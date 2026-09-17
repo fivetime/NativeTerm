@@ -68,7 +68,7 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, selected: bool, weak: bo
 }
 
 fn request(host: &HostEntry) -> HostRequest {
-    HostRequest { alias: host.alias().to_string(), label: host.label().to_string() }
+    HostRequest::new(host.alias(), host.label())
 }
 
 fn folder_title(tree: &SessionTree, index: usize) -> String {

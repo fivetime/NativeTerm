@@ -222,6 +222,25 @@ impl App {
                 core.clear_finished();
             }
         });
+        // after a restart or a Terminal restore: reconnect all, some, or none
+        let waiting: Vec<&SessionView> = sessions.iter().filter(|s| s.state == State::Waiting && s.linked).collect();
+        if !waiting.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(
+                    egui::Color32::from_rgb(0xd0, 0x9a, 0x1a),
+                    format!("{} restored sessions are waiting to connect.", waiting.len()),
+                );
+                if ui.button("Connect all").clicked() {
+                    core.connect_all(waiting.iter().map(|s| s.id.clone()).collect());
+                }
+                if ui.button("Close all").clicked() {
+                    for s in &waiting {
+                        core.close(&s.id);
+                    }
+                }
+                ui.weak("Or connect them one by one below.");
+            });
+        }
         ui.separator();
         if sessions.is_empty() {
             ui.label("Double-click a host, or right-click it or a folder for more.");
@@ -262,6 +281,9 @@ fn session_row(ui: &mut egui::Ui, core: &Core, s: &SessionView) {
     let mut state = s.state.describe();
     if s.attempt > 1 && s.state.is_open() {
         state.push_str(&format!(" · attempt {}", s.attempt));
+    }
+    if let Some(n) = s.auto_retry {
+        state.push_str(&format!(" · auto-reconnect {n}"));
     }
     ui.colored_label(state_color(ui, &s.state), state);
     match &s.location {
@@ -321,7 +343,17 @@ impl crate::window::Ui for App {
                 }
             });
             if self.show_settings {
-                ui.group(|ui| self.profile.settings_ui(ui, &mut self.notices));
+                ui.group(|ui| {
+                    self.profile.settings_ui(ui, &mut self.notices);
+                    if let Some(core) = &self.core {
+                        ui.separator();
+                        let mut auto = core.auto_reconnect();
+                        let label = "Reconnect dropped sessions automatically (never after a failed login)";
+                        if ui.checkbox(&mut auto, label).changed() {
+                            core.set_auto_reconnect(auto);
+                        }
+                    }
+                });
             }
             self.profile.banner(ui, &mut self.notices);
             if !self.notices.is_empty() {

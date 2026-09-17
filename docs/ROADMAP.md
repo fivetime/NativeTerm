@@ -122,7 +122,8 @@
       ~100 tabs, `-w 0` for later batches, each after the previous
       batch's tabs exist and only while no other Terminal window was
       activated; the rest returned as pending
-- [ ] Connections paced by the queue (app)
+- [ ] Connections paced by the queue (app): "Connect all" is paced; opening
+      a whole folder isn't yet
 - [x] Windows Terminal fragment writer: "NativeTerm SSH" profile (command
       line = shim without host, `suppressApplicationTitle: true`,
       `closeOnExit: automatic`, `historySize` 5000, fixed GUID), written
@@ -221,14 +222,17 @@
 - [x] Session states incl. "waiting for login" and "login failed"
       (`LocalCommand` signal)
 - [x] Reconnect in place / Disconnect / Close
-- [ ] Optional auto-reconnect that never retries login failures
+- [x] Optional auto-reconnect that never retries login failures (setting
+      in `state.db`; 3/10/30/60 s, at most 10 tries, spread per session;
+      live test `auto_reconnect`)
 - [ ] "Install my key" for a host or folder (bundled busybox-w32 +
       `ssh-copy-id`), network devices excluded
 - [x] Close Others / Close Disconnected (tab menu); "Close Tab Group"
       has no counterpart (Terminal has no tab groups)
 - [x] Close Tabs to the Right (real tab order via UIA)
 - [x] Clone session (same alias, base label, most recent window)
-- [ ] Clone: port forwards cleared (`-o ClearAllForwardings=yes`)
+- [x] Clone: port forwards cleared (shim `--no-forwards` →
+      `-o ClearAllForwardings=yes`, kept across restores)
 - [x] Open a whole folder (batched `wt` calls)
 - [ ] Open a whole folder (rest): rate-limited connections, chosen tab
       selected at the end; same queue for mass reconnect after resume
@@ -237,9 +241,10 @@
 - [x] Recovery after NativeTerm restart (re-discover tabs, re-pair shims
       by session GUID / `--session`); restored placeholders replaced by
       waiting tabs in their original order (see Phase 0, restarts)
+- [x] Restored sessions: "Connect all" (paced) / "Close all" in the
+      sessions panel, single ones from their row
 - [ ] Recovery (rest): unlocated sessions with position hints and
-      "Locate"; a "reconnect all / some / none" prompt for restored
-      sessions (today each waits for its own Connect)
+      "Locate"
 - [x] Own tab menu, first version (`windows_terminal::menu` +
       `tab_menu`): `WH_MOUSE_LL`/`WH_KEYBOARD_LL` installed only while
       NativeTerm has located tabs; non-activating GDI popup following the

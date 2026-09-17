@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub type Result<T> = rusqlite::Result<T>;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 /// One session that was open when last seen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +27,8 @@ pub struct Record {
     /// Last known position: window number and tab index.
     pub window_number: Option<i64>,
     pub tab_index: Option<i64>,
+    /// A clone opened without port forwards.
+    pub no_forwards: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +90,15 @@ impl Registry {
                  COMMIT;",
             )?;
         }
+        if version < 2 {
+            conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE sessions ADD COLUMN no_forwards INTEGER NOT NULL DEFAULT 0;
+                 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 PRAGMA user_version = 2;
+                 COMMIT;",
+            )?;
+        }
         Ok(Registry { conn: Mutex::new(conn) })
     }
 
@@ -99,11 +110,11 @@ impl Registry {
     pub fn opened(&self, r: &Record) -> Result<()> {
         self.with(|c| {
             c.execute(
-                "INSERT INTO sessions (id, terminal_session, current_terminal_session, label, alias, opened_at, closed_at)
-                 VALUES (?1, ?2, NULL, ?3, ?4, ?5, NULL)
+                "INSERT INTO sessions (id, terminal_session, current_terminal_session, label, alias, opened_at, closed_at, no_forwards)
+                 VALUES (?1, ?2, NULL, ?3, ?4, ?5, NULL, ?6)
                  ON CONFLICT (id) DO UPDATE SET terminal_session = ?2, current_terminal_session = NULL,
-                     label = ?3, alias = ?4, closed_at = NULL, restorable = 0",
-                params![r.id, r.terminal_session, r.label, r.alias, r.opened_at],
+                     label = ?3, alias = ?4, closed_at = NULL, restorable = 0, no_forwards = ?6",
+                params![r.id, r.terminal_session, r.label, r.alias, r.opened_at, r.no_forwards],
             )?;
             Ok(())
         })
@@ -174,7 +185,8 @@ impl Registry {
     fn query(&self, condition: &str, args: impl rusqlite::Params) -> Result<Vec<Record>> {
         self.with(|c| {
             let mut stmt = c.prepare(&format!(
-                "SELECT id, terminal_session, current_terminal_session, label, alias, opened_at, window_number, tab_index
+                "SELECT id, terminal_session, current_terminal_session, label, alias, opened_at, window_number, tab_index,
+                     no_forwards
                  FROM sessions WHERE {condition} ORDER BY window_number, tab_index, opened_at"
             ))?;
             let rows = stmt.query_map(args, |r| {
@@ -187,9 +199,25 @@ impl Registry {
                     opened_at: r.get(5)?,
                     window_number: r.get(6)?,
                     tab_index: r.get(7)?,
+                    no_forwards: r.get(8)?,
                 })
             })?;
             rows.collect()
+        })
+    }
+
+    /// A per-machine setting (`settings` table).
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        self.with(|c| c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional())
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2",
+                params![key, value],
+            )?;
+            Ok(())
         })
     }
 
@@ -228,6 +256,7 @@ mod tests {
             opened_at: 100,
             window_number: None,
             tab_index: None,
+            no_forwards: false,
         }
     }
 
@@ -288,6 +317,42 @@ mod tests {
         reg.count_use("web01").unwrap();
         assert_eq!(reg.usage("web01").unwrap().unwrap().count, 2);
         assert_eq!(reg.recent(10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn settings() {
+        let reg = Registry::in_memory().unwrap();
+        assert_eq!(reg.setting("auto_reconnect").unwrap(), None);
+        reg.set_setting("auto_reconnect", "1").unwrap();
+        reg.set_setting("auto_reconnect", "0").unwrap();
+        assert_eq!(reg.setting("auto_reconnect").unwrap().as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn schema_1_is_upgraded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("state.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE sessions (id TEXT PRIMARY KEY, terminal_session TEXT NOT NULL,
+                     current_terminal_session TEXT, label TEXT NOT NULL, alias TEXT NOT NULL,
+                     opened_at INTEGER NOT NULL, closed_at INTEGER, window_number INTEGER,
+                     tab_index INTEGER, restorable INTEGER NOT NULL DEFAULT 0);
+                 CREATE TABLE usage (alias TEXT PRIMARY KEY, count INTEGER NOT NULL, last_opened INTEGER NOT NULL);
+                 INSERT INTO sessions (id, terminal_session, label, alias, opened_at) VALUES ('old', 'g', 'l', 'a', 1);
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        }
+        let reg = Registry::open(&path).unwrap();
+        let open = reg.open_sessions().unwrap();
+        assert_eq!(open.len(), 1);
+        assert!(!open[0].no_forwards);
+        let mut clone = record("c", "web01 (2)");
+        clone.no_forwards = true;
+        reg.opened(&clone).unwrap();
+        assert!(reg.open_sessions().unwrap().iter().any(|r| r.id == "c" && r.no_forwards));
     }
 
     #[test]

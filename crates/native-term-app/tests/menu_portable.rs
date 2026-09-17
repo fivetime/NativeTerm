@@ -104,7 +104,7 @@ fn tab_menu_on_nativeterm_tabs_only() {
     core.start_tab_menu().unwrap();
     let hosts: Vec<HostRequest> = ["m a", "m b", "m c"]
         .iter()
-        .map(|l| HostRequest { alias: "nativeterm-test.invalid".into(), label: l.to_string() })
+        .map(|l| HostRequest::new("nativeterm-test.invalid", *l))
         .collect();
     core.open(&hosts, Target::NewWindow);
     wait_until("three tabs failed to log in and were located", || {

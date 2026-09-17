@@ -45,7 +45,7 @@ fn wait_until(core: &Core, ids: &[String], what: &str, check: impl Fn(&[SessionV
 #[ignore = "needs a portable Windows Terminal"]
 fn open_track_reconnect_close() {
     let core = core();
-    let host = HostRequest { alias: "nativeterm-test.invalid".into(), label: "nt-app 测试".into() };
+    let host = HostRequest::new("nativeterm-test.invalid", "nt-app 测试");
     let ids = core.open(&[host.clone(), host], Target::NewWindow);
 
     // ssh can't resolve the host: exit 255 before any login

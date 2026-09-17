@@ -15,7 +15,13 @@ pub const KEEPALIVE_COUNT: u32 = 3;
 ///   signal is left out then.
 /// - Keepalives only when `effective` (from `ssh -G`) shows the user hasn't
 ///   set them; command-line options would override the config.
-pub fn arguments(alias: &str, shim_exe: &Path, shim_pid: u32, effective: &[(String, String)]) -> Vec<OsString> {
+pub fn arguments(
+    alias: &str,
+    shim_exe: &Path,
+    shim_pid: u32,
+    effective: &[(String, String)],
+    no_forwards: bool,
+) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
     let mut option = |value: String| {
         args.push("-o".into());
@@ -33,6 +39,10 @@ pub fn arguments(alias: &str, shim_exe: &Path, shim_pid: u32, effective: &[(Stri
             option(format!("ServerAliveCountMax={KEEPALIVE_COUNT}"));
         }
     }
+    if no_forwards {
+        // a clone: the original holds the forwarded ports
+        option("ClearAllForwardings=yes".into());
+    }
     args.push("--".into());
     args.push(alias.into());
     args
@@ -48,7 +58,7 @@ mod tests {
 
     #[test]
     fn full_command_line() {
-        let args = arguments("web01", Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe"), 77, &[]);
+        let args = arguments("web01", Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe"), 77, &[], false);
         assert_eq!(
             strings(&args),
             vec![
@@ -69,13 +79,21 @@ mod tests {
     #[test]
     fn user_keepalive_is_respected() {
         let effective = vec![("serveraliveinterval".to_string(), "60".to_string())];
-        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &effective));
+        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &effective, false));
         assert!(!args.iter().any(|a| a.starts_with("ServerAlive")), "{args:?}");
     }
 
     #[test]
+    fn a_clone_drops_forwards() {
+        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &[], true));
+        let at = args.iter().position(|a| a == "ClearAllForwardings=yes").expect("option");
+        assert_eq!(args[at - 1], "-o");
+        assert!(at < args.iter().position(|a| a == "--").unwrap());
+    }
+
+    #[test]
     fn percent_in_path_drops_the_login_signal() {
-        let args = strings(&arguments("web01", Path::new(r"C:\100%\nativeterm-shim.exe"), 1, &[]));
+        let args = strings(&arguments("web01", Path::new(r"C:\100%\nativeterm-shim.exe"), 1, &[], false));
         assert!(!args.iter().any(|a| a.contains("LocalCommand")), "{args:?}");
         assert_eq!(args.last().unwrap(), "web01");
     }

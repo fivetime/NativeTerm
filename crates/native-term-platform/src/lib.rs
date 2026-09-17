@@ -19,6 +19,8 @@ pub struct TabSpec {
     pub alias: String,
     /// Don't connect until NativeTerm (or the user) says so.
     pub wait: bool,
+    /// A clone: no port forwards (they would clash with the original's).
+    pub no_forwards: bool,
 }
 
 /// Which window new tabs go to.

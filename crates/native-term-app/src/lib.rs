@@ -32,6 +32,13 @@ use registry::{Record, Registry};
 const FALLBACK_REFRESH: Duration = Duration::from_secs(60);
 /// Terminal reports changes in bursts (dozens per opened tab).
 const DEBOUNCE: Duration = Duration::from_millis(150);
+/// Between connections started together ("Connect all").
+const CONNECT_SPACING: Duration = Duration::from_millis(200);
+/// Automatic reconnects before giving up (the setting is off by default).
+const AUTO_RECONNECT_TRIES: u32 = 10;
+const AUTO_RECONNECT_SETTING: &str = "auto_reconnect";
+/// Connected at least this long: the retry count starts over.
+const STABLE_CONNECTION: Duration = Duration::from_secs(60);
 const CONFIRM: Duration = Duration::from_secs(15);
 /// Sessions from `state.db` whose shim doesn't turn up by then are gone
 /// (their window was closed while NativeTerm wasn't running).
@@ -115,6 +122,9 @@ pub struct SessionView {
     pub attempt: u32,
     pub linked: bool,
     pub location: Option<Location>,
+    /// Automatic reconnects since the last successful login, when one is
+    /// scheduled or running.
+    pub auto_retry: Option<u32>,
 }
 
 pub(crate) struct Session {
@@ -133,6 +143,13 @@ pub(crate) struct Session {
     pub(crate) location: Option<Location>,
     /// Closed together with its window: a restored pane may bring it back.
     restorable: bool,
+    /// Opened without port forwards (a clone); kept when the tab is
+    /// replaced after a restore.
+    no_forwards: bool,
+    /// Automatic reconnects since the connection was last stable.
+    auto_retries: u32,
+    /// When the current connection logged in.
+    connected_at: Option<Instant>,
 }
 
 impl Session {
@@ -150,6 +167,9 @@ impl Session {
             link: None,
             location: None,
             restorable: false,
+            no_forwards: false,
+            auto_retries: 0,
+            connected_at: None,
         }
     }
 
@@ -163,6 +183,8 @@ impl Session {
             attempt: self.attempt,
             linked: self.link.is_some(),
             location: self.location.clone(),
+            auto_retry: (self.auto_retries > 0 && matches!(self.state, State::Disconnected(_) | State::Connecting))
+                .then_some(self.auto_retries),
         }
     }
 
@@ -203,6 +225,8 @@ pub(crate) struct Shared {
     /// Full tab scans so far (diagnostics).
     scans: std::sync::atomic::AtomicU64,
     placeholders: Mutex<Sender<Placeholder>>,
+    /// Reconnect dropped sessions by themselves (a setting).
+    auto_reconnect: std::sync::atomic::AtomicBool,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -269,6 +293,14 @@ pub struct Core {
 pub struct HostRequest {
     pub alias: String,
     pub label: String,
+    /// A clone: open without port forwards.
+    pub no_forwards: bool,
+}
+
+impl HostRequest {
+    pub fn new(alias: impl Into<String>, label: impl Into<String>) -> HostRequest {
+        HostRequest { alias: alias.into(), label: label.into(), no_forwards: false }
+    }
 }
 
 impl Core {
@@ -286,6 +318,7 @@ impl Core {
             let to_session = |r: Record, state: State| {
                 let mut s = Session::new(r.id, r.terminal_session, r.label, r.alias, state);
                 s.current_terminal_session = r.current_terminal_session;
+                s.no_forwards = r.no_forwards;
                 s
             };
             match registry.open_sessions() {
@@ -311,7 +344,10 @@ impl Core {
             menu: Mutex::new(None),
             scans: Default::default(),
             placeholders: Mutex::new(placeholders),
+            auto_reconnect: Default::default(),
         });
+        let auto = shared.registry.as_ref().and_then(|r| r.setting(AUTO_RECONNECT_SETTING).ok().flatten());
+        shared.auto_reconnect.store(auto.as_deref() == Some("1"), std::sync::atomic::Ordering::Relaxed);
         let server = Arc::clone(&shared);
         std::thread::Builder::new().name("pipe-server".into()).spawn(move || serve(server, listener))?;
         let wake = Mutex::new(wake);
@@ -458,6 +494,7 @@ impl Core {
                     session: native_term_config::new_id(),
                     alias: host.alias.clone(),
                     wait: false,
+                    no_forwards: host.no_forwards,
                 };
                 sessions.push(Session::new(
                     spec.session.clone(),
@@ -466,6 +503,9 @@ impl Core {
                     host.alias.clone(),
                     State::Opening,
                 ));
+                if let Some(s) = sessions.last_mut() {
+                    s.no_forwards = host.no_forwards;
+                }
                 specs.push(spec);
             }
         }
@@ -503,6 +543,30 @@ impl Core {
     /// Connect a waiting session, or reconnect an ended one.
     pub fn connect(&self, id: &str) {
         self.send(id, AppMessage::Connect);
+    }
+
+    /// Connect several sessions, a little apart, so jump hosts and the
+    /// machine aren't hit all at once.
+    pub fn connect_all(&self, ids: Vec<String>) {
+        let core = self.clone();
+        std::thread::spawn(move || {
+            for (i, id) in ids.iter().enumerate() {
+                if i > 0 {
+                    std::thread::sleep(CONNECT_SPACING);
+                }
+                core.connect(id);
+            }
+        });
+    }
+
+    pub fn auto_reconnect(&self) -> bool {
+        self.shared.auto_reconnect.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Turn automatic reconnects on or off (remembered in `state.db`).
+    pub fn set_auto_reconnect(&self, on: bool) {
+        self.shared.auto_reconnect.store(on, std::sync::atomic::Ordering::Relaxed);
+        self.shared.db("setting", |r| r.set_setting(AUTO_RECONNECT_SETTING, if on { "1" } else { "0" }));
     }
 
     pub fn disconnect(&self, id: &str) {
@@ -569,6 +633,7 @@ fn record_for(spec: &TabSpec) -> Record {
         opened_at: registry::now(),
         window_number: None,
         tab_index: None,
+        no_forwards: spec.no_forwards,
     }
 }
 
@@ -646,6 +711,7 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
                         session: s.id.clone(),
                         alias: s.alias.clone(),
                         wait: true,
+                        no_forwards: s.no_forwards,
                     }
                 });
                 if let Some(spec) = spec {
@@ -767,7 +833,7 @@ fn serve(shared: Arc<Shared>, mut listener: PipeListener) {
     }
 }
 
-fn handle_connection(shared: &Shared, conn: Arc<PipeConnection>) {
+fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     let Ok(Some(ShimMessage::Hello { protocol, role, pid, wt_session, session, alias, terminal_window })) =
         conn.recv::<ShimMessage>(Duration::from_secs(10))
     else {
@@ -874,6 +940,8 @@ fn handle_connection(shared: &Shared, conn: Arc<PipeConnection>) {
                 opened_at: registry::now(),
                 window_number: None,
                 tab_index: None,
+                // unknown; the shim keeps its own command line anyway
+                no_forwards: false,
             };
             shared.db("adopt", |r| r.opened(&record));
             id
@@ -897,10 +965,16 @@ fn handle_connection(shared: &Shared, conn: Arc<PipeConnection>) {
     loop {
         match conn.recv::<ShimMessage>(Duration::from_secs(3600)) {
             Ok(Some(message)) => {
-                let window = shared.update(&id, |s| {
-                    apply(s, &message);
-                    s.location.as_ref().map(|l| l.window)
-                });
+                let (window, retry) = shared
+                    .update(&id, |s| {
+                        apply(s, &message);
+                        let retry = matches!(s.state, State::Disconnected(_)) && matches!(message, ShimMessage::Exited { .. });
+                        (s.location.as_ref().map(|l| l.window), retry.then_some(s.attempt))
+                    })
+                    .unzip();
+                if let Some(attempt) = retry.flatten() {
+                    schedule_reconnect(shared, &id, attempt);
+                }
                 if let ShimMessage::Closing = &message {
                     match window.flatten() {
                         Some(window) => check_window_closed(shared, &id, window),
@@ -921,6 +995,59 @@ fn handle_connection(shared: &Shared, conn: Arc<PipeConnection>) {
         }
     });
     shared.refresh_soon();
+}
+
+/// Waits before automatic reconnect number n (1-based): quick at first,
+/// then once a minute.
+fn reconnect_delay(n: u32) -> Duration {
+    const STEPS: [u64; 5] = [3, 10, 30, 60, 60];
+    Duration::from_secs(STEPS[(n.max(1) as usize - 1).min(STEPS.len() - 1)])
+}
+
+/// The retry count after a drop: a connection that stayed up for a while
+/// starts over; one that drops right after login keeps counting, so a
+/// host that accepts and then closes isn't retried forever.
+fn next_retry(previous: u32, connected_for: Option<Duration>) -> u32 {
+    let stable = connected_for.is_some_and(|d| d >= STABLE_CONNECTION);
+    if stable {
+        1
+    } else {
+        previous + 1
+    }
+}
+
+/// A dropped session (never a failed login) is connected again after a
+/// while, if the setting is on and nothing happened to it meanwhile.
+fn schedule_reconnect(shared: &Arc<Shared>, id: &str, attempt: u32) {
+    use std::sync::atomic::Ordering;
+    if !shared.auto_reconnect.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(n) = shared.update(id, |s| {
+        s.auto_retries = next_retry(s.auto_retries, s.connected_at.map(|t| t.elapsed()));
+        s.auto_retries
+    }) else {
+        return;
+    };
+    if n > AUTO_RECONNECT_TRIES {
+        let label = shared.update(id, |s| s.label.clone()).unwrap_or_default();
+        shared.notice(format!("{label}: gave up reconnecting after {AUTO_RECONNECT_TRIES} tries"));
+        return;
+    }
+    // many sessions drop together (sleep, network change): spread them
+    let spread = id.bytes().fold(0u64, |h, b| h.wrapping_mul(31).wrapping_add(u64::from(b))) % 2000;
+    let delay = reconnect_delay(n) + Duration::from_millis(spread);
+    let shared = Arc::clone(shared);
+    let id = id.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        let still = shared
+            .update(&id, |s| matches!(s.state, State::Disconnected(_)) && s.attempt == attempt && s.link.is_some())
+            .unwrap_or(false);
+        if still && shared.auto_reconnect.load(Ordering::Relaxed) {
+            Core { shared }.connect(&id);
+        }
+    });
 }
 
 /// Watch, while the tab's shim is ending, whether its window goes too.
@@ -955,6 +1082,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         ShimMessage::Authenticated => {
             s.authenticated = true;
             s.state = State::Connected;
+            s.connected_at = Some(Instant::now());
         }
         ShimMessage::Exited { code } => {
             s.state = match classify_exit(*code, s.authenticated) {
@@ -1017,6 +1145,29 @@ mod tests {
         assert_eq!(s.state, State::Ended(0));
         apply(&mut s, &ShimMessage::Closing);
         assert!(!s.state.is_open());
+    }
+
+    #[test]
+    fn reconnect_delays_grow_and_level_off() {
+        assert_eq!(reconnect_delay(1), Duration::from_secs(3));
+        assert_eq!(reconnect_delay(2), Duration::from_secs(10));
+        assert_eq!(reconnect_delay(4), Duration::from_secs(60));
+        assert_eq!(reconnect_delay(9), Duration::from_secs(60));
+        assert_eq!(reconnect_delay(0), Duration::from_secs(3));
+    }
+
+    #[test]
+    fn only_a_stable_connection_resets_the_retry_count() {
+        assert_eq!(next_retry(0, None), 1);
+        assert_eq!(next_retry(3, Some(Duration::from_secs(2))), 4, "dropped right after login");
+        assert_eq!(next_retry(3, Some(Duration::from_secs(600))), 1);
+        let mut s = session();
+        s.auto_retries = 3;
+        apply(&mut s, &ShimMessage::Connecting { attempt: 4 });
+        assert_eq!(s.view().auto_retry, Some(3));
+        apply(&mut s, &ShimMessage::Authenticated);
+        assert!(s.connected_at.is_some());
+        assert_eq!(s.view().auto_retry, None, "shown only while reconnecting");
     }
 
     #[test]

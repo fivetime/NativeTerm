@@ -115,7 +115,7 @@ impl Provider for Actions {
             CONNECT => core.connect(&this.id),
             DISCONNECT => core.disconnect(&this.id),
             CLONE => {
-                let host = HostRequest { alias: this.alias.clone(), label: base_label(&this.label).to_string() };
+                let host = HostRequest { no_forwards: true, ..HostRequest::new(&this.alias, base_label(&this.label)) };
                 core.open(&[host], Target::Recent);
             }
             CLOSE => core.close(&this.id),

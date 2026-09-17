@@ -82,7 +82,7 @@ fn main() {
             let hosts: Vec<HostRequest> = args[1..]
                 .iter()
                 .filter(|a| !a.starts_with("--"))
-                .map(|l| HostRequest { alias: HOST.into(), label: l.clone() })
+                .map(|l| HostRequest::new(HOST, l.clone()))
                 .collect();
             core.open(&hosts, if new_window { Target::NewWindow } else { Target::Recent });
             let ok = wait_until(&core, 30, |s| {

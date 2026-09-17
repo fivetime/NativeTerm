@@ -32,6 +32,9 @@ pub fn new_tab(tab: &TabSpec, shim: &Path) -> Vec<OsString> {
     if tab.wait {
         args.push("--wait".into());
     }
+    if tab.no_forwards {
+        args.push("--no-forwards".into());
+    }
     args.push(tab.alias.clone().into());
     args
 }
@@ -127,6 +130,7 @@ mod tests {
             session: format!("s-{n}"),
             alias: format!("host{n}"),
             wait: false,
+            no_forwards: false,
         }
     }
 
@@ -166,6 +170,15 @@ mod tests {
         t.wait = true;
         let args = strings(&new_tab(&t, Path::new("shim")));
         assert_eq!(args[args.len() - 4..], ["--session", "s-1", "--wait", "host1"]);
+    }
+
+    #[test]
+    fn clone_tab() {
+        let mut t = tab(1, "a");
+        t.wait = true;
+        t.no_forwards = true;
+        let args: Vec<String> = new_tab(&t, Path::new("shim.exe")).iter().map(|a| a.to_string_lossy().to_string()).collect();
+        assert_eq!(args[args.len() - 3..], ["--wait", "--no-forwards", "host1"]);
     }
 
     #[test]

@@ -46,8 +46,8 @@ fn main() {
     };
     match mode {
         Mode::Authenticated { shim_pid } => authenticated(shim_pid),
-        Mode::Shim { session, alias, wait } => {
-            let code = run(session, alias, wait);
+        Mode::Shim { session, alias, flags } => {
+            let code = run(session, alias, flags);
             std::process::exit(code);
         }
     }
@@ -80,8 +80,8 @@ fn authenticated(shim_pid: u32) {
     }
 }
 
-fn run(session: Option<String>, alias: Option<String>, wait: bool) -> i32 {
-    debug::log(format!("start session={session:?} alias={alias:?} wait={wait} wt_session={:?} pipe={:?}", wt_session(), pipe_name()));
+fn run(session: Option<String>, alias: Option<String>, flags: args::Flags) -> i32 {
+    debug::log(format!("start session={session:?} alias={alias:?} {flags:?} wt_session={:?} pipe={:?}", wt_session(), pipe_name()));
     let hello = ShimMessage::Hello {
         protocol: PROTOCOL_VERSION,
         role: Role::Shim,
@@ -103,7 +103,7 @@ fn run(session: Option<String>, alias: Option<String>, wait: bool) -> i32 {
     }
 
     match alias {
-        Some(alias) => run_host(&alias, link.as_ref(), wait),
+        Some(alias) => run_host(&alias, link.as_ref(), flags),
         None => run_without_host(link),
     }
 }
@@ -154,7 +154,7 @@ fn start_app() -> bool {
     started
 }
 
-fn run_host(alias: &str, link: Option<&Link>, wait: bool) -> i32 {
+fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
     let send = |m: ShimMessage| {
         if let Some(link) = link {
             link.send(m);
@@ -166,7 +166,7 @@ fn run_host(alias: &str, link: Option<&Link>, wait: bool) -> i32 {
     let auth = win::AuthEvent::create(pid).ok();
     let mut attempt = 0;
 
-    if wait {
+    if flags.wait {
         send(ShimMessage::Waiting);
         println!("[NativeTerm] {alias}: restored, not connected yet.");
         if let Next::Close = after_exit(link) {
@@ -177,7 +177,7 @@ fn run_host(alias: &str, link: Option<&Link>, wait: bool) -> i32 {
     loop {
         attempt += 1;
         let effective = native_term_config::effective::effective(&ssh_path, alias).unwrap_or_default();
-        let arguments = ssh::arguments(alias, &shim_exe, pid, &effective);
+        let arguments = ssh::arguments(alias, &shim_exe, pid, &effective, flags.no_forwards);
         if let Some(event) = &auth {
             event.reset();
         }

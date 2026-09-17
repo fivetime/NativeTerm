@@ -1472,6 +1472,11 @@ A host with `LocalForward`/`RemoteForward`/`DynamicForward` can't be opened
 twice: the second session fails to bind the same local port. Clones are
 started with `-o ClearAllForwardings=yes`.
 
+Implemented: "Clone Session" in the tab menu opens the clone with the
+shim flag `--no-forwards`, which adds that option to every connect of the
+tab. The flag is kept in `state.db` (`sessions.no_forwards`, schema 2),
+so a clone replaced after a Terminal restore stays without forwards.
+
 ## Login and authentication
 
 Host-key confirmation, password, key passphrase, and 2FA prompts appear
@@ -1530,6 +1535,25 @@ through both prompts.
   failed / cancelled"; **after authentication** → "disconnected".
 - **Auto-reconnect never retries a login failure**, to avoid repeated bad
   attempts triggering server-side bans (e.g. fail2ban).
+  - Implemented as a setting (off by default, kept in `state.db`'s
+    `settings` table): "Reconnect dropped sessions automatically".
+  - Only a drop after login (`Disconnected`) is retried; the core sends
+    Connect after 3 s, 10 s, 30 s, then every 60 s, at most 10 times,
+    plus up to 2 s derived from the session id, so sessions that dropped
+    together (sleep, network change) don't all reconnect at once.
+  - Nothing is sent if the session changed meanwhile (the user
+    reconnected, closed it, or the setting was turned off).
+  - The count starts over only after a connection stayed up for 60 s; a
+    host that accepts the login and closes at once isn't retried forever.
+  - The session row shows "auto-reconnect n" while it is retrying.
+  - Live test: `tests/auto_reconnect.rs` (shims started directly, fake
+    ssh): the dropped session reconnected twice in 17.5 s, the failed
+    login stayed at attempt 1, nothing happened after the setting was
+    turned off.
+- **Restored sessions** wait for Connect. When there are any, the
+  sessions panel offers "Connect all" (200 ms apart, so jump hosts
+  aren't hit at once) and "Close all"; single sessions connect from
+  their row.
 
 ### Passwords
 
