@@ -1674,6 +1674,22 @@ Constraints found while verifying:
   `HOME` pointing elsewhere, the user's `~/.ssh` isn't touched;
   `ssh.exe` itself reads the profile directory, not `HOME`, so config and
   keys still apply.
+- **Implemented differently, without busybox.** The first version needs
+  no bundled tools: the shim (`--install-key <pub> <alias>`) runs the
+  system `ssh` once with a short POSIX script as the remote command. The
+  script creates `~/.ssh/authorized_keys` with `umask 077`, adds the key
+  unless its blob is already there (and a missing final newline first),
+  and prints a marker the shim reads from stdout; the password prompt
+  still comes from the console. Each host gets a tab ("Install My Key…"
+  on a host, "Install My Key on All…" on a folder, 300 ms apart), so the
+  user types each password where the host asks. The key comment is
+  reduced to harmless characters; the key itself must be a plain OpenSSH
+  public key. Unix targets only, as above. Without any public key, the
+  dialog offers "Create a key…": a tab running `ssh-keygen -t ed25519`
+  (`--create-key`), where the passphrase is chosen. Checked with a Git
+  `sh` standing in for the host: added once, reported as present the
+  second time, no duplicate. The askpass path (saved passwords) and
+  Windows targets are not done.
 - **Ship `busybox.exe` alone, without applet shims or `PATH` changes.**
   The scoop package creates ~200 shims (`grep`, `ls`, `find`, `sort`, …)
   that compete with the user's own tools. NativeTerm calls
@@ -1852,6 +1868,25 @@ Windows Terminal also has a built-in `toggleBroadcastInput` action, which
 mirrors typing to every pane of one tab. It only works across panes within
 a tab, so it doesn't replace group send across tabs, but it's a native
 option for a small group opened side by side as panes (see "Panes").
+
+
+### Forgetting a host key
+
+"Forget Host Key…" on a host removes what `known_hosts` has for its host
+name and its alias (as `[name]:port` when the port isn't 22) with
+`ssh-keygen -R`, which also finds hashed entries and keeps
+`known_hosts.old`. The dialog lists the names first and explains when to
+do it (a reinstalled host).
+
+### Changes made outside NativeTerm
+
+`~/.ssh` is watched with `FindFirstChangeNotificationW` (a thread that
+sleeps until something changes, no polling). On a change, the config
+files' modification times and sizes are compared with the ones the tree
+was loaded from; only a real change reloads the tree (ssh writes
+`known_hosts` in the same folder on every new host). Checked: a host
+appended to a folder file by another program appeared within two
+seconds.
 
 ### Safeguards (this can touch hundreds of production hosts)
 

@@ -17,6 +17,7 @@
 //! `NATIVETERM_START_APP=0` (never start NativeTerm).
 
 mod args;
+mod keys;
 mod i18n;
 mod debug;
 mod link;
@@ -47,6 +48,16 @@ fn main() {
     };
     match mode {
         Mode::Authenticated { shim_pid } => authenticated(shim_pid),
+        Mode::InstallKey { key, alias } => {
+            let code = keys::install(&key, &alias);
+            wait_for_any_key();
+            std::process::exit(code);
+        }
+        Mode::CreateKey { path } => {
+            let code = keys::create(&path);
+            wait_for_any_key();
+            std::process::exit(code);
+        }
         Mode::Shim { session, alias, flags } => {
             let code = run(session, alias, flags);
             std::process::exit(code);

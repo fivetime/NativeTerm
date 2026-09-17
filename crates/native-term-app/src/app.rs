@@ -9,8 +9,9 @@ use native_term_config::ops::{Editor, HostDraft};
 use native_term_config::write::Writer;
 use native_term_config::SessionTree;
 
-use crate::dialogs::{ConfirmDelete, FolderDialog, HostDialog, Outcome};
+use crate::dialogs::{ConfirmDelete, ConfirmForget, FolderDialog, HostDialog, Outcome};
 use crate::import_dialog::ImportDialog;
+use crate::key_dialog::KeyDialog;
 use crate::send_dialog::SendDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
@@ -25,6 +26,8 @@ enum Dialog {
     Host(HostDialog),
     Folder(FolderDialog),
     Delete(ConfirmDelete),
+    Forget(ConfirmForget),
+    Key(Box<KeyDialog>),
     Import(Box<ImportDialog>),
     Send(Box<SendDialog>),
 }
@@ -36,8 +39,35 @@ enum View {
     Tabs,
 }
 
+/// What the session tree was loaded from: the config files with their
+/// modification time and size.
+type Fingerprint = Vec<(PathBuf, Option<std::time::SystemTime>, u64)>;
+
+fn fingerprint(ssh_dir: &Path, tree: &SessionTree) -> Fingerprint {
+    let mut files: Vec<PathBuf> = vec![ssh_dir.join("config")];
+    files.extend(tree.folders().map(|f| f.file.clone()));
+    if let Ok(entries) = std::fs::read_dir(ssh_dir.join("config.d")) {
+        files.extend(entries.filter_map(Result::ok).map(|e| e.path()));
+    }
+    files.sort();
+    files.dedup();
+    files
+        .into_iter()
+        .map(|f| {
+            let meta = std::fs::metadata(&f).ok();
+            let modified = meta.as_ref().and_then(|m| m.modified().ok());
+            let len = meta.map_or(0, |m| m.len());
+            (f, modified, len)
+        })
+        .collect()
+}
+
 pub struct App {
     core: Option<Core>,
+    /// Keeps the `~/.ssh` watcher alive.
+    _watcher: Option<native_term_win::watch::FolderWatcher>,
+    ssh_changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    loaded_from: Fingerprint,
     view_right: View,
     tab_list: TabList,
     tree: SessionTree,
@@ -91,8 +121,21 @@ impl App {
         }
         let tree = SessionTree::load(&options.ssh_dir);
         publish_hosts(&tree);
+        // changes made elsewhere (an editor, a sync tool) show up by themselves
+        let ssh_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&ssh_changed);
+        let wake = ctx.clone();
+        let watcher = native_term_win::watch::FolderWatcher::start(&options.ssh_dir, true, move || {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            wake.request_repaint();
+        })
+        .ok();
+        let loaded_from = fingerprint(&options.ssh_dir, &tree);
         App {
             core,
+            _watcher: watcher,
+            ssh_changed,
+            loaded_from,
             view_right: View::Sessions,
             tab_list: TabList::default(),
             tree,
@@ -111,7 +154,19 @@ impl App {
     fn reload(&mut self) {
         self.tree = SessionTree::load(&self.ssh_dir);
         self.generation += 1;
+        self.loaded_from = fingerprint(&self.ssh_dir, &self.tree);
         publish_hosts(&self.tree);
+    }
+
+    /// Reload if a config file really changed (ssh itself writes
+    /// `known_hosts` in the same folder).
+    fn reload_if_changed(&mut self) {
+        if !self.ssh_changed.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        if fingerprint(&self.ssh_dir, &self.tree) != self.loaded_from {
+            self.reload();
+        }
     }
 
     fn recent(&self) -> Vec<String> {
@@ -151,6 +206,17 @@ impl App {
             TreeAction::Edit(alias) => {
                 if let Some((_, host)) = self.tree.find(&alias) {
                     self.dialog = Some(Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))));
+                }
+            }
+            TreeAction::InstallKey(hosts) => {
+                if !hosts.is_empty() {
+                    self.dialog = Some(Dialog::Key(Box::new(KeyDialog::new(hosts, &self.ssh_dir))));
+                }
+            }
+            TreeAction::ForgetKey(alias) => {
+                if let Some((_, host)) = self.tree.find(&alias) {
+                    let names = Editor::host_key_names(host);
+                    self.dialog = Some(Dialog::Forget(ConfirmForget::new(&alias, names)));
                 }
             }
             TreeAction::Delete(alias) => {
@@ -230,6 +296,40 @@ impl App {
                 }
                 return;
             }
+            Dialog::Key(d) => {
+                let Some(core) = self.core.clone() else {
+                    self.dialog = None;
+                    return;
+                };
+                if let Outcome::Cancel = d.show(ctx, &core) {
+                    self.dialog = None;
+                }
+                return;
+            }
+            Dialog::Forget(d) => match d.show(ctx) {
+                Outcome::Open => false,
+                Outcome::Cancel => true,
+                Outcome::Submit(()) => {
+                    let result = match self.tree.find(&d.alias) {
+                        Some((_, host)) => self.editor.forget_host_keys(host).map_err(|e| e.to_string()),
+                        None => Err(t!("error-host-gone", alias = d.alias.as_str())),
+                    };
+                    match result {
+                        Ok(removed) => {
+                            self.notices.push(if removed.is_empty() {
+                                t!("forget-none", alias = d.alias.as_str())
+                            } else {
+                                t!("forget-done", names = removed.join(", "))
+                            });
+                            true
+                        }
+                        Err(e) => {
+                            d.error = Some(e);
+                            false
+                        }
+                    }
+                }
+            },
             Dialog::Delete(d) => match d.show(ctx) {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
@@ -532,6 +632,7 @@ impl crate::window::Ui for App {
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
             self.view.focus_search();
         }
+        self.reload_if_changed();
         if let Some(id) = crate::shell::take_send_to() {
             if let (Some(core), None) = (&self.core, &self.dialog) {
                 self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(core, &[id], &self.data_dir))));

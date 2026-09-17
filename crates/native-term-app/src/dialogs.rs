@@ -195,6 +195,51 @@ impl FolderDialog {
     }
 }
 
+/// "Forget the host keys of …?"
+pub struct ConfirmForget {
+    pub alias: String,
+    names: Vec<String>,
+    pub error: Option<String>,
+}
+
+impl ConfirmForget {
+    pub fn new(alias: &str, names: Vec<String>) -> ConfirmForget {
+        ConfirmForget { alias: alias.to_string(), names, error: None }
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
+        let mut outcome = Outcome::Open;
+        let mut open = true;
+        egui::Window::new(t!("forget-title"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(t!("forget-question", alias = self.alias.as_str()));
+                for name in &self.names {
+                    ui.monospace(format!("  {name}"));
+                }
+                ui.weak(t!("forget-note"));
+                if let Some(error) = &self.error {
+                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button(t!("forget-button")).clicked() {
+                        outcome = Outcome::Submit(());
+                    }
+                    if ui.button(t!("button-cancel")).clicked() {
+                        outcome = Outcome::Cancel;
+                    }
+                });
+            });
+        if !open {
+            outcome = Outcome::Cancel;
+        }
+        outcome
+    }
+}
+
 /// "Really delete?"
 pub struct ConfirmDelete {
     pub alias: String,

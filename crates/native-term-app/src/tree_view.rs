@@ -19,6 +19,9 @@ pub enum TreeAction {
     NewHost(PathBuf),
     Edit(String),
     Delete(String),
+    ForgetKey(String),
+    /// (alias, label) of each host.
+    InstallKey(Vec<(String, String)>),
     Move(String, PathBuf),
     NewFolder,
     RenameFolder(PathBuf),
@@ -455,7 +458,12 @@ impl TreeView {
                                 .add_enabled(!hosts.is_empty(), egui::Button::new(t!("menu-connect-all-new-window")))
                                 .clicked()
                             {
-                                actions.push(TreeAction::Open(hosts, Target::NewWindow));
+                                actions.push(TreeAction::Open(hosts.clone(), Target::NewWindow));
+                                ui.close();
+                            }
+                            if ui.add_enabled(!hosts.is_empty(), egui::Button::new(t!("menu-install-key-all"))).clicked() {
+                                let list = hosts.iter().map(|h| (h.alias.clone(), h.label.clone())).collect();
+                                actions.push(TreeAction::InstallKey(list));
                                 ui.close();
                             }
                             if let Some((file, is_main)) = &own {
@@ -516,6 +524,14 @@ impl TreeView {
                                     }
                                 });
                             });
+                            if ui.button(t!("menu-install-key")).clicked() {
+                                actions.push(TreeAction::InstallKey(vec![(alias.to_string(), host.label().to_string())]));
+                                ui.close();
+                            }
+                            if ui.button(t!("menu-forget-key")).clicked() {
+                                actions.push(TreeAction::ForgetKey(alias.to_string()));
+                                ui.close();
+                            }
                             if ui.button(t!("menu-delete")).clicked() {
                                 actions.push(TreeAction::Delete(alias.to_string()));
                                 ui.close();

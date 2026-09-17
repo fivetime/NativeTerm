@@ -53,6 +53,31 @@ menu-connect = Connect
 menu-connect-new-window = Connect in New Window
 menu-edit = Edit…
 menu-move-to = Move to
+menu-install-key = Install My Key…
+menu-install-key-all = Install My Key on All…
+key-title = Install my key
+key-none = There is no public key in { $dir } yet.
+key-create = Create a key…
+key-create-tab = Create a key
+key-refresh = Look again
+key-which = Public key
+key-hosts = On { $count } hosts: { $names }{ $more ->
+        [0] {""}
+       *[other] {" "}and { $more } more
+    }
+key-note = Each host gets a tab, where ssh asks for its password one last time. Hosts without a POSIX shell (many network devices) can't take a key this way.
+key-install = { $count ->
+        [one] Install
+       *[other] Install on { $count } hosts
+    }
+key-tab = Key → { $label }
+menu-forget-key = Forget Host Key…
+forget-title = Forget host key
+forget-question = Remove the saved host keys of { $alias }? ssh will ask to confirm the new key on the next connect.
+forget-note = Only do this when the host really changed (reinstalled, new address). A copy is kept as known_hosts.old.
+forget-button = Remove
+forget-done = Removed the saved host keys of { $names }
+forget-none = { $alias } had no saved host key
 menu-delete = Delete…
 host-via = via { $jump }
 host-alias = alias { $alias }

@@ -9,6 +9,10 @@
 pub enum Mode {
     Shim { session: Option<String>, alias: Option<String>, flags: Flags },
     Authenticated { shim_pid: u32 },
+    /// Add the public key in `key` to the host's `authorized_keys`.
+    InstallKey { key: String, alias: String },
+    /// Create a key pair at `path` (ssh-keygen asks for the passphrase).
+    CreateKey { path: String },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -28,6 +32,15 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 let pid = args.next().ok_or("--authenticated needs the shim's pid")?;
                 let shim_pid = pid.parse().map_err(|_| format!("invalid pid {pid:?}"))?;
                 return Ok(Mode::Authenticated { shim_pid });
+            }
+            "--install-key" => {
+                let key = args.next().ok_or("--install-key needs the public key file")?;
+                let alias = args.next().filter(|a| !a.starts_with('-')).ok_or("--install-key needs a host")?;
+                return Ok(Mode::InstallKey { key, alias });
+            }
+            "--create-key" => {
+                let path = args.next().ok_or("--create-key needs a path")?;
+                return Ok(Mode::CreateKey { path });
             }
             "--session" => session = Some(args.next().ok_or("--session needs a value")?),
             "--wait" => flags.wait = true,
@@ -66,6 +79,12 @@ mod tests {
             }
         );
         assert_eq!(p(&["--authenticated", "4242"]).unwrap(), Mode::Authenticated { shim_pid: 4242 });
+        assert_eq!(
+            p(&["--install-key", "k.pub", "web01"]).unwrap(),
+            Mode::InstallKey { key: "k.pub".into(), alias: "web01".into() }
+        );
+        assert!(p(&["--install-key", "k.pub", "-oProxyCommand=x"]).is_err());
+        assert_eq!(p(&["--create-key", "id"]).unwrap(), Mode::CreateKey { path: "id".into() });
     }
 
     #[test]

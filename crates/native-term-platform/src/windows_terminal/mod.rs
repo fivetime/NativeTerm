@@ -153,6 +153,23 @@ impl WindowsTerminal {
         Ok(report)
     }
 
+    /// A tab in the most recent window running the shim with `shim_args`
+    /// (tools like installing a key), titled `title`.
+    pub fn open_tool(&self, title: &str, shim_args: &[String]) -> io::Result<()> {
+        let mut args: Vec<std::ffi::OsString> = vec![
+            "-w".into(),
+            "0".into(),
+            "new-tab".into(),
+            "--profile".into(),
+            command::PROFILE_NAME.into(),
+            format!("--title={}", command::escape_delimiters(title)).into(),
+            "--suppressApplicationTitle".into(),
+            self.shim.clone().into(),
+        ];
+        args.extend(shim_args.iter().map(|a| command::escape_delimiters(a).into()));
+        launch::run(&self.install.launcher, &args)
+    }
+
     /// Wait until tabs with all these titles exist, in any window. Reads
     /// names only and leaves the claims alone.
     pub fn wait_for_titles(&self, titles: &[&str], timeout: Duration) -> bool {

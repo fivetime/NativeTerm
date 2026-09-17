@@ -172,12 +172,87 @@ pub fn missing<'k>(existing: &str, keys: &'k [HostKey]) -> Vec<&'k HostKey> {
         .collect()
 }
 
+/// How `known_hosts` names a host: `host`, or `[host]:port`.
+pub fn host_name(host: &str, port: u16) -> String {
+    if port == 22 {
+        host.to_string()
+    } else {
+        format!("[{host}]:{port}")
+    }
+}
+
+/// Remove every key for `names` with `ssh-keygen -R` (which also finds
+/// hashed entries and keeps `known_hosts.old`). Returns the names that had
+/// keys.
+pub fn remove(ssh_keygen: &Path, known_hosts: &Path, names: &[String]) -> io::Result<Vec<String>> {
+    let mut removed = Vec::new();
+    if !known_hosts.exists() {
+        return Ok(removed);
+    }
+    for name in names {
+        if name.is_empty() || name.starts_with('-') {
+            continue;
+        }
+        let mut command = std::process::Command::new(ssh_keygen);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000); // no console window
+        }
+        let output = command
+            .arg("-R")
+            .arg(name)
+            .arg("-f")
+            .arg(known_hosts)
+            .stdin(std::process::Stdio::null())
+            .output()?;
+        if !output.status.success() {
+            let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(io::Error::other(format!("ssh-keygen -R {name}: {message}")));
+        }
+        // "# Host <name> found: line <n>" for each removed line
+        if String::from_utf8_lossy(&output.stdout).contains("found") {
+            removed.push(name.clone());
+        }
+    }
+    Ok(removed)
+}
+
+/// `ssh-keygen` next to the `ssh` NativeTerm uses.
+pub fn ssh_keygen_for(ssh: &Path) -> std::path::PathBuf {
+    match ssh.parent().filter(|p| !p.as_os_str().is_empty()) {
+        Some(dir) if dir.join("ssh-keygen.exe").exists() => dir.join("ssh-keygen.exe"),
+        _ => std::path::PathBuf::from("ssh-keygen"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // a real ed25519 public key blob (type string + 32 bytes)
     const ED25519: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
+
+    #[test]
+    #[cfg(windows)]
+    fn removes_with_ssh_keygen() {
+        let keygen = Path::new(r"C:\Windows\System32\OpenSSH\ssh-keygen.exe");
+        if !keygen.exists() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("known_hosts");
+        fs::write(&file, format!("10.0.0.5 ssh-ed25519 {ED25519}
+[10.0.0.6]:2200 ssh-ed25519 {ED25519}
+keep ssh-ed25519 {ED25519}
+"))
+            .unwrap();
+        let names = vec![host_name("10.0.0.5", 22), host_name("10.0.0.6", 2200), host_name("absent", 22)];
+        assert_eq!(remove(keygen, &file, &names).unwrap(), ["10.0.0.5", "[10.0.0.6]:2200"]);
+        let left = fs::read_to_string(&file).unwrap();
+        assert!(left.contains("keep") && !left.contains("10.0.0.5") && !left.contains("10.0.0.6"), "{left}");
+        assert!(dir.path().join("known_hosts.old").exists());
+    }
 
     #[test]
     fn names() {

@@ -457,6 +457,24 @@ impl Editor {
         Ok(outcome)
     }
 
+    /// The names `known_hosts` may list `host` under: its host name and its
+    /// alias, with the port when it isn't 22.
+    pub fn host_key_names(host: &crate::HostEntry) -> Vec<String> {
+        let port = host.port.unwrap_or(22);
+        let mut names = vec![crate::known_hosts::host_name(host.target(), port)];
+        let alias = crate::known_hosts::host_name(host.alias(), port);
+        if !names.contains(&alias) {
+            names.push(alias);
+        }
+        names
+    }
+
+    /// Forget the host keys of `host` (after a reinstall, for example).
+    pub fn forget_host_keys(&self, host: &crate::HostEntry) -> std::io::Result<Vec<String>> {
+        let keygen = crate::known_hosts::ssh_keygen_for(&self.ssh);
+        crate::known_hosts::remove(&keygen, &self.known_hosts(), &Editor::host_key_names(host))
+    }
+
     /// `~/.ssh/known_hosts` (created owner-only if missing).
     pub fn known_hosts(&self) -> PathBuf {
         self.ssh_dir.join("known_hosts")

@@ -92,7 +92,8 @@
       (renaming changes `NativeTermLabel`); every change backed up and
       validated with `ssh -G` (host name must resolve as entered), rolled
       back otherwise
-- [ ] `native-term-config` (rest): file watching; `.nt.toml` non-SSH
+- [x] Watching `~/.ssh`: reload when a config file really changed
+- [ ] `native-term-config` (rest): `.nt.toml` non-SSH
       sessions; a "fix permissions" action for files ssh rejects
 - [x] `native-term-shim`: `--session <id> <alias>` plus session GUID from
       `WT_SESSION`; builds the `ssh` command line itself (`LocalCommand`
@@ -228,8 +229,9 @@
 - [x] Optional auto-reconnect that never retries login failures (setting
       in `state.db`; 3/10/30/60 s, at most 10 tries, spread per session;
       live test `auto_reconnect`)
-- [ ] "Install my key" for a host or folder (bundled busybox-w32 +
-      `ssh-copy-id`), network devices excluded
+- [x] "Install my key" for a host or folder (shim runs ssh once with a
+      POSIX script, one tab per host; key creation when there is none)
+- [ ] "Install my key" (rest): through the askpass helper; Windows hosts
 - [x] Close Others / Close Disconnected (tab menu); "Close Tab Group"
       has no counterpart (Terminal has no tab groups)
 - [x] Close Tabs to the Right (real tab order via UIA)
@@ -241,7 +243,7 @@
       selected at the end; same queue for mass reconnect after resume
 - [x] Quick connect to `user@host[:port]` from the search box, "Save…"
       afterwards (new-host dialog, filled in)
-- [ ] "Remove this host's old key" (`ssh-keygen -R`, confirmed)
+- [x] "Remove this host's old key" (`ssh-keygen -R`, confirmed)
 - [x] Recovery after NativeTerm restart (re-discover tabs, re-pair shims
       by session GUID / `--session`); restored placeholders replaced by
       waiting tabs in their original order (see Phase 0, restarts)

@@ -50,6 +50,31 @@ menu-connect = 连接
 menu-connect-new-window = 在新窗口中连接
 menu-edit = 编辑…
 menu-move-to = 移动到
+menu-install-key = 安装我的公钥…
+menu-install-key-all = 为全部主机安装公钥…
+key-title = 安装我的公钥
+key-none = { $dir } 里还没有公钥。
+key-create = 生成密钥…
+key-create-tab = 生成密钥
+key-refresh = 重新查找
+key-which = 公钥
+key-hosts = 安装到 { $count } 台主机：{ $names }{ $more ->
+        [0] {""}
+       *[other] 等（另有 { $more } 台）
+    }
+key-note = 每台主机会打开一个标签，ssh 会在那里最后一次询问它的密码。没有 POSIX shell 的主机（很多网络设备）不能用这种方式添加公钥。
+key-install = { $count ->
+        [one] 安装
+       *[other] 安装到 { $count } 台主机
+    }
+key-tab = 公钥 → { $label }
+menu-forget-key = 删除旧的主机指纹…
+forget-title = 删除主机指纹
+forget-question = 删除 { $alias } 已保存的主机指纹吗？下次连接时 ssh 会让你确认新的指纹。
+forget-note = 只有主机确实变了（重装系统、换了地址）才需要这样做。原文件会备份为 known_hosts.old。
+forget-button = 删除
+forget-done = 已删除 { $names } 的主机指纹
+forget-none = { $alias } 没有保存的主机指纹
 menu-delete = 删除…
 host-via = 经由 { $jump }
 host-alias = 别名 { $alias }
