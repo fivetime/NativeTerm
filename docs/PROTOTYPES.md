@@ -288,6 +288,47 @@ tabs left behind by a failed run.
 
 Repeated three times in a row: all passed, no shims or Terminal left.
 
+## First app slice (portable 1.26)
+
+The core (`native-term-app/src/lib.rs`) was live-tested with
+`tests/core_portable.rs`: two hosts with the same label in a new window
+became `nt-app 测试` and `nt-app 测试 (2)`; both showed "login failed
+(255)" and were located after ≈ 0.8–1.3 s. Focus selected the first tab.
+Reconnect ran `ssh` again in the same shim (attempt 2), and Close ended
+both tabs and the window.
+
+The GUI was driven through UI Automation (egui exposes its widgets via
+AccessKit) against a throwaway ssh directory with `.invalid` hosts:
+
+| Step | Result |
+|---|---|
+| Start with `--terminal-dir <portable>` | Tree with the root config and a `config.d` folder labelled 实验室; Chinese text renders |
+| Double-click 实验室 A | Tab opened in the portable Terminal; "login failed (255) · window 1 · tab 1" |
+| Folder menu → Connect All in New Window | New window with both hosts; the duplicate label became "实验室 A (2)" |
+| Window numbers | First version numbered by Z order, so the first tab jumped to "window 2"; now numbered by first appearance |
+| Focus | The portable Terminal became the foreground window |
+| Tab closed with its own close button | The shim reported closing; the row showed "closed" |
+| Close buttons | Tabs ended, no shims left |
+| glow renderer (eframe default) | Aborted at startup: `Vec::set_len` precondition in glutin 0.32.3 `find_configs_arb` → switched to wgpu |
+| wgpu, Direct3D 12 only (eframe's wgpu lacks the feature) | `FailedToCreateSurfaceForAnyBackend` until the app enabled wgpu's `dx12` feature |
+
+Idle footprint, release build, no sessions, 6–10 s samples:
+
+| Variant | Private memory |
+|---|---|
+| Direct3D 12, font read into memory | 221 MB |
+| Direct3D 12, no CJK font | 162 MB |
+| Direct3D 12, font mapped | 165 MB |
+| Vulkan, no CJK font | 82 MB |
+| Vulkan, font read into memory | 136 MB |
+| Vulkan, font mapped (**default**) | 74–79 MB |
+| Vulkan + Direct3D 12 enabled | 106 MB |
+| Vulkan drivers hidden (`VK_DRIVER_FILES`) | restarted itself on Direct3D 12: 162 MB |
+
+Idle CPU was 0 ms in every variant. With one open session, the 2 s tab
+refresh cost 78 ms per 10 s (debug build). Per GPU counters, the process
+used the AMD Radeon Pro 5600M, the only GPU Windows sees under Boot Camp.
+
 ## Hung Terminal and UIA (portable 1.26, process suspended)
 
 The portable `WindowsTerminal.exe` was suspended with `NtSuspendProcess`

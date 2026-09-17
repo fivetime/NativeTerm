@@ -31,8 +31,8 @@ pub enum ShimMessage {
         /// Host alias; absent when started without a host.
         alias: Option<String>,
     },
-    /// The client (ssh) was started.
-    Connecting,
+    /// The client (ssh) was started; `attempt` counts from 1 per shim.
+    Connecting { attempt: u32 },
     /// Logged in (`LocalCommand` fired).
     Authenticated,
     /// The client exited with this code.
@@ -88,7 +88,7 @@ mod tests {
                 session: Some("s-1".into()),
                 alias: Some("ceph-cluster.osd1".into()),
             },
-            ShimMessage::Connecting,
+            ShimMessage::Connecting { attempt: 2 },
             ShimMessage::Authenticated,
             ShimMessage::Exited { code: -1 },
             ShimMessage::Closing,

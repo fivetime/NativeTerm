@@ -129,14 +129,16 @@ fn run_host(alias: &str, link: Option<&Link>) -> i32 {
     let shim_exe = std::env::current_exe().unwrap_or_default();
     let pid = std::process::id();
     let auth = win::AuthEvent::create(pid).ok();
+    let mut attempt = 0;
 
     loop {
+        attempt += 1;
         let effective = native_term_config::effective::effective(&ssh_path, alias).unwrap_or_default();
         let arguments = ssh::arguments(alias, &shim_exe, pid, &effective);
         if let Some(event) = &auth {
             event.reset();
         }
-        send(ShimMessage::Connecting);
+        send(ShimMessage::Connecting { attempt });
         let mut child = match Command::new(&ssh_path).args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {

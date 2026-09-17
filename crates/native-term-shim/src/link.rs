@@ -123,7 +123,7 @@ impl Drop for Link {
 fn remember(replay: &Mutex<Replay>, message: &ShimMessage) {
     let mut state = replay.lock().unwrap_or_else(|e| e.into_inner());
     match message {
-        ShimMessage::Connecting => {
+        ShimMessage::Connecting { .. } => {
             state.lifecycle = Some(message.clone());
             state.authenticated = false;
         }

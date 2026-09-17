@@ -135,11 +135,24 @@
       connection-level)
 - [ ] `native-term-session` (rest): session records; verifying the
       client process path
-- [ ] `native-term-app`: egui shell — read-only sidebar tree (row
-      virtualization for thousands of sessions), "Connect" per host, list
-      of open sessions, CJK font loading; idle without repaint or polling
-- [ ] **Measure NativeTerm's own idle CPU/memory** and the shim's per-tab
-      footprint (with the 60-tab measurement)
+- [x] `native-term-app` (first slice): core without UI (in-memory
+      session registry, pipe server, tab refresh, open / focus /
+      reconnect / disconnect / close, adoption of tabs from an earlier
+      run, placeholders told to use a local shell) and an egui window
+      (read-only tree with connect / connect in new window / whole folder,
+      open sessions with state, attempt and stable window/tab position),
+      CJK font mapped from the system; `--terminal-dir`, `--ssh-dir`.
+      Live test `tests/core_portable.rs` and a GUI smoke test on portable
+      1.26
+- [ ] `native-term-app` (rest): row virtualization for thousands of
+      sessions, search, selection events instead of the 2 s refresh,
+      registry in `state.db` (restored placeholders replaced), installing
+      the fragment, connection pacing
+- [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
+      CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
+      6.6 MB working set)
+- [ ] Bring NativeTerm's memory down toward "tens of MB" (the renderer
+      dominates)
 - [ ] Data directory resolution (`--data-dir`, `NATIVETERM_DATA_DIR`,
       `nativeterm.toml`, `HKCU\Software\NativeTerm\DataDir`, writable-folder
       default); `settings.toml` with per-machine sections, `audit\`,

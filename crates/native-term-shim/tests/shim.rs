@@ -72,7 +72,7 @@ fn login_disconnect_reconnect_close() {
         other => panic!("{other:?}"),
     }
     conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
-    assert_eq!(expect(&conn), ShimMessage::Connecting);
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
 
     // the LocalCommand helper connects separately
     let helper = listener.accept().unwrap();
@@ -89,7 +89,7 @@ fn login_disconnect_reconnect_close() {
 
     // reconnect on command
     conn.send(&AppMessage::Connect).unwrap();
-    assert_eq!(expect(&conn), ShimMessage::Connecting);
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 2 });
     let _second_helper = listener.accept().unwrap();
     assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
 
@@ -108,7 +108,7 @@ fn login_failure_is_reported_as_such() {
     let mut shim = spawn_shim(&name, &["web01"], &[("FAKE_SSH_CODE", "255")]);
     let conn = listener.accept().unwrap();
     assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
-    assert_eq!(expect(&conn), ShimMessage::Connecting);
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
     assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
     conn.send(&AppMessage::Close).unwrap();
     assert_eq!(wait_exit(&mut shim), 0);
@@ -123,7 +123,7 @@ fn close_while_connected_ends_ssh() {
     let mut shim = spawn_shim(&name, &["web01"], &[("FAKE_SSH_MS", "60000")]);
     let conn = listener.accept().unwrap();
     assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
-    assert_eq!(expect(&conn), ShimMessage::Connecting);
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
     conn.send(&AppMessage::Close).unwrap();
     assert_eq!(wait_exit(&mut shim), 0);
 }
@@ -168,7 +168,7 @@ fn close_sent_right_before_nativeterm_disconnects() {
     // first connection: wait until ssh has exited, then go away
     let conn = listener.accept().unwrap();
     assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
-    assert_eq!(expect(&conn), ShimMessage::Connecting);
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
     assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
     drop(conn);
     // the shim reconnects; answer and hang up at once, without reading on

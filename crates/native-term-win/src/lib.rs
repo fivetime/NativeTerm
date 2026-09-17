@@ -1,8 +1,11 @@
 //! Small Win32 helpers shared by NativeTerm's crates: the current user's
-//! identity and security descriptors (file ACLs, pipe ACLs).
+//! identity, security descriptors (file ACLs, pipe ACLs), and read-only
+//! file mappings.
 #![cfg(windows)]
 
 use std::io;
+use std::fs::File;
+use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 
 use windows::core::{HSTRING, PWSTR};
@@ -16,6 +19,7 @@ use windows::Win32::Security::{
     PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_ELEVATION, TOKEN_INFORMATION_CLASS,
     TOKEN_QUERY, TOKEN_STATISTICS, TOKEN_USER,
 };
+use windows::Win32::System::Memory::{CreateFileMappingW, MapViewOfFile, FILE_MAP_READ, PAGE_READONLY};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 fn token_information(class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<u8>> {
@@ -133,6 +137,30 @@ pub fn file_dacl_sddl(path: &Path) -> io::Result<String> {
     }
 }
 
+/// Map a file read-only for the rest of the process. The pages are backed
+/// by the file (shared with the system file cache), not private memory;
+/// used for large fonts. The file stays open for reading.
+pub fn map_file_for_process(path: &Path) -> io::Result<&'static [u8]> {
+    let file = File::open(path)?;
+    let len = usize::try_from(file.metadata()?.len()).map_err(io::Error::other)?;
+    if len == 0 {
+        return Ok(&[]);
+    }
+    unsafe {
+        let mapping =
+            CreateFileMappingW(HANDLE(file.as_raw_handle() as _), None, PAGE_READONLY, 0, 0, None)?;
+        let view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
+        // the view keeps the mapping and the file alive
+        let _ = CloseHandle(mapping);
+        if view.Value.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: never unmapped; the file is opened without write sharing
+        // by us and system fonts aren't rewritten in place
+        Ok(std::slice::from_raw_parts(view.Value as *const u8, len))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -155,6 +183,17 @@ mod tests {
         assert!(sddl.starts_with("D:P"), "{sddl}");
         assert!(sddl.contains(&user_sid().unwrap()), "{sddl}");
         assert_eq!(sddl.matches("(A;").count(), 3, "{sddl}");
+    }
+
+    #[test]
+    fn mapped_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("data");
+        std::fs::write(&file, b"font bytes").unwrap();
+        assert_eq!(map_file_for_process(&file).unwrap(), b"font bytes");
+        std::fs::write(dir.path().join("empty"), b"").unwrap();
+        assert!(map_file_for_process(&dir.path().join("empty")).unwrap().is_empty());
+        assert!(map_file_for_process(&dir.path().join("missing")).is_err());
     }
 
     #[test]

@@ -1703,6 +1703,10 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   fragment works for it too — it just isn't carried along with the
   portable folder. There's no app execution alias, and portable mode
   can't be the Windows default terminal.
+- **Localized `ssh` errors look garbled**: Windows OpenSSH escapes
+  non-ASCII bytes of system messages, so on a Chinese system "could not
+  resolve hostname" is followed by `\262\273\326…` (the GBK text in
+  octal). This is `ssh`'s own output; NativeTerm's lines are unaffected.
 - **Changed host keys**: after a server is rebuilt, `ssh` refuses to
   connect. NativeTerm can't read the terminal output to detect this, so it
   offers "Remove this host's old key" (`ssh-keygen -R <host>`, confirmed by
@@ -1822,10 +1826,16 @@ on a laptop:
 
 - **Idle NativeTerm**: no repaint unless something changes (egui's
   on-demand repaint), event-driven UIA and foreground tracking, no polling
-  loops; target idle CPU ≈ 0 and memory in the tens of MB — measured in
-  Phase 0 alongside the 60-tab measurement.
-- **Shim**: a small native Rust binary with no runtime; its per-tab memory
-  is part of the Phase 0 measurement.
+  loops; target idle CPU ≈ 0 and memory in the tens of MB.
+  - **Measured (first slice, release build):** idle CPU 0 ms over 10 s,
+    and the window isn't repainted. Private memory is 74 MB, most of it
+    the renderer (see "Renderer").
+  - **With open sessions**, the first slice still refreshes tab
+    positions every 2 s through UIA: 78 ms of CPU per 10 s with one
+    session. Selection events are to replace this.
+- **Shim**: a small native Rust binary with no runtime: ≈ 1 MB private
+  memory, 6.6 MB working set per tab (release, waiting at its prompt), on
+  top of `ssh.exe` and the console host.
 - Battery-sensitive features (snapshots, previews, periodic sync) are
   throttled or paused on battery power.
 
@@ -1872,7 +1882,24 @@ app-level command layer.
   a named `Style`/`Visuals` preset (colors, rounding, spacing, text sizes).
   Community theme crates (e.g. `catppuccin-egui`) can be offered as presets.
 - **CJK fonts**: egui's bundled fonts have no Chinese glyphs. A system font
-  (e.g. Microsoft YaHei) is loaded at startup as a fallback font.
+  (Microsoft YaHei, else SimSun) is added as a fallback font. It is
+  **memory-mapped**, not read: egui clones owned font data while
+  parsing, so reading the 20 MB `msyh.ttc` cost ≈ 55 MB of private
+  memory; a mapped file's pages are shared with the file cache.
+- **Renderer**: eframe with wgpu, not glow. glow goes through glutin
+  0.32.3, whose WGL pixel-format query sets a vector's length to the
+  driver's total match count, beyond the buffer (undefined behavior,
+  caught by Rust's debug checks on this machine). wgpu uses **Vulkan** by
+  default: idle, it took 74–79 MB private memory against 162–165 MB
+  with Direct3D 12 (106 MB with both enabled). eframe builds wgpu
+  without Direct3D 12, so the app enables that feature itself. If
+  Vulkan can't start (VMs, remote sessions, old drivers), NativeTerm
+  restarts itself once with Direct3D 12. A window system can be set up
+  only once per process, so the retry needs a new process. `WGPU_BACKEND`
+  overrides the choice. The adapter is requested with low power
+  preference, so hybrid laptops don't wake the discrete GPU for
+  NativeTerm. On a MacBook Pro under Boot Camp, Windows only has the AMD
+  GPU anyway.
 - **Windows 11 materials**: Mica/Acrylic backdrops via the
   `window-vibrancy` crate on a transparent window; rounded corners for
   borderless windows (drawer, FAB) via `DwmSetWindowAttribute`

@@ -9,8 +9,13 @@ name = "nativeterm"
 path = "src/main.rs"
 
 [dependencies]
-eframe = "0.29"
+# wgpu, not glow: glutin 0.32.3's WGL config lookup trips a Vec::set_len
+# precondition (undefined behavior) on this machine
+eframe = { version = "0.29", default-features = false, features = ["accesskit", "default_fonts", "wgpu"] }
 egui = "0.29"
+# eframe builds wgpu with Vulkan only; Direct3D 12 is the fallback
+wgpu = { version = "22.1", default-features = false, features = ["dx12", "wgsl"] }
 native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
 native-term-platform = { path = "../native-term-platform" }
+native-term-win = { path = "../native-term-win" }

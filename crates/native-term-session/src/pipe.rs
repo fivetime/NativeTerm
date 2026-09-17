@@ -337,9 +337,9 @@ mod tests {
         };
         std::thread::sleep(Duration::from_millis(100));
         let started = Instant::now();
-        client.send(&ShimMessage::Connecting).unwrap();
+        client.send(&ShimMessage::Connecting { attempt: 1 }).unwrap();
         assert!(started.elapsed() < Duration::from_millis(500), "write was blocked by the pending read");
-        assert_eq!(server_conn.recv::<ShimMessage>(Duration::from_secs(5)).unwrap(), Some(ShimMessage::Connecting));
+        assert_eq!(server_conn.recv::<ShimMessage>(Duration::from_secs(5)).unwrap(), Some(ShimMessage::Connecting { attempt: 1 }));
         server_conn.send(&AppMessage::Close).unwrap();
         assert_eq!(reader.join().unwrap(), Some(AppMessage::Close));
     }
