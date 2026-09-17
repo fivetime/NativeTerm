@@ -208,7 +208,7 @@
 - [ ] SecureCRT importer (rest): preview on the author's real
       configuration (by the author); host keys merged into
       `known_hosts`; saved commands into the command library; Telnet /
-      serial / raw / rlogin as plink sessions; nested folder display
+      serial / raw / rlogin as plink sessions
 - [x] `ssh` used for tabs and checks: native builds only (MSYS/Cygwin
       `ssh` on `PATH` skipped), no console window for checks
 - [ ] PuTTY saved-session import (read-only from the PuTTY registry key)
@@ -315,7 +315,9 @@
 - [ ] Optional `RegisterHotKey` shortcut, off by default
 - [ ] Per-host/folder terminal appearance: profile, color scheme, tab color;
       NativeTerm profiles shipped as a Windows Terminal JSON fragment
-- [ ] NativeTerm themes (light/dark/system, presets), Mica/Acrylic
+- [x] Light / dark / system theme (title bar included), Fluent/MDL2 icons,
+      nested folders in the tree, status dots on hosts
+- [ ] NativeTerm themes (rest): presets, Mica/Acrylic
 - [x] Localization (English, Simplified Chinese) with runtime switching:
       `native-term-i18n` (Fluent, keys checked at compile time), setting
       in `state.db`, shim follows the system language / `NATIVETERM_LANG`

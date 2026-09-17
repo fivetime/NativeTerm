@@ -1,6 +1,7 @@
 //! The main window: the session tree, the open sessions, and the dialogs
 //! that edit sessions.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use native_term_app::{t, Core, SessionView, State};
@@ -11,7 +12,8 @@ use native_term_config::SessionTree;
 use crate::dialogs::{ConfirmDelete, FolderDialog, HostDialog, Outcome};
 use crate::import_dialog::ImportDialog;
 use crate::terminal_profile::ProfileSetup;
-use crate::tree_view::{TreeAction, TreeView};
+use crate::icons;
+use crate::tree_view::{Activity, TreeAction, TreeView};
 use crate::Setup;
 
 /// `state.db` setting: the docked window stays out.
@@ -60,6 +62,7 @@ impl App {
         notices.extend(profile.fix_moved());
         if let Some(core) = &core {
             crate::dock::set_pinned(core.setting(PINNED_SETTING).as_deref() == Some("1"));
+            apply_theme(ctx, core.setting(THEME_SETTING).as_deref());
             let ctx = ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
             if let Err(e) = core.start_tab_menu() {
@@ -266,6 +269,37 @@ impl App {
     }
 }
 
+/// `state.db` setting: `light`, `dark`, or absent for the system's.
+pub const THEME_SETTING: &str = "theme";
+
+pub fn apply_theme(ctx: &egui::Context, setting: Option<&str>) {
+    let (preference, title_bar) = match setting {
+        Some("light") => (egui::ThemePreference::Light, egui::SystemTheme::Light),
+        Some("dark") => (egui::ThemePreference::Dark, egui::SystemTheme::Dark),
+        _ => (egui::ThemePreference::System, egui::SystemTheme::SystemDefault),
+    };
+    ctx.set_theme(preference);
+    // the window's own title bar follows too
+    ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(title_bar));
+}
+
+fn theme_choice(ui: &mut egui::Ui, core: &Core) {
+    let setting = core.setting(THEME_SETTING).filter(|s| !s.is_empty());
+    let options = [(None, t!("theme-system")), (Some("light"), t!("theme-light")), (Some("dark"), t!("theme-dark"))];
+    let shown = options.iter().find(|(v, _)| *v == setting.as_deref()).map(|(_, n)| n.clone()).unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.label(t!("theme-label"));
+        egui::ComboBox::from_id_salt("theme").selected_text(shown).show_ui(ui, |ui| {
+            for (value, name) in &options {
+                if ui.selectable_label(setting.as_deref() == *value, name.as_str()).clicked() {
+                    core.set_setting(THEME_SETTING, value.unwrap_or(""));
+                    apply_theme(ui.ctx(), *value);
+                }
+            }
+        });
+    });
+}
+
 /// Language: the system's, or one of NativeTerm's.
 fn language_choice(ui: &mut egui::Ui, core: &Core) {
     let setting = core.language_setting();
@@ -367,10 +401,12 @@ impl crate::window::Ui for App {
         }
         egui::Panel::top("status").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.toggle_value(&mut self.show_settings, t!("settings-toggle"));
+                ui.toggle_value(&mut self.show_settings, icons::with(icons::SETTINGS, t!("settings-toggle")));
                 if let Some(edge) = crate::dock::docked_edge() {
                     let mut pinned = crate::dock::pinned();
-                    let toggle = ui.toggle_value(&mut pinned, t!("dock-pin")).on_hover_text(t!("dock-pin-hint", edge = edge.name()));
+                    let toggle = ui
+                        .toggle_value(&mut pinned, icons::with(icons::PIN, t!("dock-pin")))
+                        .on_hover_text(t!("dock-pin-hint", edge = edge.name()));
                     if toggle.changed() {
                         crate::dock::set_pinned(pinned);
                         if let Some(core) = &self.core {
@@ -378,7 +414,7 @@ impl crate::window::Ui for App {
                         }
                     }
                 }
-                if ui.button(t!("import-securecrt-button")).clicked() && self.dialog.is_none() {
+                if ui.button(icons::with(icons::IMPORT, t!("import-securecrt-button"))).clicked() && self.dialog.is_none() {
                     self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
                 }
             });
@@ -392,6 +428,7 @@ impl crate::window::Ui for App {
                             core.set_auto_reconnect(auto);
                         }
                         language_choice(ui, core);
+                        theme_choice(ui, core);
                     }
                 });
             }
@@ -408,11 +445,19 @@ impl crate::window::Ui for App {
             }
         });
         let recent = self.recent();
+        // the best state per host, for the dots in the tree
+        let mut activity: HashMap<String, Activity> = HashMap::new();
+        for s in self.core.as_ref().map(|c| c.sessions()).unwrap_or_default() {
+            if let Some(a) = Activity::of(&s.state) {
+                let best = activity.entry(s.alias).or_insert(a);
+                *best = (*best).max(a);
+            }
+        }
         let mut actions = Vec::new();
         egui::Panel::left("tree")
             .resizable(true)
             .default_size(320.0)
-            .show_inside(ui, |ui| actions = self.view.show(ui, &self.tree, self.generation, &recent));
+            .show_inside(ui, |ui| actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity));
         for action in actions {
             self.handle(action);
         }

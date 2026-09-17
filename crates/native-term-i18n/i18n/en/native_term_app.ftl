@@ -3,10 +3,14 @@
 
 ## Top bar and settings
 
-settings-toggle = ⚙ Settings
+settings-toggle = Settings
 import-securecrt-button = Import from SecureCRT…
 language-label = Language
 language-system = System default
+theme-label = Theme
+theme-system = System default
+theme-light = Light
+theme-dark = Dark
 auto-reconnect-setting = Reconnect dropped sessions automatically (never after a failed login)
 dock-pin = Pin
 dock-pin-hint = Docked at the { $edge ->
@@ -24,13 +28,13 @@ settings-profile = "NativeTerm SSH" profile: { $status }
 
 tree-heading = Sessions
 tree-reload-hint = Reload ~/.ssh
-tree-new-folder = ＋ Folder
+tree-new-folder = Folder
 tree-search-hint = Search name, host, user, note…  (Ctrl+F)
 tree-search-clear = Clear the search (Esc)
 tree-no-match = No host matches "{ $query }"
 tree-recent = Recent
 tree-all = All sessions
-tree-empty = No hosts yet: right-click a folder, or use ＋ Folder.
+tree-empty = No hosts yet: right-click a folder, or add a folder first.
 tree-main-config = ~/.ssh/config
 menu-connect-all = Connect All
 menu-connect-all-new-window = Connect All in New Window

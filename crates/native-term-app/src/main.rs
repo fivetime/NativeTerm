@@ -12,6 +12,7 @@
 mod app;
 mod dialogs;
 mod dock;
+mod icons;
 mod import_dialog;
 mod terminal_profile;
 mod tree_view;
@@ -165,16 +166,17 @@ const WINDOW_SETTING: &str = "window";
 fn install_fonts(ctx: &egui::Context) {
     let windir = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     // mapped, not read: egui would keep two private copies of a 20 MB file
-    let Some(bytes) = ["msyh.ttc", "simsun.ttc"]
-        .iter()
-        .find_map(|f| native_term_win::map_file_for_process(&windir.join("Fonts").join(f)).ok())
-    else {
-        return;
-    };
+    let dir = windir.join("Fonts");
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("cjk".into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));
-    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-        fonts.families.entry(family).or_default().push("cjk".into());
+    let cjk = ["msyh.ttc", "simsun.ttc"].iter().find_map(|f| native_term_win::map_file_for_process(&dir.join(f)).ok());
+    // icons last: their code points (private use area) are in no other font
+    let glyphs = icons::font_file(&dir).and_then(|f| native_term_win::map_file_for_process(&f).ok());
+    for (name, bytes) in [("cjk", cjk), ("icons", glyphs)] {
+        let Some(bytes) = bytes else { continue };
+        fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            fonts.families.entry(family).or_default().push(name.into());
+        }
     }
     ctx.set_fonts(fonts);
 }

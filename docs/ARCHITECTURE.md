@@ -2256,6 +2256,20 @@ app-level command layer.
   - **Side effects.** Works the same in VMs, over Remote Desktop and on
     old drivers, with no fallback or restart logic; no discrete GPU is
     ever woken on hybrid laptops.
+- **Implemented so far:**
+  - **Theme:** Settings → Appearance: system default, light or dark
+    (`settings.theme`); the window's title bar follows.
+  - **Icons:** Segoe Fluent Icons (Windows 11) or Segoe MDL2 Assets
+    (Windows 10), memory-mapped like the CJK font and added as the last
+    fallback font, so a glyph (private use area) can sit in any label.
+  - **Session tree:** folder labels are nested at " / " (an imported
+    SecureCRT tree `生产 / 控制节点` shows as folders in folders; a group
+    without its own file is a folder too), sorted by name, with folder
+    and host icons and chevrons. With up to 20 folders everything is
+    open; with more, only the top level (up to 60) or nothing. A group's
+    "Connect All" opens every host below it. A host with open sessions
+    has a dot: green connected, amber connecting or waiting, red failed
+    or dropped (the best state of its sessions).
 - **Windows 11 materials**: Mica/Acrylic backdrops via the
   `window-vibrancy` crate on a transparent window; rounded corners for
   borderless windows (drawer, FAB) via `DwmSetWindowAttribute`

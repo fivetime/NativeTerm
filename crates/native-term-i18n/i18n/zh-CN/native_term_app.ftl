@@ -1,9 +1,13 @@
 ## 顶栏和设置
 
-settings-toggle = ⚙ 设置
+settings-toggle = 设置
 import-securecrt-button = 从 SecureCRT 导入…
 language-label = 语言
 language-system = 跟随系统
+theme-label = 外观
+theme-system = 跟随系统
+theme-light = 浅色
+theme-dark = 深色
 auto-reconnect-setting = 断线后自动重连（登录失败不会重试）
 dock-pin = 钉住
 dock-pin-hint = 已停靠在屏幕{ $edge ->
@@ -21,13 +25,13 @@ settings-profile = “NativeTerm SSH”配置：{ $status }
 
 tree-heading = 会话
 tree-reload-hint = 重新读取 ~/.ssh
-tree-new-folder = ＋ 文件夹
+tree-new-folder = 文件夹
 tree-search-hint = 搜索名称、主机、用户、备注…（Ctrl+F）
 tree-search-clear = 清除搜索（Esc）
 tree-no-match = 没有匹配“{ $query }”的主机
 tree-recent = 最近使用
 tree-all = 全部会话
-tree-empty = 还没有主机：右键点文件夹，或用“＋ 文件夹”。
+tree-empty = 还没有主机：右键点文件夹新建主机，或先新建文件夹。
 tree-main-config = ~/.ssh/config
 menu-connect-all = 全部连接
 menu-connect-all-new-window = 在新窗口中全部连接

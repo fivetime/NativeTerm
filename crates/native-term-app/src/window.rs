@@ -249,6 +249,8 @@ impl Runner {
             // through winit, which otherwise resets the level on its own
             let level = if edge.is_some() { winit::window::WindowLevel::AlwaysOnTop } else { winit::window::WindowLevel::Normal };
             r.window.set_window_level(level);
+            // the top bar shows "Pin" only while docked
+            r.window.request_redraw();
         }
         if let Some(edge) = edge {
             if let Some(target) = self.docked_target(edge, false) {
