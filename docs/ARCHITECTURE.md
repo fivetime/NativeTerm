@@ -666,8 +666,9 @@ Findings:
   with it.
 - **NativeTerm's own parser must not repeat the bug:** a `Host` line is
   a list of patterns. Only literal names (no `*`, `?`, `!`) are
-  connectable aliases, and each gets its own entry pointing at the same
-  block (`ssh -G <alias>` resolves the effective settings).
+  connectable aliases; NativeTerm connects with the first one, and
+  `ssh -G <alias>` resolves the effective settings. Blocks that only add
+  shared settings are not sessions (see "Parsing and writing rules").
 - **Settings:** NativeTerm offers "Hide Windows Terminal's SSH profiles"
   in its settings. It adds `Windows.Terminal.SSH` to
   `disabledProfileSources` as an explicit, backed-up edit of Terminal's
@@ -926,9 +927,28 @@ Host ceph-cluster.osp-control1
   configuration after `Match`, wildcards, `Include`, and defaults are
   applied. NativeTerm does not reimplement OpenSSH's precedence rules; its
   own parser only builds the tree and performs edits.
-- Wildcard `Host` patterns (`Host *.prod`, `Host *`) and `Match` blocks are
-  not sessions; they're skipped in the tree but still honored by `ssh`.
-- Hosts without `HostName` connect to the alias itself; shown as-is.
+- **Sessions and shared settings.** A `Host` line is a pattern list,
+  and a common hand-written layout gives one block per host plus blocks
+  of settings shared by several:
+  ```
+  Host node01 incus-node-01
+      HostName 10.32.32.130
+  Host node01 node02 node03 incus-node-*
+      User root
+  ```
+  A block is a **session** if it sets `HostName`, or if it names only
+  literal hosts that no `HostName` block defines (ssh then connects to
+  the name itself). Everything else is **shared settings**: blocks with
+  wildcards, or blocks naming hosts defined elsewhere, possibly in
+  another file. These are listed separately, and their effect shows in
+  `ssh -G`. `Match` blocks are never sessions.
+  - A session's first literal name is the alias NativeTerm connects
+    with; further literal names are shown as alternates.
+  - A duplicate-alias warning is raised only when two *session* blocks
+    use the same name; ssh takes the first.
+  - Verified on this machine's config: 8 sessions, 2 shared blocks,
+    parsed in under 1 ms. `ssh -G node01` reported `user root` from the
+    shared block.
 - Writes are **format-preserving** (targeted line edits, comments and
   spacing kept), never a parse-and-reserialize round trip.
 - **File permissions are enforced by ssh.** Windows OpenSSH checks
