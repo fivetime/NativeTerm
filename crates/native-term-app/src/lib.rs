@@ -12,7 +12,7 @@ pub mod import;
 pub mod registry;
 pub mod tab_menu;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -130,6 +130,9 @@ pub struct SessionView {
     pub auto_retry: Option<u32>,
     /// Kept out of batch closes and group sends; closed only when unlocked.
     pub locked: bool,
+    /// The host's name in the tree when it was renamed after the tab
+    /// opened (the tab keeps its title; clones and new tabs use this).
+    pub renamed_to: Option<String>,
 }
 
 pub(crate) struct Session {
@@ -196,6 +199,7 @@ impl Session {
             auto_retry: (self.auto_retries > 0 && matches!(self.state, State::Disconnected(_) | State::Connecting))
                 .then_some(self.auto_retries),
             locked: self.locked,
+            renamed_to: None,
         }
     }
 
@@ -244,6 +248,8 @@ pub(crate) struct Shared {
     last_terminal: std::sync::atomic::AtomicIsize,
     /// Where sent commands are recorded (`<data dir>\\audit`).
     audit_dir: Mutex<Option<PathBuf>>,
+    /// Each saved host's current name, by alias.
+    host_labels: Mutex<HashMap<String, String>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -264,6 +270,19 @@ impl Shared {
 
     fn refresh_soon(&self) {
         let _ = lock(&self.wake).send(());
+    }
+
+    /// The name a new tab for this session gets: the host's current name
+    /// in the tree, else the session's own without its `(2)` suffix.
+    pub(crate) fn fresh_label(&self, alias: &str, label: &str) -> String {
+        lock(&self.host_labels).get(alias).cloned().unwrap_or_else(|| tab_menu::base_label(label).to_string())
+    }
+
+    fn view(&self, s: &Session) -> SessionView {
+        let mut view = s.view();
+        view.renamed_to =
+            lock(&self.host_labels).get(&s.alias).filter(|l| l.as_str() != tab_menu::base_label(&s.label)).cloned();
+        view
     }
 
     fn labels(&self) -> HashSet<String> {
@@ -368,6 +387,7 @@ impl Core {
             all_tabs: Default::default(),
             last_terminal: Default::default(),
             audit_dir: Mutex::new(None),
+            host_labels: Mutex::new(HashMap::new()),
         });
         let auto = shared.registry.as_ref().and_then(|r| r.setting(AUTO_RECONNECT_SETTING).ok().flatten());
         shared.auto_reconnect.store(auto.as_deref() == Some("1"), std::sync::atomic::Ordering::Relaxed);
@@ -487,7 +507,7 @@ impl Core {
     }
 
     pub fn sessions(&self) -> Vec<SessionView> {
-        lock(&self.shared.sessions).iter().map(Session::view).collect()
+        lock(&self.shared.sessions).iter().map(|s| self.shared.view(s)).collect()
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -510,6 +530,12 @@ impl Core {
     /// Show a notice (from any thread).
     pub fn add_notice(&self, text: String) {
         self.shared.notice(text);
+    }
+
+    /// The saved hosts' current names (alias → name), after every reload.
+    pub fn set_host_labels(&self, labels: HashMap<String, String>) {
+        *lock(&self.shared.host_labels) = labels;
+        self.shared.changed();
     }
 
     pub fn take_notices(&self) -> Vec<String> {
@@ -725,7 +751,7 @@ impl Core {
     /// recent Terminal window.
     pub fn clone_session(&self, id: &str) {
         let Some(s) = self.sessions().into_iter().find(|s| s.id == id) else { return };
-        let label = tab_menu::base_label(&s.label).to_string();
+        let label = self.shared.fresh_label(&s.alias, &s.label);
         let on_login = lock(&self.shared.sessions).iter().find(|x| x.id == id).and_then(|x| x.on_login.clone());
         self.open(&[HostRequest { no_forwards: true, on_login, ..HostRequest::new(s.alias, label) }], Target::Recent);
     }
@@ -913,7 +939,13 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
             let group: Vec<&Placeholder> = batch.iter().filter(|p| p.window == target_window).collect();
             let mut specs = Vec::new();
             for p in &group {
+                let taken = shared.labels();
                 let spec = shared.update(&p.session, |s| {
+                    // a host renamed since: the new tab gets the new name
+                    let fresh = shared.fresh_label(&s.alias, &s.label);
+                    if fresh != tab_menu::base_label(&s.label) {
+                        s.label = unique_label(&fresh, &taken);
+                    }
                     s.terminal_session = native_term_config::new_id();
                     s.current_terminal_session = None;
                     s.state = State::Opening;

@@ -138,6 +138,16 @@ fn commands_reach_logged_in_sessions_only() {
     assert_eq!(core.close_ended(), 0);
     assert!(matches!(state(&core, "sc-in"), Some(State::Ended(0))));
 
+    // the host renamed in the tree: shown, and the tab's own label kept
+    let view = |core: &Core| core.sessions().into_iter().find(|s| s.id == "sc-in").unwrap();
+    let before = view(&core).label;
+    let rename = |name: &str| core.set_host_labels([("nativeterm-test.invalid".to_string(), name.to_string())].into());
+    rename("测试主机");
+    assert_eq!(view(&core).renamed_to.as_deref(), Some("测试主机"));
+    assert_eq!(view(&core).label, before);
+    rename(&before);
+    assert_eq!(view(&core).renamed_to, None);
+
     // a login command is typed after every login
     let log = tmp.path().join("login.log");
     let _login = spawn_shim_with("lc-1", "6e7a0000-0000-4000-8000-0000000b0003", &log, true, &[("FAKE_SSH_LOGIN_DELAY_MS", "1500")]);

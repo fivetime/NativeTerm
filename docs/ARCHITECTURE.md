@@ -414,7 +414,7 @@ Therefore NativeTerm provides its own menus:
 
 | SecureCRT feature | Possible? | How |
 |---|---|---|
-| Rename / Reset Name | Yes | Our own metadata; tab title updated on next (re)open |
+| Rename / Reset Name | Yes | Our own metadata; an open tab keeps its title (its identity, and suppressed application titles can't change it), its card shows the new name, and clones and replacement tabs use it |
 | Reconnect | Yes | Tell the tab's shim to run `ssh` again in the same tab |
 | Disconnect / Close | Yes | Tell the shim to end `ssh` / to exit with code 0, which makes Windows Terminal close the tab (see "Closing tabs") |
 | Close Disconnected Tabs | Yes | Shim reports ssh exit code 255 → those shims exit with 0 |

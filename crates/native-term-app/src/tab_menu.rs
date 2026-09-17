@@ -133,7 +133,8 @@ impl Provider for Actions {
             DISCONNECT => core.disconnect(&this.id),
             CLONE => {
                 let on_login = lock(&shared.sessions).iter().find(|s| s.id == this.id).and_then(|s| s.on_login.clone());
-                let host = HostRequest { no_forwards: true, on_login, ..HostRequest::new(&this.alias, base_label(&this.label)) };
+                let label = shared.fresh_label(&this.alias, &this.label);
+                let host = HostRequest { no_forwards: true, on_login, ..HostRequest::new(&this.alias, label) };
                 core.open(&[host], Target::Recent);
             }
             CLOSE if !this.locked => core.close(&this.id),

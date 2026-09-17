@@ -218,8 +218,10 @@
       directory / cloud sync)
 - [x] Unique tab titles (`web01 (2)`); foreign tabs excluded from batch
       operations (tab menu close sets contain NativeTerm sessions only)
-- [ ] Rename reconciliation (a host renamed in the tree while its tab is
-      open)
+- [x] Rename reconciliation (a host renamed in the tree while its tab is
+      open): the tab keeps its title (Terminal can't retitle it, and the
+      title is the tab's identity); the card says "now called …"; clones
+      and replacement tabs after a restore use the new name
 - [x] Rename (host dialog, alias kept) / Save Session (quick connect
       "Save…"), written back to config.d
 - [x] Lock a session (session card and tab menu; kept in `state.db`

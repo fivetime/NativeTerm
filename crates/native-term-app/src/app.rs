@@ -126,7 +126,7 @@ impl App {
             }
         }
         let tree = SessionTree::load(&options.ssh_dir);
-        publish_hosts(&tree);
+        publish_hosts(&tree, core.as_ref());
         // changes made elsewhere (an editor, a sync tool) show up by themselves
         let ssh_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = std::sync::Arc::clone(&ssh_changed);
@@ -166,7 +166,7 @@ impl App {
         self.tree = SessionTree::load(&self.ssh_dir);
         self.generation += 1;
         self.loaded_from = fingerprint(&self.ssh_dir, &self.tree);
-        publish_hosts(&self.tree);
+        publish_hosts(&self.tree, self.core.as_ref());
     }
 
     /// Reload if a config file really changed (ssh itself writes
@@ -517,7 +517,10 @@ impl App {
 }
 
 /// The saved hosts, for the floating button's search.
-fn publish_hosts(tree: &SessionTree) {
+fn publish_hosts(tree: &SessionTree, core: Option<&Core>) {
+    if let Some(core) = core {
+        core.set_host_labels(tree.hosts().map(|(_, h)| (h.alias().to_string(), h.label().to_string())).collect());
+    }
     let hosts = tree
         .folders()
         .flat_map(|f| {
@@ -640,6 +643,9 @@ fn session_card(
                 state.push_str(&format!(" · {}", t!("session-auto-reconnect", n = n)));
             }
             ui.colored_label(color, state);
+            if let Some(name) = &s.renamed_to {
+                ui.weak(t!("session-renamed", name = name.as_str())).on_hover_text(t!("session-renamed-hint"));
+            }
         });
         ui.horizontal_wrapped(|ui| {
             match &s.location {
