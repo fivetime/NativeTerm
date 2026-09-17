@@ -1043,6 +1043,58 @@ Host ceph-cluster.osp-control1
   fails, the previous version is restored automatically and the error is
   shown. Backups can also be restored manually from settings.
 
+### Editing in the app (implemented)
+
+- **What the dialog edits:** name (`NativeTermLabel`), host, user, port,
+  jump host, keys (one `IdentityFile` per line) and a one-line note
+  (`NativeTermNote`). Empty fields are removed from the block. A name
+  equal to the alias isn't stored.
+- **New hosts:**
+  - The alias is generated from the name (`alias::unique`), and a
+    `NativeTermId` is added.
+  - The block is appended to the folder's file.
+  - The main config's `IgnoreUnknown` and `Include` lines are ensured
+    first.
+- **Aliases never change:** open tabs, `ProxyJump` references and the
+  user's scripts use them. Renaming only changes the label.
+- **Moving a host:**
+  - The block, including comments inside it, is written to the target
+    file first, then removed from the source.
+  - If the removal is rejected, the copy is taken out again, so the host
+    never ends up defined twice.
+- **Validation:**
+  - After each write, ssh must accept the whole configuration, and the
+    host must resolve to the host name that was entered.
+  - The second check catches an earlier block for the same name, which
+    ssh would use instead (first match wins; files included earlier
+    come first).
+  - A rejected change is rolled back, and ssh's message is shown in the
+    dialog.
+  - Seen in testing: a hand-made include file inheriting a sandbox
+    group's permissions made *every* change fail with "Bad permissions".
+    The message names the file and the account. A "fix permissions"
+    action is on the roadmap.
+- **Other directories** (tests, `--ssh-dir`): ssh is pointed at their
+  config with `-F`. Their `Include` lines must be absolute, because
+  relative and `~` includes resolve against the real `~/.ssh` even under
+  `-F`.
+- **Search:**
+  - Fuzzy: every word must match one of name, alias, host, user, note
+    or folder, with name hits weighted double.
+  - Recently used hosts rank higher. Results are cached until the query
+    or the tree changes.
+  - Enter opens the best hit, and Esc or the × button clears the search.
+    egui drops the text field's focus in the same frame Esc arrives, so
+    "lost focus" counts too.
+- **Tree rows:**
+  - Rows are drawn by hand (full width, left-aligned) and still carry
+    accessibility info.
+  - Only visible rows are laid out (`show_rows`).
+  - With 2000 hosts in 50 folders: 78 MB private memory, and no CPU when
+    idle, even with the search box focused.
+- **Recent hosts:** the top of the tree shows the five most recently
+  opened hosts (from `state.db`).
+
 ### Ad-hoc connections
 
 Quick connect accepts `user@host[:port]` for a machine that isn't in the

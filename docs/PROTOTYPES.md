@@ -362,6 +362,24 @@ Idle CPU with three sessions, 58–60 s (release core):
 | Events, 15 s fallback scan, pipe polling | 281–391 ms (4 scans; mostly pipe polling) | — |
 | Events, 60 s fallback, overlapped pipe, shim waits on handles | 16 ms (1 scan) | 0 ms |
 
+Session editing in the GUI (throwaway `~/.ssh` with absolute includes,
+driven through UI Automation and the clipboard):
+
+| Step | Result |
+|---|---|
+| New folder "Web" | `config.d\web.conf` with the folder block |
+| First try | Rejected with ssh's message: the pre-existing `lab.conf` had inherited a sandbox group's ACL ("Bad permissions … CodexSandboxUsers"); after restricting the test files, accepted |
+| New host "Web One 生产", host, user, port, note | Block `web-one` with `NativeTermLabel`, `NativeTermNote`, `NativeTermId` |
+| Typing with SendKeys | The Sogou input method switched to its composition mode and swallowed the keys (its candidate window showed; egui's IME support works). Fields were filled by pasting instead |
+| Edit: user → root | Changed in place |
+| Move to Lab | Block moved with all lines; `web.conf` back to the folder block |
+| Search "生产 web1" / "zzz" | One hit, with its folder / "No host matches" |
+| Esc in the search box | First version didn't clear (focus is dropped in the same frame); fixed |
+| Delete (confirmed) | Block gone; backups of both files in `data\backups` |
+| Tree rows | First version centered the labels (`add_sized`); now drawn left-aligned |
+| "✕" button | The glyph isn't in the fonts (showed a box); "×" is |
+| 2000 hosts / 50 folders (release) | Start ≈ 1.2 s, 78 MB private, idle 0 CPU with and without a focused search box; a search that is typed re-scores only when the query changes |
+
 Idle footprint, release build, no sessions, 6–10 s samples:
 
 | Variant | Private memory |

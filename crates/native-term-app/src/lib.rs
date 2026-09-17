@@ -4,6 +4,7 @@
 //! sends commands.
 
 pub mod data_dir;
+pub mod fuzzy;
 pub mod registry;
 
 use std::collections::HashSet;

@@ -87,9 +87,13 @@
       header; change detection; owner-only ACLs on new files, kept on
       replace; timestamped backups with pruning; validation with
       rollback; unique aliases; `NativeTermId` generation
+- [x] `native-term-config` host operations (`ops.rs`): create folder,
+      rename folder, create/edit/move/delete host; aliases stay fixed
+      (renaming changes `NativeTermLabel`); every change backed up and
+      validated with `ssh -G` (host name must resolve as entered), rolled
+      back otherwise
 - [ ] `native-term-config` (rest): file watching; `.nt.toml` non-SSH
-      sessions; host create/move/rename/delete operations on top of the
-      edit primitives; permission problems explained in the UI
+      sessions; a "fix permissions" action for files ssh rejects
 - [x] `native-term-shim`: `--session <id> <alias>` plus session GUID from
       `WT_SESSION`; builds the `ssh` command line itself (`LocalCommand`
       login helper, default keepalives only when not configured); reports
@@ -159,8 +163,12 @@
       selection and structure events per window (own thread, watchdog),
       debounced; 60 s fallback scan. Overlapped pipe I/O and handle-based
       waits in the shim: idle CPU ≈ 0 for NativeTerm and shims
-- [ ] `native-term-app` (rest): row virtualization for thousands of
-      sessions, search, connection pacing
+- [x] Session tree UI: search (fuzzy, all words, label/alias/host/
+      user/note/folder, recent hosts first, Enter opens, Esc clears),
+      recent hosts, virtualized rows (2000 hosts: 78 MB, idle 0 CPU),
+      new/rename folder, new/edit/move/delete host dialogs
+- [ ] `native-term-app` (rest): connection pacing; drag and drop in the
+      tree; multi-select
 - [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
       CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
       6.6 MB working set)

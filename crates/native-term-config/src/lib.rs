@@ -8,6 +8,7 @@
 //! - [`header`]: the `IgnoreUnknown` / `Include` lines in the main config.
 //! - [`alias`]: literal-pattern checks and unique alias generation.
 //! - [`effective`]: effective settings through `ssh -G`.
+//! - [`ops`]: creating, changing, moving and deleting hosts and folders.
 //! - [`write`]: safe writing (change detection, backups, atomic replace
 //!   with ssh-compatible ACLs, validation with rollback).
 
@@ -18,6 +19,7 @@ pub mod document;
 pub mod effective;
 pub mod header;
 pub mod include;
+pub mod ops;
 pub mod tree;
 pub mod write;
 
