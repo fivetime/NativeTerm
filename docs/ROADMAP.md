@@ -274,9 +274,9 @@
       sessions panel, single ones from their row
 - [ ] Recovery (rest): unlocated sessions with position hints and
       "Locate"
-- [x] Tab menu: "Clear Screen and Scrollback" (shim writes `ESC [3J`;
-      after login types Ctrl+L so the remote side clears and redraws;
-      otherwise clears the tab directly; see PROTOTYPES.md)
+- [x] Tab menu: "Clear Screen and Scrollback" (after login the shim
+      clears the tab, then types Ctrl+L so the remote side redraws on an
+      empty screen; before login only the scrollback; see PROTOTYPES.md)
 - [x] Own tab menu, first version (`windows_terminal::menu` +
       `tab_menu`): `WH_MOUSE_LL`/`WH_KEYBOARD_LL` installed only while
       NativeTerm has located tabs; non-activating GDI popup following the

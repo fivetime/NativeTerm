@@ -750,11 +750,22 @@ and fragments can't bind keys). Can the process in the tab do it?
 - Through NativeTerm's tab menu on a tab whose login had failed, the
   shim wrote `ESC [H ESC [2J ESC [3J` and printed its key hint again:
   the tab's text was the hint alone.
-- While logged in, the screen belongs to the remote side, so the shim
-  writes only `ESC [3J` and types Ctrl+L, which bash/zsh answer by
-  clearing and redrawing the prompt (full-screen programs redraw).
-  Before login Ctrl+L would end up in a password prompt, so it isn't
-  typed then; checked end to end with the fake ssh (`send_commands`).
+- While logged in, the remote side owns the screen: the shim types
+  Ctrl+L, which bash/zsh answer by clearing and redrawing the prompt
+  (full-screen programs redraw). Before login Ctrl+L would end up in a
+  password prompt, so it isn't typed then; checked end to end with the
+  fake ssh (`send_commands`).
+- **Order matters.** In Windows Terminal, `ESC [2J` doesn't discard the
+  screen: it moves it into the scrollback. The first version wrote
+  `ESC [3J` and then typed Ctrl+L; the remote shell's `ESC [2J` arrived
+  afterwards and pushed the old screen back into the scrollback, so the
+  scrollbar stayed and a second click was needed (reported by the user).
+  Measured with Git bash as the "remote side" in a tab (`seq 1 300`,
+  then clear): `ESC [3J` + Ctrl+L left 31 lines; `ESC [H ESC [2J ESC [3J`
+  (the tab cleared here, the screen's move into the scrollback cleared
+  with it) + Ctrl+L left only the prompt. Repeated through the real tab
+  menu with the shim, the fake ssh running bash (`FAKE_SSH_INTERACTIVE`),
+  and 600 lines: one click, prompt only, no scrollbar.
 
 Caveat: the shim writes to the console while ssh may be writing too; a
 sequence could land between two parts of the remote output's own escape

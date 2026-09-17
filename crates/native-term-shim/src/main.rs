@@ -266,11 +266,15 @@ fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEven
                     let _ = win::inject(&text, enter);
                 }
                 AppMessage::ClearScreen => {
-                    // the remote side owns the screen: it clears and redraws
-                    // on Ctrl+L; before login that would end up in a password
-                    clear_scrollback();
                     if auth.is_some_and(|a| a.is_set()) {
+                        // clear here first, then let the remote side redraw
+                        // (Ctrl+L) on the empty screen
+                        write_console(CLEAR_ALL);
                         let _ = win::inject("\u{c}", false);
+                    } else {
+                        // a password prompt may be showing: keep the screen,
+                        // and don't type into it
+                        write_console(CLEAR_SCROLLBACK);
                     }
                 }
                 _ => {}
@@ -279,12 +283,19 @@ fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEven
     }
 }
 
-/// `ESC [3J`: Windows Terminal drops the scrollback, the screen stays
+/// Windows Terminal drops the scrollback on `ESC [3J` and keeps the screen
 /// (verified through ConPTY on 1.26, see PROTOTYPES.md).
-fn clear_scrollback() {
+const CLEAR_SCROLLBACK: &[u8] = b"\x1b[3J";
+/// `ESC [2J` moves the screen into the scrollback in Windows Terminal, so
+/// the scrollback is cleared after it. A remote shell answering Ctrl+L
+/// with its own `ESC [2J` then finds an empty screen and adds nothing;
+/// clearing only the scrollback before Ctrl+L left the old screen behind.
+const CLEAR_ALL: &[u8] = b"\x1b[H\x1b[2J\x1b[3J";
+
+fn write_console(bytes: &[u8]) {
     use std::io::Write;
     let mut out = std::io::stdout();
-    let _ = out.write_all(b"\x1b[3J");
+    let _ = out.write_all(bytes);
     let _ = out.flush();
 }
 
@@ -335,7 +346,7 @@ fn after_exit(link: Option<&Link>) -> Next {
                 }
                 AppMessage::ClearScreen => {
                     // nothing runs here: clear everything, keep the keys hint
-                    print!("\x1b[H\x1b[2J\x1b[3J");
+                    write_console(CLEAR_ALL);
                     println!("{}", t!("reconnect-or-close"));
                 }
                 _ => {}
