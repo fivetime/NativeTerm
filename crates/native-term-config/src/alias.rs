@@ -33,6 +33,30 @@ pub fn sanitize(label: &str) -> String {
     }
 }
 
+/// For searching Chinese names: the full pinyin (`kongzhijiedian0`) and
+/// the initials (`kzjd0`), lowercase; other characters are kept. `None`
+/// when `text` has no Han characters.
+pub fn pinyin_forms(text: &str) -> Option<(String, String)> {
+    use pinyin::ToPinyin;
+    let mut full = String::new();
+    let mut initials = String::new();
+    let mut han = false;
+    for c in text.chars().flat_map(char::to_lowercase) {
+        match c.to_pinyin() {
+            Some(p) => {
+                han = true;
+                full.push_str(p.plain());
+                initials.push_str(&p.plain()[..1]);
+            }
+            None => {
+                full.push(c);
+                initials.push(c);
+            }
+        }
+    }
+    han.then_some((full, initials))
+}
+
 /// A globally unique alias for `label`. `taken` holds existing aliases in
 /// lowercase (ssh matches host names case-insensitively). On a clash the
 /// folder is prefixed, then a number is appended.
@@ -74,6 +98,12 @@ mod tests {
         assert_eq!(sanitize("✓✓"), "host");
         assert_eq!(sanitize("--x--"), "x");
         assert_eq!(sanitize("K8s_Master.local"), "k8s_master.local");
+    }
+
+    #[test]
+    fn pinyin_for_search() {
+        assert_eq!(pinyin_forms("控制节点0 web"), Some(("kongzhijiedian0 web".into(), "kzjd0 web".into())));
+        assert_eq!(pinyin_forms("web01"), None);
     }
 
     #[test]

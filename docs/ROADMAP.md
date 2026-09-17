@@ -290,8 +290,10 @@
 ## Phase 2 — quality of life
 - [x] Session search (label, alias, host, user, folder, note; fuzzy) and
       recent hosts
-- [ ] Session search (rest): pinyin initials for Chinese labels;
-      favorites (`NativeTermFavorite`); recent list per machine
+- [x] Pinyin search for Chinese labels and folders (initials `kzjd`
+      or full `kongzhi`); favorites (`NativeTermFavorite`, a Favorites
+      section at the top of the tree, toggled from the host menu);
+      the recent list lives in the per-machine `state.db`
 - [x] Command library (`commands.toml`), edited from the send dialog
 - [x] Post-login commands (`NativeTermOnLogin`, host or folder default),
       typed after every login

@@ -2149,11 +2149,13 @@ sessions" (or Ctrl+T, which also focuses its search box).
 With ~800 sessions, browsing the tree is the slow path.
 
 - **Search** matches label, alias, `HostName`/IP, user, folder, and note.
-  Chinese labels also match by pinyin initials (e.g. `kzjd` for
-  `控制节点`), using a pinyin table crate.
+  Chinese labels and folder names also match by pinyin, initials or
+  full (`kzjd` or `kongzhi` for `控制节点`), using the `pinyin` crate;
+  the pinyin forms are computed once per tree generation.
 - **Favorites**: `NativeTermFavorite yes` in the host block (so they sync
-  with the sessions); shown at the top of the sidebar, in quick connect,
-  and optionally exported as Windows Terminal profiles (see "Appearance").
+  with the sessions); shown in a Favorites section at the top of the
+  sidebar (with a star after the label), toggled from the host's context
+  menu, and later optionally exported as Windows Terminal profiles (see "Appearance").
 - **Recent**: the most recently opened sessions, kept per machine in the
   data directory.
 

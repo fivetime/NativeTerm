@@ -56,6 +56,11 @@ impl HostEntry {
         self.nt.get("id")
     }
 
+    /// `NativeTermFavorite yes` (or true / 1).
+    pub fn favorite(&self) -> bool {
+        self.nt.get("favorite").is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1"))
+    }
+
     /// Where ssh will connect: `HostName`, or the alias itself.
     pub fn target(&self) -> &str {
         self.hostname.as_deref().unwrap_or(self.alias())

@@ -214,6 +214,16 @@ impl App {
                     self.dialog = Some(Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))));
                 }
             }
+            TreeAction::Favorite(alias, on) => {
+                let result = match self.tree.find(&alias) {
+                    Some((_, host)) => self.editor.set_favorite(host, on).map_err(|e| e.to_string()),
+                    None => Err(t!("error-host-gone", alias = alias.as_str())),
+                };
+                if let Err(e) = result {
+                    self.notices.push(e);
+                }
+                self.reload();
+            }
             TreeAction::InstallKey(hosts) => {
                 if !hosts.is_empty() {
                     self.dialog = Some(Dialog::Key(Box::new(KeyDialog::new(hosts, &self.ssh_dir))));

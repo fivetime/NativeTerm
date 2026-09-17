@@ -275,6 +275,22 @@ impl Editor {
         Ok(())
     }
 
+    /// Mark or unmark a host as a favorite (`NativeTermFavorite yes`).
+    pub fn set_favorite(&self, host: &HostEntry, on: bool) -> Result<(), EditError> {
+        let alias = host.alias().to_string();
+        edit_file(
+            &self.writer,
+            &host.file,
+            |doc| {
+                if let Some(block) = doc.find_host_block(&alias) {
+                    set_or_remove(doc, block, "NativeTermFavorite", on.then_some("yes"));
+                }
+            },
+            || self.validate(&alias, host.hostname.as_deref()),
+        )?;
+        Ok(())
+    }
+
     pub fn delete_host(&self, host: &HostEntry) -> Result<(), EditError> {
         let alias = host.alias().to_string();
         let changed = edit_file(
@@ -710,6 +726,13 @@ mod tests {
         editor.delete_host(host).unwrap();
         assert!(tree(&editor).find(&alias).is_none());
         assert!(tree(&editor).find("ceph-jiqun.osd-1-shengchan").is_some());
+
+        let t = tree(&editor);
+        let host = t.find("ceph-jiqun.osd-1-shengchan").unwrap().1.clone();
+        editor.set_favorite(&host, true).unwrap();
+        assert_eq!(tree(&editor).find("ceph-jiqun.osd-1-shengchan").unwrap().1.nt.get("favorite"), Some("yes"));
+        editor.set_favorite(&host, false).unwrap();
+        assert_eq!(tree(&editor).find("ceph-jiqun.osd-1-shengchan").unwrap().1.nt.get("favorite"), None);
 
         editor.rename_folder(&folder, "Ceph").unwrap();
         assert_eq!(tree(&editor).folders().find(|f| f.file == folder).unwrap().label(), "Ceph");

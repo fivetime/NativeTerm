@@ -20,6 +20,7 @@ pub enum TreeAction {
     Edit(String),
     Delete(String),
     ForgetKey(String),
+    Favorite(String, bool),
     /// (alias, label) of each host.
     InstallKey(Vec<(String, String)>),
     Move(String, PathBuf),
@@ -129,6 +130,8 @@ pub struct TreeView {
     hits: Option<SearchCache>,
     /// The folder hierarchy of a tree generation.
     nodes: (u64, Vec<Node>),
+    /// Pinyin forms of labels and folder names, per tree generation.
+    pinyin: (u64, HashMap<String, (String, String)>),
 }
 
 struct SearchCache {
@@ -226,6 +229,23 @@ impl TreeView {
         self.nodes = (generation, hierarchy(&labels));
     }
 
+    fn update_pinyin(&mut self, tree: &SessionTree, generation: u64) {
+        if self.pinyin.0 == generation && !self.pinyin.1.is_empty() {
+            return;
+        }
+        let mut map = HashMap::new();
+        for folder in tree.folders() {
+            for text in std::iter::once(folder.label()).chain(folder.hosts.iter().map(|h| h.label())) {
+                if !map.contains_key(text) {
+                    if let Some(forms) = native_term_config::alias::pinyin_forms(text) {
+                        map.insert(text.to_string(), forms);
+                    }
+                }
+            }
+        }
+        self.pinyin = (generation, map);
+    }
+
     /// (folder index, host index) of the matches, best first.
     fn search(&mut self, tree: &SessionTree, generation: u64, recent: &[String]) -> Vec<(usize, usize)> {
         let query = self.query.trim().to_string();
@@ -234,9 +254,14 @@ impl TreeView {
                 return c.hits.clone();
             }
         }
+        self.update_pinyin(tree, generation);
+        let pinyin = &self.pinyin.1;
+        let forms = |text: &str| pinyin.get(text).map(|(f, i)| (f.as_str(), i.as_str())).unwrap_or(("", ""));
         let mut scored: Vec<(i64, &str, usize, usize)> = Vec::new();
         for (index, folder) in tree.folders().enumerate() {
+            let (folder_full, folder_initials) = forms(folder.label());
             for (h, host) in folder.hosts.iter().enumerate() {
+                let (full, initials) = forms(host.label());
                 let fields = [
                     host.label(),
                     host.alias(),
@@ -244,6 +269,10 @@ impl TreeView {
                     host.user.as_deref().unwrap_or(""),
                     host.nt.get("note").unwrap_or(""),
                     folder.label(),
+                    full,
+                    initials,
+                    folder_full,
+                    folder_initials,
                 ];
                 if let Some(score) = fuzzy::score(&query, &fields) {
                     // recently used hosts rank a little higher
@@ -284,9 +313,20 @@ impl TreeView {
             })
             .take(5)
             .collect();
+        let favorites: Vec<(usize, &HostEntry)> = folders
+            .iter()
+            .enumerate()
+            .flat_map(|(i, f)| f.hosts.iter().filter(|h| h.favorite()).map(move |h| (i, h)))
+            .collect();
+        if !favorites.is_empty() {
+            rows.push(Row::Heading(t!("tree-favorites")));
+            rows.extend(favorites.into_iter().map(|(folder, host)| Row::Host { host, folder, depth: 1 }));
+        }
         if !recent_hosts.is_empty() {
             rows.push(Row::Heading(t!("tree-recent")));
             rows.extend(recent_hosts.into_iter().map(|(folder, host)| Row::Host { host, folder, depth: 1 }));
+            rows.push(Row::Heading(t!("tree-all")));
+        } else if rows.iter().any(|r| matches!(r, Row::Heading(_))) {
             rows.push(Row::Heading(t!("tree-all")));
         }
         // the main config's own hosts first, then the folder hierarchy
@@ -483,6 +523,9 @@ impl TreeView {
                         let alias = host.alias();
                         let selected = self.selected.as_deref() == Some(alias);
                         let mut text = host.label().to_string();
+                        if host.favorite() {
+                            text = format!("{text}  {}", icons::STAR_FILLED);
+                        }
                         if searching {
                             text.push_str(&format!("   · {}", folder_title(folders[*folder])));
                         }
@@ -524,6 +567,15 @@ impl TreeView {
                                     }
                                 });
                             });
+                            let (label, on) = if host.favorite() {
+                                (t!("menu-unfavorite"), false)
+                            } else {
+                                (t!("menu-favorite"), true)
+                            };
+                            if ui.button(label).clicked() {
+                                actions.push(TreeAction::Favorite(alias.to_string(), on));
+                                ui.close();
+                            }
                             if ui.button(t!("menu-install-key")).clicked() {
                                 actions.push(TreeAction::InstallKey(vec![(alias.to_string(), host.label().to_string())]));
                                 ui.close();
@@ -597,6 +649,23 @@ mod tests {
         let mut under = Vec::new();
         folders_under(prod, &mut under);
         assert_eq!(under, [4, 2, 1]);
+    }
+
+    #[test]
+    fn pinyin_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = "Host node1\n  HostName 10.0.0.1\n  NativeTermLabel 控制节点\n\nHost web\n  HostName 10.0.0.2\n";
+        std::fs::write(dir.path().join("config"), config).unwrap();
+        let tree = SessionTree::load_with(dir.path(), dir.path());
+        let mut view = TreeView::default();
+        for query in ["kzjd", "kongzhi", "控制", "kz jd"] {
+            view.query = query.into();
+            let hits = view.search(&tree, 1, &[]);
+            let labels: Vec<&str> = hits.iter().map(|(f, h)| tree.folders().nth(*f).unwrap().hosts[*h].label()).collect();
+            assert_eq!(labels, ["控制节点"], "{query}");
+        }
+        view.query = "web".into();
+        assert_eq!(view.search(&tree, 1, &[]).len(), 1);
     }
 
     #[test]
