@@ -814,6 +814,14 @@ Findings:
   `disabledProfileSources` as an explicit, backed-up edit of Terminal's
   `settings.json`, same as the stub cleanup, and never changes it
   silently. The default is to leave Terminal's list alone.
+  Implemented (`windows_terminal::sources`): a checkbox under Settings.
+  The edit is textual, because the file has comments: a small tokenizer
+  finds the top-level `disabledProfileSources` array and inserts or
+  removes only that entry (a list that becomes empty is removed with its
+  line, so on → off restores the file byte for byte). The result must
+  parse and show the requested state before anything is written; the
+  previous file is copied to `<data>ackups	erminal-settings-*.json`
+  and replaced through a temporary file.
 
 ## Other protocols via plink
 

@@ -8,6 +8,7 @@ pub mod jsonc;
 pub mod launch;
 pub mod menu;
 pub mod profile;
+pub mod sources;
 pub mod theme;
 pub mod uia;
 pub mod window;

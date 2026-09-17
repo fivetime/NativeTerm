@@ -294,8 +294,10 @@
       rollback)
 - [ ] Session options: plink pages for non-SSH sessions; folder-wide
       ssh options (a folder's defaults block matches no host today)
-- [ ] Setting "Hide Windows Terminal's own SSH profiles"
-      (`disabledProfileSources`, backed-up explicit edit)
+- [x] Setting "Hide Windows Terminal's own SSH profiles"
+      (`disabledProfileSources`, backed-up explicit edit: a textual change
+      of the top-level list only, comments and layout kept, the result
+      re-read before writing; unticking removes what ticking added)
 - [ ] Shared app-level command layer used by every UI surface
 - [ ] "Change data directory" (copy + update pointer); `config.d` location
       setting (maintains the `Include` line)

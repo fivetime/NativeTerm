@@ -108,7 +108,7 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
 impl App {
     pub fn new(ctx: &egui::Context, setup: Setup) -> App {
         let Setup { options, install, shim, core, data_dir, mut notices } = setup;
-        let mut profile = ProfileSetup::new(install, shim);
+        let mut profile = ProfileSetup::new(install, shim, data_dir.join("backups"));
         if let Some(core) = &core {
             core.set_audit_dir(data_dir.join("audit"));
         }

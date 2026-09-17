@@ -45,6 +45,10 @@ settings-terminal = Windows Terminal: { $dir } ({ $kind })
 terminal-kind-packaged = Store package
 terminal-kind-portable = portable
 terminal-kind-unpackaged = unpackaged
+settings-hide-terminal-ssh = Hide Windows Terminal's own SSH profiles
+settings-hide-terminal-ssh-hint = Windows Terminal 1.25+ makes a profile for every host in ~/.ssh/config. This adds "Windows.Terminal.SSH" to disabledProfileSources in its settings.json (a copy is kept in NativeTerm's backups); unticking removes it again.
+settings-terminal-changed = Windows Terminal's settings.json was changed; the previous version is in { $backup }
+settings-terminal-change-failed = Windows Terminal's settings.json wasn't changed: { $error }
 settings-profile = "NativeTerm SSH" profile: { $status }
 
 ## Session tree

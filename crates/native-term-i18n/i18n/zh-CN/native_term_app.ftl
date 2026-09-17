@@ -42,6 +42,10 @@ settings-terminal = Windows Terminal：{ $dir }（{ $kind }）
 terminal-kind-packaged = 商店版
 terminal-kind-portable = 便携版
 terminal-kind-unpackaged = 解压版
+settings-hide-terminal-ssh = 隐藏 Windows Terminal 自带的 SSH 配置
+settings-hide-terminal-ssh-hint = Windows Terminal 1.25 及以上会为 ~/.ssh/config 里的每台主机生成一个配置。勾选后会在它的 settings.json 的 disabledProfileSources 里加入“Windows.Terminal.SSH”（原文件会备份到 NativeTerm 的备份目录）；取消勾选会再去掉。
+settings-terminal-changed = 已修改 Windows Terminal 的 settings.json；修改前的版本在 { $backup }
+settings-terminal-change-failed = 没有修改 Windows Terminal 的 settings.json：{ $error }
 settings-profile = “NativeTerm SSH”配置：{ $status }
 
 ## 会话树

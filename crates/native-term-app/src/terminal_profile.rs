@@ -8,23 +8,41 @@ use std::path::PathBuf;
 use native_term_app::t;
 use native_term_platform::windows_terminal::install::{Install, Kind};
 use native_term_platform::windows_terminal::profile::{self, Status};
+use native_term_platform::windows_terminal::sources;
 
 pub struct ProfileSetup {
     install: Install,
     shim: PathBuf,
     root: Option<PathBuf>,
     pub status: Status,
+    /// Where `settings.json` is copied before NativeTerm changes it.
+    backups: PathBuf,
+    /// Terminal's own SSH profiles are turned off (`None`: unreadable).
+    ssh_hidden: Option<bool>,
 }
 
 impl ProfileSetup {
-    pub fn new(install: Install, shim: PathBuf) -> ProfileSetup {
+    pub fn new(install: Install, shim: PathBuf, backups: PathBuf) -> ProfileSetup {
         let root = profile::fragments_root();
         let status = profile::status(&install, root.as_deref(), &shim);
-        ProfileSetup { install, shim, root, status }
+        let mut setup = ProfileSetup { install, shim, root, status, backups, ssh_hidden: None };
+        setup.refresh();
+        setup
     }
 
     pub fn refresh(&mut self) {
         self.status = profile::status(&self.install, self.root.as_deref(), &self.shim);
+        self.ssh_hidden = std::fs::read_to_string(self.install.settings_json())
+            .ok()
+            .map(|text| sources::is_disabled(&text, sources::SSH_SOURCE));
+    }
+
+    /// Hide or show Terminal's own SSH profiles (a backed-up edit of its
+    /// `settings.json`).
+    fn set_ssh_hidden(&mut self, hide: bool) -> Result<Option<PathBuf>, String> {
+        let result = sources::set_disabled(&self.install.settings_json(), sources::SSH_SOURCE, hide, &self.backups);
+        self.refresh();
+        result.map_err(|e| e.to_string())
     }
 
     /// Every Terminal that reads the fragment reloads when its
@@ -129,6 +147,17 @@ impl ProfileSetup {
                 self.refresh();
             }
         });
+        if let Some(hidden) = self.ssh_hidden {
+            let mut hide = hidden;
+            let response = ui.checkbox(&mut hide, t!("settings-hide-terminal-ssh"));
+            if response.on_hover_text(t!("settings-hide-terminal-ssh-hint")).changed() {
+                match self.set_ssh_hidden(hide) {
+                    Ok(Some(backup)) => notices.push(t!("settings-terminal-changed", backup = backup.display().to_string())),
+                    Ok(None) => {}
+                    Err(e) => notices.push(t!("settings-terminal-change-failed", error = e)),
+                }
+            }
+        }
     }
 }
 
