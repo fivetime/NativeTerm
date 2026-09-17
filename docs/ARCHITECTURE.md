@@ -955,9 +955,16 @@ Host ceph-cluster.osp-control1
   `~/.ssh/config` *and every `Include`-d file* and aborts with "Bad owner or
   permissions" if the owner isn't the user, Administrators, SYSTEM, or
   TrustedInstaller, or if any other account can write to it. Therefore:
-  - files NativeTerm creates get an ACL that only the user, Administrators,
-    and SYSTEM can write; atomic replace (temp file + rename) must keep
-    that ACL;
+  - files NativeTerm creates get a protected ACL that only the user,
+    Administrators, and SYSTEM can write. Existing files are replaced
+    with `ReplaceFileW`, which keeps their ACL (verified; it may add the
+    auto-inherited flag, the entries stay the same);
+  - the check applies to the default user config and to **every
+    `Include`-d file, even under `-F`** (readconf.c adds
+    `SSHCONF_CHECKPERM` for includes), but not to a main file given with
+    `-F`. Verified with the system ssh: a written file passed; after
+    granting Everyone write access, `ssh -G` failed with a permission
+    error and the writer rolled the next change back;
   - a `config.d` placed on a network share, a USB drive (FAT/exFAT has no
     ACLs), or any synced folder must be checked — NativeTerm validates the
     whole configuration with `ssh -G` after every change and at startup,

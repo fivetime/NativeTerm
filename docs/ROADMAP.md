@@ -80,16 +80,16 @@
       instance
 - [ ] Re-check the command-line suppression flag on the Store build
       (1.24) and on newer releases; report upstream if still broken
-- [ ] `native-term-config`: parse `~/.ssh/config` + `Include`-d
-      `config.d/*.conf` into a folder/host tree (skip wildcard `Host` and
-      `Match`); read `NativeTerm*` keys and folder defaults; effective
-      values via `ssh -G`; format-preserving write-back with change
-      detection; file watching; `~`-relative paths; restrictive ACLs on
-      written files (kept across atomic replace) and `ssh -G` validation
-      with a clear message on "Bad owner or permissions"; timestamped
-      backups before every write with automatic rollback on validation
-      failure; generated globally unique aliases with `NativeTermLabel` /
-      `NativeTermNote`
+- [x] `native-term-config` (first part): parse `~/.ssh/config` +
+      `Include`-d files into a folder/host tree (sessions vs. shared
+      settings, `Match` skipped); `NativeTerm*` keys and folder defaults;
+      `ssh -G`; format-preserving edits; `IgnoreUnknown`/`Include`
+      header; change detection; owner-only ACLs on new files, kept on
+      replace; timestamped backups with pruning; validation with
+      rollback; unique aliases; `NativeTermId` generation
+- [ ] `native-term-config` (rest): file watching; `.nt.toml` non-SSH
+      sessions; host create/move/rename/delete operations on top of the
+      edit primitives; permission problems explained in the UI
 - [ ] `native-term-shim`: `--session <id> <alias>` plus session GUID from
       `WT_SESSION`; builds the `ssh` command line itself; report exit code
       over the pipe, stay alive after exit, re-run on reconnect, exit 0 to

@@ -8,16 +8,18 @@
 //! - [`header`]: the `IgnoreUnknown` / `Include` lines in the main config.
 //! - [`alias`]: literal-pattern checks and unique alias generation.
 //! - [`effective`]: effective settings through `ssh -G`.
-//!
-//! Safe writing (backups, ACLs, change detection, validation with rollback)
-//! is a separate step.
+//! - [`write`]: safe writing (change detection, backups, atomic replace
+//!   with ssh-compatible ACLs, validation with rollback).
 
+#[cfg(windows)]
+pub mod acl;
 pub mod alias;
 pub mod document;
 pub mod effective;
 pub mod header;
 pub mod include;
 pub mod tree;
+pub mod write;
 
 pub use document::Document;
 pub use tree::{Folder, HostEntry, NtKeys, SessionTree, SharedSettings, Warning};
