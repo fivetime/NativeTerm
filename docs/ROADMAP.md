@@ -307,7 +307,10 @@
       with live titles) + search; last-seen text (UIA `TextPattern`) or
       image snapshots; tmux text preview for persistent sessions
 - [ ] NativeTerm SSH profile with a moderate scrollback size
-- [ ] Sidebar auto-hide/pin drawer (QQ-style)
+- [x] Sidebar auto-hide/pin drawer (QQ-style): docks at the top, left or
+      right edge (not towards another monitor), slides away to a 4 px
+      strip, back on touch or activation, pin, always on top while
+      docked, placement and edge remembered; no idle polling
 - [ ] Floating action button, shown only while the sidebar is hidden
 - [ ] Optional `RegisterHotKey` shortcut, off by default
 - [ ] Per-host/folder terminal appearance: profile, color scheme, tab color;

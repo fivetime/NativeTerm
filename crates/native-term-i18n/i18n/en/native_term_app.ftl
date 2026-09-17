@@ -8,6 +8,12 @@ import-securecrt-button = Import from SecureCRT…
 language-label = Language
 language-system = System default
 auto-reconnect-setting = Reconnect dropped sessions automatically (never after a failed login)
+dock-pin = Pin
+dock-pin-hint = Docked at the { $edge ->
+        [top] top
+        [left] left
+       *[right] right
+    } edge: it slides away when the pointer leaves, unless pinned. Drag it away from the edge to undock.
 settings-terminal = Windows Terminal: { $dir } ({ $kind })
 terminal-kind-packaged = Store package
 terminal-kind-portable = portable

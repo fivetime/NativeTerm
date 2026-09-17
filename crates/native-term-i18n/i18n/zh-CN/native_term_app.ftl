@@ -5,6 +5,12 @@ import-securecrt-button = 从 SecureCRT 导入…
 language-label = 语言
 language-system = 跟随系统
 auto-reconnect-setting = 断线后自动重连（登录失败不会重试）
+dock-pin = 钉住
+dock-pin-hint = 已停靠在屏幕{ $edge ->
+        [top] 顶部
+        [left] 左侧
+       *[right] 右侧
+    }：鼠标离开后自动收起，钉住后不收起。把窗口拖离边缘即可取消停靠。
 settings-terminal = Windows Terminal：{ $dir }（{ $kind }）
 terminal-kind-packaged = 商店版
 terminal-kind-portable = 便携版

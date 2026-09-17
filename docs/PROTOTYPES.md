@@ -462,6 +462,35 @@ Aliases before pinyin: `proj-00.0-3`, `proj-00.bastion-3`; with pinyin
 and the folder path as prefix: `ceshi-proj-00.kongzhijiedian0`,
 `shengchan-xiangmu01.bastion`.
 
+## Docking the window (QQ-style)
+
+Scripted check (`dock_test.ps1`, scratch; moves the window with
+`SetWindowPos` and the pointer with `SetCursorPos`, reads DWM frame
+bounds and `WS_EX_TOPMOST`), 3840×2088 work area:
+
+| Step | Result |
+|---|---|
+| Move to 5 px below the top | frame at y = 0, on top |
+| Pointer away | frame bottom at y = 4 (strip), still on top |
+| Pointer on the strip | slid back to y = 0 |
+| Pointer inside for 1.2 s | stays |
+| Pinned, pointer away | stays; unpinned: hides |
+| Moved to the middle | undocked, not on top, doesn't hide |
+| Moved to the left edge, pointer away | frame right at x = 4 |
+| Restart | docked left again, hides again |
+
+First runs found three bugs:
+
+- The window lost "always on top" when it slid away (set with
+  `SetWindowPos` behind winit's back); the strip was then covered, and
+  touching it did nothing. Now set through winit.
+- After a restart the position came back but not the docking.
+- Dragging a docked window away while its "pointer left" check was due
+  hid it first and then undocked it off screen. Hiding now waits until a
+  move is settled.
+
+Idle CPU: 0 ms over 10 s docked (pointer inside), hidden, and undocked.
+
 ## Tab menu in the app (portable 1.26)
 
 `crates/native-term-app/tests/menu_portable.rs`, three NativeTerm tabs

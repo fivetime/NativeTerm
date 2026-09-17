@@ -560,6 +560,15 @@ impl Core {
         });
     }
 
+    /// A per-machine setting from `state.db`.
+    pub fn setting(&self, key: &str) -> Option<String> {
+        self.shared.registry.as_ref()?.setting(key).ok().flatten()
+    }
+
+    pub fn set_setting(&self, key: &str, value: &str) {
+        self.shared.db("setting", |r| r.set_setting(key, value));
+    }
+
     /// The chosen language (`None`: the system's).
     pub fn language_setting(&self) -> Option<String> {
         self.shared.registry.as_ref()?.setting(i18n::SETTING).ok().flatten().filter(|l| !l.is_empty())

@@ -14,6 +14,9 @@ use crate::terminal_profile::ProfileSetup;
 use crate::tree_view::{TreeAction, TreeView};
 use crate::Setup;
 
+/// `state.db` setting: the docked window stays out.
+const PINNED_SETTING: &str = "dock_pinned";
+
 enum Dialog {
     Host(HostDialog),
     Folder(FolderDialog),
@@ -56,6 +59,7 @@ impl App {
         let mut profile = ProfileSetup::new(install, shim);
         notices.extend(profile.fix_moved());
         if let Some(core) = &core {
+            crate::dock::set_pinned(core.setting(PINNED_SETTING).as_deref() == Some("1"));
             let ctx = ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
             if let Err(e) = core.start_tab_menu() {
@@ -364,6 +368,16 @@ impl crate::window::Ui for App {
         egui::Panel::top("status").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut self.show_settings, t!("settings-toggle"));
+                if let Some(edge) = crate::dock::docked_edge() {
+                    let mut pinned = crate::dock::pinned();
+                    let toggle = ui.toggle_value(&mut pinned, t!("dock-pin")).on_hover_text(t!("dock-pin-hint", edge = edge.name()));
+                    if toggle.changed() {
+                        crate::dock::set_pinned(pinned);
+                        if let Some(core) = &self.core {
+                            core.set_setting(PINNED_SETTING, if pinned { "1" } else { "0" });
+                        }
+                    }
+                }
                 if ui.button(t!("import-securecrt-button")).clicked() && self.dialog.is_none() {
                     self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
                 }

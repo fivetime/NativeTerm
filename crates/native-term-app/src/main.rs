@@ -11,6 +11,7 @@
 
 mod app;
 mod dialogs;
+mod dock;
 mod import_dialog;
 mod terminal_profile;
 mod tree_view;
@@ -133,7 +134,18 @@ fn main() {
         .with_title("NativeTerm")
         .with_app_id("NativeTerm")
         .with_inner_size([960.0, 640.0]);
-    let result = window::run(viewport, move |ctx| {
+    // where the window was, and a way to remember it
+    let settings = setup.as_ref().ok().and_then(|s| s.core.clone());
+    let placement = settings
+        .as_ref()
+        .and_then(|core| core.setting(WINDOW_SETTING))
+        .and_then(|text| window::Placement::from_setting(&text));
+    let save: window::SavePlacement = Box::new(move |p| {
+        if let Some(core) = &settings {
+            core.set_setting(WINDOW_SETTING, &p.to_setting());
+        }
+    });
+    let result = window::run(viewport, placement, save, move |ctx| {
         install_fonts(ctx);
         match setup {
             Ok(setup) => Box::new(App::new(ctx, setup)),
@@ -145,6 +157,9 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+/// `state.db` setting: the window's placement.
+const WINDOW_SETTING: &str = "window";
 
 /// Chinese text needs a system font; egui's own fonts have no CJK.
 fn install_fonts(ctx: &egui::Context) {

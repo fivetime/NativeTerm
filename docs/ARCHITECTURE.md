@@ -2154,6 +2154,38 @@ pin toggle to keep it permanently visible.
 - **Stay-on-top while expanded**, so the drawer can overlay the maximized
   terminal window.
 
+Implemented (first version), on NativeTerm's main window:
+
+- **Docking:** a move that ends with the window's visible frame within
+  12 px of the work area's top, left or right edge docks it there (top
+  wins in a corner). The frame is aligned to the edge using DWM's frame
+  bounds, so the invisible resize borders don't leave a gap. An edge
+  with another monitor behind it is not used (the hidden window would
+  show there). A move is "ended" once no mouse button is held (checked
+  every 120 ms after the last move). Dragging the window away undocks
+  it. Maximized windows don't dock.
+- **Hiding:** 450 ms after the pointer leaves, the window slides (160 ms,
+  eased) until only a 4 px strip is on screen. It stays out while the
+  pointer is over its frame, a mouse button is held, a move is being
+  settled, or it has keyboard focus with a text field active. Touching
+  the strip, or activating the window (Alt+Tab), slides it back.
+- **On top:** docked windows are "always on top" (set through winit, which
+  otherwise resets the level itself), so the strip isn't covered.
+- **Pin:** a "Pin" toggle appears in the top bar while docked; pinned, the
+  window never hides. Kept in `state.db` (`settings.dock_pinned`).
+- **Remembered:** the window's position, size and edge
+  (`settings.window`); after a restart it docks again. A saved position
+  that is no longer on a monitor is ignored.
+- **No polling while idle:** leaving the client area is reported by the
+  window; only a pointer over the title bar or borders is checked
+  (every 450 ms). Measured: 0 ms CPU over 10 s docked with the pointer
+  inside, docked and hidden, and undocked.
+- **Where:** `src/dock.rs` (geometry, slides, unit tests),
+  `src/window.rs` (events and timers), `native_term_win::dock` (work
+  area, frame bounds, cursor, buttons).
+- **Not yet:** the floating action button; hiding into a strip on the
+  bottom edge (the taskbar is usually there).
+
 ## Floating action button (FAB)
 
 While the sidebar is hidden, frequently used actions are reachable from a

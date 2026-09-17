@@ -4,6 +4,7 @@
 #![cfg(windows)]
 
 pub mod desktop;
+pub mod dock;
 
 use std::io;
 use std::fs::File;
