@@ -61,6 +61,9 @@ pub enum AppMessage {
     Close,
     /// Type text into the tab's console, then Enter if `enter`.
     SendText { text: String, enter: bool },
+    /// Clear the tab's scrollback, and its screen: after login by typing
+    /// Ctrl+L for the remote side, otherwise directly.
+    ClearScreen,
     /// For a shim started without a host: be a local shell.
     LocalShell,
     /// For a shim started without a host: stay, NativeTerm is replacing

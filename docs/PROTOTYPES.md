@@ -736,6 +736,30 @@ Cleanup: the test key line was removed from the server's
 as expected), and the credential, temporary files, and busybox were
 removed.
 
+## Clearing a tab's scrollback from inside (portable 1.26, 2026-09-18)
+
+Question: SecureCRT's "Clear Screen and Scrollback" — Terminal's own
+`clearBuffer` action can't be triggered from outside (no `wt` argument,
+and fragments can't bind keys). Can the process in the tab do it?
+
+- A PowerShell tab printed 300 lines, then wrote `ESC [3J` to its console.
+  The tab's text (UIA `TextPattern` on the `TermControl`) went from
+  36,722 characters, line 1 included, to 3,660: only the visible screen
+  was left. So ConPTY passes the sequence on, and Terminal drops the
+  scrollback while the screen stays.
+- Through NativeTerm's tab menu on a tab whose login had failed, the
+  shim wrote `ESC [H ESC [2J ESC [3J` and printed its key hint again:
+  the tab's text was the hint alone.
+- While logged in, the screen belongs to the remote side, so the shim
+  writes only `ESC [3J` and types Ctrl+L, which bash/zsh answer by
+  clearing and redrawing the prompt (full-screen programs redraw).
+  Before login Ctrl+L would end up in a password prompt, so it isn't
+  typed then; checked end to end with the fake ssh (`send_commands`).
+
+Caveat: the shim writes to the console while ssh may be writing too; a
+sequence could land between two parts of the remote output's own escape
+sequence. Clearing is a user action on an idle tab in practice.
+
 ## Windows Terminal settings reload
 
 | Test | Result |

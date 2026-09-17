@@ -341,6 +341,7 @@ session-unlock = 解锁
 session-locked = 已锁定
 session-lock-hint = 锁定的会话不会被“关闭已断开的”“关闭其他”“关闭右侧”和群发命令选中，在这里关闭前需要先解锁。
 send-locked = 已锁定：“全选”不会选中
+tabmenu-clear = 清屏并清除回滚
 tabmenu-close = 关闭
 tabmenu-close-mixed = 关闭此会话（保留其他窗格）
 tabmenu-close-others = 关闭其他 NativeTerm 标签

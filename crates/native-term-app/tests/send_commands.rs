@@ -108,6 +108,9 @@ fn commands_reach_logged_in_sessions_only() {
     }
 
     let ids = ["sc-in".to_string(), "sc-out".to_string()];
+    // clearing types Ctrl+L after login only (never into a password prompt)
+    core.clear_screen("sc-in");
+    core.clear_screen("sc-out");
     let report = core.send_text(&ids, "uptime\necho 你好 😀", true);
     assert_eq!(report.sent.len(), 1, "{report:?}");
     assert_eq!(report.skipped.len(), 1, "{report:?}");
@@ -120,7 +123,7 @@ fn commands_reach_logged_in_sessions_only() {
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    assert_eq!(typed(&log_in), ["uptime", "echo 你好 😀"]);
+    assert_eq!(typed(&log_in), ["\u{c}uptime", "echo 你好 😀"]);
     assert!(typed(&log_out).is_empty(), "nothing typed at a login prompt");
 
     let audit: Vec<_> = std::fs::read_dir(tmp.path().join("audit")).unwrap().filter_map(Result::ok).collect();

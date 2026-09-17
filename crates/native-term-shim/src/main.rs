@@ -265,10 +265,27 @@ fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEven
                 AppMessage::SendText { text, enter } => {
                     let _ = win::inject(&text, enter);
                 }
+                AppMessage::ClearScreen => {
+                    // the remote side owns the screen: it clears and redraws
+                    // on Ctrl+L; before login that would end up in a password
+                    clear_scrollback();
+                    if auth.is_some_and(|a| a.is_set()) {
+                        let _ = win::inject("\u{c}", false);
+                    }
+                }
                 _ => {}
             }
         }
     }
+}
+
+/// `ESC [3J`: Windows Terminal drops the scrollback, the screen stays
+/// (verified through ConPTY on 1.26, see PROTOTYPES.md).
+fn clear_scrollback() {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let _ = out.write_all(b"\x1b[3J");
+    let _ = out.flush();
 }
 
 fn end(child: &mut Child) {
@@ -315,6 +332,11 @@ fn after_exit(link: Option<&Link>) -> Next {
                 AppMessage::Close => return Next::Close,
                 AppMessage::SendText { text, enter } => {
                     let _ = win::inject(&text, enter);
+                }
+                AppMessage::ClearScreen => {
+                    // nothing runs here: clear everything, keep the keys hint
+                    print!("\x1b[H\x1b[2J\x1b[3J");
+                    println!("{}", t!("reconnect-or-close"));
                 }
                 _ => {}
             }

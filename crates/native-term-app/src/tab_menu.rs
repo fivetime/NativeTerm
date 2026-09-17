@@ -17,6 +17,7 @@ pub const CLOSE_ENDED: u32 = 6;
 pub const CLOSE_RIGHT: u32 = 7;
 pub const SEND: u32 = 8;
 pub const LOCK: u32 = 9;
+pub const CLEAR: u32 = 10;
 
 pub(crate) struct Actions {
     pub(crate) core: Weak<Shared>,
@@ -106,6 +107,7 @@ impl Provider for Actions {
         entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), this.linked && live));
         entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), true));
         entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), this.linked && this.state == State::Connected));
+        entries.push(action(CLEAR, '\u{E75C}', &t!("tabmenu-clear"), this.linked));
         if this.locked {
             entries.push(action(LOCK, '\u{E785}', &t!("tabmenu-unlock"), true));
         } else {
@@ -140,6 +142,7 @@ impl Provider for Actions {
             CLOSE if !this.locked => core.close(&this.id),
             LOCK => core.set_locked(&this.id, !this.locked),
             SEND => (self.send)(&this.id),
+            CLEAR => core.clear_screen(&this.id),
             CLOSE_OTHERS | CLOSE_ENDED | CLOSE_RIGHT => {
                 for id in to_close(&all, tab, id) {
                     core.close(&id);

@@ -360,6 +360,7 @@ session-unlock = Unlock
 session-locked = Locked
 session-lock-hint = A locked session is left out of "close disconnected", "close others", "close to the right" and group sends, and must be unlocked before closing it here.
 send-locked = locked: not ticked by "All"
+tabmenu-clear = Clear Screen and Scrollback
 tabmenu-close = Close
 tabmenu-close-mixed = Close This Session (keeps the other panes)
 tabmenu-close-others = Close Other NativeTerm Tabs

@@ -836,6 +836,11 @@ impl Core {
         self.shared.db("setting", |r| r.set_setting(AUTO_RECONNECT_SETTING, if on { "1" } else { "0" }));
     }
 
+    /// Clear the tab's scrollback and screen.
+    pub fn clear_screen(&self, id: &str) {
+        self.send(id, AppMessage::ClearScreen);
+    }
+
     pub fn disconnect(&self, id: &str) {
         self.send(id, AppMessage::Disconnect);
     }
