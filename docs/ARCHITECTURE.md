@@ -455,9 +455,34 @@ NativeTerm has a session options dialog with the same categories.
   exists). Empty fields show what `ssh -G` currently resolves. A list
   picker starts from the field's explicit list, or from the effective
   one when the field is empty or only adjusts the default. Options for
-  a whole folder aren't offered yet: the folder's defaults block uses a
-  host name that never matches, so ssh options there would have no
-  effect.
+  a whole folder use ssh's own mechanism instead of the folder's
+  defaults block (whose host name never matches): see "Folder options".
+
+### Folder options
+
+ssh has no folders, so NativeTerm marks a folder's hosts and matches the
+mark (`folder_options.rs`):
+
+- every host block in the folder file gets `Tag nativeterm-<file stem>`
+  (hosts with a `Tag` of their own are left alone and reported);
+- a `Match tagged nativeterm-<file stem>` block at the **end** of the file
+  holds the options. ssh reads the file in order, so the block must come
+  after the hosts, whose tag is set by then; a value on the host itself
+  still wins because ssh keeps the first value it sees. Folder files are
+  included before the user's own `Host *` defaults, so folder options
+  win over those;
+- creating, importing and moving hosts keep this true: the new block is
+  tagged (a moved host drops its old folder's tag) and the options block
+  is moved back to the end. Clearing every option removes the block and
+  the tags;
+- the dialog is the session options dialog plus user, port, jump host
+  and key files. Saving is checked with `ssh -G` on one of the folder's
+  hosts and rolled back when ssh refuses;
+- `Tag` and `Match tagged` need OpenSSH 9.4+; older versions (Windows 10
+  ships 8.1) reject them, so the menu item explains that instead.
+  Verified with Windows OpenSSH 9.5: options reach the folder's hosts,
+  not others; a host's own `User` wins; `-P <tag>` on the command line
+  would replace the tag (NativeTerm never passes it).
 
 Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 

@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use crate::alias;
 use crate::document::{BlockKind, Document, LineKind};
 use crate::effective;
+use crate::folder_options;
 use crate::header;
 use crate::options;
 use crate::securecrt::{self, Plan};
@@ -236,7 +237,10 @@ impl Editor {
         edit_file(
             &self.writer,
             file,
-            |doc| doc.append_host(&[&new_alias], &refs),
+            |doc| {
+                doc.append_host(&[&new_alias], &refs);
+                folder_options::arrange(doc, &folder_options::tag_for(file));
+            },
             || self.validate(&new_alias, Some(draft.hostname.trim())),
         )?;
         Ok(new_alias)
@@ -303,6 +307,57 @@ impl Editor {
             || self.validate(&alias, host.hostname.as_deref()),
         )?;
         Ok(())
+    }
+
+    /// Whether this ssh can apply folder options (`Tag`, OpenSSH 9.4+).
+    pub fn folder_options_supported(&self) -> bool {
+        let mut command = std::process::Command::new(&self.ssh);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x0800_0000);
+        }
+        command
+            .arg("-V")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .is_ok_and(|o| folder_options::supported(&String::from_utf8_lossy(&o.stderr)))
+    }
+
+    /// The options for every host in a folder file.
+    pub fn folder_options(&self, file: &Path) -> Result<options::Values, EditError> {
+        let (text, _) = write::read(file)?;
+        Ok(folder_options::read(&Document::parse(&text), &folder_options::tag_for(file)))
+    }
+
+    /// Set a folder's options; `ssh -G` must accept the file (checked with
+    /// one of its hosts, which the options apply to). Returns hosts that
+    /// keep a `Tag` of their own and so don't get the options.
+    pub fn set_folder_options(&self, file: &Path, values: &options::Values) -> Result<Vec<String>, EditError> {
+        if file == self.main_config() {
+            return Err(EditError::Invalid("folder options are for folder files, not the main config".into()));
+        }
+        let values = options::normalize(values).map_err(EditError::Invalid)?;
+        let tag = folder_options::tag_for(file);
+        let (text, _) = write::read(file)?;
+        let mut preview = Document::parse(&text);
+        let own = folder_options::apply(&mut preview, &tag, &values);
+        let probe = SessionTree::load(&self.ssh_dir)
+            .folders()
+            .find(|f| f.file == file)
+            .and_then(|f| f.hosts.first().map(|h| h.alias().to_string()));
+        edit_file(
+            &self.writer,
+            file,
+            |doc| {
+                folder_options::apply(doc, &tag, &values);
+            },
+            || match &probe {
+                Some(alias) => self.validate(alias, None),
+                None => self.validate(PARSE_CHECK_HOST, None),
+            },
+        )?;
+        Ok(own)
     }
 
     /// What ssh uses for a host (`ssh -G`): lowercase keyword and value,
@@ -377,7 +432,19 @@ impl Editor {
             self.ensure_header()?;
         }
         std::fs::create_dir_all(to.parent().unwrap_or(Path::new(".")))?;
-        edit_file(&self.writer, to, |doc| append_raw(doc, &lines), || Ok(()))?;
+        let target_tag = folder_options::tag_for(to);
+        edit_file(
+            &self.writer,
+            to,
+            |doc| {
+                append_raw(doc, &lines);
+                if let Some(b) = last_host_block(doc, &alias) {
+                    folder_options::untag(doc, b);
+                }
+                folder_options::arrange(doc, &target_tag);
+            },
+            || Ok(()),
+        )?;
         let removed = edit_file(
             &self.writer,
             &host.file,
@@ -594,6 +661,7 @@ impl Editor {
             );
             append_raw(&mut doc, &lines);
         }
+        folder_options::arrange(&mut doc, &folder_options::tag_for(path));
         let checks = || {
             folder.hosts.iter().try_for_each(|h| {
                 self.validate(&h.alias, Some(&h.hostname)).map_err(|e| format!("{}: {e}", h.alias))
@@ -716,6 +784,62 @@ mod tests {
 
     fn draft(label: &str, hostname: &str) -> HostDraft {
         HostDraft { label: label.into(), hostname: hostname.into(), ..HostDraft::default() }
+    }
+
+    #[test]
+    fn folder_options_reach_its_hosts() {
+        let Some((_home, editor)) = setup() else { return };
+        if !editor.folder_options_supported() {
+            eprintln!("skipped: ssh older than 9.4");
+            return;
+        }
+        let setting = |alias: &str, key: &str| {
+            editor.effective(alias).unwrap().into_iter().find(|(k, _)| k == key).map(|(_, v)| v).unwrap_or_default()
+        };
+        let prod = editor.create_folder("生产").unwrap();
+        let lab = editor.create_folder("Lab").unwrap();
+        let web = editor.create_host(&tree(&editor), &prod, &draft("web", "10.0.0.1")).unwrap();
+        let mut own = draft("db", "10.0.0.2");
+        own.user = Some("dba".into());
+        let db = editor.create_host(&tree(&editor), &prod, &own).unwrap();
+
+        let mut values = options::empty();
+        values.insert("User", vec!["ops".into()]);
+        values.insert("ServerAliveInterval", vec!["15".into()]);
+        assert!(editor.set_folder_options(&prod, &values).unwrap().is_empty());
+        assert_eq!(editor.folder_options(&prod).unwrap(), values);
+        assert_eq!(setting(&web, "user"), "ops");
+        assert_eq!(setting(&web, "serveraliveinterval"), "15");
+        assert_eq!(setting(&db, "user"), "dba", "the host's own value wins");
+        assert_eq!(setting("old", "serveraliveinterval"), "0", "other files aren't touched");
+
+        // a host created afterwards gets them too; one moved out loses them
+        let api = editor.create_host(&tree(&editor), &prod, &draft("api", "10.0.0.3")).unwrap();
+        assert_eq!(setting(&api, "user"), "ops");
+        let text = std::fs::read_to_string(&prod).unwrap();
+        assert!(text.trim_end().ends_with("Match tagged nativeterm-shengchan\n    ServerAliveInterval 15\n    User ops"), "options stay last: {text}");
+        let t = tree(&editor);
+        editor.move_host(t.find(&web).unwrap().1, &lab).unwrap();
+        assert_eq!(setting(&web, "serveraliveinterval"), "0");
+        assert!(!std::fs::read_to_string(&lab).unwrap().contains("Tag"));
+        // moved back: tagged again, the block still last
+        let t = tree(&editor);
+        editor.move_host(t.find(&web).unwrap().1, &prod).unwrap();
+        assert_eq!(setting(&web, "user"), "ops");
+
+        // ssh refuses a bad value: nothing changes
+        let before = std::fs::read_to_string(&prod).unwrap();
+        values.insert("Ciphers", vec!["no-such-cipher".into()]);
+        assert!(editor.set_folder_options(&prod, &values).is_err());
+        assert_eq!(std::fs::read_to_string(&prod).unwrap(), before);
+        assert!(editor.set_folder_options(&editor.main_config(), &values).is_err());
+
+        // cleared: no block, no tags
+        editor.set_folder_options(&prod, &options::empty()).unwrap();
+        let text = std::fs::read_to_string(&prod).unwrap();
+        assert!(!text.contains("Match") && !text.contains("Tag"), "{text}");
+        // back to ssh's default: the local user name, like any other host
+        assert_eq!(setting(&api, "user"), setting("old", "user"));
     }
 
     #[test]

@@ -54,17 +54,26 @@ pub struct Spec {
     pub keyword: &'static str,
     pub category: Category,
     pub kind: Kind,
+    /// Only offered for folders (the host dialog has these for hosts).
+    pub folder_only: bool,
 }
 
 const YES_NO: &[&str] = &["yes", "no"];
 
 const fn spec(keyword: &'static str, category: Category, kind: Kind) -> Spec {
-    Spec { keyword, category, kind }
+    Spec { keyword, category, kind, folder_only: false }
+}
+
+const fn folder_spec(keyword: &'static str, category: Category, kind: Kind) -> Spec {
+    Spec { keyword, category, kind, folder_only: true }
 }
 
 use Category::*;
 
 pub const SPECS: &[Spec] = &[
+    folder_spec("User", Connection, Kind::Text),
+    folder_spec("Port", Connection, Kind::Text),
+    folder_spec("ProxyJump", Connection, Kind::Text),
     spec("ConnectTimeout", Connection, Kind::Text),
     spec("ServerAliveInterval", Connection, Kind::Text),
     spec("ServerAliveCountMax", Connection, Kind::Text),
@@ -78,6 +87,7 @@ pub const SPECS: &[Spec] = &[
         Connection,
         Kind::Choice(&["QUIET", "FATAL", "ERROR", "INFO", "VERBOSE", "DEBUG1", "DEBUG2", "DEBUG3"]),
     ),
+    folder_spec("IdentityFile", Authentication, Kind::Lines),
     spec(
         "PreferredAuthentications",
         Authentication,

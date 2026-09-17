@@ -101,6 +101,11 @@ key-install = { $count ->
        *[other] Install on { $count } hosts
     }
 key-tab = Key → { $label }
+menu-folder-options = Folder Options…
+options-folder-title = Options for every host in { $label }
+options-folder-note = Every host in this folder gets these (each host is tagged, and a "Match tagged" block at the end of the folder file holds them). A value set on a host itself still wins. Grey: what the first host uses now.
+folder-options-unsupported = Folder options need OpenSSH 9.4 or newer (ssh -V); this ssh is older.
+folder-options-own-tag = These hosts have a Tag of their own and don't get the folder options: { $hosts }
 menu-options = Session Options…
 options-title = Session options: { $label }
 options-connection = Connection

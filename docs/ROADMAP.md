@@ -299,8 +299,11 @@
       algorithm pickers from `ssh -Q`, current values from `ssh -G` shown
       greyed, values written verbatim and checked by `ssh -G` with
       rollback)
-- [ ] Session options: plink pages for non-SSH sessions; folder-wide
-      ssh options (a folder's defaults block matches no host today)
+- [x] Folder options (folder menu): every host in the folder file gets
+      `Tag nativeterm-<file>`, a `Match tagged` block at the end holds the
+      options (plus user, port, jump host, keys); a host's own values win;
+      kept last and tagged on create / import / move; OpenSSH 9.4+ only
+- [ ] Session options: plink pages for non-SSH sessions
 - [x] Setting "Hide Windows Terminal's own SSH profiles"
       (`disabledProfileSources`, backed-up explicit edit: a textual change
       of the top-level list only, comments and layout kept, the result

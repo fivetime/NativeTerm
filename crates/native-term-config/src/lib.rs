@@ -20,6 +20,7 @@ pub mod acl;
 pub mod alias;
 pub mod document;
 pub mod effective;
+pub mod folder_options;
 pub mod header;
 pub mod include;
 pub mod keys;

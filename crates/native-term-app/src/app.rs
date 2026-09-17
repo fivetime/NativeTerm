@@ -12,7 +12,7 @@ use native_term_config::SessionTree;
 use crate::dialogs::{ConfirmDelete, ConfirmForget, FolderDialog, HostDialog, Outcome};
 use crate::import_dialog::ImportDialog;
 use crate::key_dialog::KeyDialog;
-use crate::options_dialog::OptionsDialog;
+use crate::options_dialog::{OptionsDialog, OptionsTarget};
 use crate::send_dialog::SendDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
@@ -250,11 +250,30 @@ impl App {
                     match self.editor.host_options(host) {
                         Ok(values) => {
                             let effective = self.editor.effective(&alias).unwrap_or_default();
-                            let dialog = OptionsDialog::new(&alias, host.label(), &values, effective, self.editor.ssh());
+                            let target = OptionsTarget::Host(alias.clone());
+                            let dialog = OptionsDialog::new(target, host.label(), &values, effective, self.editor.ssh());
                             self.dialog = Some(Dialog::Options(Box::new(dialog)));
                         }
                         Err(e) => self.notices.push(e.to_string()),
                     }
+                }
+            }
+            TreeAction::FolderOptions(file) => {
+                if !self.editor.folder_options_supported() {
+                    self.notices.push(t!("folder-options-unsupported"));
+                    return;
+                }
+                match self.editor.folder_options(&file) {
+                    Ok(values) => {
+                        // what the folder's hosts get now, from its first host
+                        let first = self.tree.folders().find(|f| f.file == file).and_then(|f| f.hosts.first());
+                        let effective = first.and_then(|h| self.editor.effective(h.alias()).ok()).unwrap_or_default();
+                        let label = self.folder_label(&file);
+                        let target = OptionsTarget::Folder(file);
+                        let dialog = OptionsDialog::new(target, &label, &values, effective, self.editor.ssh());
+                        self.dialog = Some(Dialog::Options(Box::new(dialog)));
+                    }
+                    Err(e) => self.notices.push(e.to_string()),
                 }
             }
             TreeAction::Favorite(alias, on) => {
@@ -457,9 +476,20 @@ impl App {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
                 Outcome::Submit(values) => {
-                    let result = match self.tree.find(&d.alias) {
-                        Some((_, host)) => self.editor.set_host_options(host, &values).map_err(|e| e.to_string()),
-                        None => Err(t!("error-host-gone", alias = d.alias.as_str())),
+                    let result = match &d.target {
+                        OptionsTarget::Host(alias) => match self.tree.find(alias) {
+                            Some((_, host)) => self.editor.set_host_options(host, &values).map_err(|e| e.to_string()),
+                            None => Err(t!("error-host-gone", alias = alias.as_str())),
+                        },
+                        OptionsTarget::Folder(file) => match self.editor.set_folder_options(file, &values) {
+                            Ok(own) => {
+                                if !own.is_empty() {
+                                    self.notices.push(t!("folder-options-own-tag", hosts = own.join(", ")));
+                                }
+                                Ok(())
+                            }
+                            Err(e) => Err(e.to_string()),
+                        },
                     };
                     match result {
                         Ok(()) => true,

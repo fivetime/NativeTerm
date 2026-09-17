@@ -10,8 +10,16 @@ use native_term_config::options::{self, Category, Kind, Names, Values};
 
 use crate::dialogs::Outcome;
 
+/// What the options are for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OptionsTarget {
+    Host(String),
+    /// Every host in this folder file.
+    Folder(PathBuf),
+}
+
 pub struct OptionsDialog {
-    pub alias: String,
+    pub target: OptionsTarget,
     label: String,
     category: Category,
     /// Field text per keyword; repeated options one per line.
@@ -69,6 +77,10 @@ fn option_name(keyword: &str) -> String {
         "ForwardX11Trusted" => t!("opt-forward-x11-trusted"),
         "SetEnv" => t!("opt-set-env"),
         "SendEnv" => t!("opt-send-env"),
+        "User" => t!("field-user"),
+        "Port" => t!("field-port"),
+        "ProxyJump" => t!("field-jump"),
+        "IdentityFile" => t!("field-keys"),
         other => other.to_string(),
     }
 }
@@ -79,6 +91,7 @@ fn lines_hint(keyword: &str) -> &'static str {
         "RemoteForward" => "9000 localhost:3000",
         "DynamicForward" => "1080",
         "SetEnv" => "TERM=xterm-256color",
+        "IdentityFile" => "~/.ssh/id_ed25519",
         "SendEnv" => "LANG LC_*",
         _ => "",
     }
@@ -96,7 +109,7 @@ fn explicit_list(text: &str, effective: &[String]) -> Vec<String> {
 }
 
 impl OptionsDialog {
-    pub fn new(alias: &str, label: &str, values: &Values, effective: Vec<(String, String)>, ssh: &Path) -> OptionsDialog {
+    pub fn new(target: OptionsTarget, label: &str, values: &Values, effective: Vec<(String, String)>, ssh: &Path) -> OptionsDialog {
         let text = options::SPECS
             .iter()
             .map(|s| (s.keyword, values.get(s.keyword).map(|v| v.join("\n")).unwrap_or_default()))
@@ -106,7 +119,7 @@ impl OptionsDialog {
             by_keyword.entry(k).or_default().push(v);
         }
         OptionsDialog {
-            alias: alias.to_string(),
+            target,
             label: label.to_string(),
             category: Category::Connection,
             text,
@@ -202,7 +215,16 @@ impl OptionsDialog {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<Values> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(t!("options-title", label = self.label.as_str()))
+        let (title, note) = match &self.target {
+            OptionsTarget::Host(alias) => {
+                (t!("options-title", label = self.label.as_str()), t!("options-note", alias = alias.as_str()))
+            }
+            OptionsTarget::Folder(_) => {
+                (t!("options-folder-title", label = self.label.as_str()), t!("options-folder-note"))
+            }
+        };
+        let folder = matches!(self.target, OptionsTarget::Folder(_));
+        egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
@@ -224,7 +246,7 @@ impl OptionsDialog {
                         egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
                             egui::Grid::new("session-options").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                                 let category = self.category;
-                                for spec in options::SPECS.iter().filter(|s| s.category == category) {
+                                for spec in options::SPECS.iter().filter(|s| s.category == category && (folder || !s.folder_only)) {
                                     self.field(ui, spec.keyword, spec.kind);
                                 }
                             });
@@ -244,7 +266,7 @@ impl OptionsDialog {
                     });
                 });
                 ui.separator();
-                ui.weak(t!("options-note", alias = self.alias.as_str()));
+                ui.weak(note);
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
                 }
@@ -288,7 +310,7 @@ mod tests {
         let mut values = options::empty();
         values.insert("LocalForward", vec!["1 a:1".into(), "2 b:2".into()]);
         values.insert("Ciphers", vec!["aes256-ctr".into()]);
-        let dialog = OptionsDialog::new("web", "Web", &values, Vec::new(), Path::new("ssh"));
+        let dialog = OptionsDialog::new(OptionsTarget::Host("web".into()), "Web", &values, Vec::new(), Path::new("ssh"));
         assert_eq!(dialog.values(), values);
     }
 }

@@ -27,6 +27,7 @@ pub enum TreeAction {
     Move(String, PathBuf),
     NewFolder,
     RenameFolder(PathBuf),
+    FolderOptions(PathBuf),
     Reload,
 }
 
@@ -515,6 +516,10 @@ impl TreeView {
                                 }
                                 if ui.add_enabled(!is_main, egui::Button::new(t!("menu-rename-folder"))).clicked() {
                                     actions.push(TreeAction::RenameFolder(file.clone()));
+                                    ui.close();
+                                }
+                                if ui.add_enabled(!is_main, egui::Button::new(t!("menu-folder-options"))).clicked() {
+                                    actions.push(TreeAction::FolderOptions(file.clone()));
                                     ui.close();
                                 }
                             }

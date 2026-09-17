@@ -98,6 +98,11 @@ key-install = { $count ->
        *[other] 安装到 { $count } 台主机
     }
 key-tab = 公钥 → { $label }
+menu-folder-options = 文件夹选项…
+options-folder-title = { $label } 中所有主机的选项
+options-folder-note = 这个文件夹里的每台主机都会使用这些选项（每台主机会加上 Tag，文件夹文件末尾的“Match tagged”块保存这些选项）。主机自己设置的值仍然优先。灰色：第一台主机当前使用的值。
+folder-options-unsupported = 文件夹选项需要 OpenSSH 9.4 或更新版本（ssh -V），当前的 ssh 版本太旧。
+folder-options-own-tag = 这些主机有自己的 Tag，不会使用文件夹选项：{ $hosts }
 menu-options = 会话选项…
 options-title = 会话选项: { $label }
 options-connection = 连接
