@@ -507,6 +507,11 @@ impl Core {
         self.shared.scans.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Show a notice (from any thread).
+    pub fn add_notice(&self, text: String) {
+        self.shared.notice(text);
+    }
+
     pub fn take_notices(&self) -> Vec<String> {
         std::mem::take(&mut *lock(&self.shared.notices))
     }

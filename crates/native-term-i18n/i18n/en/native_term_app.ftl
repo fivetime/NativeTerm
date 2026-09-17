@@ -232,6 +232,7 @@ notice-no-data-dir = No data directory: { $error }; open sessions won't be remem
 notice-shim-missing = { $path } is missing; tabs can't start
 notice-no-pipe = NativeTerm can't serve its pipe: { $error }
 notice-tab-menu-unavailable = NativeTerm's tab menu isn't available: { $error }
+notice-agent-forwarding = { $count } of the { $total } hosts just opened forward your ssh-agent ({ $names }…): while connected, anyone with root there can use your keys. Turn it off in Session Options → Authentication where it isn't needed.
 notice-move-failed = Moving { $alias } failed: { $error }
 error-host-gone = { $alias } is gone (changed outside NativeTerm?)
 fatal-title = NativeTerm can't start

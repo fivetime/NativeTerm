@@ -1969,7 +1969,10 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
     passphrases are typed.
 - **Agent forwarding**: with `ForwardAgent yes`, every host the user logs
   into can use the user's keys to reach other hosts while the session is
-  open. When opening many such hosts at once, NativeTerm points this out.
+  open. When opening many such hosts at once, NativeTerm points this out:
+  after opening three or more hosts, a background check (`ssh -G`, eight
+  at a time) counts those whose effective `ForwardAgent` isn't `no`; from
+  three on, a notice names them and where to turn it off.
 - **Integrity levels**: if Windows Terminal runs elevated and NativeTerm
   does not, Windows blocks UIA control and synthetic input across that
   boundary. NativeTerm detects this and tells the user instead of failing

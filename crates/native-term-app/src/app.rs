@@ -34,6 +34,9 @@ enum Dialog {
     Send(Box<SendDialog>),
 }
 
+/// Opening at least this many hosts that forward the ssh-agent is pointed out.
+const AGENT_NOTICE_MIN: usize = 3;
+
 /// What the right side shows.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum View {
@@ -199,6 +202,23 @@ impl App {
             TreeAction::Open(hosts, target) => {
                 if let (Some(core), false) = (&self.core, hosts.is_empty()) {
                     core.open(&hosts, target);
+                    if hosts.len() >= AGENT_NOTICE_MIN {
+                        let aliases: Vec<String> = hosts.iter().map(|h| h.alias.clone()).collect();
+                        let (checker, core) = (self.editor.checker(), core.clone());
+                        std::thread::spawn(move || {
+                            let forwarding = checker.forwarding_agent(&aliases);
+                            if forwarding.len() >= AGENT_NOTICE_MIN {
+                                let names: Vec<&str> = forwarding.iter().map(String::as_str).take(5).collect();
+                                let text = t!(
+                                    "notice-agent-forwarding",
+                                    count = forwarding.len(),
+                                    total = aliases.len(),
+                                    names = names.join(", ")
+                                );
+                                core.add_notice(text);
+                            }
+                        });
+                    }
                 }
             }
             TreeAction::Reload => self.reload(),

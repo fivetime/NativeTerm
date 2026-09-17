@@ -315,6 +315,11 @@ impl Editor {
         &self.ssh
     }
 
+    /// For asking ssh about many hosts off the UI thread.
+    pub fn checker(&self) -> effective::Checker {
+        effective::Checker { ssh: self.ssh.clone(), config: self.config.clone() }
+    }
+
     /// Mark or unmark a host as a favorite (`NativeTermFavorite yes`).
     pub fn set_favorite(&self, host: &HostEntry, on: bool) -> Result<(), EditError> {
         let alias = host.alias().to_string();
@@ -777,6 +782,11 @@ mod tests {
         let effective = editor.effective(host.alias()).unwrap();
         assert!(effective.iter().any(|(k, v)| k == "ciphers" && v.contains("aes128-cbc")), "{effective:?}");
         assert_eq!(effective.iter().filter(|(k, _)| k == "localforward").count(), 2);
+        values.insert("ForwardAgent", vec!["yes".into()]);
+        editor.set_host_options(&host, &values).unwrap();
+        let aliases = vec![host.alias().to_string(), "old".to_string(), "-bad".to_string()];
+        assert_eq!(editor.checker().forwarding_agent(&aliases), [host.alias()]);
+        values.insert("ForwardAgent", Vec::new());
         // ssh refuses a bad cipher: nothing changes
         let before = std::fs::read_to_string(&host.file).unwrap();
         values.insert("Ciphers", vec!["no-such-cipher".into()]);

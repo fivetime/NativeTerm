@@ -3,8 +3,10 @@
 //! reimplements OpenSSH's precedence rules.
 
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 /// `ssh -G <alias>` as `(keyword, value)` pairs in ssh's output order.
 /// Fails with ssh's own message, e.g. "Bad owner or permissions".
@@ -34,6 +36,48 @@ pub fn effective_with(ssh: &Path, config: Option<&Path>, alias: &str) -> io::Res
         return Err(io::Error::other(message));
     }
     Ok(parse(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Asks `ssh -G` for many hosts at once, a few at a time.
+#[derive(Clone, Debug)]
+pub struct Checker {
+    pub ssh: PathBuf,
+    /// `-F <config>` (tests); `None` for the user's own config.
+    pub config: Option<PathBuf>,
+}
+
+const WORKERS: usize = 8;
+
+impl Checker {
+    /// The value of `keyword` (lowercase) for each alias; `None` where
+    /// ssh failed.
+    pub fn value_of(&self, aliases: &[String], keyword: &str) -> Vec<Option<String>> {
+        let next = AtomicUsize::new(0);
+        let results = Mutex::new(vec![None; aliases.len()]);
+        std::thread::scope(|scope| {
+            for _ in 0..WORKERS.min(aliases.len()) {
+                scope.spawn(|| loop {
+                    let i = next.fetch_add(1, Ordering::SeqCst);
+                    let Some(alias) = aliases.get(i) else { break };
+                    let value = effective_with(&self.ssh, self.config.as_deref(), alias)
+                        .ok()
+                        .and_then(|pairs| pairs.into_iter().find(|(k, _)| k == keyword).map(|(_, v)| v));
+                    results.lock().unwrap_or_else(|e| e.into_inner())[i] = value;
+                });
+            }
+        });
+        results.into_inner().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The aliases that forward the ssh-agent (`ForwardAgent` other than `no`).
+    pub fn forwarding_agent(&self, aliases: &[String]) -> Vec<String> {
+        aliases
+            .iter()
+            .zip(self.value_of(aliases, "forwardagent"))
+            .filter(|(_, v)| v.as_deref().is_some_and(|v| !v.is_empty() && v != "no"))
+            .map(|(a, _)| a.clone())
+            .collect()
+    }
 }
 
 fn parse(text: &str) -> Vec<(String, String)> {

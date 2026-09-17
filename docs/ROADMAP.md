@@ -292,8 +292,9 @@
       guidance; visible sync-conflict notices
 - [x] ssh-agent check and guidance (service state, protected keys, keys
       in the agent, hint only when needed, `ssh-add` in a tab)
-- [ ] Agent-forwarding notice when opening
-      many `ForwardAgent` hosts
+- [x] Agent-forwarding notice when opening
+      many `ForwardAgent` hosts (3 or more, checked with parallel `ssh -G`
+      after the tabs are opened, never blocking them)
 
 ## Phase 2 — quality of life
 - [x] Session search (label, alias, host, user, folder, note; fuzzy) and

@@ -217,6 +217,7 @@ notice-no-data-dir = 没有数据目录：{ $error }；打开的会话不会被�
 notice-shim-missing = 找不到 { $path }，无法打开标签
 notice-no-pipe = NativeTerm 无法提供管道服务：{ $error }
 notice-tab-menu-unavailable = NativeTerm 的标签菜单不可用：{ $error }
+notice-agent-forwarding = 刚打开的 { $total } 台主机中有 { $count } 台开启了 ssh-agent 转发（{ $names }…）：连接期间，这些主机上有 root 权限的人可以使用你的密钥。不需要的主机请在“会话选项 → 认证”里关闭。
 notice-move-failed = 移动 { $alias } 失败：{ $error }
 error-host-gone = { $alias } 已不存在（在 NativeTerm 之外被修改了？）
 fatal-title = NativeTerm 无法启动
