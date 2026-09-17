@@ -186,8 +186,11 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
     response
 }
 
-fn request(host: &HostEntry) -> HostRequest {
-    HostRequest::new(host.alias(), host.label())
+/// What opening `host` means; the login command falls back to its
+/// folder's default.
+fn request(tree: &SessionTree, host: &HostEntry) -> HostRequest {
+    let on_login = tree.find(host.alias()).and_then(|(folder, h)| folder.nt(h, "onlogin")).map(str::to_string);
+    HostRequest { on_login, ..HostRequest::new(host.alias(), host.label()) }
 }
 
 fn quick_request(target: &QuickTarget) -> HostRequest {
@@ -335,7 +338,7 @@ impl TreeView {
             _ => indices.extend(folder),
         }
         let folders: Vec<&Folder> = tree.folders().collect();
-        indices.into_iter().filter_map(|i| folders.get(i)).flat_map(|f| f.hosts.iter().map(request)).collect()
+        indices.into_iter().filter_map(|i| folders.get(i)).flat_map(|f| f.hosts.iter().map(|h| request(tree, h))).collect()
     }
 
     /// `generation` changes whenever `tree` is reloaded; `activity` has the
@@ -388,7 +391,7 @@ impl TreeView {
         let rows = self.rows(tree, generation, recent);
         if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             // the best saved host; a typed target only if nothing matches
-            let host = rows.iter().find_map(|r| if let Row::Host { host, .. } = r { Some(request(host)) } else { None });
+            let host = rows.iter().find_map(|r| if let Row::Host { host, .. } = r { Some(request(tree, host)) } else { None });
             let typed = rows.iter().find_map(|r| if let Row::Quick(q) = r { Some(quick_request(q)) } else { None });
             if let Some(request) = host.or(typed) {
                 actions.push(TreeAction::Open(vec![request], Target::Recent));
@@ -487,15 +490,15 @@ impl TreeView {
                             self.selected = Some(alias.to_string());
                         }
                         if response.double_clicked() {
-                            actions.push(TreeAction::Open(vec![request(host)], Target::Recent));
+                            actions.push(TreeAction::Open(vec![request(tree, host)], Target::Recent));
                         }
                         response.context_menu(|ui| {
                             if ui.button(t!("menu-connect")).clicked() {
-                                actions.push(TreeAction::Open(vec![request(host)], Target::Recent));
+                                actions.push(TreeAction::Open(vec![request(tree, host)], Target::Recent));
                                 ui.close();
                             }
                             if ui.button(t!("menu-connect-new-window")).clicked() {
-                                actions.push(TreeAction::Open(vec![request(host)], Target::NewWindow));
+                                actions.push(TreeAction::Open(vec![request(tree, host)], Target::NewWindow));
                                 ui.close();
                             }
                             ui.separator();

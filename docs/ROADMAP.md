@@ -286,7 +286,9 @@
       initials for Chinese labels); favorites (`NativeTermFavorite`) and
       per-machine recent list
 - [x] Command library (`commands.toml`), edited from the send dialog
-- [ ] Post-login commands (`NativeTermOnLogin`); SecureCRT saved commands
+- [x] Post-login commands (`NativeTermOnLogin`, host or folder default),
+      typed after every login
+- [ ] SecureCRT saved commands
       (`NativeTermOnLogin`)
 - [ ] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
       Mac keyboards

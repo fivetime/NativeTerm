@@ -31,6 +31,8 @@ pub struct HostDraft {
     pub identity_files: Vec<String>,
     /// One line (`NativeTermNote`).
     pub note: Option<String>,
+    /// Typed after every login (`NativeTermOnLogin`), one line.
+    pub on_login: Option<String>,
 }
 
 impl HostDraft {
@@ -43,6 +45,7 @@ impl HostDraft {
             proxy_jump: host.proxy_jump.clone(),
             identity_files: host.identity_files.clone(),
             note: host.nt.get("note").map(str::to_string),
+            on_login: host.nt.get("onlogin").map(str::to_string),
         }
     }
 
@@ -65,6 +68,9 @@ impl HostDraft {
         }
         if self.note.as_deref().is_some_and(|n| n.contains(['\r', '\n'])) {
             return Err(EditError::Invalid("the note must be one line".into()));
+        }
+        if self.on_login.as_deref().is_some_and(|n| n.contains(['\r', '\n'])) {
+            return Err(EditError::Invalid("the login command must be one line".into()));
         }
         if self.port == Some(0) {
             return Err(EditError::Invalid("port 0".into()));
@@ -262,6 +268,7 @@ impl Editor {
                 let label = draft.label.trim();
                 set_or_remove(doc, block, "NativeTermLabel", (label != alias).then_some(label));
                 set_or_remove(doc, block, "NativeTermNote", draft.note.as_deref().filter(|n| !n.trim().is_empty()));
+                set_or_remove(doc, block, "NativeTermOnLogin", draft.on_login.as_deref().filter(|n| !n.trim().is_empty()));
             },
             || self.validate(&alias, Some(draft.hostname.trim())),
         )?;
@@ -547,6 +554,9 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
     if let Some(note) = draft.note.as_deref().filter(|n| !n.trim().is_empty()) {
         entries.push(("NativeTermNote", note.to_string()));
     }
+    if let Some(command) = draft.on_login.as_deref().filter(|n| !n.trim().is_empty()) {
+        entries.push(("NativeTermOnLogin", command.to_string()));
+    }
     if let Some(id) = id {
         entries.push(("NativeTermId", id.to_string()));
     }
@@ -643,6 +653,7 @@ mod tests {
         d.port = Some(2222);
         d.identity_files = vec!["~/.ssh/id_ed25519".into()];
         d.note = Some("rack 3".into());
+        d.on_login = Some("cd /srv && sudo -i".into());
         let alias = editor.create_host(&tree(&editor), &folder, &d).unwrap();
         assert_eq!(alias, "osd-1-shengchan");
 

@@ -2131,6 +2131,12 @@ With ~800 sessions, browsing the tree is the slow path.
   reads it — like typing ahead. This replaces the simple kind of
   SecureCRT logon action (e.g. `sudo -i`, `cd /srv/app`). Conditional
   scripts are out of reach (see "Known limitations").
+  - Implemented: "After login" in the host dialog (one line, stored as
+    `NativeTermOnLogin`; a folder's `Host __nativeterm_folder__` default
+    applies too). The core types it when a session changes to
+    "connected" — after every login, reconnects included — through the
+    same path as sent commands (audit log). Clones keep it. Tested end to
+    end: typed after the first login and again after a reconnect.
 
 ## First run
 

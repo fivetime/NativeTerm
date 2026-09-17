@@ -10,7 +10,7 @@
 
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use native_term_app::registry::Registry;
@@ -33,6 +33,10 @@ impl Drop for Shim {
 }
 
 fn spawn_shim(session: &str, guid: &str, log: &Path, login: bool) -> Shim {
+    spawn_shim_with(session, guid, log, login, &[])
+}
+
+fn spawn_shim_with(session: &str, guid: &str, log: &Path, login: bool, envs: &[(&str, &str)]) -> Shim {
     let fake = target_dir().join("examples").join("fake_ssh.exe");
     assert!(fake.exists(), "cargo build -p native-term-shim --examples");
     let mut command = Command::new(target_dir().join("nativeterm-shim.exe"));
@@ -45,9 +49,14 @@ fn spawn_shim(session: &str, guid: &str, log: &Path, login: bool) -> Shim {
         .env("FAKE_SSH_ECHO", "1")
         .env("FAKE_SSH_CODE", "0")
         .env("FAKE_SSH_LOG", log)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .creation_flags(CREATE_NEW_CONSOLE);
     if login {
         command.env("FAKE_SSH_LOGIN", "1");
+    }
+    for (k, v) in envs {
+        command.env(k, v);
     }
     Shim(command.spawn().unwrap())
 }
@@ -122,6 +131,27 @@ fn commands_reach_logged_in_sessions_only() {
     // "exit" ends the fake session; the shim then waits for R / C
     core.send_text(&ids[..1], "exit", true);
     wait_until("the session ended", Duration::from_secs(10), || matches!(state(&core, "sc-in"), Some(State::Ended(0))));
-    core.close("sc-in");
-    core.close("sc-out");
+
+    // a login command is typed after every login
+    let log = tmp.path().join("login.log");
+    let _login = spawn_shim_with("lc-1", "6e7a0000-0000-4000-8000-0000000b0003", &log, true, &[("FAKE_SSH_LOGIN_DELAY_MS", "1500")]);
+    wait_until("the session is there, not logged in yet", Duration::from_secs(10), || {
+        state(&core, "lc-1") == Some(State::Connecting)
+    });
+    core.set_login_command("lc-1", Some("sudo -i".into()));
+    wait_until("typed after login", Duration::from_secs(10), || typed(&log) == ["sudo -i"]);
+    core.send_text(&["lc-1".to_string()], "exit", true);
+    wait_until("ended", Duration::from_secs(10), || matches!(state(&core, "lc-1"), Some(State::Ended(0))));
+    core.connect("lc-1");
+    wait_until("typed after the second login", Duration::from_secs(15), || typed(&log) == ["sudo -i", "exit", "sudo -i"]);
+
+    // close everything through the shims, so their ssh processes end too
+    for id in ["sc-in", "sc-out", "lc-1"] {
+        core.close(id);
+    }
+    wait_until("all closed", Duration::from_secs(10), || {
+        ["sc-in", "sc-out", "lc-1"].iter().all(|id| state(&core, id).is_none_or(|s| !s.is_open()))
+    });
+    std::thread::sleep(Duration::from_millis(500));
 }
+

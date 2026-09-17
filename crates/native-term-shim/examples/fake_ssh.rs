@@ -23,6 +23,7 @@ fn main() {
     }
     let env_num = |key: &str, default: i64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
     if std::env::var("FAKE_SSH_LOGIN").as_deref() == Ok("1") {
+        std::thread::sleep(Duration::from_millis(env_num("FAKE_SSH_LOGIN_DELAY_MS", 0) as u64));
         let local = args.iter().find_map(|a| a.strip_prefix("LocalCommand="));
         if let Some(command) = local {
             let _ = Command::new("cmd.exe").arg("/c").raw_arg(command).status();

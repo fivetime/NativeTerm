@@ -151,6 +151,8 @@ pub(crate) struct Session {
     no_forwards: bool,
     /// Automatic reconnects since the connection was last stable.
     auto_retries: u32,
+    /// Typed after every login.
+    on_login: Option<String>,
     /// When the current connection logged in.
     connected_at: Option<Instant>,
 }
@@ -173,6 +175,7 @@ impl Session {
             no_forwards: false,
             auto_retries: 0,
             connected_at: None,
+            on_login: None,
         }
     }
 
@@ -304,11 +307,13 @@ pub struct HostRequest {
     pub label: String,
     /// A clone: open without port forwards.
     pub no_forwards: bool,
+    /// Typed after every login (`NativeTermOnLogin`).
+    pub on_login: Option<String>,
 }
 
 impl HostRequest {
     pub fn new(alias: impl Into<String>, label: impl Into<String>) -> HostRequest {
-        HostRequest { alias: alias.into(), label: label.into(), no_forwards: false }
+        HostRequest { alias: alias.into(), label: label.into(), no_forwards: false, on_login: None }
     }
 }
 
@@ -527,6 +532,7 @@ impl Core {
                 ));
                 if let Some(s) = sessions.last_mut() {
                     s.no_forwards = host.no_forwards;
+                    s.on_login = host.on_login.clone().filter(|c| !c.trim().is_empty());
                 }
                 specs.push(spec);
             }
@@ -608,6 +614,11 @@ impl Core {
             }
             refresh(&shared);
         });
+    }
+
+    /// Set (or clear) what is typed after each login of a session.
+    pub fn set_login_command(&self, id: &str, command: Option<String>) {
+        self.shared.update(id, |s| s.on_login = command.filter(|c| !c.trim().is_empty()));
     }
 
     /// Record sent commands in `dir` (one file per month).
@@ -697,7 +708,8 @@ impl Core {
     pub fn clone_session(&self, id: &str) {
         let Some(s) = self.sessions().into_iter().find(|s| s.id == id) else { return };
         let label = tab_menu::base_label(&s.label).to_string();
-        self.open(&[HostRequest { no_forwards: true, ..HostRequest::new(s.alias, label) }], Target::Recent);
+        let on_login = lock(&self.shared.sessions).iter().find(|x| x.id == id).and_then(|x| x.on_login.clone());
+        self.open(&[HostRequest { no_forwards: true, on_login, ..HostRequest::new(s.alias, label) }], Target::Recent);
     }
 
     /// Connect a waiting session, or reconnect an ended one.
@@ -1147,13 +1159,19 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     loop {
         match conn.recv::<ShimMessage>(Duration::from_secs(3600)) {
             Ok(Some(message)) => {
-                let (window, retry) = shared
+                let (window, retry, login) = shared
                     .update(&id, |s| {
+                        let was_connected = s.state == State::Connected;
                         apply(s, &message);
+                        let logged_in = s.state == State::Connected && !was_connected;
+                        let login = if logged_in { s.on_login.clone() } else { None };
                         let retry = matches!(s.state, State::Disconnected(_)) && matches!(message, ShimMessage::Exited { .. });
-                        (s.location.as_ref().map(|l| l.window), retry.then_some(s.attempt))
+                        (s.location.as_ref().map(|l| l.window), retry.then_some(s.attempt), login)
                     })
-                    .unzip();
+                    .map_or((None, None, None), |(w, r, l)| (Some(w), Some(r), l));
+                if let Some(command) = login {
+                    Core { shared: Arc::clone(shared) }.send_text(std::slice::from_ref(&id), &command, true);
+                }
                 if let Some(attempt) = retry.flatten() {
                     schedule_reconnect(shared, &id, attempt);
                 }

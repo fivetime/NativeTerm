@@ -260,7 +260,13 @@ mod tests {
     use super::*;
 
     fn host(alias: &str, label: &str, folder: &str) -> HostEntry {
-        HostEntry { alias: alias.into(), label: label.into(), hostname: format!("{alias}.example"), folder: folder.into() }
+        HostEntry {
+            alias: alias.into(),
+            label: label.into(),
+            hostname: format!("{alias}.example"),
+            folder: folder.into(),
+            on_login: None,
+        }
     }
 
     #[test]

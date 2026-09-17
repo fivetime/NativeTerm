@@ -29,11 +29,12 @@ pub struct HostEntry {
     pub label: String,
     pub hostname: String,
     pub folder: String,
+    pub on_login: Option<String>,
 }
 
 impl HostEntry {
     pub fn request(&self) -> HostRequest {
-        HostRequest::new(&self.alias, &self.label)
+        HostRequest { on_login: self.on_login.clone(), ..HostRequest::new(&self.alias, &self.label) }
     }
 }
 

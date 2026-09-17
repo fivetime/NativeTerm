@@ -360,6 +360,7 @@ fn publish_hosts(tree: &SessionTree) {
                 label: h.label().to_string(),
                 hostname: h.target().to_string(),
                 folder: folder.clone(),
+                on_login: f.nt(h, "onlogin").map(str::to_string),
             })
         })
         .collect();

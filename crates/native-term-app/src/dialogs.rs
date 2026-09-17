@@ -26,6 +26,7 @@ pub struct HostDialog {
     proxy_jump: String,
     identity_files: String,
     note: String,
+    on_login: String,
     pub error: Option<String>,
 }
 
@@ -60,6 +61,7 @@ impl HostDialog {
             proxy_jump: d.proxy_jump.clone().unwrap_or_default(),
             identity_files: d.identity_files.join("\n"),
             note: d.note.clone().unwrap_or_default(),
+            on_login: d.on_login.clone().unwrap_or_default(),
             error: None,
         }
     }
@@ -79,6 +81,7 @@ impl HostDialog {
             proxy_jump: opt(&self.proxy_jump),
             identity_files: self.identity_files.lines().filter_map(opt).collect(),
             note: opt(&self.note),
+            on_login: opt(&self.on_login),
         })
     }
 
@@ -111,6 +114,7 @@ impl HostDialog {
                     );
                     ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
+                    field(ui, t!("field-on-login"), &mut self.on_login, t!("field-on-login-hint"));
                 });
                 if let Some(alias) = &self.alias {
                     ui.weak(t!("host-alias-kept", alias = alias.as_str()));
