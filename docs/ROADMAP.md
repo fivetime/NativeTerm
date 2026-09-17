@@ -311,8 +311,10 @@
 - [ ] Shared app-level command layer used by every UI surface
 - [ ] "Change data directory" (copy + update pointer); `config.d` location
       setting (maintains the `Include` line)
-- [ ] OneDrive placeholder detection with "Always keep on this device"
-      guidance; visible sync-conflict notices
+- [x] OneDrive placeholder detection with "Always keep on this device"
+      guidance; visible sync-conflict notices (ssh folder, `config.d`, data
+      folder; checked at start and on every reload; attributes only, so a
+      cloud-only file is never downloaded by the check)
 - [x] ssh-agent check and guidance (service state, protected keys, keys
       in the agent, hint only when needed, `ssh-add` in a tab)
 - [x] Agent-forwarding notice when opening

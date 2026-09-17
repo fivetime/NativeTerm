@@ -3,6 +3,7 @@
 //! file mappings.
 #![cfg(windows)]
 
+pub mod cloud;
 pub mod desktop;
 pub mod dock;
 pub mod registry;

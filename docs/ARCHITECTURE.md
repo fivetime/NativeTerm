@@ -2775,6 +2775,19 @@ another.
   configuration on OneDrive contains numbered duplicates
   (`Global-Simon-2.ini`, `Global-Simon-3.ini`) that look like sync conflict
   copies. Conflicts must be surfaced, never silently ignored.
+- Implemented (`storage.rs`, `native_term_win::cloud`): the ssh folder's
+  `config*` / `known_hosts*`, every file in `config.d`, and the data
+  folder are checked at start and after every reload. A file's cloud
+  state comes from its attributes and reparse tag only (`FindFirstFileW`;
+  recall-on-access / offline → cloud-only, a cloud reparse tag without
+  the pinned attribute → may be freed), so the check never downloads
+  anything. Conflict copies are recognized by name: OneDrive
+  (`name-<COMPUTERNAME>[-n].ext`), Dropbox ("conflicted copy"),
+  Syncthing (`.sync-conflict-`), rclone (`.conflictN`) and numbered
+  copies (`name (1).ext`). A conflict copy in `config.d` is flagged as
+  serious: it still matches `*.conf`, so ssh reads it and its hosts are
+  defined twice. The warning names the files, opens their folder, and
+  can be dismissed until something changes.
 
 ### Installed mode specifics
 

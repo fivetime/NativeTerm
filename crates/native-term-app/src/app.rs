@@ -76,6 +76,9 @@ pub struct App {
     view_right: View,
     tab_list: TabList,
     agent: crate::agent::AgentCheck,
+    storage: crate::storage::StorageCheck,
+    /// For background checks that repaint when done.
+    egui_ctx: egui::Context,
     tree: SessionTree,
     /// Bumped on every reload.
     generation: u64,
@@ -155,6 +158,12 @@ impl App {
                 check.refresh(&options.ssh_dir, ctx);
                 check
             },
+            storage: {
+                let check = crate::storage::StorageCheck::default();
+                check.refresh(&options.ssh_dir, &data_dir, ctx);
+                check
+            },
+            egui_ctx: ctx.clone(),
             tree,
             generation: 0,
             editor: editor_for(&options.ssh_dir, &data_dir),
@@ -176,6 +185,7 @@ impl App {
         self.generation += 1;
         self.loaded_from = fingerprint(&self.ssh_dir, &self.tree);
         publish_hosts(&self.tree, self.core.as_ref());
+        self.storage.refresh(&self.ssh_dir, &self.data_dir, &self.egui_ctx);
     }
 
     /// Reload if a config file really changed (ssh itself writes
@@ -877,6 +887,7 @@ impl crate::window::Ui for App {
             }
             self.profile.banner(ui, &mut self.notices);
             self.agent.banner(ui, self.core.as_ref(), &mut self.show_settings);
+            self.storage.banner(ui);
             if !self.notices.is_empty() {
                 let mut clear = false;
                 ui.horizontal_wrapped(|ui| {
