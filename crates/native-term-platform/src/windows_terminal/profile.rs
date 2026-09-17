@@ -9,6 +9,8 @@ use std::time::SystemTime;
 use serde_json::{json, Value};
 
 use super::command::{quote, PROFILE_NAME};
+use super::install::Install;
+use super::jsonc;
 
 /// Fixed, so saved layouts keep pointing at the profile.
 pub const PROFILE_GUID: &str = "{2b0f6c9e-7d1a-4c55-9a39-5d0c1f0e7a11}";
@@ -46,6 +48,69 @@ pub fn fragment(shim: &Path) -> String {
     text
 }
 
+/// Overrides the fragments folder (tests).
+pub const FRAGMENTS_ENV: &str = "NATIVETERM_FRAGMENTS_DIR";
+
+/// Where NativeTerm's fragment goes: `FRAGMENTS_ENV`, else the user's.
+pub fn fragments_root() -> Option<PathBuf> {
+    std::env::var_os(FRAGMENTS_ENV).map(PathBuf::from).or_else(user_fragments_root)
+}
+
+/// Whether a Terminal will show the "NativeTerm SSH" profile.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Status {
+    /// The fragment is installed with this shim.
+    Installed,
+    /// Defined in the Terminal's own `settings.json` (by hand, or tests).
+    InSettings,
+    /// The fragment points at another shim (the program folder moved).
+    Outdated { shim: PathBuf },
+    /// Installed, but turned off on Terminal's "Extensions" page.
+    Disabled,
+    Missing,
+}
+
+impl Status {
+    pub fn usable(&self) -> bool {
+        matches!(self, Status::Installed | Status::InSettings)
+    }
+}
+
+pub fn status(install: &Install, root: Option<&Path>, shim: &Path) -> Status {
+    let settings = fs::read_to_string(install.settings_json()).ok().and_then(|t| jsonc::parse(&t).ok());
+    let disabled = settings
+        .as_ref()
+        .and_then(|s| s.get("disabledProfileSources"))
+        .and_then(Value::as_array)
+        .is_some_and(|list| list.iter().any(|v| v.as_str() == Some(SOURCE)));
+    let fragment = root.and_then(installed_shim);
+    match &fragment {
+        Some(_) if disabled => return Status::Disabled,
+        Some(installed) if same_path(installed, shim) => return Status::Installed,
+        _ => {}
+    }
+    let own = settings
+        .as_ref()
+        .and_then(|s| s.pointer("/profiles/list"))
+        .and_then(Value::as_array)
+        .is_some_and(|list| {
+            list.iter().any(|p| {
+                p.get("name").and_then(Value::as_str) == Some(PROFILE_NAME)
+                    && p.get("source").is_none()
+                    && p.get("hidden").and_then(Value::as_bool) != Some(true)
+            })
+        });
+    match fragment {
+        _ if own => Status::InSettings,
+        Some(installed) => Status::Outdated { shim: installed },
+        None => Status::Missing,
+    }
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
 /// `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments` (read by
 /// packaged, unpackaged and portable installs alike).
 pub fn user_fragments_root() -> Option<PathBuf> {
@@ -59,7 +124,8 @@ pub fn fragment_path(root: &Path) -> PathBuf {
 /// The shim path in an installed fragment, to notice a moved program folder.
 pub fn installed_shim(root: &Path) -> Option<PathBuf> {
     let text = fs::read_to_string(fragment_path(root)).ok()?;
-    let value: Value = serde_json::from_str(&text).ok()?;
+    // edited by hand or other tools: a BOM or comments are possible
+    let value = jsonc::parse(&text).ok()?;
     let line = value.get("profiles")?.get(0)?.get("commandline")?.as_str()?;
     Some(PathBuf::from(line.trim_matches('"')))
 }
@@ -113,6 +179,55 @@ mod tests {
         assert_eq!(p["closeOnExit"], "automatic");
         let plain = profile(Path::new(r"C:\NativeTerm\nativeterm-shim.exe"));
         assert_eq!(plain["commandline"], r#""C:\NativeTerm\nativeterm-shim.exe""#);
+    }
+
+    fn portable(dir: &Path, settings: &str) -> Install {
+        fs::write(dir.join("WindowsTerminal.exe"), "").unwrap();
+        fs::write(dir.join("wt.exe"), "").unwrap();
+        fs::write(dir.join(".portable"), "").unwrap();
+        fs::create_dir_all(dir.join("settings")).unwrap();
+        fs::write(dir.join("settings").join("settings.json"), settings).unwrap();
+        Install::from_dir(dir).unwrap()
+    }
+
+    #[test]
+    fn status_of_fragment_and_settings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("Fragments");
+        let shim = Path::new(r"C:\NativeTerm\nativeterm-shim.exe");
+        let term = tmp.path().join("wt");
+        fs::create_dir(&term).unwrap();
+        let commented = "{\n  // user settings\n  \"profiles\": {\"list\": [{\"name\": \"cmd\"},]},\n}";
+        let install = portable(&term, commented);
+        assert_eq!(status(&install, Some(&root), shim), Status::Missing);
+        assert_eq!(status(&install, None, shim), Status::Missing);
+
+        super::install(&root, shim, &[]).unwrap();
+        assert_eq!(status(&install, Some(&root), shim), Status::Installed);
+        assert!(status(&install, Some(&root), shim).usable());
+        let moved = Path::new(r"D:\Tools\nativeterm-shim.exe");
+        assert_eq!(status(&install, Some(&root), moved), Status::Outdated { shim: shim.to_path_buf() });
+
+        let install = portable(&term, r#"{"disabledProfileSources": ["NativeTerm"], "profiles": {"list": []}}"#);
+        assert_eq!(status(&install, Some(&root), shim), Status::Disabled);
+
+        let own = r#"{"profiles": {"list": [{"name": "NativeTerm SSH", "commandline": "x"}]}}"#;
+        let install = portable(&term, own);
+        assert_eq!(status(&install, None, shim), Status::InSettings);
+        assert_eq!(status(&install, Some(&root), moved), Status::InSettings);
+        // the stub Terminal leaves for a removed fragment profile doesn't count
+        let stub = r#"{"profiles": {"list": [{"name": "NativeTerm SSH", "source": "NativeTerm", "hidden": true}]}}"#;
+        let install = portable(&term, stub);
+        assert_eq!(status(&install, None, shim), Status::Missing);
+    }
+
+    #[test]
+    fn hand_edited_fragment_with_bom() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join(SOURCE)).unwrap();
+        let text = "\u{feff}{\"profiles\": [{\"name\": \"NativeTerm SSH\", \"commandline\": \"\\\"D:\\\\Old\\\\nativeterm-shim.exe\\\"\"}]}";
+        fs::write(fragment_path(tmp.path()), text).unwrap();
+        assert_eq!(installed_shim(tmp.path()), Some(PathBuf::from(r"D:\Old\nativeterm-shim.exe")));
     }
 
     #[test]

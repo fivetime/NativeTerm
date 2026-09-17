@@ -124,8 +124,10 @@
       `closeOnExit: automatic`, `historySize` 5000, fixed GUID), written
       only when changed, `settings.json` touched to reload, moved-folder
       detection
-- [ ] Fragment: color schemes, favorites as profiles and actions;
-      installing it from the app
+- [x] Fragment in the app: status (installed / in settings.json /
+      outdated / turned off / missing), install and remove on the user's
+      request, automatic rewrite after the program folder moved
+- [ ] Fragment: color schemes, favorites as profiles and actions
 - [ ] `state.db` (SQLite) in the data directory: open-session registry,
       recent/usage, long notes and tags keyed by `NativeTermId`;
       `notes.toml` export for sync; `NativeTermId` written on create/import
@@ -146,8 +148,8 @@
       1.26
 - [ ] `native-term-app` (rest): row virtualization for thousands of
       sessions, search, selection events instead of the 2 s refresh,
-      registry in `state.db` (restored placeholders replaced), installing
-      the fragment, connection pacing
+      registry in `state.db` (restored placeholders replaced), connection
+      pacing
 - [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
       CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
       6.6 MB working set)

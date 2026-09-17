@@ -8,13 +8,16 @@
 
 #![windows_subsystem = "windows"]
 
+mod terminal_profile;
+
 use std::path::PathBuf;
 
 use eframe::egui;
 use native_term_app::{default_shim_path, Core, HostRequest, SessionView, State};
 use native_term_config::SessionTree;
 use native_term_platform::windows_terminal::install::Install;
-use native_term_platform::windows_terminal::{command, profile, WindowsTerminal};
+use native_term_platform::windows_terminal::WindowsTerminal;
+use terminal_profile::ProfileSetup;
 use native_term_platform::Target;
 
 struct Options {
@@ -42,14 +45,6 @@ fn choose_install(dir: Option<&PathBuf>) -> Result<Install, String> {
         Some(dir) => Install::from_dir(dir).map_err(|e| format!("{}: {e}", dir.display())),
         None => Install::discover(&[]).into_iter().next().ok_or_else(|| "Windows Terminal is not installed".to_string()),
     }
-}
-
-/// Whether the chosen Terminal knows the "NativeTerm SSH" profile.
-fn has_profile(install: &Install) -> bool {
-    let in_settings = std::fs::read_to_string(install.settings_json())
-        .is_ok_and(|s| s.contains(&format!("\"{}\"", command::PROFILE_NAME)));
-    let in_fragment = profile::user_fragments_root().is_some_and(|root| profile::fragment_path(&root).exists());
-    in_settings || in_fragment
 }
 
 fn main() -> eframe::Result<()> {
@@ -145,8 +140,8 @@ struct App {
     core: Option<Core>,
     tree: SessionTree,
     ssh_dir: PathBuf,
-    terminal_label: String,
-    profile_missing: bool,
+    profile: ProfileSetup,
+    show_settings: bool,
     notices: Vec<String>,
     selected_host: Option<String>,
 }
@@ -154,9 +149,8 @@ struct App {
 impl App {
     fn new(cc: &eframe::CreationContext, options: Options, install: Install, shim: PathBuf) -> App {
         let ctx = cc.egui_ctx.clone();
-        let terminal_label = format!("{} ({:?})", install.dir.display(), install.kind);
-        let profile_missing = !has_profile(&install);
-        let mut notices = Vec::new();
+        let mut profile = ProfileSetup::new(install.clone(), shim.clone());
+        let mut notices: Vec<String> = profile.fix_moved().into_iter().collect();
         if !shim.exists() {
             notices.push(format!("{} is missing; tabs can't start", shim.display()));
         }
@@ -176,8 +170,8 @@ impl App {
             core,
             tree,
             ssh_dir: options.ssh_dir,
-            terminal_label,
-            profile_missing,
+            profile,
+            show_settings: false,
             notices,
             selected_host: None,
         }
@@ -353,15 +347,13 @@ impl eframe::App for App {
             self.notices.extend(core.take_notices());
         }
         egui::TopBottomPanel::top("status").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(format!("Windows Terminal: {}", self.terminal_label));
-                if self.profile_missing {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(0xd0, 0x3a, 0x3a),
-                        "The \"NativeTerm SSH\" profile is missing in this Terminal.",
-                    );
-                }
+            ui.horizontal(|ui| {
+                ui.toggle_value(&mut self.show_settings, "⚙ Settings");
             });
+            if self.show_settings {
+                ui.group(|ui| self.profile.settings_ui(ui, &mut self.notices));
+            }
+            self.profile.banner(ui, &mut self.notices);
             if !self.notices.is_empty() {
                 let mut clear = false;
                 ui.horizontal_wrapped(|ui| {

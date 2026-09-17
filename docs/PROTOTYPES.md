@@ -312,6 +312,18 @@ AccessKit) against a throwaway ssh directory with `.invalid` hosts:
 | glow renderer (eframe default) | Aborted at startup: `Vec::set_len` precondition in glutin 0.32.3 `find_configs_arb` → switched to wgpu |
 | wgpu, Direct3D 12 only (eframe's wgpu lacks the feature) | `FailedToCreateSurfaceForAnyBackend` until the app enabled wgpu's `dx12` feature |
 
+Profile setup, against a fake portable folder (empty executables, a
+`settings.json` with comments and a trailing comma) and a temporary
+fragments folder:
+
+| Step | Result |
+|---|---|
+| Start | Banner "doesn't have the profile yet" with "Install profile" |
+| Install profile | Fragment written with the debug shim path; Settings showed "installed (fragment)" |
+| Remove | Fragment folder gone, banner back |
+| Fragment edited to `D:\Old\nativeterm-shim.exe`, restart | First read as missing: the file had a BOM (PowerShell 5.1) and was parsed as strict JSON. With the lenient parser: rewritten, notice "Updated … moved to …" |
+| Side effect of the first two clicks | The Store Terminal's `settings.json` got a new timestamp (content unchanged), because installing touches every installed Terminal. With a test fragments folder only the chosen Terminal is touched now |
+
 Idle footprint, release build, no sessions, 6–10 s samples:
 
 | Variant | Private memory |

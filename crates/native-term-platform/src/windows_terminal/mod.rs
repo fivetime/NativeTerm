@@ -3,6 +3,7 @@
 
 pub mod command;
 pub mod install;
+pub mod jsonc;
 pub mod launch;
 pub mod profile;
 pub mod uia;

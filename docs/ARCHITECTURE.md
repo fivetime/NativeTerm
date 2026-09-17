@@ -1941,6 +1941,32 @@ the user's `settings.json`:
 - **The "NativeTerm SSH" profile**: command line `nativeterm-shim` (no
   host), explicit `closeOnExit` (see "Closing tabs"), and a moderate
   `historySize` (Windows Terminal's default is 9001 lines).
+- **Status in the app** (implemented). At startup, and on "Check again",
+  NativeTerm reads the chosen Terminal's `settings.json` read-only and
+  sorts the profile into one of these states:
+  - *installed*: the fragment points at this shim;
+  - *defined in settings.json*: a hand-made profile without `source`.
+    The hidden stub Terminal keeps for a removed fragment doesn't count;
+  - *outdated*: the fragment points at another shim;
+  - *turned off*: `NativeTerm` is listed in `disabledProfileSources`;
+  - *missing*.
+
+  How the states are handled:
+  - `settings.json` is JSON with comments and trailing commas. It is read
+    with a lenient parser and never written back.
+  - Fragments are read the same way, so a BOM from a hand edit is fine.
+  - **Installing is the user's action:** a banner button, or Settings →
+    "Install / update" and "Remove". Every Terminal of the user reads
+    the fragment, including the Store build, so NativeTerm doesn't write
+    it on its own.
+  - The one automatic write is an *outdated* fragment NativeTerm
+    installed itself, rewritten when the program folder moved.
+  - A turned-off profile gets a pointer to Terminal's Extensions page.
+  - After writing, the `settings.json` of the chosen Terminal and of all
+    installed packages is touched, so each one reloads.
+  - `NATIVETERM_FRAGMENTS_DIR` redirects the fragment for tests. It also
+    limits the touch to the chosen Terminal: a first test run touched the
+    Store build's `settings.json` (timestamp only).
 - **Favorites**: frequently used hosts can be added as profiles; fragment
   profiles appear automatically in the new-tab dropdown (the default menu
   lists "remaining profiles"). They launch `nativeterm-shim <host-alias>`,
