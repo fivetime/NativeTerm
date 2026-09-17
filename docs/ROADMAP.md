@@ -123,8 +123,8 @@
       ~100 tabs, `-w 0` for later batches, each after the previous
       batch's tabs exist and only while no other Terminal window was
       activated; the rest returned as pending
-- [ ] Connections paced by the queue (app): "Connect all" is paced; opening
-      a whole folder isn't yet
+- [x] Connections paced by the queue (app): opening a folder, "Connect
+      all" and automatic reconnects
 - [x] Windows Terminal fragment writer: "NativeTerm SSH" profile (command
       line = shim without host, `suppressApplicationTitle: true`,
       `closeOnExit: automatic`, `historySize` 5000, fixed GUID), written
@@ -260,8 +260,10 @@
 - [x] Clone: port forwards cleared (shim `--no-forwards` →
       `-o ClearAllForwardings=yes`, kept across restores)
 - [x] Open a whole folder (batched `wt` calls)
-- [ ] Open a whole folder (rest): rate-limited connections, chosen tab
-      selected at the end; same queue for mass reconnect after resume
+- [x] Open a whole folder (rest): rate-limited connections (more than 3
+      hosts: tabs wait, the queue connects them, at most 4 logging in, 200 ms
+      apart), the batch's first tab selected at the end; "Connect all" and
+      automatic reconnects (resume, network change) use the same queue
 - [x] Quick connect to `user@host[:port]` from the search box, "Save…"
       afterwards (new-host dialog, filled in)
 - [x] "Remove this host's old key" (`ssh-keygen -R`, confirmed)

@@ -4,6 +4,7 @@
 //! sends commands.
 
 pub mod commands;
+mod connect_queue;
 pub mod data_dir;
 pub mod fuzzy;
 pub mod i18n;
@@ -35,8 +36,8 @@ use registry::{Record, Registry};
 const FALLBACK_REFRESH: Duration = Duration::from_secs(60);
 /// Terminal reports changes in bursts (dozens per opened tab).
 const DEBOUNCE: Duration = Duration::from_millis(150);
-/// Between connections started together ("Connect all").
-const CONNECT_SPACING: Duration = Duration::from_millis(200);
+/// Opening more hosts than this at once connects them through the queue.
+const PACED_OVER: usize = 3;
 /// Automatic reconnects before giving up (the setting is off by default).
 const AUTO_RECONNECT_TRIES: u32 = 10;
 const AUTO_RECONNECT_SETTING: &str = "auto_reconnect";
@@ -250,6 +251,8 @@ pub(crate) struct Shared {
     audit_dir: Mutex<Option<PathBuf>>,
     /// Each saved host's current name, by alias.
     host_labels: Mutex<HashMap<String, String>>,
+    /// Sessions to connect, in order (see `connect_queue`).
+    connect_queue: Mutex<Sender<String>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -283,6 +286,14 @@ impl Shared {
         view.renamed_to =
             lock(&self.host_labels).get(&s.alias).filter(|l| l.as_str() != tab_menu::base_label(&s.label)).cloned();
         view
+    }
+
+    /// Connect these sessions through the queue, in this order.
+    fn queue_connect(&self, ids: &[String]) {
+        let queue = lock(&self.connect_queue);
+        for id in ids {
+            let _ = queue.send(id.clone());
+        }
     }
 
     fn labels(&self) -> HashSet<String> {
@@ -349,6 +360,7 @@ impl Core {
         let listener = PipeListener::bind(&pipe::pipe_name()?)?;
         let (wake, woken) = mpsc::channel();
         let (placeholders, queued) = mpsc::channel();
+        let (to_connect, connect_ids) = mpsc::channel();
         let mut sessions = Vec::new();
         let mut restorable = Vec::new();
         let mut notices = Vec::new();
@@ -388,7 +400,12 @@ impl Core {
             last_terminal: Default::default(),
             audit_dir: Mutex::new(None),
             host_labels: Mutex::new(HashMap::new()),
+            connect_queue: Mutex::new(to_connect),
         });
+        let queue = Arc::downgrade(&shared);
+        std::thread::Builder::new()
+            .name("connect-queue".into())
+            .spawn(move || connect_queue::run(queue, connect_ids))?;
         let auto = shared.registry.as_ref().and_then(|r| r.setting(AUTO_RECONNECT_SETTING).ok().flatten());
         shared.auto_reconnect.store(auto.as_deref() == Some("1"), std::sync::atomic::Ordering::Relaxed);
         let server = Arc::clone(&shared);
@@ -545,6 +562,7 @@ impl Core {
     /// Open tabs for `hosts`. Returns the new session ids.
     pub fn open(&self, hosts: &[HostRequest], target: Target) -> Vec<String> {
         let mut specs = Vec::new();
+        let paced = hosts.len() > PACED_OVER;
         {
             let mut sessions = lock(&self.shared.sessions);
             let mut taken: HashSet<String> =
@@ -557,7 +575,7 @@ impl Core {
                     label: label.clone(),
                     session: native_term_config::new_id(),
                     alias: host.alias.clone(),
-                    wait: false,
+                    wait: paced,
                     no_forwards: host.no_forwards,
                 };
                 sessions.push(Session::new(
@@ -582,8 +600,20 @@ impl Core {
         }
         self.shared.changed();
         let ids: Vec<String> = specs.iter().map(|s| s.session.clone()).collect();
+        if paced {
+            self.shared.queue_connect(&ids);
+        }
         let shared = Arc::clone(&self.shared);
-        std::thread::spawn(move || open_tabs(&shared, &target, &specs));
+        std::thread::spawn(move || {
+            open_tabs(&shared, &target, &specs);
+            // each new tab took the focus; the batch ends on its first one
+            if specs.len() > 1 {
+                let snapshot = refresh(&shared);
+                if let Some((window, tab)) = snapshot.find(&specs[0].label) {
+                    let _ = shared.terminal.select(window.handle, tab);
+                }
+            }
+        });
         ids
     }
 
@@ -761,18 +791,10 @@ impl Core {
         self.send(id, AppMessage::Connect);
     }
 
-    /// Connect several sessions, a little apart, so jump hosts and the
-    /// machine aren't hit all at once.
+    /// Connect several sessions through the connection queue, so jump
+    /// hosts and the machine aren't hit all at once.
     pub fn connect_all(&self, ids: Vec<String>) {
-        let core = self.clone();
-        std::thread::spawn(move || {
-            for (i, id) in ids.iter().enumerate() {
-                if i > 0 {
-                    std::thread::sleep(CONNECT_SPACING);
-                }
-                core.connect(id);
-            }
-        });
+        self.shared.queue_connect(&ids);
     }
 
     /// Copy `state.db` to `path` (for moving the data directory).
@@ -1305,7 +1327,7 @@ fn schedule_reconnect(shared: &Arc<Shared>, id: &str, attempt: u32) {
             .update(&id, |s| matches!(s.state, State::Disconnected(_)) && s.attempt == attempt && s.link.is_some())
             .unwrap_or(false);
         if still && shared.auto_reconnect.load(Ordering::Relaxed) {
-            Core { shared }.connect(&id);
+            shared.queue_connect(&[id]);
         }
     });
 }

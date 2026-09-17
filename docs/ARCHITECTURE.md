@@ -2081,6 +2081,16 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
 - **Resume from sleep**: many sessions reconnect at once; reconnects go
   through the same queue and rate limit as opening a folder, to avoid
   hammering jump hosts.
+  - Implemented (`connect_queue.rs`): one worker takes session ids in
+    order. A session is connected once its shim is linked and it can
+    connect (sessions that close, vanish or already connect are dropped;
+    a shim that doesn't turn up within 30 s is skipped). At most four
+    sessions are logging in at a time (a slow login frees its slot after
+    20 s), and starts are 200 ms apart. Opening more than three hosts
+    starts the tabs in `--wait` mode and queues them; "Connect all" and
+    automatic reconnects queue too. When a batch of tabs has been opened,
+    its first tab is selected. Live test: six hosts through the queue
+    (1.5 s), then "Connect all" on them.
 - **Elevation decides which Terminal instance a tab joins** (verified,
   2026-09-17):
   - `wt` started from an elevated process joins (or starts) the
