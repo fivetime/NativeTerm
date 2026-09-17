@@ -335,7 +335,7 @@ summary-host-keys = Host keys: { $count } (added to known_hosts unless already t
 summary-host-keys-unknown = Host key files that weren't understood (left out): { $count }
 import-keys-added = Added { $count } host keys to known_hosts.
 import-keys-failed = known_hosts was not changed: { $error }
-summary-not-yet = Not imported yet: saved commands
+summary-not-yet = Not imported yet: button bar and Command Manager commands
 
 ## Tab menu (on NativeTerm's tabs in Windows Terminal)
 

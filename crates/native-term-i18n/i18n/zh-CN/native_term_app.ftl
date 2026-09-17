@@ -316,7 +316,7 @@ summary-host-keys = 主机指纹：{ $count } 个（已存在的不会重复添�
 summary-host-keys-unknown = 无法识别的主机指纹文件（已略过）：{ $count }
 import-keys-added = 已向 known_hosts 添加 { $count } 个主机指纹。
 import-keys-failed = known_hosts 没有修改：{ $error }
-summary-not-yet = 暂不导入：保存的命令
+summary-not-yet = 暂不导入：按钮栏和命令管理器里的命令
 
 ## 标签菜单（Windows Terminal 中 NativeTerm 的标签）
 

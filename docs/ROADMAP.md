@@ -209,7 +209,8 @@
 - [x] SecureCRT host keys → `known_hosts` (lenient `.pub` reading,
       unknown files reported, no duplicates, backup)
 - [ ] SecureCRT importer (rest): preview on the author's real
-      configuration (by the author); saved commands into the command
+      configuration (by the author); button bar / Command Manager
+      commands into the command
       library; Telnet / serial / raw / rlogin as plink sessions
 - [x] `ssh` used for tabs and checks: native builds only (MSYS/Cygwin
       `ssh` on `PATH` skipped), no console window for checks
@@ -323,7 +324,8 @@
 - [x] Command library (`commands.toml`), edited from the send dialog
 - [x] Post-login commands (`NativeTermOnLogin`, host or folder default),
       typed after every login
-- [ ] SecureCRT saved commands
+- [ ] Import SecureCRT's button bar and Command Manager commands (the
+      "send string" ones) into the command library
 - [ ] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
       Mac keyboards
 - [ ] Throttle snapshots, previews, and sync on battery power

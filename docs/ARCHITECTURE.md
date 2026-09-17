@@ -1343,7 +1343,8 @@ The result is shown as a summary before anything is written.
   the safe writer (backup, owner-only ACL for a new file). Checked with
   `ssh-keygen -F` on the result. Not verified against a real SecureCRT
   folder yet: the preview shows how many keys were understood.
-- **Not yet:** saved commands (no command library yet), plink sessions.
+- **Not yet:** button bar / Command Manager commands (into the command
+  library), plink sessions.
 
 ## Cloud sync (optional, via rclone)
 
