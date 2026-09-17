@@ -2200,8 +2200,8 @@ With ~800 sessions, browsing the tree is the slow path.
 - Implemented: `commands.toml` (`[[command]]` with `name`, `text`,
   optional `enter = false` and `group`), edited from the send dialog
   (pick, save as, delete). A file that can't be parsed is reported and
-  never overwritten. SecureCRT's saved commands aren't imported (their
-  format isn't documented).
+  never overwritten. SecureCRT's button bar and Command Manager
+  commands aren't imported yet (their format isn't documented).
 - **Post-login commands**: `NativeTermOnLogin <command>` on a host or
   folder is sent once, via shim injection, right after the
   "authenticated" signal. The text waits in the input buffer until `ssh`
