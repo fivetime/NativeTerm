@@ -10,6 +10,7 @@ serde_json = "1"
 [target.'cfg(windows)'.dependencies]
 native-term-win = { path = "../native-term-win" }
 uiautomation = "0.25.1"
+windows-core = "0.62.2"
 # the version uiautomation uses, so raw interfaces are interchangeable
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",

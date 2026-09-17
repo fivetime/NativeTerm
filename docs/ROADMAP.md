@@ -112,8 +112,8 @@
       unpackaged); fragment writer. Live-tested on portable 1.26
       (`tests/portable_terminal.rs`)
 - [ ] `native-term-platform` (rest): resend a missing tab once (with a
-      new GUID, from the app); selection events instead of polling; the
-      elevated path tested from an elevated process
+      new GUID, from the app); the elevated path tested from an elevated
+      process
 - [x] Connect in Tabs in New Window: `wt -w new` (unnamed) for the first
       ~100 tabs, `-w 0` for later batches, each after the previous
       batch's tabs exist and only while no other Terminal window was
@@ -155,9 +155,12 @@
       CJK font mapped from the system; `--terminal-dir`, `--ssh-dir`.
       Live test `tests/core_portable.rs` and a GUI smoke test on portable
       1.26
+- [x] Event-driven refresh: WinEvents for Terminal windows, UIA
+      selection and structure events per window (own thread, watchdog),
+      debounced; 60 s fallback scan. Overlapped pipe I/O and handle-based
+      waits in the shim: idle CPU ≈ 0 for NativeTerm and shims
 - [ ] `native-term-app` (rest): row virtualization for thousands of
-      sessions, search, selection events instead of the 2 s refresh,
-      connection pacing
+      sessions, search, connection pacing
 - [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
       CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
       6.6 MB working set)

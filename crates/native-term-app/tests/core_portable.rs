@@ -63,6 +63,19 @@ fn open_track_reconnect_close() {
     core.focus(&ids[0]);
     wait_until(&core, &ids, "first tab selected", |s| s[0].location.as_ref().is_some_and(|l| l.selected));
 
+    // selected behind NativeTerm's back: the selection event updates it,
+    // long before the 15 s fallback scan
+    let labels = ["nt-app 测试".to_string(), "nt-app 测试 (2)".to_string()].into_iter().collect();
+    let snapshot = core.terminal().snapshot(&labels);
+    let (w, tab) = snapshot.find("nt-app 测试 (2)").unwrap();
+    assert!(core.terminal().select(w.handle, tab).unwrap());
+    let started = Instant::now();
+    wait_until(&core, &ids, "second tab selected, noticed by event", |s| {
+        s[1].location.as_ref().is_some_and(|l| l.selected)
+    });
+    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+    assert!(core.change_counts().1 > 0);
+
     // reconnect: the shim runs ssh again, which fails again
     let pid = first.shim_pid;
     core.connect(&ids[0]);

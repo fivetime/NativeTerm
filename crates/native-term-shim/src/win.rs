@@ -13,7 +13,8 @@ use windows::Win32::System::Console::{
     INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
 };
 use windows::Win32::System::Threading::{
-    CreateEventW, OpenEventW, ResetEvent, SetEvent, WaitForSingleObject, EVENT_MODIFY_STATE,
+    CreateEventW, OpenEventW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject, EVENT_MODIFY_STATE,
+    INFINITE,
 };
 
 struct OwnedHandle(HANDLE);
@@ -28,6 +29,42 @@ impl Drop for OwnedHandle {
             let _ = CloseHandle(self.0);
         }
     }
+}
+
+/// An unnamed manual-reset event.
+pub struct Event(OwnedHandle);
+
+impl Event {
+    pub fn new() -> io::Result<Event> {
+        Ok(Event(OwnedHandle(unsafe { CreateEventW(None, true, false, None)? })))
+    }
+
+    pub fn set(&self) {
+        unsafe {
+            let _ = SetEvent(self.0 .0);
+        }
+    }
+
+    pub fn reset(&self) {
+        unsafe {
+            let _ = ResetEvent(self.0 .0);
+        }
+    }
+
+    pub fn handle(&self) -> HANDLE {
+        self.0 .0
+    }
+}
+
+/// Block until one of `handles` is signalled (or `timeout`); its index.
+pub fn wait_any(handles: &[HANDLE], timeout: Option<Duration>) -> Option<usize> {
+    if handles.is_empty() {
+        return None;
+    }
+    let millis = timeout.map_or(INFINITE, |t| t.as_millis().min(u128::from(INFINITE - 1)) as u32);
+    let result = unsafe { WaitForMultipleObjects(handles, false, millis) };
+    let index = result.0.wrapping_sub(WAIT_OBJECT_0.0) as usize;
+    (index < handles.len()).then_some(index)
 }
 
 fn auth_event_name(shim_pid: u32) -> HSTRING {
@@ -51,6 +88,10 @@ impl AuthEvent {
         unsafe {
             let _ = ResetEvent(self.0 .0);
         }
+    }
+
+    pub fn handle(&self) -> HANDLE {
+        self.0 .0
     }
 }
 
@@ -127,6 +168,11 @@ pub struct KeyReader(OwnedHandle);
 impl KeyReader {
     pub fn open() -> io::Result<KeyReader> {
         Ok(KeyReader(open_console_input()?))
+    }
+
+    /// Signalled while console input is waiting.
+    pub fn handle(&self) -> HANDLE {
+        self.0 .0
     }
 
     /// The next typed character, or `None` after `timeout`.

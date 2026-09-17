@@ -1,28 +1,26 @@
 //! The shim's connection to NativeTerm, kept alive in the background.
 //! ssh keeps working when NativeTerm isn't running; the link retries and,
 //! on every (re)connect, sends `Hello` and replays the latest state.
+//!
+//! Nothing polls: a reader thread blocks on the pipe, messages to NativeTerm
+//! are written directly by the sending thread, and arrivals set an event the
+//! shim's main loop waits on together with its other handles.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use native_term_session::pipe;
+use native_term_session::pipe::{self, PipeConnection};
 use native_term_session::protocol::{AppMessage, ShimMessage};
+
+use crate::win::Event;
 
 const RETRY: Duration = Duration::from_secs(2);
 const TICK: Duration = Duration::from_millis(50);
+/// A blocked read wakes this rarely even when nothing arrives.
+const READ_WAIT: Duration = Duration::from_secs(3600);
 
-pub struct Link {
-    outbox: Sender<ShimMessage>,
-    inbox: Receiver<AppMessage>,
-    /// Set once the first connection said hello; stays set (NativeTerm may
-    /// answer and hang up within milliseconds).
-    reached: Arc<AtomicBool>,
-    stopped: Arc<AtomicBool>,
-}
-
-/// What a newly (re)connected NativeTerm needs to know.
 /// Replayed in this order: the current attempt, its login, its outcome.
 #[derive(Default)]
 struct Replay {
@@ -32,85 +30,146 @@ struct Replay {
     outcome: Option<ShimMessage>,
 }
 
+struct Shared {
+    /// The live connection; also serializes writes with the replay.
+    current: Mutex<Option<Arc<PipeConnection>>>,
+    replay: Mutex<Replay>,
+    /// Set once the first connection said hello; stays set (NativeTerm may
+    /// answer and hang up within milliseconds).
+    reached: AtomicBool,
+    stopped: AtomicBool,
+    /// Set whenever a message arrives.
+    arrived: Event,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Shared {
+    fn send(&self, message: ShimMessage) {
+        let current = lock(&self.current);
+        remember(&self.replay, &message);
+        if let Some(conn) = current.as_ref() {
+            if conn.send(&message).is_err() {
+                // the reader notices and reconnects
+                conn.close();
+            }
+        }
+    }
+}
+
+/// A cheap handle for sending from other threads (the console control
+/// handler).
+#[derive(Clone)]
+pub struct LinkSender(Arc<Shared>);
+
+impl LinkSender {
+    pub fn send(&self, message: ShimMessage) {
+        self.0.send(message);
+    }
+}
+
+pub struct Link {
+    shared: Arc<Shared>,
+    inbox: Receiver<AppMessage>,
+}
+
 impl Link {
     pub fn start(pipe_name: String, hello: ShimMessage) -> Link {
-        let (outbox, outgoing) = mpsc::channel::<ShimMessage>();
         let (incoming, inbox) = mpsc::channel::<AppMessage>();
-        let reached = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&reached);
-        let replay = Arc::new(Mutex::new(Replay::default()));
-        let stopped = Arc::new(AtomicBool::new(false));
-        let stop = Arc::clone(&stopped);
+        let shared = Arc::new(Shared {
+            current: Mutex::new(None),
+            replay: Mutex::new(Replay::default()),
+            reached: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
+            arrived: Event::new().expect("create event"),
+        });
+        let reader = Arc::clone(&shared);
         std::thread::spawn(move || loop {
-            if stop.load(Ordering::SeqCst) {
+            if reader.stopped.load(Ordering::SeqCst) {
                 return;
             }
             let connected = pipe::connect(&pipe_name, RETRY);
             crate::debug::log(format!("pipe connect: {:?}", connected.as_ref().map(|_| ())));
             let Ok(conn) = connected else {
-                // messages sent while away only update the replay state
-                while let Ok(m) = outgoing.try_recv() {
-                    remember(&replay, &m);
-                }
                 std::thread::sleep(RETRY);
                 continue;
             };
-            let mut ok = conn.send(&hello).is_ok();
-            if ok {
-                let state = replay.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(m) = &state.connecting {
-                    ok &= conn.send(m).is_ok();
-                }
-                if state.authenticated {
-                    ok &= conn.send(&ShimMessage::Authenticated).is_ok();
+            let conn = Arc::new(conn);
+            let ok = {
+                let mut current = lock(&reader.current);
+                let state = lock(&reader.replay);
+                let mut ok = conn.send(&hello).is_ok();
+                for m in state.connecting.iter().chain(state.authenticated.then_some(&ShimMessage::Authenticated)) {
+                    ok = ok && conn.send(m).is_ok();
                 }
                 if let Some(m) = &state.outcome {
-                    ok &= conn.send(m).is_ok();
+                    ok = ok && conn.send(m).is_ok();
                 }
-            }
-            if ok {
-                flag.store(true, Ordering::SeqCst);
-            }
-            while ok && !stop.load(Ordering::SeqCst) {
-                while let Ok(m) = outgoing.try_recv() {
-                    remember(&replay, &m);
-                    ok &= conn.send(&m).is_ok();
+                if ok {
+                    *current = Some(Arc::clone(&conn));
+                    reader.reached.store(true, Ordering::SeqCst);
                 }
-                match conn.recv::<AppMessage>(TICK) {
+                ok
+            };
+            if reader.stopped.load(Ordering::SeqCst) {
+                conn.close();
+                return;
+            }
+            // read until the connection ends; a failed replay write doesn't
+            // mean nothing is left to read: NativeTerm may have sent a
+            // command right before hanging up
+            let wait = if ok { READ_WAIT } else { Duration::ZERO };
+            loop {
+                match conn.recv::<AppMessage>(wait) {
                     Ok(Some(m)) => {
                         if incoming.send(m).is_err() {
                             return;
                         }
+                        reader.arrived.set();
                     }
-                    Ok(None) => {}
-                    Err(_) => ok = false,
-                }
-            }
-            // a failed write doesn't mean nothing is left to read: NativeTerm
-            // may have sent a command right before hanging up
-            while let Ok(Some(m)) = conn.recv::<AppMessage>(Duration::ZERO) {
-                if incoming.send(m).is_err() {
-                    return;
+                    Ok(None) if ok => {}
+                    _ => break,
                 }
             }
             crate::debug::log("pipe connection ended");
+            {
+                let mut current = lock(&reader.current);
+                if current.as_ref().is_some_and(|c| Arc::ptr_eq(c, &conn)) {
+                    *current = None;
+                }
+            }
             drop(conn);
             // NativeTerm restarting, or hanging up on us: don't spin
             std::thread::sleep(RETRY);
         });
-        Link { outbox, inbox, reached, stopped }
+        Link { shared, inbox }
     }
 
     pub fn send(&self, message: ShimMessage) {
-        let _ = self.outbox.send(message);
+        self.shared.send(message);
     }
 
-    pub fn sender(&self) -> Sender<ShimMessage> {
-        self.outbox.clone()
+    pub fn sender(&self) -> LinkSender {
+        LinkSender(Arc::clone(&self.shared))
     }
 
+    /// The next message within `timeout` (blocks, doesn't poll).
     pub fn recv(&self, timeout: Duration) -> Option<AppMessage> {
         self.inbox.recv_timeout(timeout).ok()
+    }
+
+    /// Everything that has arrived; clears the arrival event first, so a
+    /// message arriving meanwhile sets it again.
+    pub fn drain(&self) -> Vec<AppMessage> {
+        self.shared.arrived.reset();
+        self.inbox.try_iter().collect()
+    }
+
+    /// Signalled when messages may be waiting (see `drain`).
+    pub fn arrival_event(&self) -> &Event {
+        &self.shared.arrived
     }
 
     /// Whether NativeTerm has been reached (now or before), waiting up to
@@ -118,24 +177,27 @@ impl Link {
     pub fn wait_reached(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
-            if self.reached.load(Ordering::SeqCst) {
+            if self.shared.reached.load(Ordering::SeqCst) {
                 return true;
             }
             std::thread::sleep(TICK);
         }
-        self.reached.load(Ordering::SeqCst)
+        self.shared.reached.load(Ordering::SeqCst)
     }
 }
 
 impl Drop for Link {
-    /// Disconnects within a tick; the tab is no longer NativeTerm's.
+    /// Disconnects at once; the tab is no longer NativeTerm's.
     fn drop(&mut self) {
-        self.stopped.store(true, Ordering::SeqCst);
+        self.shared.stopped.store(true, Ordering::SeqCst);
+        if let Some(conn) = lock(&self.shared.current).take() {
+            conn.close();
+        }
     }
 }
 
 fn remember(replay: &Mutex<Replay>, message: &ShimMessage) {
-    let mut state = replay.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = lock(replay);
     match message {
         ShimMessage::Connecting { .. } => {
             *state = Replay { connecting: Some(message.clone()), ..Replay::default() };

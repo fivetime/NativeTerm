@@ -43,6 +43,8 @@ fn print(core: &Core) {
         let names: Vec<&str> = w.tabs.iter().map(|t| t.name.as_str()).collect();
         println!("WINDOW {} tabs={:?}", w.handle, names);
     }
+    let (windows, tabs) = core.change_counts();
+    println!("CHANGES windows={windows} tabs={tabs} scans={}", core.scan_count());
     for n in core.take_notices() {
         println!("NOTICE {n}");
     }

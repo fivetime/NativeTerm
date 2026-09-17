@@ -13,6 +13,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+use native_term_platform::windows_terminal::events::{Change, Watcher};
 use native_term_platform::windows_terminal::{window, WindowsTerminal};
 use native_term_platform::{Snapshot, TabSpec, Target};
 use native_term_session::pipe::{self, PipeConnection, PipeListener};
@@ -21,8 +22,12 @@ use native_term_session::{classify_exit, SessionEnd, PROTOCOL_VERSION};
 
 use registry::{Record, Registry};
 
-/// How often tab positions are refreshed while sessions are open.
-const REFRESH: Duration = Duration::from_secs(2);
+/// Tabs are rescanned when Terminal reports a change; this is only the
+/// fallback for changes without a notification (renames). A scan costs
+/// ≈ 70 ms of CPU (release, one window), so it is rare.
+const FALLBACK_REFRESH: Duration = Duration::from_secs(60);
+/// Terminal reports changes in bursts (dozens per opened tab).
+const DEBOUNCE: Duration = Duration::from_millis(150);
 const CONFIRM: Duration = Duration::from_secs(15);
 /// Sessions from `state.db` whose shim doesn't turn up by then are gone
 /// (their window was closed while NativeTerm wasn't running).
@@ -187,6 +192,10 @@ struct Shared {
     window_order: Mutex<Vec<isize>>,
     repaint: Mutex<Option<Repaint>>,
     wake: Mutex<Sender<()>>,
+    /// Keeps the Terminal change notifications alive.
+    watcher: Mutex<Option<Watcher>>,
+    /// Full tab scans so far (diagnostics).
+    scans: std::sync::atomic::AtomicU64,
     placeholders: Mutex<Sender<Placeholder>>,
 }
 
@@ -291,19 +300,35 @@ impl Core {
             snapshot: Mutex::new(Snapshot::default()),
             window_order: Mutex::new(Vec::new()),
             repaint: Mutex::new(None),
-            wake: Mutex::new(wake),
+            wake: Mutex::new(wake.clone()),
+            watcher: Mutex::new(None),
+            scans: Default::default(),
             placeholders: Mutex::new(placeholders),
         });
         let server = Arc::clone(&shared);
         std::thread::Builder::new().name("pipe-server".into()).spawn(move || serve(server, listener))?;
+        let wake = Mutex::new(wake);
+        let watcher = Watcher::start(
+            shared.terminal.install().clone(),
+            Arc::new(move |change: Change| {
+                if change != Change::Foreground {
+                    let _ = lock(&wake).send(());
+                }
+            }),
+        );
+        *lock(&shared.watcher) = Some(watcher);
         let refresher = Arc::clone(&shared);
         std::thread::Builder::new().name("tab-refresh".into()).spawn(move || loop {
-            match woken.recv_timeout(REFRESH) {
+            match woken.recv_timeout(FALLBACK_REFRESH) {
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
-                _ => {
-                    refresh(&refresher);
+                Ok(()) => {
+                    // let the burst finish, then scan once
+                    std::thread::sleep(DEBOUNCE);
+                    while woken.try_recv().is_ok() {}
                 }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
+            refresh(&refresher);
         })?;
         let replacer = Arc::clone(&shared);
         std::thread::Builder::new().name("replace-restored".into()).spawn(move || replace_placeholders(&replacer, queued))?;
@@ -345,6 +370,19 @@ impl Core {
 
     pub fn snapshot(&self) -> Snapshot {
         lock(&self.shared.snapshot).clone()
+    }
+
+    /// Terminal change notifications so far: (window, tab) events.
+    pub fn change_counts(&self) -> (u64, u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        lock(&self.shared.watcher).as_ref().map_or((0, 0), |w| {
+            let c = w.counts();
+            (c.windows.load(Relaxed), c.selected.load(Relaxed) + c.structure.load(Relaxed))
+        })
+    }
+
+    pub fn scan_count(&self) -> u64 {
+        self.shared.scans.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn take_notices(&self) -> Vec<String> {
@@ -582,6 +620,7 @@ fn refresh(shared: &Shared) -> Snapshot {
         // nothing to look for
         Snapshot { windows: Vec::new(), complete: true }
     } else {
+        shared.scans.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         shared.terminal.snapshot(&labels)
     };
     let mut changed = *lock(&shared.snapshot) != snapshot;

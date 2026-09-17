@@ -144,7 +144,13 @@ fn cleanup(data: &Path) {
 #[ignore = "needs a portable Windows Terminal, see the file header"]
 fn restart_and_session_restore() {
     let env = Env::new();
-    assert!(env.terminal_windows().is_empty(), "close the test Terminal's windows first");
+    // a previous test's window may still be closing
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !env.terminal_windows().is_empty() {
+        assert!(Instant::now() < deadline, "close the test Terminal's windows first");
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    std::thread::sleep(Duration::from_secs(2));
     let labels = ["nt-r a", "nt-r 中文 b"];
 
     // open, then NativeTerm restarts and finds its tabs again

@@ -22,6 +22,7 @@ mod link;
 mod ssh;
 mod win;
 
+use std::os::windows::io::AsRawHandle;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -94,7 +95,7 @@ fn run(session: Option<String>, alias: Option<String>, wait: bool) -> i32 {
     if let Some(link) = &link {
         let closing = link.sender();
         win::install_ctrl_handler(move || {
-            let _ = closing.send(ShimMessage::Closing);
+            closing.send(ShimMessage::Closing);
             std::thread::sleep(Duration::from_millis(300));
         });
     } else {
@@ -214,33 +215,41 @@ enum Supervised {
 
 /// Wait for ssh while serving NativeTerm's commands. The login is also
 /// reported from here (the helper reports it too), so a reconnecting link
-/// can replay it.
+/// can replay it. Sleeps on handles: ssh's process, the link's arrivals and
+/// the login event.
 fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEvent>) -> Supervised {
     let mut reported = false;
+    let process = windows::Win32::Foundation::HANDLE(child.as_raw_handle() as _);
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             return Supervised::Exited(status.code().unwrap_or(-1));
         }
+        let mut handles = vec![process];
+        if let Some(link) = link {
+            handles.push(link.arrival_event().handle());
+            if let (false, Some(auth)) = (reported, auth) {
+                handles.push(auth.handle());
+            }
+        }
+        win::wait_any(&handles, None);
         if let (false, Some(link), Some(auth)) = (reported, link, auth) {
             if auth.is_set() {
                 link.send(ShimMessage::Authenticated);
                 reported = true;
             }
         }
-        let Some(link) = link else {
-            std::thread::sleep(POLL);
-            continue;
-        };
-        match link.recv(POLL) {
-            Some(AppMessage::Close) => {
-                end(child);
-                return Supervised::Close;
+        for message in link.map(Link::drain).unwrap_or_default() {
+            match message {
+                AppMessage::Close => {
+                    end(child);
+                    return Supervised::Close;
+                }
+                AppMessage::Disconnect => end(child),
+                AppMessage::SendText { text, enter } => {
+                    let _ = win::inject(&text, enter);
+                }
+                _ => {}
             }
-            Some(AppMessage::Disconnect) => end(child),
-            Some(AppMessage::SendText { text, enter }) => {
-                let _ = win::inject(&text, enter);
-            }
-            _ => {}
         }
     }
 }
@@ -261,21 +270,33 @@ fn after_exit(link: Option<&Link>) -> Next {
     println!("[NativeTerm] Press R to reconnect, C to close this tab.");
     let keys = win::KeyReader::open().ok();
     loop {
+        let mut handles = Vec::new();
         if let Some(keys) = &keys {
-            match keys.read_key(POLL) {
-                Ok(Some('r' | 'R' | '\r')) => return Next::Reconnect,
-                Ok(Some('c' | 'C')) => return Next::Close,
-                _ => {}
-            }
-        } else if link.is_none() {
+            handles.push(keys.handle());
+        }
+        if let Some(link) = link {
+            handles.push(link.arrival_event().handle());
+        }
+        if handles.is_empty() {
             // no console input and no NativeTerm: nothing can ever arrive
             return Next::Close;
         }
-        if let Some(link) = link {
-            match link.recv(if keys.is_some() { Duration::ZERO } else { POLL }) {
-                Some(AppMessage::Connect) => return Next::Reconnect,
-                Some(AppMessage::Close) => return Next::Close,
-                Some(AppMessage::SendText { text, enter }) => {
+        win::wait_any(&handles, None);
+        if let Some(keys) = &keys {
+            // every record read clears the signal; non-key records too
+            while let Ok(Some(key)) = keys.read_key(Duration::ZERO) {
+                match key {
+                    'r' | 'R' | '\r' => return Next::Reconnect,
+                    'c' | 'C' => return Next::Close,
+                    _ => {}
+                }
+            }
+        }
+        for message in link.map(Link::drain).unwrap_or_default() {
+            match message {
+                AppMessage::Connect => return Next::Reconnect,
+                AppMessage::Close => return Next::Close,
+                AppMessage::SendText { text, enter } => {
                     let _ = win::inject(&text, enter);
                 }
                 _ => {}

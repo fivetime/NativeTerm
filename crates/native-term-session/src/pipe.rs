@@ -5,32 +5,39 @@
 //! - ACL: the user and SYSTEM only; remote clients rejected.
 //! - The first instance is created with `FILE_FLAG_FIRST_PIPE_INSTANCE`, so
 //!   a second NativeTerm notices the first (`AddrInUse`).
-//! - Reads never block: the handles are synchronous, and a blocked
-//!   `ReadFile` would stall `WriteFile` on the same handle. Readers check
-//!   `PeekNamedPipe` first and poll.
+//! - Overlapped I/O: a reader waits on an event (no polling, no wakeups
+//!   while idle), and a writer on another thread isn't blocked by it, as it
+//!   would be on a synchronous handle.
 
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::os::windows::io::{AsRawHandle, FromRawHandle};
+use std::io;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::{de::DeserializeOwned, Serialize};
 use windows::core::HSTRING;
-use windows::Win32::Foundation::{ERROR_NO_DATA, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE};
-use windows::Win32::Security::SECURITY_ATTRIBUTES;
-use windows::Win32::Storage::FileSystem::{FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX};
-use windows::Win32::System::Pipes::{
-    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PeekNamedPipe, WaitNamedPipeW,
-    PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_OPERATION_ABORTED, ERROR_PIPE_BUSY,
+    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    WAIT_OBJECT_0,
 };
+use windows::Win32::Security::SECURITY_ATTRIBUTES;
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, ReadFile, WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE,
+    OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
+};
+use windows::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, WaitNamedPipeW, PIPE_READMODE_BYTE,
+    PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+};
+use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
 use native_term_win::SecurityDescriptor;
 
 use crate::protocol;
 
-const POLL: Duration = Duration::from_millis(20);
 const BUFFER: u32 = 64 * 1024;
+const READ_CHUNK: usize = 16 * 1024;
 
 /// This user's and sign-in's pipe name.
 pub fn pipe_name() -> io::Result<String> {
@@ -42,12 +49,75 @@ pub fn pipe_name() -> io::Result<String> {
     ))
 }
 
+/// A kernel handle closed on drop.
+struct Handle(HANDLE);
+
+// SAFETY: kernel handles may be used and closed from any thread.
+unsafe impl Send for Handle {}
+unsafe impl Sync for Handle {}
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+/// An overlapped operation's state, with its own completion event.
+struct Pending {
+    overlapped: OVERLAPPED,
+    _event: Handle,
+}
+
+// SAFETY: an operation using this state always completes (or is cancelled
+// and awaited) before the call that started it returns, so no pending I/O
+// refers to it while it moves or is used from another thread; access is
+// serialized by the connection's mutexes.
+unsafe impl Send for Pending {}
+unsafe impl Sync for Pending {}
+
+impl Pending {
+    fn new() -> io::Result<Pending> {
+        let event = unsafe { CreateEventW(None, true, false, None)? };
+        let overlapped = OVERLAPPED { hEvent: event, ..Default::default() };
+        Ok(Pending { overlapped, _event: Handle(event) })
+    }
+
+    /// Wait for the operation; `None` on timeout (after cancelling it; a
+    /// result that completed meanwhile is still returned).
+    fn finish(&mut self, pipe: HANDLE, timeout: Option<Duration>) -> io::Result<Option<u32>> {
+        let millis = timeout.map_or(INFINITE, |t| t.as_millis().min(u128::from(INFINITE - 1)) as u32);
+        let waited = unsafe { WaitForSingleObject(self.overlapped.hEvent, millis) };
+        if waited != WAIT_OBJECT_0 {
+            unsafe {
+                let _ = CancelIoEx(pipe, Some(&self.overlapped));
+            }
+        }
+        let mut transferred = 0u32;
+        match unsafe { GetOverlappedResult(pipe, &self.overlapped, &mut transferred, true) } {
+            Ok(()) => Ok(Some(transferred)),
+            Err(e) if e.code() == ERROR_OPERATION_ABORTED.to_hresult() => Ok(None),
+            Err(e) => Err(map_error(e)),
+        }
+    }
+}
+
+fn map_error(e: windows::core::Error) -> io::Error {
+    let gone = [ERROR_BROKEN_PIPE, ERROR_PIPE_NOT_CONNECTED, ERROR_NO_DATA].map(|c| c.to_hresult());
+    if gone.contains(&e.code()) {
+        io::Error::new(io::ErrorKind::UnexpectedEof, e)
+    } else {
+        e.into()
+    }
+}
+
 /// Server side (NativeTerm).
 pub struct PipeListener {
     name: HSTRING,
     security: SecurityDescriptor,
     /// Instance waiting for the next client.
-    pending: Option<File>,
+    pending: Option<Handle>,
 }
 
 impl PipeListener {
@@ -60,13 +130,13 @@ impl PipeListener {
         Ok(listener)
     }
 
-    fn create_instance(&self, first: bool) -> io::Result<File> {
+    fn create_instance(&self, first: bool) -> io::Result<Handle> {
         let attributes = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: self.security.as_ptr(),
             bInheritHandle: false.into(),
         };
-        let mut open_mode = PIPE_ACCESS_DUPLEX;
+        let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
         if first {
             open_mode |= FILE_FLAG_FIRST_PIPE_INSTANCE;
         }
@@ -91,38 +161,54 @@ impl PipeListener {
                 error
             });
         }
-        Ok(unsafe { File::from_raw_handle(handle.0 as _) })
+        Ok(Handle(handle))
     }
 
     /// Wait for the next client.
     pub fn accept(&mut self) -> io::Result<PipeConnection> {
-        let file = match self.pending.take() {
-            Some(file) => file,
+        let instance = match self.pending.take() {
+            Some(instance) => instance,
             None => self.create_instance(false)?,
         };
-        let result = unsafe { ConnectNamedPipe(handle(&file), None) };
+        let mut pending = Pending::new()?;
+        let result = unsafe { ConnectNamedPipe(instance.0, Some(&mut pending.overlapped)) };
         if let Err(e) = result {
-            // ERROR_NO_DATA: a quick client (the login helper) already wrote
-            // and closed; its messages are still readable
-            if e.code() != ERROR_PIPE_CONNECTED.to_hresult() && e.code() != ERROR_NO_DATA.to_hresult() {
+            let code = e.code();
+            if code == ERROR_IO_PENDING.to_hresult() {
+                pending.finish(instance.0, None)?;
+            } else if code != ERROR_PIPE_CONNECTED.to_hresult() && code != ERROR_NO_DATA.to_hresult() {
+                // ERROR_NO_DATA: a quick client (the login helper) already
+                // wrote and closed; its messages are still readable
                 return Err(e.into());
             }
         }
         // keep an instance ready so clients never find none
         self.pending = Some(self.create_instance(false)?);
-        Ok(PipeConnection::new(file))
+        PipeConnection::new(instance)
     }
 }
 
 /// Client side (shim): connect, waiting up to `timeout` for the server.
 pub fn connect(name: &str, timeout: Duration) -> io::Result<PipeConnection> {
     let started = Instant::now();
+    let wide = HSTRING::from(name);
     loop {
-        match OpenOptions::new().read(true).write(true).open(name) {
-            Ok(file) => return Ok(PipeConnection::new(file)),
-            Err(e) if started.elapsed() >= timeout => return Err(e),
-            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32) => unsafe {
-                let _ = WaitNamedPipeW(&HSTRING::from(name), 50);
+        let opened = unsafe {
+            CreateFileW(
+                &wide,
+                (GENERIC_READ | GENERIC_WRITE).0,
+                FILE_SHARE_NONE,
+                None,
+                OPEN_EXISTING,
+                FILE_FLAG_OVERLAPPED,
+                None,
+            )
+        };
+        match opened {
+            Ok(handle) => return PipeConnection::new(Handle(handle)),
+            Err(e) if started.elapsed() >= timeout => return Err(e.into()),
+            Err(e) if e.code() == ERROR_PIPE_BUSY.to_hresult() => unsafe {
+                let _ = WaitNamedPipeW(&wide, 50);
             },
             Err(_) => std::thread::sleep(Duration::from_millis(50)),
         }
@@ -131,27 +217,73 @@ pub fn connect(name: &str, timeout: Duration) -> io::Result<PipeConnection> {
 
 /// One connection, usable from a reader and a writer thread at once.
 pub struct PipeConnection {
-    file: File,
+    pipe: Handle,
+    closed: std::sync::atomic::AtomicBool,
     inbox: Mutex<Vec<u8>>,
-    write_lock: Mutex<()>,
+    /// Held while reading; a read in progress owns this state.
+    reader: Mutex<Pending>,
+    writer: Mutex<Pending>,
 }
 
 impl PipeConnection {
-    fn new(file: File) -> PipeConnection {
-        PipeConnection { file, inbox: Mutex::new(Vec::new()), write_lock: Mutex::new(()) }
+    fn new(pipe: Handle) -> io::Result<PipeConnection> {
+        Ok(PipeConnection {
+            pipe,
+            closed: std::sync::atomic::AtomicBool::new(false),
+            inbox: Mutex::new(Vec::new()),
+            reader: Mutex::new(Pending::new()?),
+            writer: Mutex::new(Pending::new()?),
+        })
     }
 
     /// Server side: the connected process.
     pub fn client_pid(&self) -> io::Result<u32> {
         let mut pid = 0u32;
-        unsafe { GetNamedPipeClientProcessId(handle(&self.file), &mut pid)? };
+        unsafe { GetNamedPipeClientProcessId(self.pipe.0, &mut pid)? };
         Ok(pid)
     }
 
+    /// Stop using the connection: a waiting `recv` returns at once, and
+    /// later calls fail. The handle closes when the last owner drops it.
+    pub fn close(&self) {
+        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        unsafe {
+            let _ = CancelIoEx(self.pipe.0, None);
+        }
+    }
+
+    fn check_open(&self) -> io::Result<()> {
+        if self.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(io::Error::new(io::ErrorKind::ConnectionAborted, "connection closed"))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn send<T: Serialize>(&self, message: &T) -> io::Result<()> {
-        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
-        (&self.file).write_all(protocol::encode(message).as_bytes())?;
-        (&self.file).flush()
+        self.check_open()?;
+        let line = protocol::encode(message);
+        let mut data = line.as_bytes();
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        while !data.is_empty() {
+            unsafe {
+                let _ = windows::Win32::System::Threading::ResetEvent(writer.overlapped.hEvent);
+            }
+            writer.overlapped.Internal = 0;
+            writer.overlapped.InternalHigh = 0;
+            let result = unsafe { WriteFile(self.pipe.0, Some(data), None, Some(&mut writer.overlapped)) };
+            if let Err(e) = result {
+                if e.code() != ERROR_IO_PENDING.to_hresult() {
+                    return Err(map_error(e));
+                }
+            }
+            let written = writer.finish(self.pipe.0, None)?.unwrap_or(0) as usize;
+            if written == 0 {
+                return Err(io::Error::new(io::ErrorKind::WriteZero, "pipe write made no progress"));
+            }
+            data = &data[written..];
+        }
+        Ok(())
     }
 
     /// Next message, or `Ok(None)` after `timeout`. `UnexpectedEof` when
@@ -162,17 +294,38 @@ impl PipeConnection {
             if let Some(line) = self.take_line() {
                 return protocol::decode(&line).map(Some);
             }
-            let available = self.available()?;
-            if available > 0 {
-                let mut buf = vec![0u8; available as usize];
-                let n = (&self.file).read(&mut buf)?;
-                self.inbox.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(&buf[..n]);
-                continue;
+            self.check_open()?;
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.read_some(left)? {
+                Some(bytes) => self.inbox.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(&bytes),
+                None if Instant::now() >= deadline => return Ok(None),
+                None => {}
             }
-            if Instant::now() >= deadline {
-                return Ok(None);
+        }
+    }
+
+    /// Bytes that arrived within `timeout`; `None` if none did.
+    fn read_some(&self, timeout: Duration) -> io::Result<Option<Vec<u8>>> {
+        let mut reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buf = vec![0u8; READ_CHUNK];
+        unsafe {
+            let _ = windows::Win32::System::Threading::ResetEvent(reader.overlapped.hEvent);
+        }
+        reader.overlapped.Internal = 0;
+        reader.overlapped.InternalHigh = 0;
+        let result = unsafe { ReadFile(self.pipe.0, Some(&mut buf), None, Some(&mut reader.overlapped)) };
+        if let Err(e) = result {
+            if e.code() != ERROR_IO_PENDING.to_hresult() {
+                return Err(map_error(e));
             }
-            std::thread::sleep(POLL);
+        }
+        match reader.finish(self.pipe.0, Some(timeout))? {
+            None => Ok(None),
+            Some(0) => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "pipe closed")),
+            Some(n) => {
+                buf.truncate(n as usize);
+                Ok(Some(buf))
+            }
         }
     }
 
@@ -182,19 +335,6 @@ impl PipeConnection {
         let line: Vec<u8> = inbox.drain(..=end).collect();
         Some(String::from_utf8_lossy(&line).into_owned())
     }
-
-    fn available(&self) -> io::Result<u32> {
-        let mut available = 0u32;
-        unsafe { PeekNamedPipe(handle(&self.file), None, 0, None, Some(&mut available), None) }.map_err(|e| {
-            // ERROR_BROKEN_PIPE / ERROR_PIPE_NOT_CONNECTED: the peer is gone
-            io::Error::new(io::ErrorKind::UnexpectedEof, e)
-        })?;
-        Ok(available)
-    }
-}
-
-fn handle(file: &File) -> HANDLE {
-    HANDLE(file.as_raw_handle() as _)
 }
 
 #[cfg(test)]
@@ -312,6 +452,51 @@ mod tests {
             let got = client.join().unwrap();
             assert_eq!(got, vec![AppMessage::Welcome { protocol: 1 }, AppMessage::Close], "round {round}");
         }
+    }
+
+    #[test]
+    fn close_wakes_a_waiting_reader() {
+        let name = test_name("closewait");
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let server = std::thread::spawn(move || (listener.accept().unwrap(), listener));
+        let client = Arc::new(connect(&name, Duration::from_secs(5)).unwrap());
+        let (_conn, _listener) = server.join().unwrap();
+        let reader = {
+            let client = Arc::clone(&client);
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let result = client.recv::<AppMessage>(Duration::from_secs(30));
+                (started.elapsed(), result.map_err(|e| e.kind()))
+            })
+        };
+        std::thread::sleep(Duration::from_millis(300));
+        client.close();
+        let (waited, result) = reader.join().unwrap();
+        assert!(waited < Duration::from_secs(2), "{waited:?}");
+        assert_eq!(result.unwrap_err(), io::ErrorKind::ConnectionAborted);
+        assert!(client.send(&ShimMessage::Closing).is_err());
+    }
+
+    #[test]
+    fn idle_reader_uses_no_cpu() {
+        let name = test_name("idle");
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let server = std::thread::spawn(move || (listener.accept().unwrap(), listener));
+        let client = connect(&name, Duration::from_secs(5)).unwrap();
+        let (_conn, _listener) = server.join().unwrap();
+        let before = thread_cpu();
+        assert_eq!(client.recv::<AppMessage>(Duration::from_secs(2)).unwrap(), None);
+        let used = thread_cpu() - before;
+        assert!(used < Duration::from_millis(20), "waiting cost {used:?}");
+    }
+
+    fn thread_cpu() -> Duration {
+        use windows::Win32::Foundation::FILETIME;
+        use windows::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
+        let (mut a, mut b, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+        unsafe { GetThreadTimes(GetCurrentThread(), &mut a, &mut b, &mut kernel, &mut user).unwrap() };
+        let ticks = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+        Duration::from_nanos((ticks(kernel) + ticks(user)) * 100)
     }
 
     #[test]

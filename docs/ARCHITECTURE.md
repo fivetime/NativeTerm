@@ -1881,9 +1881,32 @@ on a laptop:
   - **Measured (first slice, release build):** idle CPU 0 ms over 10 s,
     and the window isn't repainted. Private memory is 74 MB, most of it
     the renderer (see "Renderer").
-  - **With open sessions**, the first slice still refreshes tab
-    positions every 2 s through UIA: 78 ms of CPU per 10 s with one
-    session. Selection events are to replace this.
+  - **With open sessions** (implemented, measured in release with three
+    sessions, idle for a minute): NativeTerm used 16 ms of CPU and the
+    shim 0 ms.
+    - **What NativeTerm listens to.** Win32 WinEvents report Terminal
+      windows being shown, hidden or destroyed. These are out of context,
+      so a hung Terminal can't block them. UIA events on each responsive
+      Terminal window report a tab selected or the tree changed (tabs
+      opened, closed, moved). The UIA registrations run on their own
+      thread, which is replaced if a registration hangs for more than
+      5 s.
+    - **Bursts.** One opened tab produced dozens of events, so NativeTerm
+      waits 150 ms after the first and then scans once. A selection
+      behind NativeTerm's back was reflected after ≈ 200 ms. Ten seconds
+      of `ping` output in a tab produced no events at all.
+    - **Not watched: title changes.** AI tools and shells retitle all the
+      time. A rename is picked up by a fallback scan every 60 s, which
+      costs ≈ 70 ms (release, one window).
+    - **No polling anywhere else either.** The pipe uses overlapped I/O:
+      a reader waits on an event, and writes from other threads aren't
+      blocked by it. Before, readers polled `PeekNamedPipe` every 20 ms.
+      That cost 266 ms of CPU per minute with three sessions, and 47 ms
+      per 30 s in each shim.
+    - **What the shim waits on.** The ssh process, a "message arrived"
+      event, the login event, and console input, with
+      `WaitForMultipleObjects`. Its link reads in a blocking thread, and
+      closing the link cancels that read.
 - **Shim**: a small native Rust binary with no runtime: ≈ 1 MB private
   memory, 6.6 MB working set per tab (release, waiting at its prompt), on
   top of `ssh.exe` and the console host.

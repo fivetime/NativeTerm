@@ -2,6 +2,7 @@
 //! and closed through UI Automation, for one chosen Terminal install.
 
 pub mod command;
+pub mod events;
 pub mod install;
 pub mod jsonc;
 pub mod launch;

@@ -342,6 +342,26 @@ Portable settings: `firstWindowPreference: persistedLayout`,
 
 Whole suite: 47 s, passed twice in a row; no shims left.
 
+Terminal change notifications (`examples/watch_events.rs`, portable
+1.26), scripted session:
+
+| Action | Notifications |
+|---|---|
+| New window with one tab | 1 window event (the window's own events come before its subscription) |
+| Two more tabs | ≈ 70 selection/structure events within 2 s |
+| Select a tab through UIA | ≈ 25 |
+| Tab printing (`ping -n 10`) for 10 s | none |
+| Close a tab | 5 |
+| Close the window | 1 window, 1 structure |
+
+Idle CPU with three sessions, 58–60 s (release core):
+
+| Version | NativeTerm core | Shim |
+|---|---|---|
+| 2 s scan polling, pipe polling every 20 ms | — | 47 ms / 30 s (debug) |
+| Events, 15 s fallback scan, pipe polling | 281–391 ms (4 scans; mostly pipe polling) | — |
+| Events, 60 s fallback, overlapped pipe, shim waits on handles | 16 ms (1 scan) | 0 ms |
+
 Idle footprint, release build, no sessions, 6–10 s samples:
 
 | Variant | Private memory |
