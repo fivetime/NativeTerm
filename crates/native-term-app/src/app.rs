@@ -12,6 +12,7 @@ use native_term_config::SessionTree;
 use crate::dialogs::{ConfirmDelete, ConfirmForget, FolderDialog, HostDialog, Outcome};
 use crate::import_dialog::ImportDialog;
 use crate::key_dialog::KeyDialog;
+use crate::options_dialog::OptionsDialog;
 use crate::send_dialog::SendDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
@@ -28,6 +29,7 @@ enum Dialog {
     Delete(ConfirmDelete),
     Forget(ConfirmForget),
     Key(Box<KeyDialog>),
+    Options(Box<OptionsDialog>),
     Import(Box<ImportDialog>),
     Send(Box<SendDialog>),
 }
@@ -214,6 +216,18 @@ impl App {
                     self.dialog = Some(Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))));
                 }
             }
+            TreeAction::Options(alias) => {
+                if let Some((_, host)) = self.tree.find(&alias) {
+                    match self.editor.host_options(host) {
+                        Ok(values) => {
+                            let effective = self.editor.effective(&alias).unwrap_or_default();
+                            let dialog = OptionsDialog::new(&alias, host.label(), &values, effective, self.editor.ssh());
+                            self.dialog = Some(Dialog::Options(Box::new(dialog)));
+                        }
+                        Err(e) => self.notices.push(e.to_string()),
+                    }
+                }
+            }
             TreeAction::Favorite(alias, on) => {
                 let result = match self.tree.find(&alias) {
                     Some((_, host)) => self.editor.set_favorite(host, on).map_err(|e| e.to_string()),
@@ -339,6 +353,23 @@ impl App {
                             });
                             true
                         }
+                        Err(e) => {
+                            d.error = Some(e);
+                            false
+                        }
+                    }
+                }
+            },
+            Dialog::Options(d) => match d.show(ctx) {
+                Outcome::Open => false,
+                Outcome::Cancel => true,
+                Outcome::Submit(values) => {
+                    let result = match self.tree.find(&d.alias) {
+                        Some((_, host)) => self.editor.set_host_options(host, &values).map_err(|e| e.to_string()),
+                        None => Err(t!("error-host-gone", alias = d.alias.as_str())),
+                    };
+                    match result {
+                        Ok(()) => true,
                         Err(e) => {
                             d.error = Some(e);
                             false

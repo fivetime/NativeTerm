@@ -18,6 +18,7 @@ pub enum TreeAction {
     Open(Vec<HostRequest>, Target),
     NewHost(PathBuf),
     Edit(String),
+    Options(String),
     Delete(String),
     ForgetKey(String),
     Favorite(String, bool),
@@ -555,6 +556,10 @@ impl TreeView {
                             ui.separator();
                             if ui.button(t!("menu-edit")).clicked() {
                                 actions.push(TreeAction::Edit(alias.to_string()));
+                                ui.close();
+                            }
+                            if ui.button(t!("menu-options")).clicked() {
+                                actions.push(TreeAction::Options(alias.to_string()));
                                 ui.close();
                             }
                             ui.menu_button(t!("menu-move-to"), |ui| {

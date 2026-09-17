@@ -446,6 +446,18 @@ NativeTerm has a session options dialog with the same categories.
 - **Validation:** every save is checked with `ssh -G`.
 - **Reach:** what is set there also works for command-line `ssh`, `scp`,
   and VS Code Remote.
+- **Implemented (SSH):** the host context menu's "Session Options…".
+  The option list lives in `native_term_config::options::SPECS`
+  (keyword, category, kind: text, choice, algorithm list, or repeated
+  lines). Values are kept exactly as written after the keyword, so
+  quoting and ssh's `+`/`-`/`^` list prefixes pass through; only
+  keywords whose values changed are rewritten (in place where the line
+  exists). Empty fields show what `ssh -G` currently resolves. A list
+  picker starts from the field's explicit list, or from the effective
+  one when the field is empty or only adjusts the default. Options for
+  a whole folder aren't offered yet: the folder's defaults block uses a
+  host name that never matches, so ssh options there would have no
+  effect.
 
 Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 

@@ -15,6 +15,7 @@ use crate::alias;
 use crate::document::{BlockKind, Document, LineKind};
 use crate::effective;
 use crate::header;
+use crate::options;
 use crate::securecrt::{self, Plan};
 use crate::tree::{HostEntry, SessionTree, FOLDER_DEFAULTS_HOST};
 use crate::write::{self, edit_file, WriteError, Writer};
@@ -273,6 +274,45 @@ impl Editor {
             || self.validate(&alias, Some(draft.hostname.trim())),
         )?;
         Ok(())
+    }
+
+    /// The session options written in a host's own block.
+    pub fn host_options(&self, host: &HostEntry) -> Result<options::Values, EditError> {
+        let (text, _) = write::read(&host.file)?;
+        let doc = Document::parse(&text);
+        match doc.find_host_block(host.alias()) {
+            Some(block) => Ok(options::read(&doc, block)),
+            None => Err(EditError::NotFound(format!("host {} in {}", host.alias(), host.file.display()))),
+        }
+    }
+
+    /// Write session options into a host's block; `ssh -G` must accept
+    /// them, or the file is rolled back with ssh's message.
+    pub fn set_host_options(&self, host: &HostEntry, values: &options::Values) -> Result<(), EditError> {
+        let values = options::normalize(values).map_err(EditError::Invalid)?;
+        self.host_options(host)?;
+        let alias = host.alias().to_string();
+        edit_file(
+            &self.writer,
+            &host.file,
+            |doc| {
+                if let Some(block) = doc.find_host_block(&alias) {
+                    options::apply(doc, block, &values);
+                }
+            },
+            || self.validate(&alias, host.hostname.as_deref()),
+        )?;
+        Ok(())
+    }
+
+    /// What ssh uses for a host (`ssh -G`): lowercase keyword and value,
+    /// repeated keywords once per value.
+    pub fn effective(&self, alias: &str) -> Result<Vec<(String, String)>, String> {
+        effective::effective_with(&self.ssh, self.config.as_deref(), alias).map_err(|e| e.to_string())
+    }
+
+    pub fn ssh(&self) -> &Path {
+        &self.ssh
     }
 
     /// Mark or unmark a host as a favorite (`NativeTermFavorite yes`).
@@ -729,6 +769,21 @@ mod tests {
 
         let t = tree(&editor);
         let host = t.find("ceph-jiqun.osd-1-shengchan").unwrap().1.clone();
+        let mut values = editor.host_options(&host).unwrap();
+        values.insert("Ciphers", vec!["+aes128-cbc".into()]);
+        values.insert("LocalForward", vec!["8080 localhost:80".into(), "8443 localhost:443".into()]);
+        editor.set_host_options(&host, &values).unwrap();
+        assert_eq!(editor.host_options(&host).unwrap(), values);
+        let effective = editor.effective(host.alias()).unwrap();
+        assert!(effective.iter().any(|(k, v)| k == "ciphers" && v.contains("aes128-cbc")), "{effective:?}");
+        assert_eq!(effective.iter().filter(|(k, _)| k == "localforward").count(), 2);
+        // ssh refuses a bad cipher: nothing changes
+        let before = std::fs::read_to_string(&host.file).unwrap();
+        values.insert("Ciphers", vec!["no-such-cipher".into()]);
+        let error = editor.set_host_options(&host, &values).unwrap_err().to_string();
+        assert!(error.to_lowercase().contains("cipher"), "{error}");
+        assert_eq!(std::fs::read_to_string(&host.file).unwrap(), before);
+
         editor.set_favorite(&host, true).unwrap();
         assert_eq!(tree(&editor).find("ceph-jiqun.osd-1-shengchan").unwrap().1.nt.get("favorite"), Some("yes"));
         editor.set_favorite(&host, false).unwrap();

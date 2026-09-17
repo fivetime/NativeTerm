@@ -53,6 +53,12 @@ impl Line {
         }
     }
 
+    /// A directive's value as written (quotes kept), for keywords that are
+    /// edited verbatim.
+    pub fn raw_value(&self) -> Option<&str> {
+        self.directive().map(|d| self.text[d.value_start..].trim_end())
+    }
+
     fn indent(&self) -> &str {
         &self.text[..self.text.len() - self.text.trim_start().len()]
     }
@@ -177,6 +183,34 @@ impl Document {
             None => {
                 let (at, indent) = self.insertion_point(&b);
                 self.lines.insert(at, parse_line(&format!("{indent}{keyword} {}", quote_arg(value))));
+            }
+        }
+    }
+
+    /// Set the values of a keyword that may repeat, each written verbatim:
+    /// existing lines are rewritten in place, extra ones removed, new ones
+    /// added after the block's last directive.
+    pub fn set_raw_values(&mut self, block: usize, keyword: &str, values: &[String]) {
+        let b = self.blocks().swap_remove(block);
+        let existing: Vec<(usize, usize)> =
+            self.directives(&b).filter(|(_, d)| d.is(keyword)).map(|(i, d)| (i, d.value_start)).collect();
+        for ((i, value_start), value) in existing.iter().zip(values) {
+            let mut text = self.lines[*i].text[..*value_start].to_string();
+            if !text.ends_with(|c: char| c.is_whitespace() || c == '=') {
+                text.push(' ');
+            }
+            text.push_str(value);
+            self.lines[*i] = parse_line(&text);
+        }
+        for (i, _) in existing.iter().skip(values.len()).rev() {
+            self.lines.remove(*i);
+        }
+        if values.len() > existing.len() {
+            let b = self.blocks().swap_remove(block);
+            let (mut at, indent) = self.insertion_point(&b);
+            for value in &values[existing.len()..] {
+                self.lines.insert(at, parse_line(&format!("{indent}{keyword} {value}")));
+                at += 1;
             }
         }
     }

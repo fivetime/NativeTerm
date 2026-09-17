@@ -273,8 +273,13 @@
       temporary `-load` session for options without a command-line flag,
       Telnet exit 0 = disconnected, raw `CLOSE_WAIT` watch, serial port
       picker, "port busy" with owner, "no data since …" for serial
-- [ ] Session options dialog (SecureCRT categories; algorithm lists from
-      `ssh -Q`, `ssh -G` validation; plink pages for non-SSH sessions)
+- [x] Session options dialog for SSH hosts (host menu; connection,
+      authentication, algorithms, host key, forwarding, environment;
+      algorithm pickers from `ssh -Q`, current values from `ssh -G` shown
+      greyed, values written verbatim and checked by `ssh -G` with
+      rollback)
+- [ ] Session options: plink pages for non-SSH sessions; folder-wide
+      ssh options (a folder's defaults block matches no host today)
 - [ ] Setting "Hide Windows Terminal's own SSH profiles"
       (`disabledProfileSources`, backed-up explicit edit)
 - [ ] Shared app-level command layer used by every UI surface
