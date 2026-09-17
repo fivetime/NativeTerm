@@ -204,7 +204,10 @@ pub fn sessions_key() -> String {
 
 /// PuTTY's saved sessions.
 pub fn scan() -> io::Result<Scan> {
-    scan_key(&sessions_key())
+    let mut scan = scan_key(&sessions_key())?;
+    // keys that can't be read don't stop the session import
+    scan.host_keys = scan_host_keys(&host_keys_key()).unwrap_or_default();
+    Ok(scan)
 }
 
 /// Sessions under another key (tests).
@@ -237,6 +240,131 @@ pub fn scan_key(key: &str) -> io::Result<Scan> {
 /// Whether there is at least one saved session to import.
 pub fn has_sessions() -> bool {
     registry::user_subkeys(&sessions_key()).is_ok_and(|keys| keys.iter().any(|k| unmunge(k) != DEFAULT_SETTINGS))
+}
+
+pub const HOST_KEYS_KEY: &str = r"Software\SimonTatham\PuTTY\SshHostKeys";
+
+/// Big-endian bytes of `0x…` hex (no leading zero bytes).
+fn hex_number(text: &str) -> Option<Vec<u8>> {
+    let hex = text.trim().strip_prefix("0x")?;
+    if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let padded = if hex.len() % 2 == 1 { format!("0{hex}") } else { hex.to_string() };
+    let bytes: Vec<u8> = (0..padded.len()).step_by(2).map(|i| u8::from_str_radix(&padded[i..i + 2], 16).unwrap()).collect();
+    let start = bytes.iter().position(|b| *b != 0).unwrap_or(bytes.len());
+    Some(bytes[start..].to_vec())
+}
+
+fn put_string(blob: &mut Vec<u8>, bytes: &[u8]) {
+    blob.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+    blob.extend_from_slice(bytes);
+}
+
+/// SSH `mpint`: big-endian, a zero byte in front if the top bit is set.
+fn put_mpint(blob: &mut Vec<u8>, number: &[u8]) {
+    if number.first().is_some_and(|b| b & 0x80 != 0) {
+        let mut padded = vec![0];
+        padded.extend_from_slice(number);
+        put_string(blob, &padded);
+    } else {
+        put_string(blob, number);
+    }
+}
+
+/// `number` as exactly `len` big-endian bytes.
+fn fixed(number: &[u8], len: usize) -> Option<Vec<u8>> {
+    (number.len() <= len).then(|| {
+        let mut out = vec![0; len - number.len()];
+        out.extend_from_slice(number);
+        out
+    })
+}
+
+/// PuTTY's cached form of a key (`0x…` numbers) as (OpenSSH type, blob).
+/// `None` for types OpenSSH doesn't take (DSA, Ed448) or bad values.
+pub fn host_key_blob(putty_type: &str, value: &str) -> Option<(String, Vec<u8>)> {
+    let parts: Vec<&str> = value.split(',').collect();
+    let mut blob = Vec::new();
+    let key_type = match putty_type {
+        "rsa2" => {
+            let [e, n] = parts[..] else { return None };
+            put_string(&mut blob, b"ssh-rsa");
+            put_mpint(&mut blob, &hex_number(e)?);
+            put_mpint(&mut blob, &hex_number(n)?);
+            "ssh-rsa"
+        }
+        "ssh-ed25519" => {
+            let [x, y] = parts[..] else { return None };
+            // RFC 8032 encoding: y little-endian, the sign of x in the top bit
+            let x = hex_number(x)?;
+            let mut encoded = fixed(&hex_number(y)?, 32)?;
+            encoded.reverse();
+            if x.last().is_some_and(|b| b & 1 == 1) {
+                encoded[31] |= 0x80;
+            }
+            put_string(&mut blob, b"ssh-ed25519");
+            put_string(&mut blob, &encoded);
+            "ssh-ed25519"
+        }
+        t if t.starts_with("ecdsa-sha2-nistp") => {
+            let [curve, x, y] = parts[..] else { return None };
+            let len = match curve.trim() {
+                "nistp256" => 32,
+                "nistp384" => 48,
+                "nistp521" => 66,
+                _ => return None,
+            };
+            if t != format!("ecdsa-sha2-{}", curve.trim()) {
+                return None;
+            }
+            let mut point = vec![4];
+            point.extend(fixed(&hex_number(x)?, len)?);
+            point.extend(fixed(&hex_number(y)?, len)?);
+            put_string(&mut blob, t.as_bytes());
+            put_string(&mut blob, curve.trim().as_bytes());
+            put_string(&mut blob, &point);
+            t
+        }
+        _ => return None,
+    };
+    Some((key_type.to_string(), blob))
+}
+
+/// `type@port:host` (the host escaped like session names).
+fn parse_host_key_name(name: &str) -> Option<(String, u16, String)> {
+    let (key_type, rest) = name.split_once('@')?;
+    let (port, host) = rest.split_once(':')?;
+    let host = unmunge(host);
+    let port: u16 = port.parse().ok().filter(|p| *p != 0)?;
+    (!host.is_empty() && !host.contains(char::is_whitespace)).then(|| (key_type.to_string(), port, host))
+}
+
+/// PuTTY's stored host keys, for `known_hosts`.
+pub fn scan_host_keys(key: &str) -> io::Result<crate::known_hosts::KeyScan> {
+    let mut scan = crate::known_hosts::KeyScan::default();
+    for (name, value) in registry::user_values(key)? {
+        let RegValue::Str(value) = value else {
+            scan.not_understood += 1;
+            continue;
+        };
+        let parsed = parse_host_key_name(&name).and_then(|(t, port, host)| Some((host_key_blob(&t, &value)?, port, host)));
+        match parsed {
+            Some(((key_type, blob), port, host)) => scan.keys.push(crate::known_hosts::HostKey {
+                hosts: vec![host],
+                port,
+                key_type,
+                key: crate::known_hosts::base64_encode(&blob),
+            }),
+            None => scan.not_understood += 1,
+        }
+    }
+    Ok(scan)
+}
+
+/// Where host keys are read from (`NATIVETERM_PUTTY_HOST_KEYS` for tests).
+pub fn host_keys_key() -> String {
+    std::env::var("NATIVETERM_PUTTY_HOST_KEYS").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| HOST_KEYS_KEY.to_string())
 }
 
 #[cfg(test)]
@@ -386,6 +514,104 @@ mod tests {
                 ("switch", &Skip::PlinkLater("Telnet".into())),
             ]
         );
+    }
+
+    const ED_X: &str = "0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce";
+    const ED_Y: &str = "0x1a5107f7681a02af2523a6daf372e10e3a0764c9d3fe4bd5b70ab18201985ad7";
+    /// RFC 8032, test 1.
+    const ED_PUBLIC: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// The strings of an SSH blob.
+    fn fields(blob: &[u8]) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        let mut rest = blob;
+        while rest.len() >= 4 {
+            let len = u32::from_be_bytes(rest[..4].try_into().unwrap()) as usize;
+            out.push(rest[4..4 + len].to_vec());
+            rest = &rest[4 + len..];
+        }
+        out
+    }
+
+    fn putty_hex(bytes: &[u8]) -> String {
+        let start = bytes.iter().position(|b| *b != 0).unwrap_or(bytes.len() - 1);
+        format!("0x{}", hex(&bytes[start..]).trim_start_matches('0'))
+    }
+
+    #[test]
+    fn ed25519_from_coordinates() {
+        let (key_type, blob) = host_key_blob("ssh-ed25519", &format!("{ED_X},{ED_Y}")).unwrap();
+        assert_eq!(key_type, "ssh-ed25519");
+        let f = fields(&blob);
+        assert_eq!(f[0], b"ssh-ed25519");
+        assert_eq!(hex(&f[1]), ED_PUBLIC);
+        assert_eq!(crate::known_hosts::blob_type(&blob).as_deref(), Some("ssh-ed25519"));
+        assert!(host_key_blob("ssh-ed25519", "0x1").is_none());
+        assert!(host_key_blob("dss", "0x1,0x2,0x3,0x4").is_none());
+        assert!(host_key_blob("ssh-ed448", &format!("{ED_X},{ED_Y}")).is_none());
+        assert!(host_key_blob("rsa2", "0x10001,0xzz").is_none());
+    }
+
+    /// Keys made by ssh-keygen, written the way PuTTY caches them, come
+    /// back as the same OpenSSH blob.
+    #[test]
+    fn rsa_and_ecdsa_round_trip() {
+        let keygen = std::path::Path::new(r"C:\Windows\System32\OpenSSH\ssh-keygen.exe");
+        if !keygen.exists() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        for (kind, bits) in [("rsa", "2048"), ("ecdsa", "256"), ("ecdsa", "521")] {
+            let file = dir.path().join(format!("{kind}{bits}"));
+            let status = std::process::Command::new(keygen)
+                .args(["-q", "-t", kind, "-b", bits, "-N", "", "-f"])
+                .arg(&file)
+                .status()
+                .unwrap();
+            assert!(status.success());
+            let line = std::fs::read_to_string(file.with_extension("pub")).unwrap();
+            let mut words = line.split_whitespace();
+            let (key_type, key) = (words.next().unwrap(), words.next().unwrap());
+            let blob = crate::known_hosts::base64_decode(key).unwrap();
+            let f = fields(&blob);
+            let (putty_type, value) = if kind == "rsa" {
+                ("rsa2".to_string(), format!("{},{}", putty_hex(&f[1]), putty_hex(&f[2])))
+            } else {
+                let point = &f[2][1..];
+                let (x, y) = point.split_at(point.len() / 2);
+                let curve = String::from_utf8(f[1].clone()).unwrap();
+                (key_type.to_string(), format!("{curve},{},{}", putty_hex(x), putty_hex(y)))
+            };
+            let (converted_type, converted) = host_key_blob(&putty_type, &value).unwrap();
+            assert_eq!(converted_type, key_type);
+            assert_eq!(crate::known_hosts::base64_encode(&converted), key, "{kind}{bits}");
+        }
+    }
+
+    #[test]
+    fn host_keys_from_the_registry() {
+        let key = format!(r"Software\NativeTerm-Tests-putty-hostkeys-{}", std::process::id());
+        let _cleanup = TestKey(key.clone());
+        registry::write_user_values(
+            &key,
+            &[
+                ("ssh-ed25519@22:10.0.0.5", s(&format!("{ED_X},{ED_Y}"))),
+                ("ssh-ed25519@2222:jump%20box", s(&format!("{ED_X},{ED_Y}"))),
+                ("dss@22:old.example", s("0x1,0x2,0x3,0x4")),
+                ("garbage", s("x")),
+                ("rsa2@22:number", RegValue::Dword(1)),
+            ],
+        )
+        .unwrap();
+        let scan = scan_host_keys(&key).unwrap();
+        assert_eq!(scan.not_understood, 4, "dss, a bad name, a bad value, and a space in a host name");
+        let lines: Vec<String> = scan.keys.iter().map(|k| k.line()).collect();
+        let ed = crate::known_hosts::base64_encode(&host_key_blob("ssh-ed25519", &format!("{ED_X},{ED_Y}")).unwrap().1);
+        assert_eq!(lines, [format!("10.0.0.5 ssh-ed25519 {ed}")]);
     }
 
     #[test]

@@ -223,7 +223,9 @@
       same preview, per-folder `ssh -G` check and `putty:` source for
       re-imports as SecureCRT; toolbar button only when PuTTY has
       sessions; `NATIVETERM_PUTTY_KEY` points tests at another key)
-- [ ] PuTTY import (rest): host keys from `SshHostKeys`; plink sessions
+- [x] PuTTY host keys (`SshHostKeys`: RSA, ECDSA P-256/384/521 and Ed25519
+      rebuilt from PuTTY's cached numbers; DSA / Ed448 reported) → `known_hosts`
+- [ ] PuTTY import (rest): plink sessions
 - [x] First-run wizard (environment checks: `ssh -V`, Terminal, profile
       with an install button, ssh-agent; import from SecureCRT / PuTTY;
       key creation / "Install my key" on all hosts; where sessions and data

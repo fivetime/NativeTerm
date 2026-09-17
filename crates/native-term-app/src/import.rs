@@ -153,11 +153,14 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         out.push(line(t!("summary-host-keys", count = keys.keys.len()), false, Vec::new()));
     }
     if keys.not_understood > 0 {
-        out.push(line(t!("summary-host-keys-unknown", count = keys.not_understood), true, Vec::new()));
+        let text = match scan.origin {
+            Origin::SecureCrt => t!("summary-host-keys-unknown", count = keys.not_understood),
+            Origin::Putty => t!("summary-putty-host-keys-skipped", count = keys.not_understood),
+        };
+        out.push(line(text, true, Vec::new()));
     }
-    match scan.origin {
-        Origin::SecureCrt => out.push(line(t!("summary-not-yet"), false, Vec::new())),
-        Origin::Putty => out.push(line(t!("summary-putty-host-keys"), false, Vec::new())),
+    if scan.origin == Origin::SecureCrt {
+        out.push(line(t!("summary-not-yet"), false, Vec::new()));
     }
     out
 }

@@ -859,7 +859,14 @@ planner and writer serve both; `NativeTermSource putty:<name>` marks
 imported hosts. A PuTTY SSH proxy (method 6) becomes `ProxyJump` — to
 the imported host when it names a saved session, else the host written
 out. `.ppk` keys aren't usable by OpenSSH and are reported with the
-PuTTYgen conversion step; PuTTY's host keys aren't imported yet.
+PuTTYgen conversion step. PuTTY's host keys (`SshHostKeys`, values
+`<type>@<port>:<host>`) store the key's numbers, not a blob: RSA as
+`0x<e>,0x<n>`, ECDSA as `<curve>,0x<x>,0x<y>`, Ed25519 as the point's
+`0x<x>,0x<y>`. NativeTerm rebuilds the OpenSSH blob (for Ed25519: `y`
+little-endian with the sign of `x` in the top bit, RFC 8032) and adds
+them through the same `known_hosts` writer as SecureCRT's; DSA and Ed448
+are reported as unusable. Verified with RFC 8032's test key and with
+RSA / ECDSA keys from `ssh-keygen`.
 
 ### PuTTY options and how they reach plink
 
