@@ -186,10 +186,12 @@
       user SID and logon session
 - [ ] Absolute shim path everywhere; fragment rewritten when the program
       folder moves; tabs restored from an old path detected and reopened
-- [ ] Startup checks: Windows Terminal installed and recent enough (and
-      which variant to use when several are installed; located via its
-      package if the `wt.exe` alias is off), single instance,
-      integrity-level mismatch, folder writable
+- [x] Startup checks (part): Windows Terminal found (packages, portable,
+      unpackaged; `--terminal-dir`), single instance (second start brings
+      the first to the front), data folder writable (fallbacks)
+- [ ] Startup checks (rest): Terminal recent enough; choosing among
+      several installs in the UI; located via its package if the
+      `wt.exe` alias is off; integrity-level mismatch warning
 
 ## Phase 1 — MVP
 - [ ] **SecureCRT importer** (folders, names, host, port, user,
@@ -202,28 +204,33 @@
 - [ ] PuTTY saved-session import (read-only from the PuTTY registry key)
 - [ ] First-run wizard (import, environment checks, key setup, data
       directory / cloud sync)
-- [ ] Unique tab titles; rename reconciliation; foreign tabs excluded from
-      batch operations
+- [x] Unique tab titles (`web01 (2)`); foreign tabs excluded from batch
+      operations (tab menu close sets contain NativeTerm sessions only)
+- [ ] Rename reconciliation (a host renamed in the tree while its tab is
+      open)
 - [ ] Rename / Lock / Save Session (writes back to config.d)
-- [ ] Session states incl. "waiting for login" and "login failed"
+- [x] Session states incl. "waiting for login" and "login failed"
       (`LocalCommand` signal)
-- [ ] Reconnect in place / Disconnect / Close; optional auto-reconnect that
-      never retries login failures
+- [x] Reconnect in place / Disconnect / Close
+- [ ] Optional auto-reconnect that never retries login failures
 - [ ] "Install my key" for a host or folder (bundled busybox-w32 +
       `ssh-copy-id`), network devices excluded
-- [ ] Close Others / Close Disconnected / Close Tab Group
-- [ ] Close Tabs to the Right (real tab order via UIA)
-- [ ] Clone session (port forwards cleared)
-- [ ] Open a whole folder (batched `wt` calls, rate-limited connections,
-      chosen tab selected at the end); same queue for mass reconnect after
-      resume
+- [x] Close Others / Close Disconnected (tab menu); "Close Tab Group"
+      has no counterpart (Terminal has no tab groups)
+- [x] Close Tabs to the Right (real tab order via UIA)
+- [x] Clone session (same alias, base label, most recent window)
+- [ ] Clone: port forwards cleared (`-o ClearAllForwardings=yes`)
+- [x] Open a whole folder (batched `wt` calls)
+- [ ] Open a whole folder (rest): rate-limited connections, chosen tab
+      selected at the end; same queue for mass reconnect after resume
 - [ ] Quick connect to `user@host[:port]`, optionally save afterwards
 - [ ] "Remove this host's old key" (`ssh-keygen -R`, confirmed)
-- [ ] Recovery after NativeTerm restart (re-discover tabs, re-pair shims by
-      session GUID / `--session`, unlocated sessions with position hints
-      and "Locate"); restored placeholders (session restore, workspaces)
-      replaced by proper tabs in their original order, with a
-      "reconnect all / some / none" prompt
+- [x] Recovery after NativeTerm restart (re-discover tabs, re-pair shims
+      by session GUID / `--session`); restored placeholders replaced by
+      waiting tabs in their original order (see Phase 0, restarts)
+- [ ] Recovery (rest): unlocated sessions with position hints and
+      "Locate"; a "reconnect all / some / none" prompt for restored
+      sessions (today each waits for its own Connect)
 - [x] Own tab menu, first version (`windows_terminal::menu` +
       `tab_menu`): `WH_MOUSE_LL`/`WH_KEYBOARD_LL` installed only while
       NativeTerm has located tabs; non-activating GDI popup following the
