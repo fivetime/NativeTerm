@@ -16,6 +16,7 @@ pub const CLOSE_OTHERS: u32 = 5;
 pub const CLOSE_ENDED: u32 = 6;
 pub const CLOSE_RIGHT: u32 = 7;
 pub const SEND: u32 = 8;
+pub const LOCK: u32 = 9;
 
 pub(crate) struct Actions {
     pub(crate) core: Weak<Shared>,
@@ -32,6 +33,7 @@ struct MenuSession {
     linked: bool,
     window: Option<isize>,
     index: Option<usize>,
+    locked: bool,
 }
 
 fn sessions(shared: &Shared) -> Vec<MenuSession> {
@@ -46,6 +48,7 @@ fn sessions(shared: &Shared) -> Vec<MenuSession> {
             linked: s.link.is_some(),
             window: s.location.as_ref().map(|l| l.window),
             index: s.location.as_ref().map(|l| l.tab_index),
+            locked: s.locked,
         })
         .collect()
 }
@@ -65,9 +68,11 @@ pub(crate) fn base_label(label: &str) -> &str {
     label
 }
 
-/// Sessions the "close …" items would close, for the tab `tab`.
+/// Sessions the "close …" items would close, for the tab `tab`; locked
+/// ones never.
 fn to_close(all: &[MenuSession], tab: &MenuTab, id: u32) -> Vec<String> {
     all.iter()
+        .filter(|s| !s.locked)
         .filter(|s| match id {
             CLOSE_OTHERS => s.window == Some(tab.window) && s.label != tab.label,
             CLOSE_RIGHT => s.window == Some(tab.window) && s.index.is_some_and(|i| i > tab.index),
@@ -101,9 +106,14 @@ impl Provider for Actions {
         entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), this.linked && live));
         entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), true));
         entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), this.linked && this.state == State::Connected));
+        if this.locked {
+            entries.push(action(LOCK, '\u{E785}', &t!("tabmenu-unlock"), true));
+        } else {
+            entries.push(action(LOCK, '\u{E72E}', &t!("tabmenu-lock"), true));
+        }
         entries.push(Entry::Separator);
         let close = if tab.mixed { t!("tabmenu-close-mixed") } else { t!("tabmenu-close") };
-        entries.push(action(CLOSE, '\u{E711}', &close, true));
+        entries.push(action(CLOSE, '\u{E711}', &close, !this.locked));
         let others = !to_close(&all, tab, CLOSE_OTHERS).is_empty();
         entries.push(action(CLOSE_OTHERS, '\u{E8BB}', &t!("tabmenu-close-others"), others));
         let ended = !to_close(&all, tab, CLOSE_ENDED).is_empty();
@@ -126,7 +136,8 @@ impl Provider for Actions {
                 let host = HostRequest { no_forwards: true, on_login, ..HostRequest::new(&this.alias, base_label(&this.label)) };
                 core.open(&[host], Target::Recent);
             }
-            CLOSE => core.close(&this.id),
+            CLOSE if !this.locked => core.close(&this.id),
+            LOCK => core.set_locked(&this.id, !this.locked),
             SEND => (self.send)(&this.id),
             CLOSE_OTHERS | CLOSE_ENDED | CLOSE_RIGHT => {
                 for id in to_close(&all, tab, id) {
@@ -152,6 +163,7 @@ mod tests {
             linked: true,
             window: Some(window),
             index: Some(index),
+            locked: false,
         }
     }
 
@@ -173,6 +185,13 @@ mod tests {
         assert_eq!(to_close(&all, &t, CLOSE_RIGHT), ["c"]);
         assert_eq!(to_close(&all, &t, CLOSE_ENDED), ["b", "d"], "all windows");
         assert!(to_close(&all, &tab("c", 1, 4), CLOSE_RIGHT).is_empty());
+
+        let mut all = all;
+        all[2].locked = true;
+        all[3].locked = true;
+        assert_eq!(to_close(&all, &t, CLOSE_OTHERS), ["a"], "locked sessions stay");
+        assert!(to_close(&all, &t, CLOSE_RIGHT).is_empty());
+        assert_eq!(to_close(&all, &t, CLOSE_ENDED), ["b"]);
     }
 
     #[test]

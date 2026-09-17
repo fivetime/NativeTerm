@@ -222,7 +222,10 @@
       open)
 - [x] Rename (host dialog, alias kept) / Save Session (quick connect
       "Save…"), written back to config.d
-- [ ] Lock a session
+- [x] Lock a session (session card and tab menu; kept in `state.db`
+      across restarts and replacement tabs; left out of close
+      disconnected / others / to the right and of "All" in group send;
+      Close disabled until unlocked)
 - [x] Session states incl. "waiting for login" and "login failed"
       (`LocalCommand` signal)
 - [x] Reconnect in place / Disconnect / Close

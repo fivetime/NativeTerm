@@ -254,6 +254,7 @@ mod tests {
                 mixed: false,
             }),
             auto_retry: None,
+            locked: false,
         }
     }
 

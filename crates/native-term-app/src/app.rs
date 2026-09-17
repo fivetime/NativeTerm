@@ -447,7 +447,7 @@ impl App {
                     core.connect_all(waiting.iter().map(|s| s.id.clone()).collect());
                 }
                 if ui.button(t!("sessions-close-all")).clicked() {
-                    for s in &waiting {
+                    for s in waiting.iter().filter(|s| !s.locked) {
                         core.close(&s.id);
                     }
                 }
@@ -605,6 +605,9 @@ fn session_card(
         ui.horizontal_wrapped(|ui| {
             let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
             ui.painter().circle_filled(dot.center(), 4.5, color);
+            if s.locked {
+                ui.label(icons::LOCK.to_string()).on_hover_text(t!("session-locked"));
+            }
             let label = ui.strong(&s.label);
             if s.label != s.alias {
                 label.on_hover_text(&s.alias);
@@ -652,8 +655,12 @@ fn session_card(
             if ui.add_enabled(open && s.linked && live, egui::Button::new(t!("button-disconnect")).small()).clicked() {
                 core.disconnect(&s.id);
             }
-            if ui.add_enabled(open, egui::Button::new(t!("button-close")).small()).clicked() {
+            if ui.add_enabled(open && !s.locked, egui::Button::new(t!("button-close")).small()).clicked() {
                 core.close(&s.id);
+            }
+            let lock = if s.locked { icons::with(icons::UNLOCK, t!("session-unlock")) } else { icons::with(icons::LOCK, t!("session-lock")) };
+            if ui.add_enabled(open, egui::Button::new(lock).small()).on_hover_text(t!("session-lock-hint")).clicked() {
+                core.set_locked(&s.id, !s.locked);
             }
             let ready = s.state == State::Connected && s.linked;
             if ui.add_enabled(ready, egui::Button::new(icons::with(icons::SEND, t!("session-send"))).small()).clicked() {

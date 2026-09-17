@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub type Result<T> = rusqlite::Result<T>;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 /// One session that was open when last seen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +29,8 @@ pub struct Record {
     pub tab_index: Option<i64>,
     /// A clone opened without port forwards.
     pub no_forwards: bool,
+    /// Kept out of batch closes and group sends (not changed by `opened`).
+    pub locked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +101,14 @@ impl Registry {
                  COMMIT;",
             )?;
         }
+        if version < 3 {
+            conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE sessions ADD COLUMN locked INTEGER NOT NULL DEFAULT 0;
+                 PRAGMA user_version = 3;
+                 COMMIT;",
+            )?;
+        }
         Ok(Registry { conn: Mutex::new(conn) })
     }
 
@@ -116,6 +126,13 @@ impl Registry {
                      label = ?3, alias = ?4, closed_at = NULL, restorable = 0, no_forwards = ?6",
                 params![r.id, r.terminal_session, r.label, r.alias, r.opened_at, r.no_forwards],
             )?;
+            Ok(())
+        })
+    }
+
+    pub fn set_locked(&self, id: &str, locked: bool) -> Result<()> {
+        self.with(|c| {
+            c.execute("UPDATE sessions SET locked = ?2 WHERE id = ?1", params![id, locked])?;
             Ok(())
         })
     }
@@ -186,7 +203,7 @@ impl Registry {
         self.with(|c| {
             let mut stmt = c.prepare(&format!(
                 "SELECT id, terminal_session, current_terminal_session, label, alias, opened_at, window_number, tab_index,
-                     no_forwards
+                     no_forwards, locked
                  FROM sessions WHERE {condition} ORDER BY window_number, tab_index, opened_at"
             ))?;
             let rows = stmt.query_map(args, |r| {
@@ -200,6 +217,7 @@ impl Registry {
                     window_number: r.get(6)?,
                     tab_index: r.get(7)?,
                     no_forwards: r.get(8)?,
+                    locked: r.get(9)?,
                 })
             })?;
             rows.collect()
@@ -257,6 +275,7 @@ mod tests {
             window_number: None,
             tab_index: None,
             no_forwards: false,
+            locked: false,
         }
     }
 
@@ -353,6 +372,10 @@ mod tests {
         clone.no_forwards = true;
         reg.opened(&clone).unwrap();
         assert!(reg.open_sessions().unwrap().iter().any(|r| r.id == "c" && r.no_forwards));
+        reg.set_locked("c", true).unwrap();
+        // a replacement tab keeps the lock
+        reg.opened(&clone).unwrap();
+        assert!(reg.open_sessions().unwrap().iter().any(|r| r.id == "c" && r.locked));
     }
 
     #[test]

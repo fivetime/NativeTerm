@@ -15,6 +15,7 @@ struct Target {
     label: String,
     state: State,
     chosen: bool,
+    locked: bool,
 }
 
 pub struct SendDialog {
@@ -43,8 +44,9 @@ impl SendDialog {
             .filter(|s| s.state.is_open())
             .map(|s| {
                 let ready = s.state == State::Connected && s.linked;
-                let chosen = ready && (chosen.is_empty() || chosen.contains(&s.id));
-                Target { id: s.id, label: s.label, state: s.state, chosen }
+                // a locked session only when asked for by name
+                let chosen = ready && (chosen.contains(&s.id) || (chosen.is_empty() && !s.locked));
+                Target { id: s.id, label: s.label, state: s.state, chosen, locked: s.locked }
             })
             .collect();
         let library_path = Library::path_in(data_dir);
@@ -174,7 +176,7 @@ impl SendDialog {
                     ui.label(t!("send-targets"));
                     if ui.small_button(t!("send-all")).clicked() {
                         for t in &mut self.targets {
-                            t.chosen = t.state == State::Connected;
+                            t.chosen = t.state == State::Connected && !t.locked;
                         }
                     }
                     if ui.small_button(t!("send-none")).clicked() {
@@ -193,6 +195,8 @@ impl SendDialog {
                             ui.add_enabled(ready, egui::Checkbox::new(&mut target.chosen, &target.label));
                             if !ready {
                                 ui.colored_label(AMBER, t!("send-not-logged-in", state = target.state.describe()));
+                            } else if target.locked {
+                                ui.weak(t!("send-locked"));
                             }
                         });
                     }

@@ -128,6 +128,8 @@ pub struct SessionView {
     /// Automatic reconnects since the last successful login, when one is
     /// scheduled or running.
     pub auto_retry: Option<u32>,
+    /// Kept out of batch closes and group sends; closed only when unlocked.
+    pub locked: bool,
 }
 
 pub(crate) struct Session {
@@ -155,6 +157,7 @@ pub(crate) struct Session {
     on_login: Option<String>,
     /// When the current connection logged in.
     connected_at: Option<Instant>,
+    locked: bool,
 }
 
 impl Session {
@@ -176,6 +179,7 @@ impl Session {
             auto_retries: 0,
             connected_at: None,
             on_login: None,
+            locked: false,
         }
     }
 
@@ -191,6 +195,7 @@ impl Session {
             location: self.location.clone(),
             auto_retry: (self.auto_retries > 0 && matches!(self.state, State::Disconnected(_) | State::Connecting))
                 .then_some(self.auto_retries),
+            locked: self.locked,
         }
     }
 
@@ -333,6 +338,7 @@ impl Core {
                 let mut s = Session::new(r.id, r.terminal_session, r.label, r.alias, state);
                 s.current_terminal_session = r.current_terminal_session;
                 s.no_forwards = r.no_forwards;
+                s.locked = r.locked;
                 s
             };
             match registry.open_sessions() {
@@ -694,13 +700,20 @@ impl Core {
         let ended: Vec<String> = self
             .sessions()
             .into_iter()
-            .filter(|s| matches!(s.state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_)))
+            .filter(|s| !s.locked && matches!(s.state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_)))
             .map(|s| s.id)
             .collect();
         for id in &ended {
             self.close(id);
         }
         ended.len()
+    }
+
+    /// Lock or unlock a session (remembered across restarts).
+    pub fn set_locked(&self, id: &str, locked: bool) {
+        if self.shared.update(id, |s| s.locked = locked).is_some() {
+            self.shared.db("lock", |r| r.set_locked(id, locked));
+        }
     }
 
     /// Open the same host again (without port forwards), in the most
@@ -827,6 +840,7 @@ fn record_for(spec: &TabSpec) -> Record {
         window_number: None,
         tab_index: None,
         no_forwards: spec.no_forwards,
+        locked: false,
     }
 }
 
@@ -1136,6 +1150,7 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                 tab_index: None,
                 // unknown; the shim keeps its own command line anyway
                 no_forwards: false,
+                locked: false,
             };
             shared.db("adopt", |r| r.opened(&record));
             id
