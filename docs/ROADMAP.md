@@ -219,7 +219,9 @@
       operations (tab menu close sets contain NativeTerm sessions only)
 - [ ] Rename reconciliation (a host renamed in the tree while its tab is
       open)
-- [ ] Rename / Lock / Save Session (writes back to config.d)
+- [x] Rename (host dialog, alias kept) / Save Session (quick connect
+      "Save…"), written back to config.d
+- [ ] Lock a session
 - [x] Session states incl. "waiting for login" and "login failed"
       (`LocalCommand` signal)
 - [x] Reconnect in place / Disconnect / Close
@@ -282,26 +284,25 @@
       many `ForwardAgent` hosts
 
 ## Phase 2 — quality of life
-- [ ] Session search (label, alias, IP, user, folder, note; pinyin
-      initials for Chinese labels); favorites (`NativeTermFavorite`) and
-      per-machine recent list
+- [x] Session search (label, alias, host, user, folder, note; fuzzy) and
+      recent hosts
+- [ ] Session search (rest): pinyin initials for Chinese labels;
+      favorites (`NativeTermFavorite`); recent list per machine
 - [x] Command library (`commands.toml`), edited from the send dialog
 - [x] Post-login commands (`NativeTermOnLogin`, host or folder default),
       typed after every login
 - [ ] SecureCRT saved commands
-      (`NativeTermOnLogin`)
 - [ ] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
       Mac keyboards
 - [ ] Throttle snapshots, previews, and sync on battery power
-- [ ] Active-session tracking (foreground hook + UIA selection, sticky)
+- [x] Active-session tracking (last Terminal window in front + its
+      selected tab; used by the floating button)
 - [x] Send commands to one or several logged-in sessions (shim injection,
       confirmation for several, audit log; card, list, tab menu, floating
       button); end-to-end test `send_commands`
-- [ ] Send Commands to Active Session, command input at the bottom of the
-      sidebar; refused before login; audit log
-- [ ] Send Commands to This Group — shim injection (source-confirmed),
-      `tmux send-keys` as a fallback for persistent sessions; confirmation
-      dialog, per-folder "no group send"
+- [ ] Send commands (rest): input line at the bottom of the sidebar;
+      `tmux send-keys` fallback for persistent sessions; per-folder "no
+      group send"
 - [ ] Persistent sessions via tmux (`NativeTermPersistent`): attach-or-create,
       via `-o RemoteCommand` (hosts with their own `RemoteCommand` are
       skipped), `sh -c` wrapper with fallback when tmux is missing, optional hidden
@@ -316,7 +317,8 @@
       switches (Ctrl+T)
 - [ ] Tab switcher (rest): last-seen text (UIA `TextPattern`) or image
       snapshots; tmux text preview for persistent sessions
-- [ ] NativeTerm SSH profile with a moderate scrollback size
+- [x] NativeTerm SSH profile with a moderate scrollback size
+      (`historySize` 5000)
 - [x] Sidebar auto-hide/pin drawer (QQ-style): docks at the top, left or
       right edge (not towards another monitor), slides away to a 4 px
       strip, back on touch or activation, pin, always on top while
@@ -364,7 +366,7 @@
       availability on 19041: UIA events and tab rectangles, the
       tab menu's square corners, the fragment path, the elevated launch
       through Explorer
-- [ ] Windows Terminal variant detection: packaged (Store, Preview) and
+- [x] Windows Terminal variant detection: packaged (Store, Preview) and
       unpackaged/portable by path; absolute `wt.exe` per variant; UIA
       windows filtered by process image path
 - [ ] Optional bundled portable Windows Terminal (stable ZIP, `.portable`,
