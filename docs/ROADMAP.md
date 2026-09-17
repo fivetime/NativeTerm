@@ -194,13 +194,22 @@
       `wt.exe` alias is off; integrity-level mismatch warning
 
 ## Phase 1 — MVP
-- [ ] **SecureCRT importer** (folders, names, host, port, user,
-      descriptions, jump hosts, port forwards), locating the sessions via
-      SecureCRT's `Config Path` registry value; host keys merged into
+- [x] **SecureCRT importer** (first version): folders, names, host,
+      port, user, descriptions, jump hosts (`Session:` firewalls), port
+      forwards, own key files; found via SecureCRT's `Config Path`;
+      secrets never read; report of skipped protocols, other firewalls,
+      logon actions, saved passwords, character sets, duplicates;
+      preview before writing (app dialog and `securecrt_import`
+      example); per-folder writes checked with `ssh -G` and rolled back
+      on failure; re-import skips `NativeTermSource` hosts; pinyin
+      aliases. Tested on a synthetic 736-session / 188-folder
+      configuration (29 s)
+- [ ] SecureCRT importer (rest): preview on the author's real
+      configuration (by the author); host keys merged into
       `known_hosts`; saved commands into the command library; Telnet /
-      serial / raw / rlogin sessions imported as plink sessions; report of
-      other protocols, logon scripts, and duplicates; summary before
-      writing; tested at ~800 sessions / ~200 folders
+      serial / raw / rlogin as plink sessions; nested folder display
+- [x] `ssh` used for tabs and checks: native builds only (MSYS/Cygwin
+      `ssh` on `PATH` skipped), no console window for checks
 - [ ] PuTTY saved-session import (read-only from the PuTTY registry key)
 - [ ] First-run wizard (import, environment checks, key setup, data
       directory / cloud sync)

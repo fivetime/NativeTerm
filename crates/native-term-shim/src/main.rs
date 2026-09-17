@@ -23,7 +23,7 @@ mod ssh;
 mod win;
 
 use std::os::windows::io::AsRawHandle;
-use std::path::PathBuf;
+
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
 
@@ -160,7 +160,7 @@ fn run_host(alias: &str, link: Option<&Link>, wait: bool) -> i32 {
             link.send(m);
         }
     };
-    let ssh_path = std::env::var_os("NATIVETERM_SSH").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("ssh"));
+    let ssh_path = native_term_session::ssh_program();
     let shim_exe = std::env::current_exe().unwrap_or_default();
     let pid = std::process::id();
     let auth = win::AuthEvent::create(pid).ok();

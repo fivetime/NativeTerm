@@ -11,6 +11,7 @@
 
 mod app;
 mod dialogs;
+mod import_dialog;
 mod terminal_profile;
 mod tree_view;
 mod window;

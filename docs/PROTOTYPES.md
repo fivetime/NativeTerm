@@ -439,6 +439,29 @@ own winit runner):
   hidden window gets no `WM_PAINT`, so the redraw request never arrived.
   The first frame is now painted directly.
 
+## SecureCRT import (synthetic configuration)
+
+`make_crt_fixture.py` (scratch) wrote 188 folders and 736 session files
+the way SecureCRT does (BOM, CRLF, `B:` blocks, `Z:` lists): nested
+Chinese and ASCII folder names, a bastion per folder used as a
+`Session:` firewall, two-line descriptions, fake password values, one
+local forward per folder, plus Telnet, serial, RDP, a GBK session and a
+named firewall. The author's real SecureCRT files were not read.
+
+| Step | Result |
+|---|---|
+| Preview | 733 to import into 184 folders; RDP, serial, Telnet skipped; "Corp Proxy" and GBK reported; 549 saved passwords reported, none read |
+| Import, command line, first try | Every folder rolled back: `ssh` from Git Bash was Git's MSYS build, which didn't read the `C:/…` include. Fixed with `ssh_program()` |
+| Import, command line, one folder at a time | 733 hosts, 48 s |
+| Import, 8 folders at a time | 29–31 s |
+| Second preview | 0 to import, 733 "already imported" |
+| Import from the app, first try | 288 of 733 after 130 s: a console window per `ssh -G`. Fixed with `CREATE_NO_WINDOW` |
+| Import from the app | ~40 s, tree reloaded, 34 MB private afterwards |
+
+Aliases before pinyin: `proj-00.0-3`, `proj-00.bastion-3`; with pinyin
+and the folder path as prefix: `ceshi-proj-00.kongzhijiedian0`,
+`shengchan-xiangmu01.bastion`.
+
 ## Tab menu in the app (portable 1.26)
 
 `crates/native-term-app/tests/menu_portable.rs`, three NativeTerm tabs

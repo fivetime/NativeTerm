@@ -9,13 +9,18 @@ pub fn is_literal(pattern: &str) -> bool {
     !pattern.is_empty() && !pattern.contains(['*', '?', '!'])
 }
 
-/// Lowercase ASCII letters, digits, `-`, `_`, `.`; anything else becomes a
-/// single `-`. Never starts with `-` (ssh would read it as an option).
+/// Lowercase ASCII letters, digits, `-`, `_`, `.`; Han characters become
+/// pinyin without tones (`控制节点` → `kongzhijiedian`); anything else
+/// becomes a single `-`. Never starts with `-` (ssh would read it as an
+/// option).
 pub fn sanitize(label: &str) -> String {
+    use pinyin::ToPinyin;
     let mut out = String::new();
     for c in label.chars().flat_map(char::to_lowercase) {
         if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
             out.push(c);
+        } else if let Some(p) = c.to_pinyin() {
+            out.push_str(p.plain());
         } else if !out.ends_with('-') {
             out.push('-');
         }
@@ -63,7 +68,10 @@ mod tests {
     fn sanitizes_labels() {
         assert_eq!(sanitize("10.32.16.66(osp-control1)"), "10.32.16.66-osp-control1");
         assert_eq!(sanitize("Web 01 / Prod"), "web-01-prod");
-        assert_eq!(sanitize("控制节点"), "host");
+        assert_eq!(sanitize("控制节点"), "kongzhijiedian");
+        assert_eq!(sanitize("Ceph 集群"), "ceph-jiqun");
+        assert_eq!(sanitize("控制节点0"), "kongzhijiedian0");
+        assert_eq!(sanitize("✓✓"), "host");
         assert_eq!(sanitize("--x--"), "x");
         assert_eq!(sanitize("K8s_Master.local"), "k8s_master.local");
     }

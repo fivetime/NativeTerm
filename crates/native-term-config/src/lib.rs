@@ -9,6 +9,7 @@
 //! - [`alias`]: literal-pattern checks and unique alias generation.
 //! - [`effective`]: effective settings through `ssh -G`.
 //! - [`ops`]: creating, changing, moving and deleting hosts and folders.
+//! - [`securecrt`]: reading SecureCRT sessions and planning their import.
 //! - [`write`]: safe writing (change detection, backups, atomic replace
 //!   with ssh-compatible ACLs, validation with rollback).
 
@@ -20,6 +21,7 @@ pub mod effective;
 pub mod header;
 pub mod include;
 pub mod ops;
+pub mod securecrt;
 pub mod tree;
 pub mod write;
 

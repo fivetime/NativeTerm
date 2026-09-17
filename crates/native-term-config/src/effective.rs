@@ -21,7 +21,14 @@ pub fn effective_with(ssh: &Path, config: Option<&Path>, alias: &str) -> io::Res
     if let Some(config) = config {
         command.arg("-F").arg(config);
     }
-    let output = command.arg("-G").arg(alias).output()?;
+    // no console window per check when called from the GUI
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = command.arg("-G").arg(alias).stdin(std::process::Stdio::null()).output()?;
     if !output.status.success() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(io::Error::other(message));

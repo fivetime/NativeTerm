@@ -15,6 +15,7 @@ use crate::alias;
 use crate::document::{BlockKind, Document, LineKind};
 use crate::effective;
 use crate::header;
+use crate::securecrt::{self, Plan};
 use crate::tree::{HostEntry, SessionTree, FOLDER_DEFAULTS_HOST};
 use crate::write::{self, edit_file, WriteError, Writer};
 
@@ -337,6 +338,154 @@ impl Editor {
     }
 }
 
+/// Result of [`Editor::import`]: each folder is written whole or not at all.
+#[derive(Debug, Default)]
+pub struct ImportOutcome {
+    /// Folder label, file, hosts written.
+    pub written: Vec<(String, PathBuf, usize)>,
+    /// Folder label and why it wasn't written.
+    pub failed: Vec<(String, String)>,
+}
+
+impl ImportOutcome {
+    pub fn hosts(&self) -> usize {
+        self.written.iter().map(|(_, _, n)| n).sum()
+    }
+}
+
+/// Folders written and checked at the same time during an import.
+const IMPORT_WORKERS: usize = 8;
+
+impl Editor {
+    /// Write an import plan (see [`securecrt::plan`]). One write per folder,
+    /// validated by resolving every new alias with `ssh -G`; a folder that
+    /// fails is rolled back and reported, the others are kept. `progress`
+    /// gets (hosts done, hosts total) after each folder.
+    ///
+    /// Folders are written in parallel. While one folder's file is in place
+    /// unchecked, it could make another folder's check fail (ssh reads all
+    /// of them), so failed folders are tried once more on their own.
+    pub fn import(&self, plan: &Plan, progress: &(dyn Fn(usize, usize) + Sync)) -> Result<ImportOutcome, EditError> {
+        securecrt::check_unique(plan).map_err(EditError::Invalid)?;
+        let total = plan.host_count();
+        if total == 0 {
+            return Ok(ImportOutcome::default());
+        }
+        self.ensure_header()?;
+        let dir = self.folders_dir();
+        std::fs::create_dir_all(&dir)?;
+
+        // file names up front, so parallel writers don't pick the same one
+        let mut used = std::collections::HashSet::new();
+        let jobs: Vec<(&securecrt::PlannedFolder, PathBuf)> = plan
+            .folders
+            .iter()
+            .filter(|f| !f.hosts.is_empty())
+            .map(|folder| {
+                let path = folder.existing.clone().unwrap_or_else(|| {
+                    let stem = securecrt::folder_stem(&folder.label);
+                    (1..)
+                        .map(|n| if n == 1 { dir.join(format!("{stem}.conf")) } else { dir.join(format!("{stem}-{n}.conf")) })
+                        .find(|p| !p.exists() && !used.contains(p))
+                        .expect("unbounded")
+                });
+                used.insert(path.clone());
+                (folder, path)
+            })
+            .collect();
+
+        let done = std::sync::atomic::AtomicUsize::new(0);
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let results: std::sync::Mutex<Vec<Option<Result<(), String>>>> = std::sync::Mutex::new(vec![None; jobs.len()]);
+        let run = |i: usize| {
+            let (folder, path) = &jobs[i];
+            let result = self.write_folder(folder, path);
+            if result.is_ok() {
+                let n = done.fetch_add(folder.hosts.len(), std::sync::atomic::Ordering::SeqCst) + folder.hosts.len();
+                progress(n, total);
+            }
+            results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(result);
+        };
+        std::thread::scope(|scope| {
+            for _ in 0..IMPORT_WORKERS.min(jobs.len()) {
+                scope.spawn(|| loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if i >= jobs.len() {
+                        break;
+                    }
+                    run(i);
+                });
+            }
+        });
+        let failed: Vec<usize> = results
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| !matches!(r, Some(Ok(()))))
+            .map(|(i, _)| i)
+            .collect();
+        for i in failed {
+            run(i);
+        }
+
+        let mut outcome = ImportOutcome::default();
+        let results = results.into_inner().unwrap_or_else(|e| e.into_inner());
+        for ((folder, path), result) in jobs.iter().zip(results) {
+            match result {
+                Some(Ok(())) => outcome.written.push((folder.label.clone(), path.clone(), folder.hosts.len())),
+                Some(Err(e)) => outcome.failed.push((folder.label.clone(), e)),
+                None => outcome.failed.push((folder.label.clone(), "not attempted".into())),
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// Append one planned folder's hosts to `path` (created if new) and
+    /// check each alias.
+    fn write_folder(&self, folder: &securecrt::PlannedFolder, path: &Path) -> Result<(), String> {
+        let (text, fingerprint) = match &folder.existing {
+            Some(_) => write::read(path).map_err(|e| e.to_string())?,
+            None => {
+                if path.exists() {
+                    // an earlier attempt of this import left nothing behind;
+                    // anything there now belongs to someone else
+                    return Err(format!("{} appeared meanwhile", path.display()));
+                }
+                let mut doc = Document::parse("");
+                doc.append_host(&[FOLDER_DEFAULTS_HOST], &[("NativeTermLabel", folder.label.as_str())]);
+                (doc.render(), None)
+            }
+        };
+        let mut doc = Document::parse(&text);
+        for host in &folder.hosts {
+            let mut lines = vec![format!("Host {}", crate::document::quote_arg(&host.alias))];
+            lines.extend(
+                host.entries(&crate::new_id())
+                    .into_iter()
+                    .map(|(keyword, value)| format!("    {keyword} {}", directive_args(keyword, &value))),
+            );
+            append_raw(&mut doc, &lines);
+        }
+        let checks = || {
+            folder.hosts.iter().try_for_each(|h| {
+                self.validate(&h.alias, Some(&h.hostname)).map_err(|e| format!("{}: {e}", h.alias))
+            })
+        };
+        self.writer.write(path, &doc.render(), fingerprint, checks).map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
+/// Forwards take two arguments; everything else one.
+fn directive_args(keyword: &str, value: &str) -> String {
+    match keyword {
+        "LocalForward" | "RemoteForward" => {
+            value.split_whitespace().map(crate::document::quote_arg).collect::<Vec<_>>().join(" ")
+        }
+        _ => crate::document::quote_arg(value),
+    }
+}
+
 fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'static str, String)> {
     let mut entries = vec![("HostName", draft.hostname.trim().to_string())];
     if let Some(user) = &draft.user {
@@ -443,7 +592,7 @@ mod tests {
     fn folders_and_hosts_round_trip() {
         let Some((_home, editor)) = setup() else { return };
         let folder = editor.create_folder("Ceph 集群").unwrap();
-        assert_eq!(folder.file_name().unwrap(), "ceph.conf", "{}", folder.display());
+        assert_eq!(folder.file_name().unwrap(), "ceph-jiqun.conf", "{}", folder.display());
         let main = std::fs::read_to_string(editor.main_config()).unwrap();
         assert!(main.contains("IgnoreUnknown NativeTerm*") && main.contains("Include "), "{main}");
         assert!(main.contains("Host old"), "own content kept: {main}");
@@ -454,7 +603,7 @@ mod tests {
         d.identity_files = vec!["~/.ssh/id_ed25519".into()];
         d.note = Some("rack 3".into());
         let alias = editor.create_host(&tree(&editor), &folder, &d).unwrap();
-        assert_eq!(alias, "osd-1");
+        assert_eq!(alias, "osd-1-shengchan");
 
         let t = tree(&editor);
         let (f, host) = t.find(&alias).unwrap();
@@ -464,11 +613,11 @@ mod tests {
 
         // same label again: the folder prefix keeps the alias unique
         let second = editor.create_host(&t, &folder, &draft("osd 1 (生产)", "10.32.16.71")).unwrap();
-        assert_eq!(second, "ceph.osd-1");
+        assert_eq!(second, "ceph-jiqun.osd-1-shengchan");
 
         // edit: drop the port and the note, rename, second key
         let mut changed = d.clone();
-        changed.label = "osd-1".into();
+        changed.label = "osd-1-shengchan".into();
         changed.port = None;
         changed.note = None;
         changed.identity_files.push("~/.ssh/id_rsa".into());
@@ -490,7 +639,7 @@ mod tests {
 
         editor.delete_host(host).unwrap();
         assert!(tree(&editor).find(&alias).is_none());
-        assert!(tree(&editor).find("ceph.osd-1").is_some());
+        assert!(tree(&editor).find("ceph-jiqun.osd-1-shengchan").is_some());
 
         editor.rename_folder(&folder, "Ceph").unwrap();
         assert_eq!(tree(&editor).folders().find(|f| f.file == folder).unwrap().label(), "Ceph");
@@ -516,6 +665,99 @@ mod tests {
         let err = editor.create_host(&t, &web, &draft("web", "10.0.0.1")).unwrap_err();
         assert!(matches!(err, EditError::Write(WriteError::Rejected { .. })), "{err}");
         assert_eq!(std::fs::read_to_string(&web).unwrap(), before, "rolled back");
+    }
+
+    fn crt_file(dir: &Path, rel: &str, body: &str) {
+        let p = dir.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, format!("\u{feff}S:\"Protocol Name\"=SSH2\r\n{body}")).unwrap();
+    }
+
+    #[test]
+    fn imports_a_plan() {
+        let Some((home, editor)) = setup() else { return };
+        let config = home.path().join("crt");
+        let crt = config.join("Sessions");
+        crt_file(&crt, "生产/bastion.ini", "S:\"Hostname\"=10.1.0.1\r\nS:\"Username\"=ops\r\n");
+        crt_file(
+            &crt,
+            "生产/web 01.ini",
+            concat!(
+                "S:\"Hostname\"=10.1.0.2\r\n",
+                "D:\"[SSH2] Port\"=00000d3d\r\n",
+                "S:\"Firewall Name\"=Session:生产/bastion\r\n",
+                "Z:\"Port Forward Table V2\"=00000002\r\n",
+                " web|127.0.0.1,8080|1|10.0.0.9|80||\r\n",
+                " dyn|1080|0|socks,|0||\r\n",
+                "Z:\"Description\"=00000001\r\n",
+                " 前端 web\r\n",
+            ),
+        );
+        crt_file(&crt, "old-box.ini", "S:\"Hostname\"=10.9.9.9\r\n");
+        let scan = securecrt::scan(&config).unwrap();
+        let plan = securecrt::plan(&scan, &tree(&editor));
+        assert_eq!(plan.host_count(), 3);
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let outcome = editor
+            .import(&plan, &|_, _| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            })
+            .unwrap();
+        assert!(outcome.failed.is_empty(), "{:?}", outcome.failed);
+        assert_eq!(outcome.hosts(), 3);
+        assert_eq!(calls.into_inner(), 2);
+
+        let t = tree(&editor);
+        let (folder, web) = t.find("web-01").unwrap();
+        assert_eq!(folder.label(), "生产");
+        assert_eq!(web.label(), "web 01");
+        assert_eq!(web.port, Some(3389));
+        assert_eq!(web.proxy_jump.as_deref(), Some("bastion"));
+        assert_eq!(web.nt.get("note"), Some("前端 web"));
+        assert_eq!(web.nt.get("source"), Some("securecrt:生产/web 01"));
+        let effective = crate::effective::effective_with(&editor.ssh, editor.config.as_deref(), "web-01").unwrap();
+        let get = |k: &str| effective.iter().filter(|(kk, _)| kk == k).map(|(_, v)| v.clone()).collect::<Vec<_>>();
+        assert_eq!(get("localforward"), ["[127.0.0.1]:8080 [10.0.0.9]:80"]);
+        assert_eq!(get("dynamicforward"), ["1080"]);
+        assert_eq!(t.find("old-box").unwrap().0.label(), "SecureCRT");
+
+        // a second import skips what is there and adds the new session to
+        // the existing folder
+        crt_file(&crt, "生产/db.ini", "S:\"Hostname\"=10.1.0.3\r\n");
+        let scan = securecrt::scan(&config).unwrap();
+        let plan = securecrt::plan(&scan, &t);
+        assert_eq!(plan.host_count(), 1);
+        assert_eq!(plan.skipped.len(), 3);
+        assert!(plan.folders[0].existing.is_some());
+        editor.import(&plan, &|_, _| {}).unwrap();
+        let t = tree(&editor);
+        assert_eq!(t.find("db").unwrap().0.label(), "生产");
+        assert_eq!(t.folders().filter(|f| f.label() == "生产").count(), 1);
+    }
+
+    #[test]
+    fn a_folder_that_fails_is_rolled_back() {
+        let Some((home, editor)) = setup() else { return };
+        let config = home.path().join("crt");
+        let crt = config.join("Sessions");
+        crt_file(&crt, "A/a1.ini", "S:\"Hostname\"=10.0.0.1\r\n");
+        crt_file(&crt, "B/b1.ini", "S:\"Hostname\"=10.0.0.2\r\n");
+        let scan = securecrt::scan(&config).unwrap();
+        let plan = securecrt::plan(&scan, &tree(&editor));
+        // meanwhile a file read earlier defines b1 differently
+        let earlier = editor.folders_dir().join("0-mine.conf");
+        std::fs::create_dir_all(editor.folders_dir()).unwrap();
+        std::fs::write(&earlier, "Host b1
+    HostName 10.9.9.9
+").unwrap();
+        crate::acl::restrict_to_owner(&earlier).unwrap();
+        let outcome = editor.import(&plan, &|_, _| {}).unwrap();
+        assert_eq!(outcome.written.len(), 1);
+        assert_eq!(outcome.failed.len(), 1, "{:?}", outcome.failed);
+        assert_eq!(outcome.failed[0].0, "B");
+        let t = tree(&editor);
+        assert!(t.find("a1").is_some());
+        assert!(!t.folders().any(|f| f.label() == "B"), "the failed folder's file is gone");
     }
 
     #[test]

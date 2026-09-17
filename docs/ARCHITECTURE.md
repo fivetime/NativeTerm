@@ -989,6 +989,7 @@ Keys NativeTerm reads:
 |---|---|
 | `NativeTermId` | **Stable id** (UUID), written once when a host is created or imported. App data (recent, usage, long notes, tags, open-session records) is keyed by it, so renaming the alias or label loses nothing |
 | `NativeTermLabel` / `NativeTermNote` | Display name / one-line description |
+| `NativeTermSource` | Where an imported host came from (`securecrt:<folder>/<session>`); a later import skips it |
 | `NativeTermFavorite` | Favorite |
 | `NativeTermTabColor` / `NativeTermProfile` / `NativeTermColorScheme` | Appearance |
 | `NativeTermPersistent` | tmux / screen |
@@ -1215,6 +1216,83 @@ What it doesn't import, and reports instead of silently dropping:
   review.
 
 The result is shown as a summary before anything is written.
+
+#### Implementation (first version)
+
+- **Where:** `native-term-config::securecrt` (`scan` reads the files,
+  `plan` decides folders, aliases, and what is skipped),
+  `Editor::import` writes the plan, `native-term-app::import` words the
+  summary. The app has "Import from SecureCRT…" in its top bar; the
+  `securecrt_import` example does the same on the command line (preview
+  by default, `--write --ssh-dir <dir>` to import).
+- **File format** (from public samples and VanDyke's own import scripts):
+  `S:"key"=text`, `D:"key"=<hex>`, `Z:"key"=<hex count>` followed by that
+  many lines (each with one leading space), `B:"key"=<hex length>`
+  followed by indented hex lines. UTF-8 with BOM, CRLF. The host is
+  `Hostname`, the user `Username`, the port `[SSH2] Port` for SSH2 and
+  `Port` otherwise, the description `Description`. `Default.ini` at the
+  top and every `__FolderData__.ini` are not sessions.
+- **Secrets never enter the model.** Values of keys containing
+  "password", "passphrase", "login script" or "logon script" are not
+  kept; only whether they were set is recorded, for the report
+  ("Saved passwords aren't imported (N sessions)"). A test checks that
+  no such value survives parsing. During development only public
+  samples and synthetic files were read, not the author's own session
+  files.
+- **Folders:** SecureCRT's nested folders become flat NativeTerm folders
+  labeled with the whole path (`生产 / 控制节点`); sessions directly
+  under `Sessions` go to a folder "SecureCRT". A folder whose label
+  already exists is appended to. The tree doesn't show the nesting yet.
+- **Aliases:** generated from the session name (or the host name when
+  the name has nothing usable), unique across all files; on a clash the
+  folder path is put in front (`shengchan-xiangmu01.bastion`). Han
+  characters become pinyin without tones (`控制节点0` →
+  `kongzhijiedian0`), for all generated aliases and folder file names,
+  not just imported ones.
+- **Jump hosts:** `Firewall Name` = `Session:<path>` becomes `ProxyJump`
+  with the alias the jump session got (in this import or an earlier
+  one). A jump session that isn't imported is reported, and the host is
+  written without it. Other firewall names (global SecureCRT
+  firewalls/proxies) are reported, not imported. Not checked against a
+  real configuration yet; the preview shows what it found.
+- **Port forwards:** `Port Forward Table V2` / `Reverse Forward Table V2`
+  entries (`name|[bind,]port|different?|host|port||`) become
+  `LocalForward`, `RemoteForward`, or `DynamicForward` (target
+  `socks,`). A target that isn't "different from the SSH server" is
+  `localhost` as seen from the server. Forwards take two arguments, so
+  they are written unquoted, argument by argument.
+- **Keys:** `Identity Filename V2` is used only when the session doesn't
+  use the global key (`Use Global Public Key` = 0); `::…` options and a
+  `.pub` suffix are dropped. The key must be in OpenSSH format (the
+  report says so).
+- **Descriptions:** all lines joined with " · " into `NativeTermNote`.
+- **Skipped and reported:** Telnet, serial, raw and rlogin (plink
+  sessions come later), RDP and other protocols, sessions without a
+  host name, sessions imported before (`NativeTermSource`). Reported but
+  imported: duplicates (same host, port, user), non-UTF-8 character
+  sets, logon actions, unreadable forwards.
+- **Writing:** one write per folder through the safe writer (backup,
+  owner-only ACL), then every new alias is resolved with `ssh -G` and
+  must give its host name; a failing folder is rolled back and listed,
+  the others stay. Folders are written by 8 workers at once; a folder
+  that failed is tried again on its own, in case another folder's
+  unchecked file was the cause.
+  - Measured on a synthetic configuration (188 folders, 736 sessions):
+    733 hosts in 184 folders in 29 s from the command line, ~40 s from
+    the app, most of it `ssh -G` (each run reads all folder files).
+    Idle memory afterwards: 34 MB.
+  - Two bugs found on the way:
+    - **Wrong ssh.** From Git Bash, `ssh` on `PATH` is Git's MSYS
+      build, which doesn't find the `C:/…` include, so every folder was
+      rolled back. NativeTerm now uses `native_term_session::ssh_program()`
+      everywhere (checks and tabs): `NATIVETERM_SSH`, else the first
+      native `ssh.exe` on `PATH`, skipping MSYS/Cygwin builds, else
+      `System32\OpenSSH`.
+    - **A console per check.** From the GUI, every `ssh -G` opened a
+      console window (slow, and visible). Checks now run with
+      `CREATE_NO_WINDOW`; the same applied to editing hosts before.
+- **Not yet:** host keys (`KnownHosts`), saved commands, plink sessions,
+  nested folder display.
 
 ## Cloud sync (optional, via rclone)
 

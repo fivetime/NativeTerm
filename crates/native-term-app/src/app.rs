@@ -9,6 +9,7 @@ use native_term_config::write::Writer;
 use native_term_config::SessionTree;
 
 use crate::dialogs::{ConfirmDelete, FolderDialog, HostDialog, Outcome};
+use crate::import_dialog::ImportDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::tree_view::{TreeAction, TreeView};
 use crate::Setup;
@@ -17,6 +18,7 @@ enum Dialog {
     Host(HostDialog),
     Folder(FolderDialog),
     Delete(ConfirmDelete),
+    Import(Box<ImportDialog>),
 }
 
 pub struct App {
@@ -25,6 +27,7 @@ pub struct App {
     /// Bumped on every reload.
     generation: u64,
     ssh_dir: PathBuf,
+    data_dir: PathBuf,
     editor: Editor,
     view: TreeView,
     dialog: Option<Dialog>,
@@ -35,9 +38,10 @@ pub struct App {
 
 /// The user's own `~/.ssh` is edited with ssh's defaults; any other
 /// directory (tests, demos) with `-F` and absolute includes.
-fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
+pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
     let writer = Writer::new(data_dir.join("backups"));
-    let ssh = Path::new("ssh");
+    let program = native_term_session::ssh_program();
+    let ssh = program.as_path();
     let home_ssh = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"));
     if home_ssh.as_deref().is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&ssh_dir.to_string_lossy())) {
         Editor::new(ssh_dir, writer, ssh)
@@ -64,6 +68,7 @@ impl App {
             tree,
             generation: 0,
             editor: editor_for(&options.ssh_dir, &data_dir),
+            data_dir,
             ssh_dir: options.ssh_dir,
             view: TreeView::default(),
             dialog: None,
@@ -175,6 +180,14 @@ impl App {
                         }
                     }
                 }
+            },
+            Dialog::Import(d) => match d.show(ctx, &self.tree) {
+                Outcome::Open => false,
+                Outcome::Cancel => {
+                    self.dialog = None;
+                    return;
+                }
+                Outcome::Submit(()) => true,
             },
             Dialog::Delete(d) => match d.show(ctx) {
                 Outcome::Open => false,
@@ -303,6 +316,9 @@ impl crate::window::Ui for App {
         egui::Panel::top("status").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut self.show_settings, "⚙ Settings");
+                if ui.button("Import from SecureCRT…").clicked() && self.dialog.is_none() {
+                    self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
+                }
             });
             if self.show_settings {
                 ui.group(|ui| self.profile.settings_ui(ui, &mut self.notices));
