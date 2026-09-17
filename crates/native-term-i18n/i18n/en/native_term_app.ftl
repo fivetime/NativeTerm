@@ -289,6 +289,11 @@ delete-backup-note = A backup of the file is kept in the data directory.
 
 ## SecureCRT import
 
+import-putty-button = Import from PuTTY…
+import-title-putty = Import from PuTTY
+import-putty-from = PuTTY saved sessions
+summary-ppk = PuTTY keys (.ppk) are not used by OpenSSH: { $count } sessions; convert them with PuTTYgen (Conversions → Export OpenSSH key) and add the key in the host dialog
+summary-putty-host-keys = PuTTY's stored host keys are not imported; ssh asks once on the first connection
 import-title = Import from SecureCRT
 import-folder-label = SecureCRT config folder
 import-into = Into: { $path }  (every changed file is backed up first)

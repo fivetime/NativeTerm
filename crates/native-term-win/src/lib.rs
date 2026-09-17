@@ -5,6 +5,7 @@
 
 pub mod desktop;
 pub mod dock;
+pub mod registry;
 pub mod service;
 pub mod watch;
 

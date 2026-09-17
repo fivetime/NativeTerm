@@ -33,6 +33,40 @@ use crate::tree::SessionTree;
 /// second import skips it.
 pub const SOURCE_PREFIX: &str = "securecrt:";
 
+/// Which program the sessions come from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Origin {
+    #[default]
+    SecureCrt,
+    /// PuTTY's saved sessions (see [`crate::putty`]).
+    Putty,
+}
+
+impl Origin {
+    /// `NativeTermSource` prefix.
+    pub fn source_prefix(self) -> &'static str {
+        match self {
+            Origin::SecureCrt => SOURCE_PREFIX,
+            Origin::Putty => "putty:",
+        }
+    }
+
+    /// Folder for sessions that aren't in a folder.
+    pub fn root_label(self) -> &'static str {
+        match self {
+            Origin::SecureCrt => ROOT_FOLDER_LABEL,
+            Origin::Putty => "PuTTY",
+        }
+    }
+
+    fn alias_prefix(self) -> &'static str {
+        match self {
+            Origin::SecureCrt => "securecrt",
+            Origin::Putty => "putty",
+        }
+    }
+}
+
 /// A value from a session file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Value {
@@ -135,8 +169,11 @@ pub enum Firewall {
     None,
     /// Through another session (a jump host), by its path under `Sessions`.
     Session(String),
-    /// A firewall/proxy defined in SecureCRT's global options.
+    /// A firewall/proxy defined in SecureCRT's global options, or a PuTTY
+    /// proxy that isn't an SSH jump.
     Named(String),
+    /// A jump host written out (`user@host:port`), not a saved session.
+    Jump(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,6 +259,10 @@ pub struct CrtSession {
     pub com_port: Option<String>,
     pub logon_actions: bool,
     pub saved_password: bool,
+    /// A PuTTY-format key (`.ppk`), which OpenSSH can't use.
+    pub ppk_key: Option<String>,
+    /// More directives to write (`ForwardAgent yes`, …).
+    pub options: Vec<(&'static str, String)>,
 }
 
 fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
@@ -277,6 +318,8 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
         com_port: ini.str("Com Port").map(str::to_string),
         logon_actions,
         saved_password,
+        ppk_key: None,
+        options: Vec::new(),
     }
 }
 
@@ -294,6 +337,7 @@ fn identity_path(value: &str) -> String {
 /// What a scan found.
 #[derive(Debug, Default)]
 pub struct Scan {
+    pub origin: Origin,
     pub root: PathBuf,
     pub sessions: Vec<CrtSession>,
     /// Folders seen (paths), including empty ones.
@@ -380,6 +424,8 @@ pub enum Skip {
 /// A host to write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedHost {
+    /// `NativeTermSource` prefix, from the scan's origin.
+    pub source_prefix: &'static str,
     pub source: String,
     pub alias: String,
     pub label: String,
@@ -389,6 +435,7 @@ pub struct PlannedHost {
     pub proxy_jump: Option<String>,
     pub identity_file: Option<String>,
     pub forwards: Vec<Forward>,
+    pub options: Vec<(&'static str, String)>,
     pub note: Option<String>,
 }
 
@@ -411,6 +458,7 @@ impl PlannedHost {
         for forward in &self.forwards {
             entries.push(forward.directive());
         }
+        entries.extend(self.options.iter().cloned());
         if self.label != self.alias {
             entries.push(("NativeTermLabel", self.label.clone()));
         }
@@ -418,7 +466,7 @@ impl PlannedHost {
             entries.push(("NativeTermNote", note.clone()));
         }
         entries.push(("NativeTermId", id.to_string()));
-        entries.push(("NativeTermSource", format!("{SOURCE_PREFIX}{}", self.source)));
+        entries.push(("NativeTermSource", format!("{}{}", self.source_prefix, self.source)));
         entries
     }
 }
@@ -451,6 +499,8 @@ pub struct Notes {
     pub bad_forwards: Vec<String>,
     /// Multi-line descriptions joined into one line.
     pub joined_descriptions: usize,
+    /// PuTTY keys (`.ppk`) that need converting: path → key file.
+    pub ppk_keys: Vec<(String, String)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -472,9 +522,9 @@ impl Plan {
 /// Label for sessions directly under `Sessions`.
 pub const ROOT_FOLDER_LABEL: &str = "SecureCRT";
 
-fn folder_label(folder: &[String]) -> String {
+fn folder_label(folder: &[String], origin: Origin) -> String {
     if folder.is_empty() {
-        ROOT_FOLDER_LABEL.to_string()
+        origin.root_label().to_string()
     } else {
         folder.join(" / ")
     }
@@ -486,10 +536,11 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
     let mut notes = Notes::default();
     let mut skipped = Vec::new();
 
-    // sessions imported earlier: source path → alias
+    // sessions imported earlier from the same program: source path → alias
+    let origin = scan.origin;
     let mut imported: HashMap<String, String> = HashMap::new();
     for (_, host) in tree.hosts() {
-        if let Some(source) = host.nt.get("source").and_then(|s| s.strip_prefix(SOURCE_PREFIX)) {
+        if let Some(source) = host.nt.get("source").and_then(|s| s.strip_prefix(origin.source_prefix())) {
             imported.insert(source.to_lowercase(), host.alias().to_string());
         }
     }
@@ -510,7 +561,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
         }
         match protocol.as_str() {
             "ssh2" => {}
-            "telnet" | "serial" | "raw" | "rlogin" | "telnet/ssl" => {
+            "telnet" | "serial" | "raw" | "rlogin" | "telnet/ssl" | "supdup" => {
                 skipped.push((s.path.clone(), Skip::PlinkLater(s.protocol.clone())));
                 continue;
             }
@@ -525,7 +576,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
         };
         let user = s.username.clone().filter(|u| !u.contains(char::is_whitespace));
 
-        let label = folder_label(&s.folder);
+        let label = folder_label(&s.folder, origin);
         let fi = *folder_index.entry(label.to_lowercase()).or_insert_with(|| {
             folders.push(PlannedFolder {
                 existing: existing_folders.get(&label.to_lowercase()).cloned(),
@@ -536,13 +587,19 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
         });
 
         let base = if alias::sanitize(&s.name) == "host" { hostname.as_str() } else { s.name.as_str() };
-        let prefix = if s.folder.is_empty() { "securecrt".to_string() } else { folder_stem(&s.folder.join(" ")) };
+        let prefix =
+            if s.folder.is_empty() { origin.alias_prefix().to_string() } else { folder_stem(&s.folder.join(" ")) };
         let alias = alias::unique(base, &prefix, &taken);
         taken.insert(alias.to_lowercase());
         by_path.insert(s.path.to_lowercase(), alias.clone());
 
+        let mut proxy_jump = None;
         match &s.firewall {
             Firewall::None => {}
+            Firewall::Jump(target) if !target.is_empty() && !target.contains(char::is_whitespace) => {
+                proxy_jump = Some(target.clone());
+            }
+            Firewall::Jump(target) => notes.unresolved_jumps.push((s.path.clone(), target.clone())),
             Firewall::Session(target) => {
                 pending_jumps.push((fi, folders[fi].hosts.len(), target.clone()));
             }
@@ -560,6 +617,9 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
         if s.identity_file.is_some() {
             notes.identity_files += 1;
         }
+        if let Some(key) = &s.ppk_key {
+            notes.ppk_keys.push((s.path.clone(), key.clone()));
+        }
         notes.forwards += s.forwards.len();
         if s.bad_forwards > 0 {
             notes.bad_forwards.push(s.path.clone());
@@ -573,15 +633,17 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
 
         let note = Some(s.description.join(" · ")).filter(|n| !n.is_empty());
         folders[fi].hosts.push(PlannedHost {
+            source_prefix: origin.source_prefix(),
             source: s.path.clone(),
             alias,
             label: s.name.clone(),
             hostname,
             user,
             port: s.port,
-            proxy_jump: None,
+            proxy_jump,
             identity_file: s.identity_file.clone(),
             forwards: s.forwards.clone(),
+            options: s.options.clone(),
             note,
         });
     }

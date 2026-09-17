@@ -87,6 +87,8 @@ pub struct App {
     profile: ProfileSetup,
     show_settings: bool,
     notices: Vec<String>,
+    /// PuTTY has saved sessions (checked at start).
+    putty_sessions: bool,
 }
 
 /// The user's own `~/.ssh` is edited with ssh's defaults; any other
@@ -159,6 +161,7 @@ impl App {
             profile,
             show_settings: false,
             notices,
+            putty_sessions: native_term_config::putty::has_sessions(),
         }
     }
 
@@ -743,6 +746,10 @@ impl crate::window::Ui for App {
                 }
                 if ui.button(icons::with(icons::IMPORT, t!("import-securecrt-button"))).clicked() && self.dialog.is_none() {
                     self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
+                }
+                if self.putty_sessions && ui.button(icons::with(icons::IMPORT, t!("import-putty-button"))).clicked() && self.dialog.is_none() {
+                    let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.tree);
+                    self.dialog = Some(Dialog::Import(Box::new(dialog)));
                 }
             });
             if self.show_settings {

@@ -1,10 +1,10 @@
-//! Importing from SecureCRT: where its sessions are, and the summary shown
-//! before anything is written.
+//! Importing from SecureCRT or PuTTY: where the sessions are, and the
+//! summary shown before anything is written.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use native_term_config::securecrt::{Plan, Scan, Skip};
+use native_term_config::securecrt::{Origin, Plan, Scan, Skip};
 
 use crate::t;
 
@@ -121,6 +121,13 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
     if n.identity_files > 0 {
         kept.push(t!("summary-keys", count = n.identity_files));
     }
+    if !n.ppk_keys.is_empty() {
+        out.push(line(
+            t!("summary-ppk", count = n.ppk_keys.len()),
+            true,
+            n.ppk_keys.iter().map(|(p, k)| format!("{p}  ({k})")).collect(),
+        ));
+    }
     if n.joined_descriptions > 0 {
         kept.push(t!("summary-descriptions", count = n.joined_descriptions));
     }
@@ -148,6 +155,9 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
     if keys.not_understood > 0 {
         out.push(line(t!("summary-host-keys-unknown", count = keys.not_understood), true, Vec::new()));
     }
-    out.push(line(t!("summary-not-yet"), false, Vec::new()));
+    match scan.origin {
+        Origin::SecureCrt => out.push(line(t!("summary-not-yet"), false, Vec::new())),
+        Origin::Putty => out.push(line(t!("summary-putty-host-keys"), false, Vec::new())),
+    }
     out
 }

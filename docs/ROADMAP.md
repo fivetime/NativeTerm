@@ -213,7 +213,16 @@
       library; Telnet / serial / raw / rlogin as plink sessions
 - [x] `ssh` used for tabs and checks: native builds only (MSYS/Cygwin
       `ssh` on `PATH` skipped), no console window for checks
-- [ ] PuTTY saved-session import (read-only from the PuTTY registry key)
+- [x] PuTTY saved-session import (read-only from the PuTTY registry key;
+      names un-escaped, UTF-8 or ANSI; host, port, user incl.
+      `user@host`, port forwards, agent forwarding, compression,
+      keepalive; SSH proxy → `ProxyJump` to the imported session or the
+      written-out host; other proxies, `.ppk` keys and non-UTF-8 code pages
+      reported; Telnet / serial / raw / rlogin / SUPDUP skipped for plink;
+      same preview, per-folder `ssh -G` check and `putty:` source for
+      re-imports as SecureCRT; toolbar button only when PuTTY has
+      sessions; `NATIVETERM_PUTTY_KEY` points tests at another key)
+- [ ] PuTTY import (rest): host keys from `SshHostKeys`; plink sessions
 - [ ] First-run wizard (import, environment checks, key setup, data
       directory / cloud sync)
 - [x] Unique tab titles (`web01 (2)`); foreign tabs excluded from batch

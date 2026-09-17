@@ -845,6 +845,13 @@ Import: the user's existing **PuTTY saved sessions** (e.g. switches and
 serial consoles) are read, read-only, from
 `HKCU\Software\SimonTatham\PuTTY\Sessions`. They can be imported like
 SecureCRT sessions, or referenced by name (`plink -load <name>`).
+Implemented for SSH sessions (`native_term_config::putty`): each session
+becomes the same session record the SecureCRT reader produces, so one
+planner and writer serve both; `NativeTermSource putty:<name>` marks
+imported hosts. A PuTTY SSH proxy (method 6) becomes `ProxyJump` — to
+the imported host when it names a saved session, else the host written
+out. `.ppk` keys aren't usable by OpenSSH and are reported with the
+PuTTYgen conversion step; PuTTY's host keys aren't imported yet.
 
 ### PuTTY options and how they reach plink
 

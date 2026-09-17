@@ -11,6 +11,7 @@
 //! - [`ops`]: creating, changing, moving and deleting hosts and folders.
 //! - [`options`]: the session options (more ssh settings per host).
 //! - [`securecrt`]: reading SecureCRT sessions and planning their import.
+//! - [`putty`]: reading PuTTY's saved sessions for the same import.
 //! - [`write`]: safe writing (change detection, backups, atomic replace
 //!   with ssh-compatible ACLs, validation with rollback).
 
@@ -25,6 +26,8 @@ pub mod keys;
 pub mod known_hosts;
 pub mod ops;
 pub mod options;
+#[cfg(windows)]
+pub mod putty;
 pub mod securecrt;
 pub mod tree;
 pub mod write;

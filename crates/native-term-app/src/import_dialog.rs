@@ -1,5 +1,5 @@
-//! "Import from SecureCRT": pick the folder, preview what would happen,
-//! then import in the background.
+//! "Import from SecureCRT / PuTTY": pick the folder (SecureCRT), preview
+//! what would happen, then import in the background.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,7 +9,8 @@ use std::sync::Arc;
 use native_term_app::import::{self, Line};
 use native_term_app::t;
 use native_term_config::ops::ImportOutcome;
-use native_term_config::securecrt::{self, Plan};
+use native_term_config::putty;
+use native_term_config::securecrt::{self, Origin, Plan};
 use native_term_config::SessionTree;
 
 use crate::dialogs::Outcome;
@@ -22,6 +23,7 @@ enum Step {
 }
 
 pub struct ImportDialog {
+    origin: Origin,
     path: String,
     step: Step,
     error: Option<String>,
@@ -35,12 +37,23 @@ const AMBER: egui::Color32 = egui::Color32::from_rgb(0xd0, 0x9a, 0x1a);
 impl ImportDialog {
     pub fn new(ssh_dir: PathBuf, data_dir: PathBuf) -> ImportDialog {
         let path = import::securecrt_config_path().map(|p| p.display().to_string()).unwrap_or_default();
-        ImportDialog { path, step: Step::Choose, error: None, ssh_dir, data_dir }
+        ImportDialog { origin: Origin::SecureCrt, path, step: Step::Choose, error: None, ssh_dir, data_dir }
+    }
+
+    /// PuTTY's saved sessions, previewed right away.
+    pub fn putty(ssh_dir: PathBuf, data_dir: PathBuf, tree: &SessionTree) -> ImportDialog {
+        let path = format!(r"HKEY_CURRENT_USER\{}", putty::sessions_key());
+        let mut dialog = ImportDialog { origin: Origin::Putty, path, step: Step::Choose, error: None, ssh_dir, data_dir };
+        dialog.preview(tree);
+        dialog
     }
 
     fn preview(&mut self, tree: &SessionTree) {
-        let config = PathBuf::from(self.path.trim());
-        match securecrt::scan(&config) {
+        let scanned = match self.origin {
+            Origin::SecureCrt => securecrt::scan(&PathBuf::from(self.path.trim())),
+            Origin::Putty => putty::scan(),
+        };
+        match scanned {
             Ok(scan) => {
                 let plan = securecrt::plan(&scan, tree);
                 let lines = import::summary(&scan, &plan);
@@ -98,8 +111,13 @@ impl ImportDialog {
         let mut open = true;
         let running = matches!(self.step, Step::Running { .. });
         let mut start = None;
-        egui::Window::new(t!("import-title"))
-            .id(egui::Id::new("import-securecrt"))
+        let (title, folder_label) = match self.origin {
+            Origin::SecureCrt => (t!("import-title"), t!("import-folder-label")),
+            Origin::Putty => (t!("import-title-putty"), t!("import-putty-from")),
+        };
+        let editable = self.origin == Origin::SecureCrt && matches!(self.step, Step::Choose | Step::Preview { .. });
+        egui::Window::new(title)
+            .id(egui::Id::new("import-sessions"))
             .collapsible(false)
             .resizable(true)
             .default_width(640.0)
@@ -107,9 +125,9 @@ impl ImportDialog {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(t!("import-folder-label"));
+                    ui.label(folder_label);
                     ui.add_enabled(
-                        matches!(self.step, Step::Choose | Step::Preview { .. }),
+                        editable,
                         egui::TextEdit::singleline(&mut self.path).hint_text("…\\VanDyke\\Config").desired_width(360.0),
                     );
                 });

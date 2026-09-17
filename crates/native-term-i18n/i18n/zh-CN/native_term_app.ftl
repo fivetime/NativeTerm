@@ -274,6 +274,11 @@ delete-backup-note = 文件的备份会保存在数据目录中。
 
 ## 从 SecureCRT 导入
 
+import-putty-button = 从 PuTTY 导入…
+import-title-putty = 从 PuTTY 导入
+import-putty-from = PuTTY 保存的会话
+summary-ppk = OpenSSH 不能使用 PuTTY 格式的密钥 (.ppk)：{ $count } 个会话；请用 PuTTYgen 转换（Conversions → Export OpenSSH key），再在主机对话框里填写密钥
+summary-putty-host-keys = 不导入 PuTTY 保存的主机指纹；首次连接时 ssh 会询问一次
 import-title = 从 SecureCRT 导入
 import-folder-label = SecureCRT 配置文件夹
 import-into = 导入到：{ $path }（改动的文件都会先备份）
