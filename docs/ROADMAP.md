@@ -100,24 +100,32 @@
       end-to-end tests with a fake ssh
 - [ ] `native-term-shim` (rest): `NativeTermPreConnect`; plink sessions;
       askpass mode
-- [ ] `native-term-platform` (Windows): open tabs via
-      `wt -w 0 new-tab --profile "NativeTerm SSH" --sessionId {…} --title …
-      nativeterm-shim --session <id> <alias>` (tested argument handling;
-      optional dedicated window, with the named-workspace check before
-      opening into it); claim tabs by the three rules (tab name, selected
-      tab's pane HelpText, full-list alignment via `ItemContainerPattern`);
-      Terminal windows via `EnumWindows` + `WM_NULL` probe +
-      `ElementFromHandle`, UIA on watchdog-guarded workers; select via
-      realize + select; UIA close only as a fallback; braced GUIDs;
-      confirm each new tab appeared, resend once; launch `wt` with the
-      user's normal token when NativeTerm is elevated
-- [ ] Connect in Tabs in New Window: `wt -w new` (unnamed) for the first
-      ~100 tabs, `-w 0` for later batches with foreground/UIA checks;
-      connections paced by the queue
-- [ ] Windows Terminal fragment: "NativeTerm SSH" profile (command line =
-      shim without host, `suppressApplicationTitle: true`, `closeOnExit`,
-      `historySize`, stable GUID), color schemes, favorites as profiles
-      and actions
+- [x] `native-term-platform` (Windows): open tabs via
+      `wt -w 0 new-tab --profile "NativeTerm SSH" --sessionId {…} --title=…
+      --suppressApplicationTitle <shim> --session <id> <alias>` (`;`
+      escaped, leading `-` safe); named window with the saved-workspace
+      check; claim tabs by the three rules; Terminal windows via
+      `EnumWindows` + `WM_NULL` probe + `ElementFromHandle`, UIA on a
+      watchdog worker; select via realize + select; UIA close as a
+      fallback; confirmation by title; `wt` launched through the desktop
+      shell when elevated; install discovery (packages, portable,
+      unpackaged); fragment writer. Live-tested on portable 1.26
+      (`tests/portable_terminal.rs`)
+- [ ] `native-term-platform` (rest): resend a missing tab once (with a
+      new GUID, from the app); selection events instead of polling; the
+      elevated path tested from an elevated process
+- [x] Connect in Tabs in New Window: `wt -w new` (unnamed) for the first
+      ~100 tabs, `-w 0` for later batches, each after the previous
+      batch's tabs exist and only while no other Terminal window was
+      activated; the rest returned as pending
+- [ ] Connections paced by the queue (app)
+- [x] Windows Terminal fragment writer: "NativeTerm SSH" profile (command
+      line = shim without host, `suppressApplicationTitle: true`,
+      `closeOnExit: automatic`, `historySize` 5000, fixed GUID), written
+      only when changed, `settings.json` touched to reload, moved-folder
+      detection
+- [ ] Fragment: color schemes, favorites as profiles and actions;
+      installing it from the app
 - [ ] `state.db` (SQLite) in the data directory: open-session registry,
       recent/usage, long notes and tags keyed by `NativeTermId`;
       `notes.toml` export for sync; `NativeTermId` written on create/import

@@ -12,9 +12,9 @@ use windows::Win32::Security::Authorization::{
     ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::{
-    GetTokenInformation, SetFileSecurityW, TokenStatistics, TokenUser, DACL_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
-    TOKEN_STATISTICS, TOKEN_USER,
+    GetTokenInformation, SetFileSecurityW, TokenElevation, TokenStatistics, TokenUser, DACL_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_ELEVATION, TOKEN_INFORMATION_CLASS,
+    TOKEN_QUERY, TOKEN_STATISTICS, TOKEN_USER,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -40,7 +40,7 @@ pub fn user_sid() -> io::Result<String> {
         let mut sid = PWSTR::null();
         ConvertSidToStringSidW(user.User.Sid, &mut sid)?;
         let text = sid.to_string().map_err(io::Error::other);
-        LocalFree(HLOCAL(sid.0.cast()));
+        LocalFree(Some(HLOCAL(sid.0.cast())));
         text
     }
 }
@@ -52,6 +52,13 @@ pub fn logon_session_id() -> io::Result<String> {
     let stats = unsafe { &*(buf.as_ptr() as *const TOKEN_STATISTICS) };
     let luid = stats.AuthenticationId;
     Ok(format!("{:x}{:08x}", luid.HighPart, luid.LowPart))
+}
+
+/// Whether this process runs elevated (as administrator with UAC).
+pub fn is_elevated() -> bool {
+    token_information(TokenElevation)
+        .map(|buf| unsafe { (*(buf.as_ptr() as *const TOKEN_ELEVATION)).TokenIsElevated != 0 })
+        .unwrap_or(false)
 }
 
 /// A self-relative security descriptor parsed from SDDL, freed on drop.
@@ -79,7 +86,7 @@ unsafe impl Sync for SecurityDescriptor {}
 impl Drop for SecurityDescriptor {
     fn drop(&mut self) {
         unsafe {
-            LocalFree(HLOCAL(self.0 .0));
+            LocalFree(Some(HLOCAL(self.0 .0)));
         }
     }
 }
@@ -121,7 +128,7 @@ pub fn file_dacl_sddl(path: &Path) -> io::Result<String> {
             None,
         )?;
         let out = text.to_string().map_err(io::Error::other);
-        LocalFree(HLOCAL(text.0.cast()));
+        LocalFree(Some(HLOCAL(text.0.cast())));
         out
     }
 }
@@ -135,6 +142,7 @@ mod tests {
         assert!(user_sid().unwrap().starts_with("S-1-"));
         let logon = logon_session_id().unwrap();
         assert!(!logon.is_empty() && logon.chars().all(|c| c.is_ascii_hexdigit()), "{logon}");
+        let _ = is_elevated();
     }
 
     #[test]

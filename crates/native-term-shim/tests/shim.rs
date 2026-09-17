@@ -146,6 +146,41 @@ fn placeholder_without_host_is_closed_by_nativeterm() {
 }
 
 #[test]
+fn placeholder_without_an_answer_becomes_a_local_shell() {
+    let name = pipe_name("goeslocal");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    // the local shell (cmd with no input) ends at once, and so does the shim
+    let mut shim = spawn_shim(&name, &[], &[]);
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { alias: None, .. }));
+    let started = std::time::Instant::now();
+    assert_eq!(wait_exit(&mut shim), 0);
+    assert!(started.elapsed() >= Duration::from_millis(2500), "waited for NativeTerm first");
+    // and it has hung up instead of reconnecting
+    assert_eq!(conn.recv::<ShimMessage>(WAIT).unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+}
+
+#[test]
+fn close_sent_right_before_nativeterm_disconnects() {
+    let name = pipe_name("dropclose");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(&name, &["web01"], &[("FAKE_SSH_CODE", "255")]);
+    // first connection: wait until ssh has exited, then go away
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    assert_eq!(expect(&conn), ShimMessage::Connecting);
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    drop(conn);
+    // the shim reconnects; answer and hang up at once, without reading on
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    conn.send(&AppMessage::Close).unwrap();
+    drop(conn);
+    assert_eq!(wait_exit(&mut shim), 0);
+}
+
+#[test]
 fn works_without_nativeterm() {
     // nobody serves the pipe: ssh still runs, and the shim waits at the
     // reconnect/close prompt like in a real tab

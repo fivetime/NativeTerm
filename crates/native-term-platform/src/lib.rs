@@ -2,31 +2,97 @@
 //! sessions are opened as tabs in the user's own terminal window. See
 //! `docs/ARCHITECTURE.md`.
 
+pub mod claim;
 #[cfg(windows)]
-mod windows_backend;
-#[cfg(windows)]
-pub use windows_backend::{WindowsTerminalBackend as DefaultBackend, DEDICATED_WINDOW_NAME};
+pub mod windows_terminal;
 
-/// A tab as seen from outside the terminal. NativeTerm's own tabs are
-/// identified by their fixed, unique title; `runtime_id` is only valid right
-/// after the lookup (Windows Terminal recycles tab elements when scrolling).
+/// One tab to open.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TabInfo {
-    pub runtime_id: Vec<i32>,
-    pub title: String,
-    pub index: usize,
-    pub selected: bool,
+pub struct TabSpec {
+    /// The terminal session GUID NativeTerm assigns (without braces).
+    pub terminal_session: String,
+    /// The unique tab title the tab is claimed by.
+    pub label: String,
+    /// NativeTerm's own session id (`--session`), kept by "Restart connection".
+    pub session: String,
+    /// Host alias for the shim (sanitized: no spaces, quotes or `;`).
+    pub alias: String,
 }
 
-pub trait TerminalBackend {
-    /// Open a new tab in the user's current terminal window, titled `title`,
-    /// with the given terminal session GUID, running `nativeterm-shim <host_alias>`.
-    fn open_tab(&self, session_id: &str, title: &str, host_alias: &str) -> std::io::Result<()>;
+/// Which window new tabs go to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// The most recently used window (`-w 0`).
+    Recent,
+    /// One new unnamed window for all of them (`-w new`, then `-w 0`).
+    NewWindow,
+    /// A named window (`-w <name>`).
+    Named(String),
+}
 
-    /// Current tabs of all terminal windows, in on-screen order.
-    fn list_tabs(&self) -> std::io::Result<Vec<TabInfo>>;
+/// A screen rectangle in physical pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Rect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+}
 
-    fn focus_tab(&self, title: &str) -> std::io::Result<()>;
+impl Rect {
+    pub fn contains(&self, x: i32, y: i32) -> bool {
+        x >= self.left && x < self.right && y >= self.top && y < self.bottom
+    }
+}
 
-    fn close_tab(&self, title: &str) -> std::io::Result<()>;
+/// A NativeTerm session a tab was claimed for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Claim {
+    pub label: String,
+    /// The tab also holds panes that aren't this session (the user split it).
+    /// Only known once the tab has been selected.
+    pub mixed: bool,
+}
+
+/// A tab as NativeTerm sees it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TabView {
+    /// Position in the window's tab strip.
+    pub index: usize,
+    /// Current title (the focused pane's title for a split tab).
+    pub name: String,
+    pub selected: bool,
+    /// Only for tabs currently realized in the strip (not scrolled away).
+    pub rect: Option<Rect>,
+    pub claim: Option<Claim>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WindowView {
+    /// Native window handle.
+    pub handle: isize,
+    pub pid: u32,
+    pub foreground: bool,
+    /// The window didn't answer and was skipped; its tabs are unknown.
+    pub unresponsive: bool,
+    pub tabs: Vec<TabView>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Snapshot {
+    pub windows: Vec<WindowView>,
+    /// False if a window couldn't be read; claims of missing windows are kept.
+    pub complete: bool,
+}
+
+impl Snapshot {
+    pub fn claimed(&self) -> impl Iterator<Item = (&WindowView, &TabView, &Claim)> {
+        self.windows
+            .iter()
+            .flat_map(|w| w.tabs.iter().filter_map(move |t| t.claim.as_ref().map(|c| (w, t, c))))
+    }
+
+    pub fn find(&self, label: &str) -> Option<(&WindowView, &TabView)> {
+        self.claimed().find(|(_, _, c)| c.label == label).map(|(w, t, _)| (w, t))
+    }
 }

@@ -96,13 +96,13 @@ fn run(session: Option<String>, alias: Option<String>) -> i32 {
 
     match alias {
         Some(alias) => run_host(&alias, link.as_ref()),
-        None => run_without_host(link.as_ref()),
+        None => run_without_host(link),
     }
 }
 
 /// Restored or duplicated pane: NativeTerm decides.
-fn run_without_host(link: Option<&Link>) -> i32 {
-    if let Some(link) = link.filter(|l| l.wait_connected(Duration::from_secs(2))) {
+fn run_without_host(link: Option<Link>) -> i32 {
+    if let Some(link) = link.as_ref().filter(|l| l.wait_connected(Duration::from_secs(2))) {
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while std::time::Instant::now() < deadline {
             match link.recv(POLL) {
@@ -112,6 +112,8 @@ fn run_without_host(link: Option<&Link>) -> i32 {
             }
         }
     }
+    // a local shell makes this the user's own tab: leave NativeTerm alone
+    drop(link);
     let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
     let _ = Command::new(shell).status();
     0

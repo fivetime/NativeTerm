@@ -17,6 +17,7 @@ pub struct Link {
     outbox: Sender<ShimMessage>,
     inbox: Receiver<AppMessage>,
     connected: Arc<AtomicBool>,
+    stopped: Arc<AtomicBool>,
 }
 
 /// What a newly (re)connected NativeTerm needs to know.
@@ -33,7 +34,12 @@ impl Link {
         let connected = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&connected);
         let replay = Arc::new(Mutex::new(Replay::default()));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stop = Arc::clone(&stopped);
         std::thread::spawn(move || loop {
+            if stop.load(Ordering::SeqCst) {
+                return;
+            }
             let Ok(conn) = pipe::connect(&pipe_name, RETRY) else {
                 // messages sent while away only update the replay state
                 while let Ok(m) = outgoing.try_recv() {
@@ -53,7 +59,7 @@ impl Link {
                 }
             }
             flag.store(ok, Ordering::SeqCst);
-            while ok {
+            while ok && !stop.load(Ordering::SeqCst) {
                 while let Ok(m) = outgoing.try_recv() {
                     remember(&replay, &m);
                     ok &= conn.send(&m).is_ok();
@@ -68,9 +74,19 @@ impl Link {
                     Err(_) => ok = false,
                 }
             }
+            // a failed write doesn't mean nothing is left to read: NativeTerm
+            // may have sent a command right before hanging up
+            while let Ok(Some(m)) = conn.recv::<AppMessage>(Duration::ZERO) {
+                if incoming.send(m).is_err() {
+                    return;
+                }
+            }
             flag.store(false, Ordering::SeqCst);
+            drop(conn);
+            // NativeTerm restarting, or hanging up on us: don't spin
+            std::thread::sleep(RETRY);
         });
-        Link { outbox, inbox, connected }
+        Link { outbox, inbox, connected, stopped }
     }
 
     pub fn send(&self, message: ShimMessage) {
@@ -94,6 +110,13 @@ impl Link {
             std::thread::sleep(TICK);
         }
         self.connected.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for Link {
+    /// Disconnects within a tick; the tab is no longer NativeTerm's.
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::SeqCst);
     }
 }
 

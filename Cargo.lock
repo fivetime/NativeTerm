@@ -1893,14 +1893,19 @@ dependencies = [
  "native-term-win",
  "tempfile",
  "uuid",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
 name = "native-term-platform"
 version = "0.1.0"
 dependencies = [
- "windows 0.58.0",
+ "native-term-session",
+ "native-term-win",
+ "serde_json",
+ "tempfile",
+ "uiautomation",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -1910,7 +1915,7 @@ dependencies = [
  "native-term-win",
  "serde",
  "serde_json",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -1919,7 +1924,7 @@ version = "0.1.0"
 dependencies = [
  "native-term-config",
  "native-term-session",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -1927,7 +1932,7 @@ name = "native-term-win"
 version = "0.1.0"
 dependencies = [
  "tempfile",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]

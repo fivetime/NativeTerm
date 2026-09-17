@@ -77,11 +77,24 @@ Batching:
   invocation therefore carries about **100 tabs**, safely below the
   32,767-character limit.
 - **The first batch** goes to `-w new`, and later batches to `-w 0`.
-  Before each later batch, NativeTerm checks through Win32 that the new
-  window is still the foreground Terminal window. After the batch, it
-  confirms through UIA that the tabs landed there. If the user switched
-  windows in between, the remaining batches wait until the new window is
-  active again, or the user chooses "open the rest here".
+  - **`-w 0` means Terminal's most recent window, not the foreground
+    window.** A new window counts as the most recent one from its
+    creation (`AppHost.cpp`: "the creation of a new window marks it as
+    the most recent one immediately, even before it becomes active"). So
+    it doesn't matter that NativeTerm or another app has the foreground.
+    Only activating *another window of the same Terminal install* moves
+    the target. Before each later batch, NativeTerm checks exactly that.
+  - **Each batch waits for the previous one.** Terminal builds the tabs
+    of a command asynchronously. A second `wt` call sent before the
+    first batch's tabs exist gets **interleaved** with them (verified:
+    tabs 25–29 landed between tabs 05 and 10). So NativeTerm sends the
+    next batch only once every title of the previous batch shows up in
+    UIA (names only; claims are left alone). With 30 tabs in two batches
+    the strip order then matched the request.
+  - If the user moved to another Terminal window, or a batch doesn't show
+    up within 30 s, the remaining tabs are returned as pending: they wait
+    until the new window is active again, or the user chooses "open the
+    rest here".
 - **Connections are paced separately.** All tabs appear at once, but
   each shim waits for NativeTerm's go-ahead, so logins follow the
   connection queue and rate limit (jump hosts aren't hammered).
@@ -1657,8 +1670,16 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   - In that instance, tab names and pane HelpText carry the console's
     "管理员: " (Administrator: ) prefix.
   So NativeTerm runs non-elevated. If it is started elevated anyway, it
-  launches `wt` with the user's normal token (as the shell does; the
-  prototype used `explorer.exe <script>`) or warns. Label matching strips
+  launches `wt` with the user's normal token: through the desktop shell's
+  `IShellDispatch2::ShellExecute` (Shell windows → desktop →
+  `SID_STopLevelBrowser` → active shell view → `GetItemObject` as
+  `IDispatch` → `IShellFolderViewDual::Application`). Explorer then
+  starts `wt`, unelevated. Asking `GetItemObject` for
+  `IShellFolderViewDual` directly fails with `E_NOINTERFACE`. It first
+  calls `AllowSetForegroundWindow(ASFW_ANY)`, since Explorer isn't the
+  foreground app. Verified from a non-elevated process with the path
+  forced (30 tabs, two batches); the prototype had used
+  `explorer.exe <script>`. Label matching strips
   a localized administrator prefix. The same applies to its own test
   tooling.
 - **Multiple Windows Terminal installs** (Store, Preview, unpackaged or
@@ -2137,8 +2158,10 @@ another.
   write, `NativeTerm*` keys, SecureCRT importer
 - `native-term-session` — session records, shim pipe protocol, exit
   classification
-- `native-term-platform` — `TerminalBackend` trait: open/focus/close tabs,
-  list tabs, selection events; Windows implementation (`wt` + UIA)
+- `native-term-platform` — tab claiming (pure logic) and the Windows
+  Terminal backend: install discovery, `wt` command lines and batches,
+  unelevated launch, window enumeration with the `WM_NULL` probe, UIA
+  reads and actions on a watchdog worker, the fragment profile
 - `native-term-shim` — the per-tab helper binary
 - `native-term-win` — small Windows helpers shared by the crates above
   (current user SID, logon session id, SDDL security descriptors, file

@@ -266,6 +266,54 @@ mod tests {
     }
 
     #[test]
+    fn message_sent_right_before_the_server_closes_arrives() {
+        let name = test_name("sendclose");
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let server = std::thread::spawn(move || {
+            let conn = listener.accept().unwrap();
+            conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+            conn.send(&AppMessage::Close).unwrap();
+            drop(conn);
+            listener
+        });
+        let client = connect(&name, Duration::from_secs(5)).unwrap();
+        let _listener = server.join().unwrap();
+        assert_eq!(client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(), Some(AppMessage::Welcome { protocol: 1 }));
+        assert_eq!(client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(), Some(AppMessage::Close));
+        assert_eq!(client.recv::<AppMessage>(Duration::from_secs(1)).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn last_message_survives_a_concurrent_reader() {
+        // the client is already polling when the server sends and hangs up
+        for round in 0..200 {
+            let name = test_name(&format!("race{round}"));
+            let mut listener = PipeListener::bind(&name).unwrap();
+            let client = std::thread::spawn({
+                let name = name.clone();
+                move || {
+                    let client = connect(&name, Duration::from_secs(5)).unwrap();
+                    let mut got = Vec::new();
+                    loop {
+                        match client.recv::<AppMessage>(Duration::from_secs(5)) {
+                            Ok(Some(m)) => got.push(m),
+                            Ok(None) => return got,
+                            Err(_) => return got,
+                        }
+                    }
+                }
+            });
+            let conn = listener.accept().unwrap();
+            conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+            std::thread::sleep(Duration::from_millis(round % 3));
+            conn.send(&AppMessage::Close).unwrap();
+            drop(conn);
+            let got = client.join().unwrap();
+            assert_eq!(got, vec![AppMessage::Welcome { protocol: 1 }, AppMessage::Close], "round {round}");
+        }
+    }
+
+    #[test]
     fn second_server_is_refused() {
         let name = test_name("single");
         let _first = PipeListener::bind(&name).unwrap();

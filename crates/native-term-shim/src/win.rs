@@ -4,8 +4,8 @@ use std::io;
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use windows::core::{w, HSTRING};
-use windows::Win32::Foundation::{CloseHandle, BOOL, GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0};
+use windows::core::{w, BOOL, HSTRING};
+use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
 use windows::Win32::System::Console::{
     ReadConsoleInputW, SetConsoleCtrlHandler, WriteConsoleInputW, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,

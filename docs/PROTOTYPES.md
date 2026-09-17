@@ -263,6 +263,31 @@ closed with `WM_CLOSE`. `WindowPattern.Close` via UIA did nothing.
 | `menu-hook` started fresh, pane HelpText claiming added | First scan claimed all three, the split one via HelpText as `[mixed]`; right-clicks opened our menu for each |
 | Rebuilding `shim-probe.exe` while tabs ran it | Link failed: the executable is locked (the update rule applies) |
 
+## `native-term-platform` live tests (portable 1.26)
+
+Setup: the "NativeTerm SSH" profile (the fragment's content, pointing at
+`target\debug\nativeterm-shim.exe`) was added to the *portable*
+`settings.json` (backup in the scratchpad). The test serves the real
+pipe and opens tabs to `nativeterm-test.invalid`, so `ssh` fails at once
+and the shims wait at their prompt. Run with
+`cargo test -p native-term-platform --test portable_terminal -- --ignored --test-threads=1`.
+`cargo run -p native-term-platform --example close_test_tabs` closes
+tabs left behind by a failed run.
+
+| Test | Result |
+|---|---|
+| 3 tabs, `Target::NewWindow`, labels `nt-it web01`, `nt-it db; prod`, `-nt-it 中文 主机` | New window found by `EnumWindows`; all claimed by rule 1 with exact titles after ≈ 0.8–1.1 s (`\;` unescaped, `--title=` with a leading `-` fine) |
+| Shims' hellos | `WT_SESSION` = the assigned GUID, `--session` and alias as sent |
+| Select the first tab through UIA; select with a stale name | Selected; stale → `false`, nothing touched |
+| `wt -w 0 new-tab --profile "NativeTerm SSH"` (placeholder) | Shim without host said hello, closed by `close` within its grace period |
+| `close` to every shim | Tabs and window gone; snapshot complete, no claims, no abandoned UIA worker |
+| 30 tabs with 900-character labels (2+ `wt` calls), launched through the desktop shell (`IShellDispatch2`) | All in the new window. **Without waiting between batches, tabs 25–29 were interleaved with the first batch**; with the wait, the order matched |
+| Shell path, first attempt | `GetItemObject` as `IShellFolderViewDual` → `E_NOINTERFACE`; as `IDispatch` then cast → works |
+| Placeholder answered too late | Started a local shell and kept reconnecting to the pipe; now it disconnects for good when it goes local |
+| Test server dropping a connection right after sending `close` | Some shims missed it: a failed write (their state replay) ended the link before reading. The link now drains what's readable before reconnecting, and waits 2 s before reconnecting |
+
+Repeated three times in a row: all passed, no shims or Terminal left.
+
 ## Hung Terminal and UIA (portable 1.26, process suspended)
 
 The portable `WindowsTerminal.exe` was suspended with `NtSuspendProcess`
