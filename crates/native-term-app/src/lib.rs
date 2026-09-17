@@ -229,6 +229,8 @@ pub(crate) struct Shared {
     placeholders: Mutex<Sender<Placeholder>>,
     /// Reconnect dropped sessions by themselves (a setting).
     auto_reconnect: std::sync::atomic::AtomicBool,
+    /// The tab list is shown: scan every tab even without sessions.
+    all_tabs: std::sync::atomic::AtomicBool,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -347,6 +349,7 @@ impl Core {
             scans: Default::default(),
             placeholders: Mutex::new(placeholders),
             auto_reconnect: Default::default(),
+            all_tabs: Default::default(),
         });
         let auto = shared.registry.as_ref().and_then(|r| r.setting(AUTO_RECONNECT_SETTING).ok().flatten());
         shared.auto_reconnect.store(auto.as_deref() == Some("1"), std::sync::atomic::Ordering::Relaxed);
@@ -537,6 +540,54 @@ impl Core {
             };
             if let Err(e) = shared.terminal.select(window.handle, tab) {
                 shared.notice(format!("{label}: {e}"));
+            }
+            refresh(&shared);
+        });
+    }
+
+    /// Whether every tab is wanted (the tab list is shown); scans at once
+    /// when turned on.
+    pub fn want_all_tabs(&self, on: bool) {
+        let was = self.shared.all_tabs.swap(on, std::sync::atomic::Ordering::Relaxed);
+        if on && !was {
+            self.shared.refresh_soon();
+        }
+    }
+
+    /// Scan Terminal's tabs again soon (titles change without a
+    /// notification).
+    pub fn rescan(&self) {
+        self.shared.refresh_soon();
+    }
+
+    /// The stable number of a Terminal window (1-based), as in the session
+    /// list.
+    pub fn window_number(&self, handle: isize) -> Option<usize> {
+        lock(&self.shared.window_order).iter().position(|h| *h == handle).map(|i| i + 1)
+    }
+
+    /// Switch to any tab (the user's own too): the tab at `index` in
+    /// `window`, if it still has the title `name`, else a tab with that
+    /// title in the same window.
+    pub fn select_tab(&self, window: isize, index: usize, name: &str) {
+        let shared = Arc::clone(&self.shared);
+        let name = name.to_string();
+        std::thread::spawn(move || {
+            let snapshot = refresh(&shared);
+            let found = snapshot.windows.iter().find(|w| w.handle == window).and_then(|w| {
+                w.tabs
+                    .iter()
+                    .find(|t| t.index == index && t.name == name)
+                    .or_else(|| w.tabs.iter().find(|t| t.name == name))
+                    .cloned()
+            });
+            match found {
+                Some(tab) => {
+                    if let Err(e) = shared.terminal.select(window, &tab) {
+                        shared.notice(format!("{name}: {e}"));
+                    }
+                }
+                None => shared.notice(t!("notice-tab-gone", title = name.as_str())),
             }
             refresh(&shared);
         });
@@ -758,7 +809,8 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
 /// Read all tabs and store each session's position.
 fn refresh(shared: &Shared) -> Snapshot {
     let labels = shared.labels();
-    let snapshot = if labels.is_empty() {
+    let all_tabs = shared.all_tabs.load(std::sync::atomic::Ordering::Relaxed);
+    let snapshot = if labels.is_empty() && !all_tabs {
         // nothing to look for
         Snapshot { windows: Vec::new(), complete: true }
     } else {

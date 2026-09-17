@@ -2055,6 +2055,24 @@ NativeTerm ever does.
 Windows Terminal's own tab search (`tabSearch` action) also lists tabs by
 title and benefits from the same stable labels.
 
+Implemented (first version, no previews yet): "All tabs" next to "Open
+sessions" (or Ctrl+T, which also focuses its search box).
+
+- Every tab of the chosen Terminal install, grouped by window (the same
+  window numbers as in the session list), in strip order; the user's own
+  tabs with a page icon, NativeTerm's with the host icon, a state dot, the
+  session label (and the live title when it differs) and the state. The
+  selected tab of each window is marked, and highlighted when its window
+  is in front.
+- Typing filters and ranks by title and label (the same fuzzy match as
+  the tree); Enter switches to the best match.
+- Switching selects the tab by index and title (or by title in the same
+  window, if it moved) and brings its window to the front.
+- While the list is shown, the core scans every tab even when NativeTerm
+  has no sessions of its own, and rescans every 5 s while NativeTerm has
+  the focus (titles change without a notification). Hidden, nothing extra
+  runs.
+
 ## Finding sessions: search, favorites, recent
 
 With ~800 sessions, browsing the tree is the slow path.

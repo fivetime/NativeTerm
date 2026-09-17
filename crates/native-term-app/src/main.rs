@@ -13,6 +13,7 @@ mod app;
 mod dialogs;
 mod dock;
 mod icons;
+mod tab_list;
 mod import_dialog;
 mod terminal_profile;
 mod tree_view;

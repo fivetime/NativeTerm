@@ -304,9 +304,11 @@
       password prompt and handles every other prompt in the console, one
       attempt then mark invalid, risk warning in the UI; helper checks its
       caller chain (shim → ssh → helper)
-- [ ] Tab switcher: all tabs in all windows (including the user's own,
-      with live titles) + search; last-seen text (UIA `TextPattern`) or
-      image snapshots; tmux text preview for persistent sessions
+- [x] Tab switcher, first version: all tabs in all windows (the user's own
+      too) with live titles, grouped by window, search, Enter / click
+      switches (Ctrl+T)
+- [ ] Tab switcher (rest): last-seen text (UIA `TextPattern`) or image
+      snapshots; tmux text preview for persistent sessions
 - [ ] NativeTerm SSH profile with a moderate scrollback size
 - [x] Sidebar auto-hide/pin drawer (QQ-style): docks at the top, left or
       right edge (not towards another monitor), slides away to a 4 px

@@ -54,6 +54,16 @@ host-alias = alias { $alias }
 ## Open sessions
 
 sessions-heading = Open sessions ({ $count })
+view-tabs = All tabs
+view-tabs-hint = Every tab in every Windows Terminal window, yours too (Ctrl+T)
+tabs-search-hint = Search tab titles…  (Ctrl+T)
+tabs-none = No Windows Terminal tabs found.
+tabs-no-match = No tab matches.
+tabs-window =
+    { $count ->
+        [one] Window { $number } · 1 tab
+       *[other] Window { $number } · { $count } tabs
+    }
 sessions-clear-finished = Clear finished
 sessions-restored-waiting =
     { $count ->
@@ -103,6 +113,7 @@ notice-lost-sessions =
        *[other] { $count } sessions from the last run have no tab any more
     }
 notice-tab-not-found = { $label }: its tab wasn't found (a split tab is found once it's selected)
+notice-tab-gone = The tab “{ $title }” isn't there any more
 notice-tab-changed = { $label }: the tab changed, not closed
 notice-not-linked = { $label }: its tab isn't connected to NativeTerm
 notice-terminal-failed = Windows Terminal could not be started: { $error }

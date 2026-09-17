@@ -51,6 +51,12 @@ host-alias = 别名 { $alias }
 ## 打开的会话
 
 sessions-heading = 打开的会话（{ $count }）
+view-tabs = 所有标签
+view-tabs-hint = 所有 Windows Terminal 窗口里的全部标签，包括你自己的（Ctrl+T）
+tabs-search-hint = 搜索标签标题…（Ctrl+T）
+tabs-none = 没有找到 Windows Terminal 标签。
+tabs-no-match = 没有匹配的标签。
+tabs-window = 窗口 { $number } · { $count } 个标签
 sessions-clear-finished = 清除已结束的
 sessions-restored-waiting = 有 { $count } 个恢复的会话等待连接。
 sessions-connect-all = 全部连接
@@ -92,6 +98,7 @@ state-closed = 已关闭
 
 notice-lost-sessions = 上次运行的 { $count } 个会话已找不到标签
 notice-tab-not-found = { $label }：没有找到它的标签（拆分的标签被选中后才能找到）
+notice-tab-gone = 标签“{ $title }”已不在
 notice-tab-changed = { $label }：标签已变化，未关闭
 notice-not-linked = { $label }：它的标签没有连接到 NativeTerm
 notice-terminal-failed = 无法启动 Windows Terminal：{ $error }

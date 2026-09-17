@@ -13,6 +13,7 @@ use crate::dialogs::{ConfirmDelete, FolderDialog, HostDialog, Outcome};
 use crate::import_dialog::ImportDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
+use crate::tab_list::TabList;
 use crate::tree_view::{Activity, TreeAction, TreeView};
 use crate::Setup;
 
@@ -26,8 +27,17 @@ enum Dialog {
     Import(Box<ImportDialog>),
 }
 
+/// What the right side shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum View {
+    Sessions,
+    Tabs,
+}
+
 pub struct App {
     core: Option<Core>,
+    view_right: View,
+    tab_list: TabList,
     tree: SessionTree,
     /// Bumped on every reload.
     generation: u64,
@@ -72,6 +82,8 @@ impl App {
         let tree = SessionTree::load(&options.ssh_dir);
         App {
             core,
+            view_right: View::Sessions,
+            tab_list: TabList::default(),
             tree,
             generation: 0,
             editor: editor_for(&options.ssh_dir, &data_dir),
@@ -220,12 +232,33 @@ impl App {
         }
     }
 
-    fn sessions_panel(&mut self, ui: &mut egui::Ui) {
+    /// The right side: open sessions, or every tab.
+    fn right_panel(&mut self, ui: &mut egui::Ui) {
         let Some(core) = self.core.clone() else { return };
+        let open = core.sessions().iter().filter(|s| s.state.is_open()).count();
+        ui.horizontal(|ui| {
+            let sessions = egui::RichText::new(t!("sessions-heading", count = open)).heading();
+            ui.selectable_value(&mut self.view_right, View::Sessions, sessions);
+            let tabs = egui::RichText::new(icons::with(icons::TABS, t!("view-tabs"))).heading();
+            ui.selectable_value(&mut self.view_right, View::Tabs, tabs).on_hover_text(t!("view-tabs-hint"));
+        });
+        match self.view_right {
+            View::Sessions => {
+                core.want_all_tabs(false);
+                self.sessions_panel(ui, &core);
+            }
+            View::Tabs => {
+                ui.separator();
+                self.tab_list.show(ui, &core);
+            }
+        }
+    }
+
+    fn sessions_panel(&mut self, ui: &mut egui::Ui, core: &Core) {
+        let core = core.clone();
         let sessions = core.sessions();
         ui.horizontal(|ui| {
-            ui.heading(t!("sessions-heading", count = sessions.iter().filter(|s| s.state.is_open()).count()));
-            if ui.button(t!("sessions-clear-finished")).clicked() {
+            if ui.small_button(t!("sessions-clear-finished")).clicked() {
                 core.clear_finished();
             }
         });
@@ -436,6 +469,10 @@ impl crate::window::Ui for App {
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
             self.view.focus_search();
         }
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::T)) {
+            self.view_right = View::Tabs;
+            self.tab_list.focus_search();
+        }
         egui::Panel::top("status").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut self.show_settings, icons::with(icons::SETTINGS, t!("settings-toggle")));
@@ -499,7 +536,7 @@ impl crate::window::Ui for App {
         for action in actions {
             self.handle(action);
         }
-        egui::CentralPanel::default().show_inside(ui, |ui| self.sessions_panel(ui));
+        egui::CentralPanel::default().show_inside(ui, |ui| self.right_panel(ui));
         self.show_dialog(ctx);
     }
 }
