@@ -1304,8 +1304,19 @@ The result is shown as a summary before anything is written.
     - **A console per check.** From the GUI, every `ssh -G` opened a
       console window (slow, and visible). Checks now run with
       `CREATE_NO_WINDOW`; the same applied to editing hosts before.
-- **Not yet:** host keys (`KnownHosts`), saved commands, plink sessions,
-  nested folder display.
+- **Host keys** (`native-term-config::known_hosts`): SecureCRT's
+  `KnownHosts` folder (next to `Sessions`) is read leniently, because its
+  format isn't documented: one key per `.pub` file named
+  `<name>[<address>]<port>.pub`, holding an OpenSSH line or an RFC 4716
+  block (`ssh-keygen -e` output); the key type inside the blob must match.
+  Anything else is counted as "not understood" in the preview, never
+  guessed. The keys become `known_hosts` lines (`address,name` or
+  `[address]:port,[name]:port`), appended only where the same key isn't
+  already listed for that name (hashed entries can't be compared), through
+  the safe writer (backup, owner-only ACL for a new file). Checked with
+  `ssh-keygen -F` on the result. Not verified against a real SecureCRT
+  folder yet: the preview shows how many keys were understood.
+- **Not yet:** saved commands (no command library yet), plink sessions.
 
 ## Cloud sync (optional, via rclone)
 

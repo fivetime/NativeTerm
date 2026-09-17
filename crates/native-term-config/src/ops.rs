@@ -345,6 +345,10 @@ pub struct ImportOutcome {
     pub written: Vec<(String, PathBuf, usize)>,
     /// Folder label and why it wasn't written.
     pub failed: Vec<(String, String)>,
+    /// Host keys added to `known_hosts`.
+    pub keys_added: usize,
+    /// Why `known_hosts` wasn't changed, if it failed.
+    pub keys_failed: Option<String>,
 }
 
 impl ImportOutcome {
@@ -368,8 +372,13 @@ impl Editor {
     pub fn import(&self, plan: &Plan, progress: &(dyn Fn(usize, usize) + Sync)) -> Result<ImportOutcome, EditError> {
         securecrt::check_unique(plan).map_err(EditError::Invalid)?;
         let total = plan.host_count();
+        let mut keys = ImportOutcome::default();
+        match self.add_host_keys(&plan.host_keys) {
+            Ok(n) => keys.keys_added = n,
+            Err(e) => keys.keys_failed = Some(e.to_string()),
+        }
         if total == 0 {
-            return Ok(ImportOutcome::default());
+            return Ok(keys);
         }
         self.ensure_header()?;
         let dir = self.folders_dir();
@@ -429,7 +438,7 @@ impl Editor {
             run(i);
         }
 
-        let mut outcome = ImportOutcome::default();
+        let mut outcome = keys;
         let results = results.into_inner().unwrap_or_else(|e| e.into_inner());
         for ((folder, path), result) in jobs.iter().zip(results) {
             match result {
@@ -439,6 +448,38 @@ impl Editor {
             }
         }
         Ok(outcome)
+    }
+
+    /// `~/.ssh/known_hosts` (created owner-only if missing).
+    pub fn known_hosts(&self) -> PathBuf {
+        self.ssh_dir.join("known_hosts")
+    }
+
+    /// Add the keys `known_hosts` doesn't have yet; returns how many.
+    pub fn add_host_keys(&self, keys: &[crate::known_hosts::HostKey]) -> Result<usize, EditError> {
+        if keys.is_empty() {
+            return Ok(0);
+        }
+        let path = self.known_hosts();
+        let (text, fingerprint) = match write::read(&path) {
+            Ok(read) => read,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (String::new(), None),
+            Err(e) => return Err(e.into()),
+        };
+        let missing = crate::known_hosts::missing(&text, keys);
+        if missing.is_empty() {
+            return Ok(0);
+        }
+        let mut new = text.clone();
+        if !new.is_empty() && !new.ends_with('\n') {
+            new.push('\n');
+        }
+        for key in &missing {
+            new.push_str(&key.line());
+            new.push('\n');
+        }
+        self.writer.write(&path, &new, fingerprint, || Ok(()))?;
+        Ok(missing.len())
     }
 
     /// Append one planned folder's hosts to `path` (created if new) and
@@ -697,6 +738,7 @@ mod tests {
         let scan = securecrt::scan(&config).unwrap();
         let plan = securecrt::plan(&scan, &tree(&editor));
         assert_eq!(plan.host_count(), 3);
+        assert!(plan.host_keys.is_empty(), "no KnownHosts folder here");
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let outcome = editor
             .import(&plan, &|_, _| {
@@ -733,6 +775,24 @@ mod tests {
         let t = tree(&editor);
         assert_eq!(t.find("db").unwrap().0.label(), "生产");
         assert_eq!(t.folders().filter(|f| f.label() == "生产").count(), 1);
+    }
+
+    #[test]
+    fn host_keys_are_added_once() {
+        let Some((home, editor)) = setup() else { return };
+        let key = crate::known_hosts::HostKey {
+            hosts: vec!["10.0.0.5".into(), "web01".into()],
+            port: 22,
+            key_type: "ssh-ed25519".into(),
+            key: "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl".into(),
+        };
+        std::fs::write(editor.known_hosts(), "# mine").unwrap();
+        crate::acl::restrict_to_owner(&editor.known_hosts()).unwrap();
+        assert_eq!(editor.add_host_keys(std::slice::from_ref(&key)).unwrap(), 1);
+        assert_eq!(editor.add_host_keys(std::slice::from_ref(&key)).unwrap(), 0, "already there");
+        let text = std::fs::read_to_string(editor.known_hosts()).unwrap();
+        assert_eq!(text, format!("# mine\n{}\n", key.line()));
+        let _ = home;
     }
 
     #[test]

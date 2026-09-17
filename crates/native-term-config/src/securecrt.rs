@@ -302,6 +302,8 @@ pub struct Scan {
     pub unreadable: Vec<(String, String)>,
     /// Files that weren't UTF-8 (read with replacement characters).
     pub not_utf8: Vec<String>,
+    /// Host keys from SecureCRT's `KnownHosts` folder.
+    pub host_keys: crate::known_hosts::KeyScan,
 }
 
 /// Read every session under `<config>\Sessions`. `config` is SecureCRT's
@@ -314,6 +316,10 @@ pub fn scan(config: &Path) -> io::Result<Scan> {
     }
     let mut out = Scan { root: root.clone(), ..Scan::default() };
     walk(&root, &mut Vec::new(), &mut out)?;
+    // next to `Sessions`
+    if let Some(config) = root.parent() {
+        out.host_keys = crate::known_hosts::scan_securecrt(config).unwrap_or_default();
+    }
     out.sessions.sort_by_key(|s| s.path.to_lowercase());
     out.folders.sort_by_key(|f| f.to_lowercase());
     Ok(out)
@@ -452,6 +458,9 @@ pub struct Plan {
     pub folders: Vec<PlannedFolder>,
     pub skipped: Vec<(String, Skip)>,
     pub notes: Notes,
+    /// Host keys to add to `known_hosts` (all found; the writer skips the
+    /// ones already there).
+    pub host_keys: Vec<crate::known_hosts::HostKey>,
 }
 
 impl Plan {
@@ -588,7 +597,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
     let mut duplicates: Vec<Vec<String>> = seen.into_values().filter(|paths| paths.len() > 1).collect();
     duplicates.sort();
     notes.duplicates = duplicates;
-    Plan { folders, skipped, notes }
+    Plan { folders, skipped, notes, host_keys: scan.host_keys.keys.clone() }
 }
 
 /// File stem for a new folder file: ASCII from the label, else `folder`.

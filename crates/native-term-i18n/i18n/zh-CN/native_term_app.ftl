@@ -199,7 +199,11 @@ summary-keys = { $count } 个密钥文件（须为 OpenSSH 格式）
 summary-descriptions = { $count } 条多行描述已合并为一行
 summary-unreadable = 无法读取的会话文件：{ $count }
 summary-not-utf8 = 不是 UTF-8 的会话文件（无法识别的字符已替换）：{ $count }
-summary-not-yet = 暂不导入：主机密钥（KnownHosts）和保存的命令
+summary-host-keys = 主机指纹：{ $count } 个（已存在的不会重复添加到 known_hosts）
+summary-host-keys-unknown = 无法识别的主机指纹文件（已略过）：{ $count }
+import-keys-added = 已向 known_hosts 添加 { $count } 个主机指纹。
+import-keys-failed = known_hosts 没有修改：{ $error }
+summary-not-yet = 暂不导入：保存的命令
 
 ## 标签菜单（Windows Terminal 中 NativeTerm 的标签）
 

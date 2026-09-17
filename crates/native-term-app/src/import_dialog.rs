@@ -79,10 +79,16 @@ impl ImportDialog {
                 self.step = match result {
                     Ok(o) => {
                         let mut text = vec![t!("import-done", hosts = o.hosts(), folders = o.written.len())];
+                        if o.keys_added > 0 {
+                            text.push(t!("import-keys-added", count = o.keys_added));
+                        }
+                        if let Some(e) = &o.keys_failed {
+                            text.push(t!("import-keys-failed", error = e.as_str()));
+                        }
                         text.extend(
                             o.failed.iter().map(|(label, why)| t!("import-folder-failed", folder = label.as_str(), error = why.as_str())),
                         );
-                        Step::Finished { text, wrote: o.hosts() > 0 }
+                        Step::Finished { text, wrote: o.hosts() > 0 || o.keys_added > 0 }
                     }
                     Err(e) => Step::Finished { text: vec![t!("import-failed", error = e)], wrote: false },
                 };
@@ -157,7 +163,8 @@ impl ImportDialog {
                         }
                         if let Step::Preview { plan, .. } = &self.step {
                             let n = plan.host_count();
-                            if ui.add_enabled(n > 0, egui::Button::new(t!("import-run", count = n))).clicked() {
+                            let keys = !plan.host_keys.is_empty();
+                            if ui.add_enabled(n > 0 || keys, egui::Button::new(t!("import-run", count = n))).clicked() {
                                 start = Some(Plan::clone(plan));
                             }
                         }

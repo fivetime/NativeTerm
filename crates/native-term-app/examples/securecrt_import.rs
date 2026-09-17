@@ -85,6 +85,10 @@ fn main() {
         Ok(outcome) => {
             eprintln!();
             println!("imported {} hosts into {} folders in {:.1} s", outcome.hosts(), outcome.written.len(), started.elapsed().as_secs_f64());
+            println!("host keys added to known_hosts: {}", outcome.keys_added);
+            if let Some(e) = &outcome.keys_failed {
+                println!("! known_hosts not changed: {e}");
+            }
             for (label, why) in &outcome.failed {
                 println!("! folder {label} not written: {why}");
             }

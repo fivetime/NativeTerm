@@ -205,10 +205,11 @@
       on failure; re-import skips `NativeTermSource` hosts; pinyin
       aliases. Tested on a synthetic 736-session / 188-folder
       configuration (29 s)
+- [x] SecureCRT host keys → `known_hosts` (lenient `.pub` reading,
+      unknown files reported, no duplicates, backup)
 - [ ] SecureCRT importer (rest): preview on the author's real
-      configuration (by the author); host keys merged into
-      `known_hosts`; saved commands into the command library; Telnet /
-      serial / raw / rlogin as plink sessions
+      configuration (by the author); saved commands into the command
+      library; Telnet / serial / raw / rlogin as plink sessions
 - [x] `ssh` used for tabs and checks: native builds only (MSYS/Cygwin
       `ssh` on `PATH` skipped), no console window for checks
 - [ ] PuTTY saved-session import (read-only from the PuTTY registry key)

@@ -141,6 +141,13 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
             scan.not_utf8.clone(),
         ));
     }
+    let keys = &scan.host_keys;
+    if !keys.keys.is_empty() {
+        out.push(line(t!("summary-host-keys", count = keys.keys.len()), false, Vec::new()));
+    }
+    if keys.not_understood > 0 {
+        out.push(line(t!("summary-host-keys-unknown", count = keys.not_understood), true, Vec::new()));
+    }
     out.push(line(t!("summary-not-yet"), false, Vec::new()));
     out
 }
