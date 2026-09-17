@@ -115,7 +115,7 @@ pub fn set_pointer(pointer: Pointer, program_dir: &Path, dir: &Path) -> io::Resu
                 Err(e) => return Err(e),
             };
             table.insert("data_dir".into(), toml::Value::String(dir.display().to_string()));
-            let text = format!("# where NativeTerm keeps its data (Settings → Change)\n{table}");
+            let text = format!("# where NativeTerm keeps its data (Settings > Change data folder)\n{table}");
             let temp = file.with_extension("toml.tmp");
             std::fs::write(&temp, text)?;
             std::fs::rename(&temp, &file)

@@ -309,8 +309,11 @@
       of the top-level list only, comments and layout kept, the result
       re-read before writing; unticking removes what ticking added)
 - [ ] Shared app-level command layer used by every UI surface
-- [ ] "Change data directory" (copy + update pointer); `config.d` location
-      setting (maintains the `Include` line)
+- [x] "Change data directory" (Settings: an empty or new folder; files
+      copied, `state.db` as a `VACUUM INTO` snapshot; `nativeterm.toml` in
+      portable mode, `HKCU\Software\NativeTerm\DataDir` otherwise; used from
+      the next start; the old folder is kept)
+- [ ] `config.d` location setting (maintains the `Include` line)
 - [x] OneDrive placeholder detection with "Always keep on this device"
       guidance; visible sync-conflict notices (ssh folder, `config.d`, data
       folder; checked at start and on every reload; attributes only, so a

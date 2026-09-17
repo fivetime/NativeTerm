@@ -2738,6 +2738,15 @@ First match wins:
 
 "Change data directory" in settings copies the current data to the new
 location and updates the pointer used in that mode.
+Implemented: the new folder must be new or empty and not inside the old
+one (or around it). `state.db` is open, so it is copied with SQLite's
+`VACUUM INTO` (a consistent snapshot); everything else is copied as is.
+The pointer is `nativeterm.toml` when the data came from the program
+folder or that file, and the registry value otherwise; with
+`--data-dir` or `NATIVETERM_DATA_DIR` the setting only explains where to
+change it. The switch happens at the next start (the running app keeps
+its open database and paths), and the old folder is left for the user to
+delete.
 
 The session tree is separate from the data directory by design — it stays
 in ssh's own config — but `config.d` can also live anywhere: the main
