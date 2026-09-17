@@ -14,7 +14,7 @@ pub mod tab_menu;
 
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
@@ -773,6 +773,14 @@ impl Core {
                 core.connect(id);
             }
         });
+    }
+
+    /// Copy `state.db` to `path` (for moving the data directory).
+    pub fn copy_state_to(&self, path: &Path) -> io::Result<()> {
+        match &self.shared.registry {
+            Some(registry) => registry.copy_to(path).map_err(io::Error::other),
+            None => Err(io::Error::other("state.db isn't open")),
+        }
     }
 
     /// A per-machine setting from `state.db`.

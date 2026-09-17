@@ -75,6 +75,8 @@ pub struct Setup {
     shim: PathBuf,
     core: Option<Core>,
     data_dir: PathBuf,
+    /// How the data directory was chosen (see `data_dir`).
+    data_source: &'static str,
     notices: Vec<String>,
 }
 
@@ -90,17 +92,17 @@ fn setup() -> Result<Start, String> {
     let shim = default_shim_path().map_err(|e| e.to_string())?;
     let mut notices = Vec::new();
     let inputs = data_dir::Inputs::from_system(options.data_dir.clone()).map_err(|e| e.to_string())?;
-    let (data_dir, registry) = match data_dir::resolve(&inputs) {
-        Ok((dir, _)) => match Registry::open(&dir.join("state.db")) {
-            Ok(registry) => (dir, Some(registry)),
+    let (data_dir, data_source, registry) = match data_dir::resolve(&inputs) {
+        Ok((dir, source)) => match Registry::open(&dir.join("state.db")) {
+            Ok(registry) => (dir, source, Some(registry)),
             Err(e) => {
                 notices.push(t!("notice-db-unavailable", path = dir.join("state.db").display().to_string(), error = e.to_string()));
-                (dir, None)
+                (dir, source, None)
             }
         },
         Err(e) => {
             notices.push(t!("notice-no-data-dir", error = e.to_string()));
-            (std::env::temp_dir().join("NativeTerm"), None)
+            (std::env::temp_dir().join("NativeTerm"), "--data-dir", None)
         }
     };
     if !shim.exists() {
@@ -122,7 +124,7 @@ fn setup() -> Result<Start, String> {
             native_term_app::i18n::set_language(Some(&language));
         }
     }
-    Ok(Start::Run(Box::new(Setup { options, install, shim, core, data_dir, notices })))
+    Ok(Start::Run(Box::new(Setup { options, install, shim, core, data_dir, data_source, notices })))
 }
 
 fn main() {

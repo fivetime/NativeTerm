@@ -398,6 +398,13 @@ sessions-send-many = Send to several…
 fab-send-hint = Type into the active session, Enter sends
 tabmenu-send = Send Command…
 
+data-dir-current = NativeTerm data: { $path } (from { $source })
+data-dir-fixed = Chosen with --data-dir or NATIVETERM_DATA_DIR; change it there.
+data-dir-change = Change data folder…
+data-dir-move = Copy and use from next start
+data-dir-move-note = The folder must be new or empty. Everything is copied (state.db as a consistent snapshot); the old folder stays until you delete it.
+data-dir-moved = Copied { $count } files to { $path }. Restart NativeTerm to use it; { $old } is kept until you delete it.
+data-dir-move-failed = The data folder wasn't changed: { $error }
 wizard-open = First-run guide…
 wizard-title = Welcome to NativeTerm
 wizard-step = Step { $n } of { $total }: { $title }

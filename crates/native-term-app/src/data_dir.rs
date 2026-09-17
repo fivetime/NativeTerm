@@ -82,6 +82,105 @@ fn pointer(program_dir: &Path) -> io::Result<Option<PathBuf>> {
     Ok(value.get("data_dir").and_then(|v| v.as_str()).map(|dir| program_dir.join(dir)))
 }
 
+/// What "Change data directory" updates, by how the current one was chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pointer {
+    /// `nativeterm.toml` next to the program (portable mode).
+    File,
+    /// `HKCU\Software\NativeTerm\DataDir` (installed mode).
+    Registry,
+    /// Chosen by `--data-dir` or the environment: not NativeTerm's to change.
+    Fixed,
+}
+
+pub fn pointer_for(source: &str) -> Pointer {
+    match source {
+        "--data-dir" | ENV => Pointer::Fixed,
+        POINTER_FILE | "program folder" => Pointer::File,
+        _ => Pointer::Registry,
+    }
+}
+
+/// Point future starts at `dir`.
+pub fn set_pointer(pointer: Pointer, program_dir: &Path, dir: &Path) -> io::Result<()> {
+    match pointer {
+        Pointer::Fixed => Err(io::Error::other("the data directory is set on the command line or in the environment")),
+        Pointer::File => {
+            let file = program_dir.join(POINTER_FILE);
+            let mut table: toml::Table = match std::fs::read_to_string(&file) {
+                Ok(text) => text
+                    .parse()
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", file.display())))?,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => toml::Table::new(),
+                Err(e) => return Err(e),
+            };
+            table.insert("data_dir".into(), toml::Value::String(dir.display().to_string()));
+            let text = format!("# where NativeTerm keeps its data (Settings → Change)\n{table}");
+            let temp = file.with_extension("toml.tmp");
+            std::fs::write(&temp, text)?;
+            std::fs::rename(&temp, &file)
+        }
+        Pointer::Registry => native_term_win::registry::write_user_values(
+            REGISTRY_KEY,
+            &[(REGISTRY_VALUE, native_term_win::registry::RegValue::Str(dir.display().to_string()))],
+        ),
+    }
+}
+
+/// Whether `new` can take the data now in `current`: an absolute path,
+/// not the same folder or inside it (or around it), and empty.
+pub fn check_target(current: &Path, new: &Path) -> Result<(), String> {
+    if !new.is_absolute() {
+        return Err("not a full path".into());
+    }
+    let normalize = |p: &Path| p.to_string_lossy().trim_end_matches(['\\', '/']).replace('/', "\\").to_lowercase();
+    let (a, b) = (normalize(current), normalize(new));
+    if a == b {
+        return Err("that is the current folder".into());
+    }
+    if b.starts_with(&format!("{a}\\")) || a.starts_with(&format!("{b}\\")) {
+        return Err("one folder is inside the other".into());
+    }
+    match std::fs::read_dir(new) {
+        Ok(mut entries) => match entries.next() {
+            Some(_) => Err("the folder isn't empty".into()),
+            None => Ok(()),
+        },
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Copy the data to `to`. `state.db` is written by `copy_db` (a
+/// consistent snapshot of the open database); the other files are copied
+/// as they are. Returns how many files were copied.
+pub fn copy_data(from: &Path, to: &Path, copy_db: impl FnOnce(&Path) -> io::Result<()>) -> io::Result<usize> {
+    std::fs::create_dir_all(to)?;
+    copy_db(&to.join("state.db"))?;
+    let mut copied = 1;
+    copy_tree(from, to, true, &mut copied)?;
+    Ok(copied)
+}
+
+fn copy_tree(from: &Path, to: &Path, top: bool, copied: &mut usize) -> io::Result<()> {
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if top && (name.starts_with("state.db") || name.starts_with(".write-test-")) {
+            continue;
+        }
+        let target = to.join(&name);
+        if entry.file_type()?.is_dir() {
+            std::fs::create_dir_all(&target)?;
+            copy_tree(&entry.path(), &target, false, copied)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+            *copied += 1;
+        }
+    }
+    Ok(())
+}
+
 /// Whether files can be created in `dir` (created on the way if missing).
 fn writable(dir: &Path) -> bool {
     if std::fs::create_dir_all(dir).is_err() {
@@ -123,6 +222,64 @@ mod tests {
         assert_eq!(choose(&inputs(tmp.path())).unwrap().1, "program folder");
         std::fs::write(tmp.path().join(POINTER_FILE), "data_dir = \n").unwrap();
         assert!(choose(&inputs(tmp.path())).is_err(), "a broken pointer is reported, not skipped");
+    }
+
+    #[test]
+    fn pointers() {
+        assert_eq!(pointer_for("--data-dir"), Pointer::Fixed);
+        assert_eq!(pointer_for(ENV), Pointer::Fixed);
+        assert_eq!(pointer_for("program folder"), Pointer::File);
+        assert_eq!(pointer_for(POINTER_FILE), Pointer::File);
+        assert_eq!(pointer_for("%APPDATA%"), Pointer::Registry);
+
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("elsewhere");
+        set_pointer(Pointer::File, tmp.path(), &target).unwrap();
+        assert_eq!(choose(&inputs(tmp.path())).unwrap(), (target.clone(), POINTER_FILE));
+        // other keys in the file stay
+        std::fs::write(tmp.path().join(POINTER_FILE), "data_dir = 'x'\nother = 1\n").unwrap();
+        set_pointer(Pointer::File, tmp.path(), &target).unwrap();
+        let text = std::fs::read_to_string(tmp.path().join(POINTER_FILE)).unwrap();
+        assert!(text.contains("other = 1"), "{text}");
+        assert_eq!(choose(&inputs(tmp.path())).unwrap().0, target);
+        assert!(set_pointer(Pointer::Fixed, tmp.path(), &target).is_err());
+    }
+
+    #[test]
+    fn targets() {
+        let tmp = tempfile::tempdir().unwrap();
+        let current = tmp.path().join("data");
+        std::fs::create_dir_all(&current).unwrap();
+        assert!(check_target(&current, Path::new("relative")).is_err());
+        assert!(check_target(&current, &current).is_err());
+        assert!(check_target(&current, &tmp.path().join("DATA\\")).is_err(), "same folder, other spelling");
+        assert!(check_target(&current, &current.join("sub")).is_err());
+        assert!(check_target(&current, tmp.path()).is_err());
+        assert!(check_target(&current, &tmp.path().join("data2")).is_ok(), "a sibling with a longer name");
+        let full = tmp.path().join("full");
+        std::fs::create_dir_all(&full).unwrap();
+        assert!(check_target(&current, &full).is_ok(), "empty");
+        std::fs::write(full.join("x"), "").unwrap();
+        assert!(check_target(&current, &full).is_err());
+    }
+
+    #[test]
+    fn copies_everything_with_a_database_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let from = tmp.path().join("from");
+        std::fs::create_dir_all(from.join("backups").join("inner")).unwrap();
+        std::fs::write(from.join("commands.toml"), "a").unwrap();
+        std::fs::write(from.join("backups").join("inner").join("b.bak"), "b").unwrap();
+        std::fs::write(from.join("state.db-journal"), "stale").unwrap();
+        let registry = crate::registry::Registry::open(&from.join("state.db")).unwrap();
+        registry.set_setting("theme", "dark").unwrap();
+        let to = tmp.path().join("to");
+        let copied = copy_data(&from, &to, |db| registry.copy_to(db).map_err(io::Error::other)).unwrap();
+        assert_eq!(copied, 3);
+        assert_eq!(std::fs::read_to_string(to.join("backups").join("inner").join("b.bak")).unwrap(), "b");
+        assert!(!to.join("state.db-journal").exists());
+        let copy = crate::registry::Registry::open(&to.join("state.db")).unwrap();
+        assert_eq!(copy.setting("theme").unwrap().as_deref(), Some("dark"));
     }
 
     #[test]

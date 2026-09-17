@@ -79,6 +79,10 @@ pub struct App {
     storage: crate::storage::StorageCheck,
     /// For background checks that repaint when done.
     egui_ctx: egui::Context,
+    /// How the data directory was chosen.
+    data_source: &'static str,
+    /// "Change data directory": the new path being typed.
+    data_move: Option<String>,
     tree: SessionTree,
     /// Bumped on every reload.
     generation: u64,
@@ -113,7 +117,7 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
 
 impl App {
     pub fn new(ctx: &egui::Context, setup: Setup) -> App {
-        let Setup { options, install, shim, core, data_dir, mut notices } = setup;
+        let Setup { options, install, shim, core, data_dir, data_source, mut notices } = setup;
         let mut profile = ProfileSetup::new(install, shim, data_dir.join("backups"));
         if let Some(core) = &core {
             core.set_audit_dir(data_dir.join("audit"));
@@ -164,6 +168,8 @@ impl App {
                 check
             },
             egui_ctx: ctx.clone(),
+            data_source,
+            data_move: None,
             tree,
             generation: 0,
             editor: editor_for(&options.ssh_dir, &data_dir),
@@ -322,6 +328,67 @@ impl App {
                 }
                 self.reload();
             }
+        }
+    }
+
+    fn data_dir_ui(&mut self, ui: &mut egui::Ui) {
+        use native_term_app::data_dir::{self, Pointer};
+        let pointer = data_dir::pointer_for(self.data_source);
+        ui.horizontal_wrapped(|ui| {
+            ui.label(t!("data-dir-current", path = self.data_dir.display().to_string(), source = self.data_source));
+            if ui.small_button(t!("wizard-open-folder")).clicked() {
+                let _ = std::process::Command::new("explorer.exe").arg(&self.data_dir).spawn();
+            }
+        });
+        if pointer == Pointer::Fixed {
+            ui.weak(t!("data-dir-fixed"));
+            return;
+        }
+        let Some(path) = self.data_move.as_mut() else {
+            if ui.button(t!("data-dir-change")).clicked() {
+                self.data_move = Some(String::new());
+            }
+            return;
+        };
+        let mut done = false;
+        let mut chosen = None;
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(path).hint_text(r"D:\Sync\NativeTerm").desired_width(320.0));
+            if ui.button(t!("data-dir-move")).clicked() {
+                chosen = Some(PathBuf::from(path.trim()));
+            }
+            if ui.button(t!("button-cancel")).clicked() {
+                done = true;
+            }
+        });
+        ui.weak(t!("data-dir-move-note"));
+        if let Some(new) = chosen {
+            let result = data_dir::check_target(&self.data_dir, &new).and_then(|()| {
+                let core = self.core.as_ref().ok_or_else(|| "state.db isn't open".to_string())?;
+                let copied =
+                    data_dir::copy_data(&self.data_dir, &new, |db| core.copy_state_to(db)).map_err(|e| e.to_string())?;
+                let program_dir = std::env::current_exe()
+                    .ok()
+                    .and_then(|e| e.parent().map(Path::to_path_buf))
+                    .ok_or_else(|| "the program folder isn't known".to_string())?;
+                data_dir::set_pointer(pointer, &program_dir, &new).map_err(|e| e.to_string())?;
+                Ok(copied)
+            });
+            match result {
+                Ok(copied) => {
+                    self.notices.push(t!(
+                        "data-dir-moved",
+                        count = copied,
+                        path = new.display().to_string(),
+                        old = self.data_dir.display().to_string()
+                    ));
+                    done = true;
+                }
+                Err(e) => self.notices.push(t!("data-dir-move-failed", error = e)),
+            }
+        }
+        if done {
+            self.data_move = None;
         }
     }
 
@@ -879,6 +946,8 @@ impl crate::window::Ui for App {
                     if ui.small_button(t!("button-check-again")).clicked() {
                         self.agent.refresh(&self.ssh_dir, ui.ctx());
                     }
+                    ui.separator();
+                    self.data_dir_ui(ui);
                     ui.separator();
                     if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {
                         self.wizard = Some(crate::wizard::Wizard::new(ui.ctx()));

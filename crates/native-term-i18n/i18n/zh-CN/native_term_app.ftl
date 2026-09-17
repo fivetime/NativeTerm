@@ -378,6 +378,13 @@ sessions-send-many = 发送到多个会话…
 fab-send-hint = 输入到当前会话，回车发送
 tabmenu-send = 发送命令…
 
+data-dir-current = NativeTerm 数据：{ $path }（来自 { $source }）
+data-dir-fixed = 数据目录由 --data-dir 或 NATIVETERM_DATA_DIR 指定，请在那里修改。
+data-dir-change = 更改数据目录…
+data-dir-move = 复制并在下次启动时使用
+data-dir-move-note = 目标文件夹必须是新的或空的。所有文件都会被复制（state.db 以一致的快照复制）；原文件夹会保留，确认无误后再自行删除。
+data-dir-moved = 已复制 { $count } 个文件到 { $path }。重启 NativeTerm 后生效；原文件夹 { $old } 保留，确认无误后可以删除。
+data-dir-move-failed = 没有更改数据目录：{ $error }
 wizard-open = 首次运行向导…
 wizard-title = 欢迎使用 NativeTerm
 wizard-step = 第 { $n } / { $total } 步：{ $title }

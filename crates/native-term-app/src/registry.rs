@@ -130,6 +130,14 @@ impl Registry {
         })
     }
 
+    /// A consistent copy of the whole database in a new file.
+    pub fn copy_to(&self, path: &Path) -> Result<()> {
+        self.with(|c| {
+            c.execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
+            Ok(())
+        })
+    }
+
     pub fn set_locked(&self, id: &str, locked: bool) -> Result<()> {
         self.with(|c| {
             c.execute("UPDATE sessions SET locked = ?2 WHERE id = ?1", params![id, locked])?;
