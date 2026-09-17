@@ -389,3 +389,40 @@ session-send = Send…
 sessions-send-many = Send to several…
 fab-send-hint = Type into the active session, Enter sends
 tabmenu-send = Send Command…
+
+wizard-open = First-run guide…
+wizard-title = Welcome to NativeTerm
+wizard-step = Step { $n } of { $total }: { $title }
+wizard-check = Check this PC
+wizard-import = Bring your sessions
+wizard-keys = Log in with a key
+wizard-data = Where things are kept
+wizard-check-intro = NativeTerm opens sessions as Windows Terminal tabs running OpenSSH. Here is what it found:
+wizard-ssh-checking = Asking ssh for its version…
+wizard-ssh-ok = OpenSSH: { $version }
+wizard-ssh-missing = No usable ssh.exe ({ $error }). Install the "OpenSSH Client" optional feature in Windows Settings → System → Optional features.
+wizard-terminal = Windows Terminal: { $terminal }
+wizard-profile = "NativeTerm SSH" profile: { $status }
+wizard-agent-running = ssh-agent is running: key passphrases are asked once.
+wizard-agent-needed = A key has a passphrase but ssh-agent isn't running: every connection will ask for it.
+wizard-agent-off = ssh-agent isn't running (only needed for keys with a passphrase).
+wizard-import-intro = Your sessions live in ~/.ssh/config and config.d (now { $hosts } hosts). Import existing ones:
+wizard-securecrt-found = found: { $path }
+wizard-securecrt-not-found = SecureCRT's configuration wasn't found; you can pick the folder in the dialog.
+wizard-putty-none = PuTTY has no saved sessions on this PC.
+wizard-import-later = Both imports are also in the toolbar, any time. Passwords are never imported.
+wizard-keys-intro = With a key, ssh logs in without asking for the host's password.
+wizard-keys-found = Public keys found: { $count }
+wizard-install-keys = { $count ->
+        [one] Install my key on this host…
+       *[other] Install my key on { $count } hosts…
+    }
+wizard-data-intro = Sessions are plain ssh config, shared with ssh, scp and VS Code. NativeTerm's own data (recent hosts, open tabs, backups, command library) is kept separately:
+wizard-sessions-dir = Sessions
+wizard-data-dir = NativeTerm data
+wizard-open-folder = Open
+wizard-sync-note = To use the same sessions on several PCs, sync ~/.ssh/config.d with a tool you trust (without private keys). Moving the data folder and built-in sync come later.
+wizard-back = Back
+wizard-next = Next
+wizard-skip = Skip the guide
+wizard-finish = Finish

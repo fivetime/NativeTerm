@@ -2227,6 +2227,14 @@ A short wizard, each step skippable:
    ("Install my key").
 4. Choose the data directory and, optionally, cloud sync.
 
+Implemented (`wizard.rs`), except choosing the data directory and cloud
+sync: step 4 shows where sessions and NativeTerm's data are, with "Open"
+buttons and advice to sync `~/.ssh/config.d` (never private keys) with a
+tool the user trusts. The wizard opens once, until finished or skipped
+(`first_run_done` in `state.db`), and again from Settings. Its buttons
+only open the existing dialogs (import, install my key) or tabs (key
+creation); while such a dialog is open the wizard waits behind it.
+
 ## Keyboard shortcuts
 
 - Every command has an optional shortcut; defaults are few and editable.

@@ -89,6 +89,9 @@ pub struct App {
     notices: Vec<String>,
     /// PuTTY has saved sessions (checked at start).
     putty_sessions: bool,
+    wizard: Option<crate::wizard::Wizard>,
+    /// SecureCRT's configuration folder, if found (checked at start).
+    securecrt: Option<PathBuf>,
 }
 
 /// The user's own `~/.ssh` is edited with ssh's defaults; any other
@@ -139,6 +142,7 @@ impl App {
         })
         .ok();
         let loaded_from = fingerprint(&options.ssh_dir, &tree);
+        let first_run = core.as_ref().is_some_and(|c| c.setting(crate::wizard::DONE_SETTING).is_none());
         App {
             core,
             _watcher: watcher,
@@ -162,6 +166,8 @@ impl App {
             show_settings: false,
             notices,
             putty_sessions: native_term_config::putty::has_sessions(),
+            wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
+            securecrt: native_term_app::import::securecrt_config_path(),
         }
     }
 
@@ -286,6 +292,70 @@ impl App {
                     self.notices.push(t!("notice-move-failed", alias = alias.as_str(), error = e));
                 }
                 self.reload();
+            }
+        }
+    }
+
+    fn show_wizard(&mut self, ctx: &egui::Context) {
+        use crate::wizard::WizardAction;
+        // a dialog the wizard opened comes first; the wizard waits behind it
+        if self.dialog.is_some() {
+            return;
+        }
+        let Some(wizard) = self.wizard.as_mut() else { return };
+        let facts = crate::wizard::Facts {
+            terminal: self.profile.terminal_text(),
+            profile: self.profile.describe(),
+            profile_usable: self.profile.status.usable(),
+            agent: self.agent.status(),
+            securecrt: self.securecrt.clone(),
+            putty: self.putty_sessions,
+            hosts: self.tree.hosts().count(),
+            public_keys: crate::key_dialog::public_keys(&self.ssh_dir).len(),
+            ssh_dir: &self.ssh_dir,
+            data_dir: &self.data_dir,
+            can_open_tabs: self.core.is_some(),
+        };
+        let actions = wizard.show(ctx, &facts);
+        for action in actions {
+            match action {
+                WizardAction::InstallProfile => {
+                    if let Err(e) = self.profile.install_now() {
+                        self.notices.push(t!("profile-install-failed", error = e));
+                    }
+                }
+                WizardAction::OpenSettings => self.show_settings = true,
+                WizardAction::ImportSecureCrt => {
+                    self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
+                }
+                WizardAction::ImportPutty => {
+                    let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.tree);
+                    self.dialog = Some(Dialog::Import(Box::new(dialog)));
+                }
+                WizardAction::CreateKey => {
+                    if let Some(core) = &self.core {
+                        let path = self.ssh_dir.join("id_ed25519").display().to_string();
+                        if let Err(e) = core.terminal().open_tool(&t!("key-create-tab"), &["--create-key".into(), path]) {
+                            self.notices.push(e.to_string());
+                        }
+                    }
+                }
+                WizardAction::InstallKeys => {
+                    let hosts: Vec<(String, String)> =
+                        self.tree.hosts().map(|(_, h)| (h.alias().to_string(), h.label().to_string())).collect();
+                    if !hosts.is_empty() {
+                        self.dialog = Some(Dialog::Key(Box::new(KeyDialog::new(hosts, &self.ssh_dir))));
+                    }
+                }
+                WizardAction::OpenFolder(path) => {
+                    let _ = std::process::Command::new("explorer.exe").arg(path).spawn();
+                }
+                WizardAction::Done => {
+                    if let Some(core) = &self.core {
+                        core.set_setting(crate::wizard::DONE_SETTING, "1");
+                    }
+                    self.wizard = None;
+                }
             }
         }
     }
@@ -769,6 +839,10 @@ impl crate::window::Ui for App {
                     if ui.small_button(t!("button-check-again")).clicked() {
                         self.agent.refresh(&self.ssh_dir, ui.ctx());
                     }
+                    ui.separator();
+                    if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {
+                        self.wizard = Some(crate::wizard::Wizard::new(ui.ctx()));
+                    }
                 });
             }
             self.profile.banner(ui, &mut self.notices);
@@ -804,5 +878,6 @@ impl crate::window::Ui for App {
         }
         egui::CentralPanel::default().show_inside(ui, |ui| self.right_panel(ui));
         self.show_dialog(ctx);
+        self.show_wizard(ctx);
     }
 }

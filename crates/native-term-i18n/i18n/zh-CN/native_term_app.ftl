@@ -369,3 +369,40 @@ session-send = 发送…
 sessions-send-many = 发送到多个会话…
 fab-send-hint = 输入到当前会话，回车发送
 tabmenu-send = 发送命令…
+
+wizard-open = 首次运行向导…
+wizard-title = 欢迎使用 NativeTerm
+wizard-step = 第 { $n } / { $total } 步：{ $title }
+wizard-check = 检查这台电脑
+wizard-import = 导入已有会话
+wizard-keys = 用密钥登录
+wizard-data = 数据保存在哪里
+wizard-check-intro = NativeTerm 用 Windows Terminal 标签运行 OpenSSH 来打开会话。检查结果：
+wizard-ssh-checking = 正在查询 ssh 版本…
+wizard-ssh-ok = OpenSSH：{ $version }
+wizard-ssh-missing = 没有可用的 ssh.exe（{ $error }）。请在 Windows 设置 → 系统 → 可选功能 中安装“OpenSSH 客户端”。
+wizard-terminal = Windows Terminal：{ $terminal }
+wizard-profile = “NativeTerm SSH”配置：{ $status }
+wizard-agent-running = ssh-agent 正在运行：私钥密码只需输入一次。
+wizard-agent-needed = 有私钥设了密码，但 ssh-agent 没有运行：每次连接都会询问私钥密码。
+wizard-agent-off = ssh-agent 没有运行（只有带密码的私钥才需要它）。
+wizard-import-intro = 会话保存在 ~/.ssh/config 和 config.d 里（现在有 { $hosts } 台主机）。导入已有会话：
+wizard-securecrt-found = 已找到：{ $path }
+wizard-securecrt-not-found = 没有找到 SecureCRT 的配置，可以在导入对话框里选择文件夹。
+wizard-putty-none = 这台电脑上的 PuTTY 没有保存的会话。
+wizard-import-later = 两种导入随时都可以在工具栏里使用。密码永远不会被导入。
+wizard-keys-intro = 使用密钥后，ssh 登录时不再询问主机密码。
+wizard-keys-found = 已找到公钥：{ $count } 个
+wizard-install-keys = { $count ->
+        [one] 为这台主机安装公钥…
+       *[other] 为 { $count } 台主机安装公钥…
+    }
+wizard-data-intro = 会话就是普通的 ssh 配置，ssh、scp 和 VS Code 都能使用。NativeTerm 自己的数据（最近使用、打开的标签、备份、命令库）单独保存：
+wizard-sessions-dir = 会话
+wizard-data-dir = NativeTerm 数据
+wizard-open-folder = 打开
+wizard-sync-note = 想在多台电脑上使用同样的会话，可以用你信任的工具同步 ~/.ssh/config.d（不要同步私钥）。移动数据目录和内置同步会在以后提供。
+wizard-back = 上一步
+wizard-next = 下一步
+wizard-skip = 跳过向导
+wizard-finish = 完成

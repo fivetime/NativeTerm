@@ -75,6 +75,16 @@ impl ProfileSetup {
         })
     }
 
+    /// Install the fragment (the user asked, e.g. in the wizard).
+    pub fn install_now(&mut self) -> Result<(), String> {
+        self.install_fragment()
+    }
+
+    /// The chosen Terminal, in words.
+    pub fn terminal_text(&self) -> String {
+        format!("{} ({})", self.install.dir.display(), kind_name(&self.install.kind))
+    }
+
     fn install_fragment(&mut self) -> Result<(), String> {
         let root = self.root.clone().ok_or_else(|| t!("profile-no-localappdata"))?;
         profile::install(&root, &self.shim, &self.settings_files()).map_err(|e| e.to_string())?;

@@ -24,6 +24,7 @@ mod import_dialog;
 mod terminal_profile;
 mod tree_view;
 mod window;
+mod wizard;
 
 use std::path::PathBuf;
 

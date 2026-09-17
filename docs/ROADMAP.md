@@ -223,8 +223,12 @@
       re-imports as SecureCRT; toolbar button only when PuTTY has
       sessions; `NATIVETERM_PUTTY_KEY` points tests at another key)
 - [ ] PuTTY import (rest): host keys from `SshHostKeys`; plink sessions
-- [ ] First-run wizard (import, environment checks, key setup, data
-      directory / cloud sync)
+- [x] First-run wizard (environment checks: `ssh -V`, Terminal, profile
+      with an install button, ssh-agent; import from SecureCRT / PuTTY;
+      key creation / "Install my key" on all hosts; where sessions and data
+      are kept, with sync advice); shown once (`first_run_done`), again from
+      Settings; every button opens the usual dialog or tab
+- [ ] First-run wizard (rest): choosing the data directory; cloud sync
 - [x] Unique tab titles (`web01 (2)`); foreign tabs excluded from batch
       operations (tab menu close sets contain NativeTerm sessions only)
 - [x] Rename reconciliation (a host renamed in the tree while its tab is
