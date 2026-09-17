@@ -6,6 +6,7 @@
 pub mod data_dir;
 pub mod fuzzy;
 pub mod i18n;
+pub mod quick;
 pub mod import;
 pub mod registry;
 pub mod tab_menu;

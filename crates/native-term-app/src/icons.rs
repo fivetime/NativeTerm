@@ -14,6 +14,8 @@ pub const HOST: char = '\u{E756}';
 pub const PIN: char = '\u{E718}';
 pub const CLEAR: char = '\u{E711}';
 pub const SEARCH: char = '\u{E721}';
+pub const CONNECT: char = '\u{E703}';
+pub const SAVE: char = '\u{E74E}';
 
 /// `glyph` then `text`, for buttons.
 pub fn with(glyph: char, text: impl AsRef<str>) -> String {

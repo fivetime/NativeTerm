@@ -236,7 +236,8 @@
 - [x] Open a whole folder (batched `wt` calls)
 - [ ] Open a whole folder (rest): rate-limited connections, chosen tab
       selected at the end; same queue for mass reconnect after resume
-- [ ] Quick connect to `user@host[:port]`, optionally save afterwards
+- [x] Quick connect to `user@host[:port]` from the search box, "Save…"
+      afterwards (new-host dialog, filled in)
 - [ ] "Remove this host's old key" (`ssh-keygen -R`, confirmed)
 - [x] Recovery after NativeTerm restart (re-discover tabs, re-pair shims
       by session GUID / `--session`); restored placeholders replaced by

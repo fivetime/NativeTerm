@@ -253,19 +253,34 @@ impl App {
             ui.label(t!("sessions-empty"));
             return;
         }
+        let mut save = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Grid::new("sessions").striped(true).num_columns(4).show(ui, |ui| {
-                ui.strong(t!("column-session"));
-                ui.strong(t!("column-state"));
-                ui.strong(t!("column-tab"));
-                ui.strong("");
-                ui.end_row();
-                for s in &sessions {
-                    session_row(ui, &core, s);
-                    ui.end_row();
+            for s in &sessions {
+                // typed by hand, not in the tree: offer to save it
+                let typed = self
+                    .tree
+                    .find(&s.alias)
+                    .is_none()
+                    .then(|| native_term_app::quick::from_destination(&s.alias))
+                    .flatten();
+                if let Some(target) = session_card(ui, &core, s, typed) {
+                    save = Some(target);
                 }
-            });
+                ui.add_space(6.0);
+            }
         });
+        if let (Some(target), None) = (save, &self.dialog) {
+            let draft = HostDraft {
+                label: target.host.clone(),
+                hostname: target.host,
+                user: target.user,
+                port: target.port,
+                ..HostDraft::default()
+            };
+            let main = self.editor.main_config();
+            let folder = self.folder_label(&main);
+            self.dialog = Some(Dialog::Host(HostDialog::new_host_from(main, &folder, &draft)));
+        }
     }
 }
 
@@ -336,58 +351,80 @@ fn state_color(ui: &egui::Ui, state: &State) -> egui::Color32 {
     }
 }
 
-fn session_row(ui: &mut egui::Ui, core: &Core, s: &SessionView) {
-    let label = ui.label(&s.label);
-    if s.label != s.alias {
-        label.on_hover_text(&s.alias);
-    }
-    let mut state = s.state.describe();
-    if s.attempt > 1 && s.state.is_open() {
-        state.push_str(&format!(" · {}", t!("session-attempt", n = s.attempt)));
-    }
-    if let Some(n) = s.auto_retry {
-        state.push_str(&format!(" · {}", t!("session-auto-reconnect", n = n)));
-    }
-    ui.colored_label(state_color(ui, &s.state), state);
-    match &s.location {
-        Some(l) => {
-            let tab = l.tab_index + 1;
-            let mut text = t!("session-location", window = l.window_number, tab = tab);
-            if l.selected {
-                text.push_str(&format!(" · {}", t!("session-selected")));
+/// One open session as a card: name and state, then where its tab is and
+/// what can be done. Returns the target when "Save…" was clicked.
+fn session_card(
+    ui: &mut egui::Ui,
+    core: &Core,
+    s: &SessionView,
+    typed: Option<native_term_app::quick::QuickTarget>,
+) -> Option<native_term_app::quick::QuickTarget> {
+    let mut save = None;
+    let color = state_color(ui, &s.state);
+    egui::Frame::group(ui.style()).corner_radius(6.0).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal_wrapped(|ui| {
+            let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+            ui.painter().circle_filled(dot.center(), 4.5, color);
+            let label = ui.strong(&s.label);
+            if s.label != s.alias {
+                label.on_hover_text(&s.alias);
             }
-            if l.mixed {
-                text.push_str(&format!(" · {}", t!("session-split")));
+            let mut state = s.state.describe();
+            if s.attempt > 1 && s.state.is_open() {
+                state.push_str(&format!(" · {}", t!("session-attempt", n = s.attempt)));
             }
-            let response = ui.label(text);
-            if l.title != s.label {
-                response.on_hover_text(t!("session-current-title", title = l.title.as_str()));
+            if let Some(n) = s.auto_retry {
+                state.push_str(&format!(" · {}", t!("session-auto-reconnect", n = n)));
             }
-        }
-        None if s.state.is_open() => {
-            ui.weak(t!("session-not-located"));
-        }
-        None => {
-            ui.label("");
-        }
-    }
-    ui.horizontal(|ui| {
-        let open = s.state.is_open();
-        if ui.add_enabled(s.location.is_some(), egui::Button::new(t!("button-focus"))).clicked() {
-            core.focus(&s.id);
-        }
-        let label = if s.state == State::Waiting { t!("button-connect") } else { t!("button-reconnect") };
-        if ui.add_enabled(open && s.linked && s.state.can_connect(), egui::Button::new(label)).clicked() {
-            core.connect(&s.id);
-        }
-        let live = matches!(s.state, State::Connecting | State::Connected);
-        if ui.add_enabled(open && s.linked && live, egui::Button::new(t!("button-disconnect"))).clicked() {
-            core.disconnect(&s.id);
-        }
-        if ui.add_enabled(open, egui::Button::new(t!("button-close"))).clicked() {
-            core.close(&s.id);
-        }
+            ui.colored_label(color, state);
+        });
+        ui.horizontal_wrapped(|ui| {
+            match &s.location {
+                Some(l) => {
+                    let tab = l.tab_index + 1;
+                    let mut text = t!("session-location", window = l.window_number, tab = tab);
+                    if l.selected {
+                        text.push_str(&format!(" · {}", t!("session-selected")));
+                    }
+                    if l.mixed {
+                        text.push_str(&format!(" · {}", t!("session-split")));
+                    }
+                    let response = ui.weak(text);
+                    if l.title != s.label {
+                        response.on_hover_text(t!("session-current-title", title = l.title.as_str()));
+                    }
+                }
+                None if s.state.is_open() => {
+                    ui.weak(t!("session-not-located"));
+                }
+                None => {}
+            }
+            ui.add_space(12.0);
+            let open = s.state.is_open();
+            if ui.add_enabled(s.location.is_some(), egui::Button::new(t!("button-focus")).small()).clicked() {
+                core.focus(&s.id);
+            }
+            let label = if s.state == State::Waiting { t!("button-connect") } else { t!("button-reconnect") };
+            if ui.add_enabled(open && s.linked && s.state.can_connect(), egui::Button::new(label).small()).clicked() {
+                core.connect(&s.id);
+            }
+            let live = matches!(s.state, State::Connecting | State::Connected);
+            if ui.add_enabled(open && s.linked && live, egui::Button::new(t!("button-disconnect")).small()).clicked() {
+                core.disconnect(&s.id);
+            }
+            if ui.add_enabled(open, egui::Button::new(t!("button-close")).small()).clicked() {
+                core.close(&s.id);
+            }
+            if let Some(target) = typed {
+                let button = egui::Button::new(icons::with(icons::SAVE, t!("quick-save"))).small();
+                if ui.add(button).on_hover_text(t!("quick-save-hint")).clicked() {
+                    save = Some(target);
+                }
+            }
+        });
     });
+    save
 }
 
 impl crate::window::Ui for App {
@@ -457,6 +494,7 @@ impl crate::window::Ui for App {
         egui::Panel::left("tree")
             .resizable(true)
             .default_size(320.0)
+            .size_range(220.0..=640.0)
             .show_inside(ui, |ui| actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity));
         for action in actions {
             self.handle(action);

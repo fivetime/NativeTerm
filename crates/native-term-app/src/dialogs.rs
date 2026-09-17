@@ -39,6 +39,11 @@ impl HostDialog {
         HostDialog::from_draft(t!("host-new-title", folder = folder), None, Some(file), &HostDraft::default())
     }
 
+    /// A new host, filled in (saving a quick connect).
+    pub fn new_host_from(file: PathBuf, folder: &str, draft: &HostDraft) -> HostDialog {
+        HostDialog::from_draft(t!("host-new-title", folder = folder), None, Some(file), draft)
+    }
+
     pub fn edit(alias: &str, draft: &HostDraft) -> HostDialog {
         HostDialog::from_draft(t!("host-edit-title", alias = alias), Some(alias.to_string()), None, draft)
     }

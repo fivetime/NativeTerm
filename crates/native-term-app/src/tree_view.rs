@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use native_term_app::quick::{self, QuickTarget};
 use native_term_app::{fuzzy, t, HostRequest, State};
 use native_term_config::{Folder, HostEntry, SessionTree};
 use native_term_platform::Target;
@@ -137,6 +138,7 @@ struct SearchCache {
 
 enum Row<'a> {
     Heading(String),
+    Quick(QuickTarget),
     Folder { depth: usize, name: String, path: String, folder: Option<usize>, count: usize, open: bool },
     Host { host: &'a HostEntry, folder: usize, depth: usize },
     Empty(String),
@@ -186,6 +188,10 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
 
 fn request(host: &HostEntry) -> HostRequest {
     HostRequest::new(host.alias(), host.label())
+}
+
+fn quick_request(target: &QuickTarget) -> HostRequest {
+    HostRequest::new(target.destination(), target.label())
 }
 
 fn folder_title(folder: &Folder) -> String {
@@ -257,7 +263,9 @@ impl TreeView {
         let query = self.query.trim().to_string();
         if !query.is_empty() {
             let hits = self.search(tree, generation, recent);
-            if hits.is_empty() {
+            if let Some(target) = quick::parse(&query) {
+                rows.push(Row::Quick(target));
+            } else if hits.is_empty() {
                 rows.push(Row::Empty(t!("tree-no-match", query = query.as_str())));
             }
             rows.extend(hits.into_iter().map(|(f, h)| Row::Host { host: &folders[f].hosts[h], folder: f, depth: 0 }));
@@ -354,7 +362,10 @@ impl TreeView {
         let search = ui
             .horizontal(|ui| {
                 ui.label(icons::SEARCH.to_string());
-                let width = ui.available_width() - if self.query.is_empty() { 0.0 } else { 28.0 };
+                // the clear button and the spacing before it: a field that is
+                // too wide makes the resizable panel grow on every frame
+                let clear_width = ui.spacing().interact_size.y + ui.spacing().item_spacing.x + 4.0;
+                let width = ui.available_width() - if self.query.is_empty() { 0.0 } else { clear_width };
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query).hint_text(t!("tree-search-hint")).desired_width(width),
                 );
@@ -376,8 +387,11 @@ impl TreeView {
         self.update_nodes(tree, generation);
         let rows = self.rows(tree, generation, recent);
         if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Some(Row::Host { host, .. }) = rows.iter().find(|r| matches!(r, Row::Host { .. })) {
-                actions.push(TreeAction::Open(vec![request(host)], Target::Recent));
+            // the best saved host; a typed target only if nothing matches
+            let host = rows.iter().find_map(|r| if let Row::Host { host, .. } = r { Some(request(host)) } else { None });
+            let typed = rows.iter().find_map(|r| if let Row::Quick(q) = r { Some(quick_request(q)) } else { None });
+            if let Some(request) = host.or(typed) {
+                actions.push(TreeAction::Open(vec![request], Target::Recent));
             }
         }
         ui.separator();
@@ -393,6 +407,20 @@ impl TreeView {
                     Row::Heading(text) => {
                         let look = RowLook { icon: None, dot: None, selected: false, weak: true, indent: 0.0 };
                         draw_row(ui, row_height, text, look);
+                    }
+                    Row::Quick(target) => {
+                        let look = RowLook { icon: Some(icons::CONNECT), dot: None, selected: false, weak: false, indent: 0.0 };
+                        let text = t!("quick-connect", target = target.label());
+                        let response = draw_row(ui, row_height, &text, look);
+                        if response.clicked() {
+                            actions.push(TreeAction::Open(vec![quick_request(target)], Target::Recent));
+                        }
+                        response.context_menu(|ui| {
+                            if ui.button(t!("menu-connect-new-window")).clicked() {
+                                actions.push(TreeAction::Open(vec![quick_request(target)], Target::NewWindow));
+                                ui.close();
+                            }
+                        });
                     }
                     Row::Empty(text) => {
                         let look = RowLook { icon: None, dot: None, selected: false, weak: true, indent: 0.0 };

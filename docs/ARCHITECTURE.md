@@ -1168,6 +1168,19 @@ Host ceph-cluster.osp-control1
 Quick connect accepts `user@host[:port]` for a machine that isn't in the
 config; after the session, the user can save it into a folder.
 
+Implemented: typing `user@host`, `host:port`, `user@host:port`, a name
+with a dot, or a bare IPv6 address (optionally after `ssh `) into the
+search box adds a "Connect to …" row on top; Enter still opens the best
+saved match and falls back to the typed target. The shim gets `user@host`,
+or `ssh://user@host:port` when there is a port (Windows OpenSSH 9.5 takes
+that form, but not `ssh://[v6]:port`, so IPv6 targets can't carry a
+port). The destination comes after `--`, as for aliases. A session opened
+this way has "Save…" on its card, which opens the new-host dialog for
+`~/.ssh/config`, filled in.
+
+The open sessions are cards: a state dot, name and state on the first
+line; tab position and buttons on the second, wrapping on narrow windows.
+
 ### Per-host terminal type
 
 Some older network devices only understand `vt100`, while Windows OpenSSH
