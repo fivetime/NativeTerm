@@ -52,7 +52,7 @@ fn ended(state: &State) -> bool {
 }
 
 /// `web01 (2)` → `web01`, for cloning.
-fn base_label(label: &str) -> &str {
+pub(crate) fn base_label(label: &str) -> &str {
     if let Some(open) = label.rfind(" (") {
         let inner = &label[open + 2..];
         if inner.strip_suffix(')').is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) {

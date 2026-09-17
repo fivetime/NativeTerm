@@ -2235,6 +2235,40 @@ small draggable floating button, bottom-right by default.
   window with the CPU renderer (per-pixel alpha from the rendered
   buffer).
 
+Implemented (first version):
+
+- **Windows:** the runner (`src/window.rs`) now drives two windows, each
+  with its own egui context, renderer and repaint timer: the main window
+  and the button (borderless, always on top, no taskbar entry, rounded
+  corners through DWM, 52 × 52 points, the accent color with an icon).
+- **Visibility:** shown exactly while the docked main window is hidden
+  (and while its panel is open). It is created hidden at start and
+  painted once, so it appears without a flash.
+- **Position:** bottom right of the work area at first; dragged anywhere
+  (a press that egui sees as a drag hands the move to Windows); the
+  collapsed position is kept in `settings.fab`.
+- **Panel:** a click opens a panel that grows up and to the left from the
+  button (kept on the screen) and fits its height to the content:
+  - a field for a host (fuzzy search over the saved hosts, which the main
+    window publishes on every reload) or `user@host[:port]`; Enter opens
+    the best host, else the typed target;
+  - the active session — NativeTerm's session in the selected tab of the
+    Terminal window that was last in front (the core records it on
+    foreground changes) — with Reconnect and Clone;
+  - All tabs (brings the main window out with the tab list), Close
+    disconnected tabs, Show NativeTerm.
+  - Esc, a click elsewhere, or any action closes the panel.
+- **Bringing the main window out** from the button slides it back and
+  keeps it out until the pointer has been over it or it loses the focus
+  (otherwise it would hide at once: the pointer is still at the button).
+- Measured: idle 0 ms CPU with the button shown; 22.7 MB private for
+  both windows. Scripted check `fab_test.ps1` (scratch): shown only while
+  docked-hidden, the panel opens from the button's corner, host search,
+  "Show NativeTerm" brings the window out and hides the button, the
+  button returns to its place.
+- Not yet: transparency / a round shape (needs a layered window), a
+  "send command" entry (needs the command layer).
+
 All UI surfaces (sidebar, FAB, shortcut, tab switcher) invoke one shared
 app-level command layer.
 

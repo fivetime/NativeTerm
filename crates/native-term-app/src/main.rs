@@ -12,7 +12,9 @@
 mod app;
 mod dialogs;
 mod dock;
+mod fab;
 mod icons;
+mod shell;
 mod tab_list;
 mod import_dialog;
 mod terminal_profile;
@@ -138,6 +140,7 @@ fn main() {
         .with_inner_size([960.0, 640.0]);
     // where the window was, and a way to remember it
     let settings = setup.as_ref().ok().and_then(|s| s.core.clone());
+    let settings_core = settings.clone();
     let placement = settings
         .as_ref()
         .and_then(|core| core.setting(WINDOW_SETTING))
@@ -147,8 +150,8 @@ fn main() {
             core.set_setting(WINDOW_SETTING, &p.to_setting());
         }
     });
-    let result = window::run(viewport, placement, save, move |ctx| {
-        install_fonts(ctx);
+    let button = floating_button(settings_core.clone());
+    let result = window::run(viewport, placement, save, Some(button), move |ctx| {
         match setup {
             Ok(setup) => Box::new(App::new(ctx, setup)),
             Err(e) => Box::new(Fatal(e)),
@@ -160,11 +163,38 @@ fn main() {
     }
 }
 
+/// `state.db` setting: where the floating button was (`x,y`).
+const BUTTON_SETTING: &str = "fab";
+
+fn floating_button(core: Option<Core>) -> window::FloatingButton {
+    let position = core.as_ref().and_then(|c| c.setting(BUTTON_SETTING)).and_then(|text| {
+        let (x, y) = text.split_once(',')?;
+        Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+    });
+    let saver = core.clone();
+    window::FloatingButton {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("NativeTerm")
+            .with_inner_size([fab::BUTTON, fab::BUTTON])
+            .with_decorations(false)
+            .with_resizable(false)
+            .with_always_on_top()
+            .with_taskbar(false),
+        position,
+        save: Box::new(move |x, y| {
+            if let Some(core) = &saver {
+                core.set_setting(BUTTON_SETTING, &format!("{x},{y}"));
+            }
+        }),
+        factory: Box::new(move |_| Box::new(fab::Fab::new(core))),
+    }
+}
+
 /// `state.db` setting: the window's placement.
 const WINDOW_SETTING: &str = "window";
 
 /// Chinese text needs a system font; egui's own fonts have no CJK.
-fn install_fonts(ctx: &egui::Context) {
+pub(crate) fn install_fonts(ctx: &egui::Context) {
     let windir = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     // mapped, not read: egui would keep two private copies of a 20 MB file
     let dir = windir.join("Fonts");

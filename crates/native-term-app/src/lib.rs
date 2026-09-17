@@ -231,6 +231,8 @@ pub(crate) struct Shared {
     auto_reconnect: std::sync::atomic::AtomicBool,
     /// The tab list is shown: scan every tab even without sessions.
     all_tabs: std::sync::atomic::AtomicBool,
+    /// The Terminal window that was last in front.
+    last_terminal: std::sync::atomic::AtomicIsize,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -350,6 +352,7 @@ impl Core {
             placeholders: Mutex::new(placeholders),
             auto_reconnect: Default::default(),
             all_tabs: Default::default(),
+            last_terminal: Default::default(),
         });
         let auto = shared.registry.as_ref().and_then(|r| r.setting(AUTO_RECONNECT_SETTING).ok().flatten());
         shared.auto_reconnect.store(auto.as_deref() == Some("1"), std::sync::atomic::Ordering::Relaxed);
@@ -361,7 +364,16 @@ impl Core {
             shared.terminal.install().clone(),
             Arc::new(move |change: Change| {
                 match change {
-                    Change::Foreground | Change::Popup => return,
+                    Change::Foreground => {
+                        if let Some(shared) = weak.upgrade() {
+                            let front = native_term_platform::windows_terminal::window::foreground();
+                            if shared.terminal.windows().iter().any(|w| w.handle == front) {
+                                shared.last_terminal.store(front, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
+                        return;
+                    }
+                    Change::Popup => return,
                     Change::Content => {}
                     Change::Tabs | Change::Windows | Change::Moved => {
                         // tab rectangles are stale until the next scan
@@ -591,6 +603,45 @@ impl Core {
             }
             refresh(&shared);
         });
+    }
+
+    /// NativeTerm's session in the selected tab of the Terminal window that
+    /// was last in front (what "the active session" means while NativeTerm
+    /// itself has the focus).
+    pub fn active_session(&self) -> Option<SessionView> {
+        let snapshot = self.snapshot();
+        let last = self.shared.last_terminal.load(std::sync::atomic::Ordering::Relaxed);
+        let window = snapshot
+            .windows
+            .iter()
+            .find(|w| w.handle == last)
+            .or_else(|| snapshot.windows.iter().find(|w| w.foreground))?;
+        let tab = window.tabs.iter().find(|t| t.selected)?;
+        self.sessions().into_iter().find(|s| {
+            s.state.is_open() && s.location.as_ref().is_some_and(|l| l.window == window.handle && l.tab_index == tab.index)
+        })
+    }
+
+    /// Close every session whose connection ended or failed.
+    pub fn close_ended(&self) -> usize {
+        let ended: Vec<String> = self
+            .sessions()
+            .into_iter()
+            .filter(|s| matches!(s.state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_)))
+            .map(|s| s.id)
+            .collect();
+        for id in &ended {
+            self.close(id);
+        }
+        ended.len()
+    }
+
+    /// Open the same host again (without port forwards), in the most
+    /// recent Terminal window.
+    pub fn clone_session(&self, id: &str) {
+        let Some(s) = self.sessions().into_iter().find(|s| s.id == id) else { return };
+        let label = tab_menu::base_label(&s.label).to_string();
+        self.open(&[HostRequest { no_forwards: true, ..HostRequest::new(s.alias, label) }], Target::Recent);
     }
 
     /// Connect a waiting session, or reconnect an ended one.

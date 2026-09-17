@@ -4,7 +4,10 @@
 //! per-monitor DPI aware).
 
 use windows::Win32::Foundation::{HWND, POINT, RECT};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+use windows::Win32::Graphics::Dwm::{
+    DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS, DWMWA_WINDOW_CORNER_PREFERENCE,
+    DWMWCP_ROUND,
+};
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL,
 };
@@ -96,6 +99,20 @@ pub fn cursor() -> Option<(i32, i32)> {
 /// A mouse button is held (a drag or a click in progress).
 pub fn mouse_button_down() -> bool {
     [VK_LBUTTON, VK_RBUTTON, VK_MBUTTON].iter().any(|vk| unsafe { GetAsyncKeyState(i32::from(vk.0)) } < 0)
+}
+
+/// Rounded corners for a window without a frame (Windows 11; Windows 10
+/// ignores it).
+pub fn round_corners(handle: isize) {
+    let preference = DWMWCP_ROUND;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd(handle),
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            (&preference as *const windows::Win32::Graphics::Dwm::DWM_WINDOW_CORNER_PREFERENCE).cast(),
+            std::mem::size_of_val(&preference) as u32,
+        );
+    }
 }
 
 pub fn set_topmost(handle: isize, on: bool) {

@@ -314,7 +314,10 @@
       right edge (not towards another monitor), slides away to a 4 px
       strip, back on touch or activation, pin, always on top while
       docked, placement and edge remembered; no idle polling
-- [ ] Floating action button, shown only while the sidebar is hidden
+- [x] Floating action button, shown only while the docked window is hidden:
+      host search / quick connect, active session reconnect and clone, all
+      tabs, close disconnected, show NativeTerm; draggable, position kept
+- [ ] Floating action button (rest): round/transparent shape, send command
 - [ ] Optional `RegisterHotKey` shortcut, off by default
 - [ ] Per-host/folder terminal appearance: profile, color scheme, tab color;
       NativeTerm profiles shipped as a Windows Terminal JSON fragment

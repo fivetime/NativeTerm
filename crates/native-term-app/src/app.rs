@@ -80,6 +80,7 @@ impl App {
             }
         }
         let tree = SessionTree::load(&options.ssh_dir);
+        publish_hosts(&tree);
         App {
             core,
             view_right: View::Sessions,
@@ -100,6 +101,7 @@ impl App {
     fn reload(&mut self) {
         self.tree = SessionTree::load(&self.ssh_dir);
         self.generation += 1;
+        publish_hosts(&self.tree);
     }
 
     fn recent(&self) -> Vec<String> {
@@ -317,8 +319,28 @@ impl App {
     }
 }
 
+/// The saved hosts, for the floating button's search.
+fn publish_hosts(tree: &SessionTree) {
+    let hosts = tree
+        .folders()
+        .flat_map(|f| {
+            let folder = if f.name.is_empty() { String::new() } else { f.label().to_string() };
+            f.hosts.iter().map(move |h| crate::shell::HostEntry {
+                alias: h.alias().to_string(),
+                label: h.label().to_string(),
+                hostname: h.target().to_string(),
+                folder: folder.clone(),
+            })
+        })
+        .collect();
+    crate::shell::set_hosts(hosts);
+}
+
 /// `state.db` setting: `light`, `dark`, or absent for the system's.
 pub const THEME_SETTING: &str = "theme";
+
+/// The chosen theme, for the other window.
+pub static THEME: std::sync::Mutex<Option<egui::ThemePreference>> = std::sync::Mutex::new(None);
 
 pub fn apply_theme(ctx: &egui::Context, setting: Option<&str>) {
     let (preference, title_bar) = match setting {
@@ -327,6 +349,7 @@ pub fn apply_theme(ctx: &egui::Context, setting: Option<&str>) {
         _ => (egui::ThemePreference::System, egui::SystemTheme::SystemDefault),
     };
     ctx.set_theme(preference);
+    *THEME.lock().unwrap_or_else(|e| e.into_inner()) = Some(preference);
     // the window's own title bar follows too
     ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(title_bar));
 }
@@ -468,6 +491,10 @@ impl crate::window::Ui for App {
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
             self.view.focus_search();
+        }
+        if crate::shell::take_show_tabs() {
+            self.view_right = View::Tabs;
+            self.tab_list.focus_search();
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::T)) {
             self.view_right = View::Tabs;
