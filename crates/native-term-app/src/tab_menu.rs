@@ -15,9 +15,12 @@ pub const CLOSE: u32 = 4;
 pub const CLOSE_OTHERS: u32 = 5;
 pub const CLOSE_ENDED: u32 = 6;
 pub const CLOSE_RIGHT: u32 = 7;
+pub const SEND: u32 = 8;
 
 pub(crate) struct Actions {
     pub(crate) core: Weak<Shared>,
+    /// Opens the send dialog (the window lives in the binary).
+    pub(crate) send: Arc<dyn Fn(&str) + Send + Sync>,
 }
 
 /// A session as the menu sees it.
@@ -97,6 +100,7 @@ impl Provider for Actions {
         let live = matches!(this.state, State::Connecting | State::Connected);
         entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), this.linked && live));
         entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), true));
+        entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), this.linked && this.state == State::Connected));
         entries.push(Entry::Separator);
         let close = if tab.mixed { t!("tabmenu-close-mixed") } else { t!("tabmenu-close") };
         entries.push(action(CLOSE, '\u{E711}', &close, true));
@@ -122,6 +126,7 @@ impl Provider for Actions {
                 core.open(&[host], Target::Recent);
             }
             CLOSE => core.close(&this.id),
+            SEND => (self.send)(&this.id),
             CLOSE_OTHERS | CLOSE_ENDED | CLOSE_RIGHT => {
                 for id in to_close(&all, tab, id) {
                     core.close(&id);

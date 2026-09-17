@@ -285,12 +285,16 @@
 - [ ] Session search (label, alias, IP, user, folder, note; pinyin
       initials for Chinese labels); favorites (`NativeTermFavorite`) and
       per-machine recent list
-- [ ] Command library (`commands.toml`) and post-login commands
+- [x] Command library (`commands.toml`), edited from the send dialog
+- [ ] Post-login commands (`NativeTermOnLogin`); SecureCRT saved commands
       (`NativeTermOnLogin`)
 - [ ] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
       Mac keyboards
 - [ ] Throttle snapshots, previews, and sync on battery power
 - [ ] Active-session tracking (foreground hook + UIA selection, sticky)
+- [x] Send commands to one or several logged-in sessions (shim injection,
+      confirmation for several, audit log; card, list, tab menu, floating
+      button); end-to-end test `send_commands`
 - [ ] Send Commands to Active Session, command input at the bottom of the
       sidebar; refused before login; audit log
 - [ ] Send Commands to This Group — shim injection (source-confirmed),

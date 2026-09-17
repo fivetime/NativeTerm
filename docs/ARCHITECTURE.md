@@ -1824,8 +1824,23 @@ In order of preference:
    - only after the session reported "authenticated" (see "Login and
      authentication").
 
-   An end-to-end prototype still confirms the combination on a real
-   machine.
+   Confirmed end to end (`tests/send_commands.rs`): a shim with its own
+   console, a stand-in ssh that reads key records with
+   `ReadConsoleInputW` like Windows OpenSSH; `uptime` and
+   `echo 你好 😀` arrived as two lines.
+
+   Implemented (`Core::send_text`):
+   - text is sent line by line (`` after each; after the last only if
+     "Press Enter after the last line" is on); CRLF is folded;
+   - only to sessions in the "connected" state with a shim: others are
+     listed as not sent (in the test, the session still at its login
+     prompt got nothing);
+   - every send is appended to `<data dir>udit\commands-YYYY-MM.log`
+     (UTC time, the sessions, the text with line breaks shown as ⏎);
+   - UI: "Send…" on each logged-in session card, "Send to several…"
+     above the list (all logged-in sessions ticked; more than one target
+     asks first), "Send Command…" in the tab menu, and a line on the
+     floating button for the active session.
 2. **`tmux send-keys`** for persistent sessions (see above).
 3. **Fallback: focus + synthetic keystrokes.** Select the tab via UIA,
    `SetForegroundWindow`, then `SendInput`. Single target only.
@@ -2104,6 +2119,11 @@ With ~800 sessions, browsing the tree is the slow path.
   `commands.toml` in the data directory and synced with the settings.
   Each can be sent to the active session or a group, with the usual
   safeguards (confirmation, audit log, never before login).
+- Implemented: `commands.toml` (`[[command]]` with `name`, `text`,
+  optional `enter = false` and `group`), edited from the send dialog
+  (pick, save as, delete). A file that can't be parsed is reported and
+  never overwritten. SecureCRT's saved commands aren't imported (their
+  format isn't documented).
 - **Post-login commands**: `NativeTermOnLogin <command>` on a host or
   folder is sent once, via shim injection, right after the
   "authenticated" signal. The text waits in the input buffer until `ssh`

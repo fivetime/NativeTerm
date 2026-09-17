@@ -1771,6 +1771,7 @@ dependencies = [
  "native-term-session",
  "native-term-win",
  "rusqlite",
+ "serde",
  "softbuffer",
  "tempfile",
  "toml 0.9.12+spec-1.1.0",

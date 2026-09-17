@@ -101,7 +101,7 @@ fn tab_rect(core: &Core, name: &str) -> (isize, Rect) {
 #[ignore = "needs a portable Windows Terminal; moves the mouse"]
 fn tab_menu_on_nativeterm_tabs_only() {
     let core = core();
-    core.start_tab_menu().unwrap();
+    core.start_tab_menu(|_| {}).unwrap();
     let hosts: Vec<HostRequest> = ["m a", "m b", "m c"]
         .iter()
         .map(|l| HostRequest::new("nativeterm-test.invalid", *l))

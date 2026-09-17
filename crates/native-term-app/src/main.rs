@@ -12,6 +12,7 @@
 mod app;
 mod dialogs;
 mod dock;
+mod send_dialog;
 mod fab;
 mod icons;
 mod shell;

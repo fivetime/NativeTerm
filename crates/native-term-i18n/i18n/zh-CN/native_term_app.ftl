@@ -218,3 +218,34 @@ tabmenu-close-mixed = 关闭此会话（保留其他窗格）
 tabmenu-close-others = 关闭其他 NativeTerm 标签
 tabmenu-close-disconnected = 关闭已断开的标签
 tabmenu-close-right = 关闭右侧标签
+
+## Sending commands
+
+send-title = 发送命令
+send-command-label = 命令（每行一条）
+send-enter = 最后一行后按回车
+send-saved = 已保存的命令
+send-saved-pick = （选择）
+send-saved-none = 还没有保存的命令。
+send-save-as = 保存为
+send-save = 保存
+send-delete = 删除这条保存的命令
+send-library-error = 无法读取 { $path }（{ $error }），不会修改它。
+send-targets = 会话
+send-all = 全部已登录的
+send-none = 全不选
+send-no-sessions = 没有打开的会话。
+send-not-logged-in = 未登录（{ $state }）
+send-button = { $count ->
+        [one] 发送
+       *[other] 发送到 { $count } 个会话
+    }
+send-confirm = 确定要把这些内容输入到 { $count } 个会话中吗？
+send-back = 返回
+send-result-sent = 已发送到 { $count } 个会话：{ $labels }
+send-result-skipped = 未发送（未登录）：{ $labels }
+send-result-failed = 未发送（NativeTerm 失去了该标签）：{ $labels }
+session-send = 发送…
+sessions-send-many = 发送到多个会话…
+fab-send-hint = 输入到当前会话，回车发送
+tabmenu-send = 发送命令…

@@ -3,6 +3,7 @@
 //! work on background threads. The GUI (`main.rs`) only reads views and
 //! sends commands.
 
+pub mod commands;
 pub mod data_dir;
 pub mod fuzzy;
 pub mod i18n;
@@ -233,6 +234,8 @@ pub(crate) struct Shared {
     all_tabs: std::sync::atomic::AtomicBool,
     /// The Terminal window that was last in front.
     last_terminal: std::sync::atomic::AtomicIsize,
+    /// Where sent commands are recorded (`<data dir>\\audit`).
+    audit_dir: Mutex<Option<PathBuf>>,
 }
 
 pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -353,6 +356,7 @@ impl Core {
             auto_reconnect: Default::default(),
             all_tabs: Default::default(),
             last_terminal: Default::default(),
+            audit_dir: Mutex::new(None),
         });
         let auto = shared.registry.as_ref().and_then(|r| r.setting(AUTO_RECONNECT_SETTING).ok().flatten());
         shared.auto_reconnect.store(auto.as_deref() == Some("1"), std::sync::atomic::Ordering::Relaxed);
@@ -428,9 +432,10 @@ impl Core {
     }
 
     /// Start NativeTerm's own right-click menu on its tabs (once).
-    pub fn start_tab_menu(&self) -> io::Result<()> {
+    /// `send` opens the send dialog for a session id.
+    pub fn start_tab_menu(&self, send: impl Fn(&str) + Send + Sync + 'static) -> io::Result<()> {
         let settings = self.shared.terminal.install().settings_json();
-        let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared) });
+        let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared), send: Arc::new(send) });
         let menu = TabMenu::start(settings, provider)?;
         *lock(&self.shared.menu) = Some(menu);
         self.shared.refresh_soon();
@@ -603,6 +608,57 @@ impl Core {
             }
             refresh(&shared);
         });
+    }
+
+    /// Record sent commands in `dir` (one file per month).
+    pub fn set_audit_dir(&self, dir: PathBuf) {
+        *lock(&self.shared.audit_dir) = Some(dir);
+    }
+
+    /// Type `text` into sessions, line by line (see `commands::lines`).
+    /// Only sessions that are logged in get it: text typed at a password or
+    /// host-key prompt would be taken as the answer. Every send is
+    /// recorded in the audit log.
+    pub fn send_text(&self, ids: &[String], text: &str, enter: bool) -> SendReport {
+        let lines = commands::lines(text, enter);
+        let mut report = SendReport::default();
+        let mut audit = Vec::new();
+        for id in ids {
+            let target = lock(&self.shared.sessions).iter().find(|s| &s.id == id).map(|s| {
+                (s.label.clone(), s.alias.clone(), s.state == State::Connected, s.link.clone())
+            });
+            let Some((label, alias, connected, link)) = target else { continue };
+            let Some(link) = link.filter(|_| connected) else {
+                report.skipped.push(label);
+                continue;
+            };
+            let ok = lines
+                .iter()
+                .all(|(line, enter)| link.send(&AppMessage::SendText { text: line.clone(), enter: *enter }).is_ok());
+            if ok {
+                report.sent.push(label.clone());
+                audit.push(format!("{label} ({alias})"));
+            } else {
+                report.failed.push(label);
+            }
+        }
+        if !audit.is_empty() {
+            if let Err(e) = self.audit(&audit, text) {
+                self.shared.notice(format!("audit log: {e}"));
+            }
+        }
+        report
+    }
+
+    fn audit(&self, targets: &[String], text: &str) -> io::Result<()> {
+        use std::io::Write;
+        let Some(dir) = lock(&self.shared.audit_dir).clone() else { return Ok(()) };
+        std::fs::create_dir_all(&dir)?;
+        let (date, time) = utc_now();
+        let file = dir.join(format!("commands-{}.log", &date[..7]));
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(file)?;
+        let text = text.replace('\r', "").replace('\n', " \u{23CE} ");
+        writeln!(f, "{date} {time}Z\t{}\t{text}", targets.join(", "))
     }
 
     /// NativeTerm's session in the selected tab of the Terminal window that
@@ -1176,6 +1232,40 @@ fn schedule_reconnect(shared: &Arc<Shared>, id: &str, attempt: u32) {
     });
 }
 
+/// What happened to a command that was sent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SendReport {
+    /// Labels of the sessions that got it.
+    pub sent: Vec<String>,
+    /// Not logged in (or no shim): not sent.
+    pub skipped: Vec<String>,
+    /// The shim couldn't be reached.
+    pub failed: Vec<String>,
+}
+
+/// ("YYYY-MM-DD", "HH:MM:SS") in UTC.
+fn utc_now() -> (String, String) {
+    utc(registry::now().max(0))
+}
+
+fn utc(secs: i64) -> (String, String) {
+    let (days, rest) = (secs / 86_400, secs % 86_400);
+    // civil from days (Howard Hinnant's algorithm)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    (
+        format!("{year:04}-{month:02}-{day:02}"),
+        format!("{:02}:{:02}:{:02}", rest / 3600, rest / 60 % 60, rest % 60),
+    )
+}
+
 /// Watch, while the tab's shim is ending, whether its window goes too.
 fn check_window_closed(shared: &Shared, id: &str, window: isize) {
     let deadline = Instant::now() + WINDOW_CLOSE_CHECK;
@@ -1294,6 +1384,13 @@ mod tests {
         apply(&mut s, &ShimMessage::Authenticated);
         assert!(s.connected_at.is_some());
         assert_eq!(s.view().auto_retry, None, "shown only while reconnecting");
+    }
+
+    #[test]
+    fn utc_dates() {
+        assert_eq!(utc(0), ("1970-01-01".to_string(), "00:00:00".to_string()));
+        assert_eq!(utc(1_789_000_000), ("2026-09-10".to_string(), "00:26:40".to_string()));
+        assert_eq!(utc(951_782_400).0, "2000-02-29");
     }
 
     #[test]

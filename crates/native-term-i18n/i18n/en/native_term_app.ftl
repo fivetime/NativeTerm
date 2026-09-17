@@ -237,3 +237,35 @@ tabmenu-close-mixed = Close This Session (keeps the other panes)
 tabmenu-close-others = Close Other NativeTerm Tabs
 tabmenu-close-disconnected = Close Disconnected Tabs
 tabmenu-close-right = Close Tabs to the Right
+
+## Sending commands
+
+send-title = Send command
+send-command-label = Command (one per line)
+send-enter = Press Enter after the last line
+send-saved = Saved commands
+send-saved-pick = (choose)
+send-saved-none = No saved commands yet.
+send-save-as = Save as
+send-save = Save
+send-delete = Delete this saved command
+send-library-error = { $path } can't be read ({ $error }); it isn't changed.
+send-targets = Sessions
+send-all = All logged in
+send-none = None
+send-no-sessions = No open sessions.
+send-not-logged-in = not logged in ({ $state })
+send-button =
+    { $count ->
+        [one] Send
+       *[other] Send to { $count } sessions
+    }
+send-confirm = Really type this into { $count } sessions?
+send-back = Back
+send-result-sent = Sent to { $count }: { $labels }
+send-result-skipped = Not sent (not logged in): { $labels }
+send-result-failed = Not sent (NativeTerm lost the tab): { $labels }
+session-send = Send…
+sessions-send-many = Send to several…
+fab-send-hint = Type into the active session, Enter sends
+tabmenu-send = Send Command…

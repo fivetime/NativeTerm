@@ -17,6 +17,7 @@ pub const SEARCH: char = '\u{E721}';
 pub const TAB: char = '\u{E7C3}';
 pub const TABS: char = '\u{E8A9}';
 pub const OPEN: char = '\u{E8A7}';
+pub const SEND: char = '\u{E724}';
 pub const CONNECT: char = '\u{E703}';
 pub const SAVE: char = '\u{E74E}';
 

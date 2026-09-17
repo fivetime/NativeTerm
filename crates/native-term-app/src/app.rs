@@ -11,6 +11,7 @@ use native_term_config::SessionTree;
 
 use crate::dialogs::{ConfirmDelete, FolderDialog, HostDialog, Outcome};
 use crate::import_dialog::ImportDialog;
+use crate::send_dialog::SendDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
 use crate::tab_list::TabList;
@@ -25,6 +26,7 @@ enum Dialog {
     Folder(FolderDialog),
     Delete(ConfirmDelete),
     Import(Box<ImportDialog>),
+    Send(Box<SendDialog>),
 }
 
 /// What the right side shows.
@@ -69,13 +71,21 @@ impl App {
     pub fn new(ctx: &egui::Context, setup: Setup) -> App {
         let Setup { options, install, shim, core, data_dir, mut notices } = setup;
         let mut profile = ProfileSetup::new(install, shim);
+        if let Some(core) = &core {
+            core.set_audit_dir(data_dir.join("audit"));
+        }
         notices.extend(profile.fix_moved());
         if let Some(core) = &core {
             crate::dock::set_pinned(core.setting(PINNED_SETTING).as_deref() == Some("1"));
             apply_theme(ctx, core.setting(THEME_SETTING).as_deref());
+            let repaint = ctx.clone();
             let ctx = ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
-            if let Err(e) = core.start_tab_menu() {
+            let send = move |id: &str| {
+                crate::shell::send_to(id);
+                repaint.request_repaint();
+            };
+            if let Err(e) = core.start_tab_menu(send) {
                 notices.push(t!("notice-tab-menu-unavailable", error = e.to_string()));
             }
         }
@@ -210,6 +220,16 @@ impl App {
                 }
                 Outcome::Submit(()) => true,
             },
+            Dialog::Send(d) => {
+                let Some(core) = self.core.clone() else {
+                    self.dialog = None;
+                    return;
+                };
+                if let Outcome::Cancel = d.show(ctx, &core) {
+                    self.dialog = None;
+                }
+                return;
+            }
             Dialog::Delete(d) => match d.show(ctx) {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
@@ -263,6 +283,10 @@ impl App {
             if ui.small_button(t!("sessions-clear-finished")).clicked() {
                 core.clear_finished();
             }
+            let logged_in = sessions.iter().filter(|s| s.state == State::Connected).count();
+            if ui.add_enabled(logged_in > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked() && self.dialog.is_none() {
+                self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[], &self.data_dir))));
+            }
         });
         // after a restart or a Terminal restore: reconnect all, some, or none
         let waiting: Vec<&SessionView> = sessions.iter().filter(|s| s.state == State::Waiting && s.linked).collect();
@@ -289,6 +313,7 @@ impl App {
             return;
         }
         let mut save = None;
+        let mut send = None;
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for s in &sessions {
                 // typed by hand, not in the tree: offer to save it
@@ -298,12 +323,17 @@ impl App {
                     .is_none()
                     .then(|| native_term_app::quick::from_destination(&s.alias))
                     .flatten();
-                if let Some(target) = session_card(ui, &core, s, typed) {
-                    save = Some(target);
+                match session_card(ui, &core, s, typed) {
+                    Some(CardAction::Save(target)) => save = Some(target),
+                    Some(CardAction::Send) => send = Some(s.id.clone()),
+                    None => {}
                 }
                 ui.add_space(6.0);
             }
         });
+        if let (Some(id), None) = (send, &self.dialog) {
+            self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[id], &self.data_dir))));
+        }
         if let (Some(target), None) = (save, &self.dialog) {
             let draft = HostDraft {
                 label: target.host.clone(),
@@ -407,15 +437,20 @@ fn state_color(ui: &egui::Ui, state: &State) -> egui::Color32 {
     }
 }
 
+enum CardAction {
+    Save(native_term_app::quick::QuickTarget),
+    Send,
+}
+
 /// One open session as a card: name and state, then where its tab is and
-/// what can be done. Returns the target when "Save…" was clicked.
+/// what can be done.
 fn session_card(
     ui: &mut egui::Ui,
     core: &Core,
     s: &SessionView,
     typed: Option<native_term_app::quick::QuickTarget>,
-) -> Option<native_term_app::quick::QuickTarget> {
-    let mut save = None;
+) -> Option<CardAction> {
+    let mut action = None;
     let color = state_color(ui, &s.state);
     egui::Frame::group(ui.style()).corner_radius(6.0).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -472,15 +507,19 @@ fn session_card(
             if ui.add_enabled(open, egui::Button::new(t!("button-close")).small()).clicked() {
                 core.close(&s.id);
             }
+            let ready = s.state == State::Connected && s.linked;
+            if ui.add_enabled(ready, egui::Button::new(icons::with(icons::SEND, t!("session-send"))).small()).clicked() {
+                action = Some(CardAction::Send);
+            }
             if let Some(target) = typed {
                 let button = egui::Button::new(icons::with(icons::SAVE, t!("quick-save"))).small();
                 if ui.add(button).on_hover_text(t!("quick-save-hint")).clicked() {
-                    save = Some(target);
+                    action = Some(CardAction::Save(target));
                 }
             }
         });
     });
-    save
+    action
 }
 
 impl crate::window::Ui for App {
@@ -491,6 +530,11 @@ impl crate::window::Ui for App {
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
             self.view.focus_search();
+        }
+        if let Some(id) = crate::shell::take_send_to() {
+            if let (Some(core), None) = (&self.core, &self.dialog) {
+                self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(core, &[id], &self.data_dir))));
+            }
         }
         if crate::shell::take_show_tabs() {
             self.view_right = View::Tabs;

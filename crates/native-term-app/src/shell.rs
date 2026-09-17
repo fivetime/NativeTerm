@@ -10,6 +10,17 @@ use native_term_app::HostRequest;
 static SHOW_MAIN: AtomicBool = AtomicBool::new(false);
 static SHOW_TABS: AtomicBool = AtomicBool::new(false);
 static HOSTS: Mutex<Vec<HostEntry>> = Mutex::new(Vec::new());
+static SEND_TO: Mutex<Option<String>> = Mutex::new(None);
+
+/// Open the send dialog for a session (from the tab menu).
+pub fn send_to(session: &str) {
+    *SEND_TO.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.to_string());
+    show_main();
+}
+
+pub fn take_send_to() -> Option<String> {
+    SEND_TO.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
 
 /// A saved host, for the floating button's search.
 #[derive(Clone, Debug, PartialEq, Eq)]

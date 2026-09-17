@@ -34,11 +34,13 @@ pub struct Fab {
     collapsed_at: Option<egui::Rect>,
     focus_search: bool,
     was_focused: bool,
+    /// Text for the active session.
+    line: String,
 }
 
 impl Fab {
     pub fn new(core: Option<Core>) -> Fab {
-        Fab { core, query: String::new(), open: false, collapsed_at: None, focus_search: false, was_focused: false }
+        Fab { core, query: String::new(), open: false, collapsed_at: None, focus_search: false, was_focused: false, line: String::new() }
     }
 
     fn expand(&mut self, ctx: &egui::Context) {
@@ -169,6 +171,18 @@ impl Fab {
                             close = true;
                         }
                     });
+                    if active.state == State::Connected {
+                        let line = ui.add(
+                            egui::TextEdit::singleline(&mut self.line)
+                                .hint_text(t!("fab-send-hint"))
+                                .desired_width(f32::INFINITY),
+                        );
+                        if line.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            core.send_text(std::slice::from_ref(&active.id), &self.line, true);
+                            self.line.clear();
+                            line.request_focus();
+                        }
+                    }
                 }
                 None => {
                     ui.weak(t!("fab-no-active"));
