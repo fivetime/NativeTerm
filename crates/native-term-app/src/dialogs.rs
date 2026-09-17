@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use native_term_app::t;
 use native_term_config::ops::HostDraft;
 
 pub enum Outcome<T> {
@@ -35,11 +36,11 @@ fn opt(text: &str) -> Option<String> {
 
 impl HostDialog {
     pub fn new_host(file: PathBuf, folder: &str) -> HostDialog {
-        HostDialog::from_draft(format!("New host in {folder}"), None, Some(file), &HostDraft::default())
+        HostDialog::from_draft(t!("host-new-title", folder = folder), None, Some(file), &HostDraft::default())
     }
 
     pub fn edit(alias: &str, draft: &HostDraft) -> HostDialog {
-        HostDialog::from_draft(format!("Edit {alias}"), Some(alias.to_string()), None, draft)
+        HostDialog::from_draft(t!("host-edit-title", alias = alias), Some(alias.to_string()), None, draft)
     }
 
     fn from_draft(title: String, alias: Option<String>, file: Option<PathBuf>, d: &HostDraft) -> HostDialog {
@@ -61,7 +62,7 @@ impl HostDialog {
     fn draft(&self) -> Result<HostDraft, String> {
         let port = match self.port.trim() {
             "" => None,
-            p => Some(p.parse::<u16>().map_err(|_| format!("port {p:?} is not a number from 1 to 65535"))?),
+            p => Some(p.parse::<u16>().map_err(|_| t!("host-bad-port", port = p))?),
         };
         let hostname = self.hostname.trim().to_string();
         let label = if self.label.trim().is_empty() { hostname.clone() } else { self.label.trim().to_string() };
@@ -86,41 +87,41 @@ impl HostDialog {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 egui::Grid::new("host-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                    let field = |ui: &mut egui::Ui, name: &str, value: &mut String, hint: &str| {
+                    let field = |ui: &mut egui::Ui, name: String, value: &mut String, hint: String| {
                         ui.label(name);
                         ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(280.0));
                         ui.end_row();
                     };
-                    field(ui, "Name", &mut self.label, "shown in the tree and on the tab");
-                    field(ui, "Host", &mut self.hostname, "host name or address");
-                    field(ui, "User", &mut self.user, "(ssh default)");
-                    field(ui, "Port", &mut self.port, "22");
-                    field(ui, "Jump host", &mut self.proxy_jump, "e.g. bastion or user@bastion:22");
-                    ui.label("Keys");
+                    field(ui, t!("field-name"), &mut self.label, t!("field-name-hint"));
+                    field(ui, t!("field-host"), &mut self.hostname, t!("field-host-hint"));
+                    field(ui, t!("field-user"), &mut self.user, t!("field-user-hint"));
+                    field(ui, t!("field-port"), &mut self.port, "22".into());
+                    field(ui, t!("field-jump"), &mut self.proxy_jump, t!("field-jump-hint"));
+                    ui.label(t!("field-keys"));
                     ui.add(
                         egui::TextEdit::multiline(&mut self.identity_files)
-                            .hint_text("one IdentityFile per line, e.g. ~/.ssh/id_ed25519")
+                            .hint_text(t!("field-keys-hint"))
                             .desired_rows(2)
                             .desired_width(280.0),
                     );
                     ui.end_row();
-                    field(ui, "Note", &mut self.note, "one line");
+                    field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                 });
                 if let Some(alias) = &self.alias {
-                    ui.weak(format!("ssh alias: {alias} (kept, so tabs and scripts keep working)"));
+                    ui.weak(t!("host-alias-kept", alias = alias.as_str()));
                 }
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
                 }
                 ui.horizontal(|ui| {
                     let ready = !self.hostname.trim().is_empty();
-                    if ui.add_enabled(ready, egui::Button::new("Save")).clicked() {
+                    if ui.add_enabled(ready, egui::Button::new(t!("button-save"))).clicked() {
                         match self.draft() {
                             Ok(d) => outcome = Outcome::Submit(d),
                             Err(e) => self.error = Some(e),
                         }
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(t!("button-cancel")).clicked() {
                         outcome = Outcome::Cancel;
                     }
                 });
@@ -143,11 +144,11 @@ pub struct FolderDialog {
 
 impl FolderDialog {
     pub fn new_folder() -> FolderDialog {
-        FolderDialog { title: "New folder".into(), file: None, name: String::new(), error: None }
+        FolderDialog { title: t!("folder-new-title"), file: None, name: String::new(), error: None }
     }
 
     pub fn rename(file: PathBuf, current: &str) -> FolderDialog {
-        FolderDialog { title: format!("Rename {current}"), file: Some(file), name: current.to_string(), error: None }
+        FolderDialog { title: t!("folder-rename-title", name = current), file: Some(file), name: current.to_string(), error: None }
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<String> {
@@ -159,7 +160,7 @@ impl FolderDialog {
             .open(&mut open)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                let edit = ui.add(egui::TextEdit::singleline(&mut self.name).hint_text("folder name").desired_width(260.0));
+                let edit = ui.add(egui::TextEdit::singleline(&mut self.name).hint_text(t!("folder-name-hint")).desired_width(260.0));
                 if self.name.is_empty() {
                     edit.request_focus();
                 }
@@ -168,12 +169,12 @@ impl FolderDialog {
                 }
                 ui.horizontal(|ui| {
                     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if ui.add_enabled(!self.name.trim().is_empty(), egui::Button::new("Save")).clicked()
+                    if ui.add_enabled(!self.name.trim().is_empty(), egui::Button::new(t!("button-save"))).clicked()
                         || (enter && !self.name.trim().is_empty())
                     {
                         outcome = Outcome::Submit(self.name.trim().to_string());
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(t!("button-cancel")).clicked() {
                         outcome = Outcome::Cancel;
                     }
                 });
@@ -200,22 +201,22 @@ impl ConfirmDelete {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new("Delete host")
+        egui::Window::new(t!("delete-title"))
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label(format!("Delete \"{}\" ({}) from the ssh config?", self.label, self.alias));
-                ui.weak("A backup of the file is kept in the data directory.");
+                ui.label(t!("delete-question", label = self.label.as_str(), alias = self.alias.as_str()));
+                ui.weak(t!("delete-backup-note"));
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
                 }
                 ui.horizontal(|ui| {
-                    if ui.button("Delete").clicked() {
+                    if ui.button(t!("button-delete")).clicked() {
                         outcome = Outcome::Submit(());
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(t!("button-cancel")).clicked() {
                         outcome = Outcome::Cancel;
                     }
                 });

@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use native_term_app::fuzzy;
-use native_term_app::HostRequest;
+use native_term_app::{t, HostRequest};
 use native_term_config::{HostEntry, SessionTree};
 use native_term_platform::Target;
 
@@ -42,7 +42,7 @@ struct SearchCache {
 }
 
 enum Row<'a> {
-    Heading(&'a str),
+    Heading(String),
     Folder { index: usize, label: String, file: &'a PathBuf, count: usize },
     Host { host: &'a HostEntry, folder: usize, indent: bool },
     Empty(String),
@@ -74,7 +74,7 @@ fn request(host: &HostEntry) -> HostRequest {
 fn folder_title(tree: &SessionTree, index: usize) -> String {
     let folder = tree.folders().nth(index).expect("folder index");
     if folder.name.is_empty() {
-        "~/.ssh/config".to_string()
+        t!("tree-main-config")
     } else {
         folder.label().to_string()
     }
@@ -124,7 +124,7 @@ impl TreeView {
         if !query.is_empty() {
             let hits = self.search(tree, generation, recent);
             if hits.is_empty() {
-                rows.push(Row::Empty(format!("No host matches \"{query}\"")));
+                rows.push(Row::Empty(t!("tree-no-match", query = query.as_str())));
             }
             rows.extend(hits.into_iter().map(|(f, h)| Row::Host { host: &folders[f].hosts[h], folder: f, indent: false }));
             return rows;
@@ -137,9 +137,9 @@ impl TreeView {
             .take(5)
             .collect();
         if !recent_hosts.is_empty() {
-            rows.push(Row::Heading("Recent"));
+            rows.push(Row::Heading(t!("tree-recent")));
             rows.extend(recent_hosts.into_iter().map(|(folder, host)| Row::Host { host, folder, indent: true }));
-            rows.push(Row::Heading("All sessions"));
+            rows.push(Row::Heading(t!("tree-all")));
         }
         for (index, folder) in folders.iter().enumerate() {
             if folder.name.is_empty() && folder.hosts.is_empty() {
@@ -151,7 +151,7 @@ impl TreeView {
             }
         }
         if tree.hosts().next().is_none() {
-            rows.push(Row::Empty("No hosts yet: right-click a folder, or use New folder.".into()));
+            rows.push(Row::Empty(t!("tree-empty")));
         }
         rows
     }
@@ -160,11 +160,11 @@ impl TreeView {
     pub fn show(&mut self, ui: &mut egui::Ui, tree: &SessionTree, generation: u64, recent: &[String]) -> Vec<TreeAction> {
         let mut actions = Vec::new();
         ui.horizontal(|ui| {
-            ui.heading("Sessions");
-            if ui.small_button("⟳").on_hover_text("Reload ~/.ssh").clicked() {
+            ui.heading(t!("tree-heading"));
+            if ui.small_button("⟳").on_hover_text(t!("tree-reload-hint")).clicked() {
                 actions.push(TreeAction::Reload);
             }
-            if ui.small_button("＋ Folder").clicked() {
+            if ui.small_button(t!("tree-new-folder")).clicked() {
                 actions.push(TreeAction::NewFolder);
             }
         });
@@ -174,10 +174,10 @@ impl TreeView {
                 let width = ui.available_width() - if self.query.is_empty() { 0.0 } else { 28.0 };
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query)
-                        .hint_text("Search name, host, user, note…  (Ctrl+F)")
+                        .hint_text(t!("tree-search-hint"))
                         .desired_width(width),
                 );
-                if !self.query.is_empty() && ui.small_button("×").on_hover_text("Clear the search (Esc)").clicked() {
+                if !self.query.is_empty() && ui.small_button("×").on_hover_text(t!("tree-search-clear")).clicked() {
                     clear = true;
                 }
                 search
@@ -225,20 +225,20 @@ impl TreeView {
                             tree.folders().nth(*index).map(|f| f.hosts.iter().map(request).collect()).unwrap_or_default();
                         let is_main = tree.folders().nth(*index).is_some_and(|f| f.name.is_empty());
                         response.context_menu(|ui| {
-                            if ui.add_enabled(!hosts.is_empty(), egui::Button::new("Connect All")).clicked() {
+                            if ui.add_enabled(!hosts.is_empty(), egui::Button::new(t!("menu-connect-all"))).clicked() {
                                 actions.push(TreeAction::Open(hosts.clone(), Target::Recent));
                                 ui.close();
                             }
-                            if ui.add_enabled(!hosts.is_empty(), egui::Button::new("Connect All in New Window")).clicked() {
+                            if ui.add_enabled(!hosts.is_empty(), egui::Button::new(t!("menu-connect-all-new-window"))).clicked() {
                                 actions.push(TreeAction::Open(hosts.clone(), Target::NewWindow));
                                 ui.close();
                             }
                             ui.separator();
-                            if ui.button("New Host…").clicked() {
+                            if ui.button(t!("menu-new-host")).clicked() {
                                 actions.push(TreeAction::NewHost((*file).clone()));
                                 ui.close();
                             }
-                            if ui.add_enabled(!is_main, egui::Button::new("Rename Folder…")).clicked() {
+                            if ui.add_enabled(!is_main, egui::Button::new(t!("menu-rename-folder"))).clicked() {
                                 actions.push(TreeAction::RenameFolder((*file).clone()));
                                 ui.close();
                             }
@@ -260,20 +260,20 @@ impl TreeView {
                             actions.push(TreeAction::Open(vec![request(host)], Target::Recent));
                         }
                         response.context_menu(|ui| {
-                            if ui.button("Connect").clicked() {
+                            if ui.button(t!("menu-connect")).clicked() {
                                 actions.push(TreeAction::Open(vec![request(host)], Target::Recent));
                                 ui.close();
                             }
-                            if ui.button("Connect in New Window").clicked() {
+                            if ui.button(t!("menu-connect-new-window")).clicked() {
                                 actions.push(TreeAction::Open(vec![request(host)], Target::NewWindow));
                                 ui.close();
                             }
                             ui.separator();
-                            if ui.button("Edit…").clicked() {
+                            if ui.button(t!("menu-edit")).clicked() {
                                 actions.push(TreeAction::Edit(alias.to_string()));
                                 ui.close();
                             }
-                            ui.menu_button("Move to", |ui| {
+                            ui.menu_button(t!("menu-move-to"), |ui| {
                                 for (title, file) in &folder_files {
                                     if *file != host.file && ui.button(title).clicked() {
                                         actions.push(TreeAction::Move(alias.to_string(), file.clone()));
@@ -281,7 +281,7 @@ impl TreeView {
                                     }
                                 }
                             });
-                            if ui.button("Delete…").clicked() {
+                            if ui.button(t!("menu-delete")).clicked() {
                                 actions.push(TreeAction::Delete(alias.to_string()));
                                 ui.close();
                             }
@@ -302,11 +302,11 @@ fn hover(host: &HostEntry) -> String {
         host.port.map(|p| format!(":{p}")).unwrap_or_default()
     );
     if let Some(jump) = &host.proxy_jump {
-        text.push_str(&format!("\nvia {jump}"));
+        text.push_str(&format!("\n{}", t!("host-via", jump = jump.as_str())));
     }
     if let Some(note) = host.nt.get("note") {
         text.push_str(&format!("\n{note}"));
     }
-    text.push_str(&format!("\nalias {}", host.alias()));
+    text.push_str(&format!("\n{}", t!("host-alias", alias = host.alias())));
     text
 }

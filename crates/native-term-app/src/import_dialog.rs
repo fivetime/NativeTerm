@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 
 use native_term_app::import::{self, Line};
+use native_term_app::t;
 use native_term_config::ops::ImportOutcome;
 use native_term_config::securecrt::{self, Plan};
 use native_term_config::SessionTree;
@@ -77,11 +78,13 @@ impl ImportDialog {
             if let Ok(result) = rx.try_recv() {
                 self.step = match result {
                     Ok(o) => {
-                        let mut text = vec![format!("Imported {} hosts into {} folders.", o.hosts(), o.written.len())];
-                        text.extend(o.failed.iter().map(|(label, why)| format!("Folder {label} was not written: {why}")));
+                        let mut text = vec![t!("import-done", hosts = o.hosts(), folders = o.written.len())];
+                        text.extend(
+                            o.failed.iter().map(|(label, why)| t!("import-folder-failed", folder = label.as_str(), error = why.as_str())),
+                        );
                         Step::Finished { text, wrote: o.hosts() > 0 }
                     }
-                    Err(e) => Step::Finished { text: vec![format!("Import failed: {e}")], wrote: false },
+                    Err(e) => Step::Finished { text: vec![t!("import-failed", error = e)], wrote: false },
                 };
             }
         }
@@ -89,7 +92,8 @@ impl ImportDialog {
         let mut open = true;
         let running = matches!(self.step, Step::Running { .. });
         let mut start = None;
-        egui::Window::new("Import from SecureCRT")
+        egui::Window::new(t!("import-title"))
+            .id(egui::Id::new("import-securecrt"))
             .collapsible(false)
             .resizable(true)
             .default_width(640.0)
@@ -97,13 +101,13 @@ impl ImportDialog {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label("SecureCRT config folder");
+                    ui.label(t!("import-folder-label"));
                     ui.add_enabled(
                         matches!(self.step, Step::Choose | Step::Preview { .. }),
                         egui::TextEdit::singleline(&mut self.path).hint_text("…\\VanDyke\\Config").desired_width(360.0),
                     );
                 });
-                ui.weak(format!("Into: {}  (every changed file is backed up first)", self.ssh_dir.display()));
+                ui.weak(t!("import-into", path = self.ssh_dir.display().to_string()));
                 if let Some(e) = &self.error {
                     ui.colored_label(RED, e);
                 }
@@ -111,7 +115,7 @@ impl ImportDialog {
                 match &mut self.step {
                     Step::Choose => {
                         if self.path.is_empty() {
-                            ui.label("SecureCRT's config folder wasn't found; enter it above.");
+                            ui.label(t!("import-not-found"));
                         }
                     }
                     Step::Preview { lines, .. } => {
@@ -137,7 +141,7 @@ impl ImportDialog {
                     Step::Running { done, total, .. } => {
                         let n = done.load(Ordering::Relaxed);
                         ui.add(egui::ProgressBar::new(n as f32 / (*total).max(1) as f32).text(format!("{n} / {total}")));
-                        ui.weak("Each folder is checked with ssh -G after writing.");
+                        ui.weak(t!("import-checking"));
                     }
                     Step::Finished { text, .. } => {
                         for t in text {
@@ -148,16 +152,16 @@ impl ImportDialog {
                 ui.separator();
                 ui.horizontal(|ui| match &self.step {
                     Step::Choose | Step::Preview { .. } => {
-                        if ui.add_enabled(!self.path.trim().is_empty(), egui::Button::new("Preview")).clicked() {
+                        if ui.add_enabled(!self.path.trim().is_empty(), egui::Button::new(t!("import-preview"))).clicked() {
                             self.preview(tree);
                         }
                         if let Step::Preview { plan, .. } = &self.step {
                             let n = plan.host_count();
-                            if ui.add_enabled(n > 0, egui::Button::new(format!("Import {n} hosts"))).clicked() {
+                            if ui.add_enabled(n > 0, egui::Button::new(t!("import-run", count = n))).clicked() {
                                 start = Some(Plan::clone(plan));
                             }
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(t!("button-cancel")).clicked() {
                             outcome = Outcome::Cancel;
                         }
                     }
@@ -165,7 +169,7 @@ impl ImportDialog {
                         ui.add(egui::Spinner::new());
                     }
                     Step::Finished { wrote, .. } => {
-                        if ui.button("Close").clicked() {
+                        if ui.button(t!("button-close")).clicked() {
                             outcome = if *wrote { Outcome::Submit(()) } else { Outcome::Cancel };
                         }
                     }

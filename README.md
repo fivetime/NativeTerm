@@ -54,7 +54,9 @@ move, delete hosts and folders), opens hosts as tabs of Windows Terminal
 (in the current or a new window), tracks their state and position from
 Terminal's events, and focuses, reconnects, and closes them. Sessions are
 recorded in `state.db`; tabs restored by Terminal are replaced by proper
-sessions. Right-clicking a NativeTerm tab opens NativeTerm's own menu.
+sessions. Right-clicking a NativeTerm tab opens NativeTerm's own menu. SecureCRT
+sessions can be imported (preview first). The window is available in
+English and Simplified Chinese.
 
 ```
 cargo build --release -p native-term-app -p native-term-shim

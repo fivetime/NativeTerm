@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use native_term_app::{Core, SessionView, State};
+use native_term_app::{t, Core, SessionView, State};
 use native_term_config::ops::{Editor, HostDraft};
 use native_term_config::write::Writer;
 use native_term_config::SessionTree;
@@ -59,7 +59,7 @@ impl App {
             let ctx = ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
             if let Err(e) = core.start_tab_menu() {
-                notices.push(format!("NativeTerm's tab menu isn't available: {e}"));
+                notices.push(t!("notice-tab-menu-unavailable", error = e.to_string()));
             }
         }
         let tree = SessionTree::load(&options.ssh_dir);
@@ -96,7 +96,7 @@ impl App {
         self.tree
             .folders()
             .find(|f| f.file == file)
-            .map(|f| if f.name.is_empty() { "~/.ssh/config".to_string() } else { f.label().to_string() })
+            .map(|f| if f.name.is_empty() { t!("tree-main-config") } else { f.label().to_string() })
             .unwrap_or_else(|| file.display().to_string())
     }
 
@@ -130,10 +130,10 @@ impl App {
             TreeAction::Move(alias, to) => {
                 let result = match self.tree.find(&alias) {
                     Some((_, host)) => self.editor.move_host(host, &to).map_err(|e| e.to_string()),
-                    None => Err(format!("{alias} is gone")),
+                    None => Err(t!("error-host-gone", alias = alias.as_str())),
                 };
                 if let Err(e) = result {
-                    self.notices.push(format!("Moving {alias} failed: {e}"));
+                    self.notices.push(t!("notice-move-failed", alias = alias.as_str(), error = e));
                 }
                 self.reload();
             }
@@ -150,7 +150,7 @@ impl App {
                     let result = match (&d.alias, &d.file) {
                         (Some(alias), _) => match self.tree.find(alias) {
                             Some((_, host)) => self.editor.update_host(host, &draft).map_err(|e| e.to_string()),
-                            None => Err(format!("{alias} is gone (changed outside NativeTerm?)")),
+                            None => Err(t!("error-host-gone", alias = alias.as_str())),
                         },
                         (None, Some(file)) => self.editor.create_host(&self.tree, file, &draft).map(|_| ()).map_err(|e| e.to_string()),
                         (None, None) => Ok(()),
@@ -217,8 +217,8 @@ impl App {
         let Some(core) = self.core.clone() else { return };
         let sessions = core.sessions();
         ui.horizontal(|ui| {
-            ui.heading(format!("Open sessions ({})", sessions.iter().filter(|s| s.state.is_open()).count()));
-            if ui.button("Clear finished").clicked() {
+            ui.heading(t!("sessions-heading", count = sessions.iter().filter(|s| s.state.is_open()).count()));
+            if ui.button(t!("sessions-clear-finished")).clicked() {
                 core.clear_finished();
             }
         });
@@ -228,29 +228,29 @@ impl App {
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     egui::Color32::from_rgb(0xd0, 0x9a, 0x1a),
-                    format!("{} restored sessions are waiting to connect.", waiting.len()),
+                    t!("sessions-restored-waiting", count = waiting.len()),
                 );
-                if ui.button("Connect all").clicked() {
+                if ui.button(t!("sessions-connect-all")).clicked() {
                     core.connect_all(waiting.iter().map(|s| s.id.clone()).collect());
                 }
-                if ui.button("Close all").clicked() {
+                if ui.button(t!("sessions-close-all")).clicked() {
                     for s in &waiting {
                         core.close(&s.id);
                     }
                 }
-                ui.weak("Or connect them one by one below.");
+                ui.weak(t!("sessions-one-by-one"));
             });
         }
         ui.separator();
         if sessions.is_empty() {
-            ui.label("Double-click a host, or right-click it or a folder for more.");
+            ui.label(t!("sessions-empty"));
             return;
         }
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             egui::Grid::new("sessions").striped(true).num_columns(4).show(ui, |ui| {
-                ui.strong("Session");
-                ui.strong("State");
-                ui.strong("Tab");
+                ui.strong(t!("column-session"));
+                ui.strong(t!("column-state"));
+                ui.strong(t!("column-tab"));
                 ui.strong("");
                 ui.end_row();
                 for s in &sessions {
@@ -260,6 +260,31 @@ impl App {
             });
         });
     }
+}
+
+/// Language: the system's, or one of NativeTerm's.
+fn language_choice(ui: &mut egui::Ui, core: &Core) {
+    let setting = core.language_setting();
+    let languages = native_term_app::i18n::available();
+    let name = |id: &str| languages.iter().find(|(l, _)| *l == id).map(|(_, n)| n.to_string());
+    let shown = match &setting {
+        Some(id) => name(id).unwrap_or_else(|| id.clone()),
+        None => format!("{} ({})", t!("language-system"), name(&native_term_app::i18n::current()).unwrap_or_default()),
+    };
+    ui.horizontal(|ui| {
+        ui.label(t!("language-label"));
+        egui::ComboBox::from_id_salt("language").selected_text(shown).show_ui(ui, |ui| {
+            if ui.selectable_label(setting.is_none(), t!("language-system")).clicked() {
+                core.set_language_setting(None);
+            }
+            for (id, native) in &languages {
+                let id = id.to_string();
+                if ui.selectable_label(setting.as_deref() == Some(id.as_str()), *native).clicked() {
+                    core.set_language_setting(Some(&id));
+                }
+            }
+        });
+    });
 }
 
 fn state_color(ui: &egui::Ui, state: &State) -> egui::Color32 {
@@ -280,28 +305,29 @@ fn session_row(ui: &mut egui::Ui, core: &Core, s: &SessionView) {
     }
     let mut state = s.state.describe();
     if s.attempt > 1 && s.state.is_open() {
-        state.push_str(&format!(" · attempt {}", s.attempt));
+        state.push_str(&format!(" · {}", t!("session-attempt", n = s.attempt)));
     }
     if let Some(n) = s.auto_retry {
-        state.push_str(&format!(" · auto-reconnect {n}"));
+        state.push_str(&format!(" · {}", t!("session-auto-reconnect", n = n)));
     }
     ui.colored_label(state_color(ui, &s.state), state);
     match &s.location {
         Some(l) => {
-            let mut text = format!("window {} · tab {}", l.window_number, l.tab_index + 1);
+            let tab = l.tab_index + 1;
+            let mut text = t!("session-location", window = l.window_number, tab = tab);
             if l.selected {
-                text.push_str(" · selected");
+                text.push_str(&format!(" · {}", t!("session-selected")));
             }
             if l.mixed {
-                text.push_str(" · split");
+                text.push_str(&format!(" · {}", t!("session-split")));
             }
             let response = ui.label(text);
             if l.title != s.label {
-                response.on_hover_text(format!("current title: {}", l.title));
+                response.on_hover_text(t!("session-current-title", title = l.title.as_str()));
             }
         }
         None if s.state.is_open() => {
-            ui.weak("not located");
+            ui.weak(t!("session-not-located"));
         }
         None => {
             ui.label("");
@@ -309,18 +335,18 @@ fn session_row(ui: &mut egui::Ui, core: &Core, s: &SessionView) {
     }
     ui.horizontal(|ui| {
         let open = s.state.is_open();
-        if ui.add_enabled(s.location.is_some(), egui::Button::new("Focus")).clicked() {
+        if ui.add_enabled(s.location.is_some(), egui::Button::new(t!("button-focus"))).clicked() {
             core.focus(&s.id);
         }
-        let label = if s.state == State::Waiting { "Connect" } else { "Reconnect" };
+        let label = if s.state == State::Waiting { t!("button-connect") } else { t!("button-reconnect") };
         if ui.add_enabled(open && s.linked && s.state.can_connect(), egui::Button::new(label)).clicked() {
             core.connect(&s.id);
         }
         let live = matches!(s.state, State::Connecting | State::Connected);
-        if ui.add_enabled(open && s.linked && live, egui::Button::new("Disconnect")).clicked() {
+        if ui.add_enabled(open && s.linked && live, egui::Button::new(t!("button-disconnect"))).clicked() {
             core.disconnect(&s.id);
         }
-        if ui.add_enabled(open, egui::Button::new("Close")).clicked() {
+        if ui.add_enabled(open, egui::Button::new(t!("button-close"))).clicked() {
             core.close(&s.id);
         }
     });
@@ -337,8 +363,8 @@ impl crate::window::Ui for App {
         }
         egui::Panel::top("status").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.toggle_value(&mut self.show_settings, "⚙ Settings");
-                if ui.button("Import from SecureCRT…").clicked() && self.dialog.is_none() {
+                ui.toggle_value(&mut self.show_settings, t!("settings-toggle"));
+                if ui.button(t!("import-securecrt-button")).clicked() && self.dialog.is_none() {
                     self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
                 }
             });
@@ -348,10 +374,10 @@ impl crate::window::Ui for App {
                     if let Some(core) = &self.core {
                         ui.separator();
                         let mut auto = core.auto_reconnect();
-                        let label = "Reconnect dropped sessions automatically (never after a failed login)";
-                        if ui.checkbox(&mut auto, label).changed() {
+                        if ui.checkbox(&mut auto, t!("auto-reconnect-setting")).changed() {
                             core.set_auto_reconnect(auto);
                         }
+                        language_choice(ui, core);
                     }
                 });
             }

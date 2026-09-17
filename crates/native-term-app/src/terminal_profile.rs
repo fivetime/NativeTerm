@@ -5,7 +5,8 @@
 
 use std::path::PathBuf;
 
-use native_term_platform::windows_terminal::install::Install;
+use native_term_app::t;
+use native_term_platform::windows_terminal::install::{Install, Kind};
 use native_term_platform::windows_terminal::profile::{self, Status};
 
 pub struct ProfileSetup {
@@ -51,20 +52,20 @@ impl ProfileSetup {
         let result = profile::install(&root, &self.shim, &self.settings_files());
         self.refresh();
         Some(match result {
-            Ok(_) => format!("Updated the \"NativeTerm SSH\" profile: {} moved to {}", old.display(), self.shim.display()),
-            Err(e) => format!("Could not update the \"NativeTerm SSH\" profile: {e}"),
+            Ok(_) => t!("profile-updated", old = old.display().to_string(), new = self.shim.display().to_string()),
+            Err(e) => t!("profile-update-failed", error = e.to_string()),
         })
     }
 
     fn install_fragment(&mut self) -> Result<(), String> {
-        let root = self.root.clone().ok_or("LOCALAPPDATA is not set")?;
+        let root = self.root.clone().ok_or_else(|| t!("profile-no-localappdata"))?;
         profile::install(&root, &self.shim, &self.settings_files()).map_err(|e| e.to_string())?;
         self.refresh();
         Ok(())
     }
 
     fn remove_fragment(&mut self) -> Result<(), String> {
-        let root = self.root.clone().ok_or("LOCALAPPDATA is not set")?;
+        let root = self.root.clone().ok_or_else(|| t!("profile-no-localappdata"))?;
         profile::uninstall(&root, &self.settings_files()).map_err(|e| e.to_string())?;
         self.refresh();
         Ok(())
@@ -72,11 +73,11 @@ impl ProfileSetup {
 
     pub fn describe(&self) -> String {
         match &self.status {
-            Status::Installed => "installed (fragment)".into(),
-            Status::InSettings => "defined in this Terminal's settings.json".into(),
-            Status::Outdated { shim } => format!("points at {}", shim.display()),
-            Status::Disabled => "turned off on Terminal's Extensions page".into(),
-            Status::Missing => "not installed".into(),
+            Status::Installed => t!("profile-installed"),
+            Status::InSettings => t!("profile-in-settings"),
+            Status::Outdated { shim } => t!("profile-outdated", path = shim.display().to_string()),
+            Status::Disabled => t!("profile-disabled"),
+            Status::Missing => t!("profile-missing"),
         }
     }
 
@@ -88,26 +89,21 @@ impl ProfileSetup {
         let red = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
         ui.horizontal_wrapped(|ui| match &self.status {
             Status::Disabled => {
-                ui.colored_label(
-                    red,
-                    "The \"NativeTerm SSH\" profile is turned off in Windows Terminal (Settings → Extensions → NativeTerm).",
-                );
-                if ui.button("Check again").clicked() {
+                ui.colored_label(red, t!("profile-banner-disabled"));
+                if ui.button(t!("button-check-again")).clicked() {
                     self.refresh();
                 }
             }
             _ => {
-                ui.colored_label(red, "Windows Terminal doesn't have the \"NativeTerm SSH\" profile yet; tabs can't open.");
+                ui.colored_label(red, t!("profile-banner-missing"));
+                let path = self.root.as_ref().map(|r| profile::fragment_path(r).display().to_string()).unwrap_or_default();
                 if ui
-                    .button("Install profile")
-                    .on_hover_text(format!(
-                        "Writes {} (read by every Windows Terminal of this user)",
-                        self.root.as_ref().map(|r| profile::fragment_path(r).display().to_string()).unwrap_or_default()
-                    ))
+                    .button(t!("profile-install"))
+                    .on_hover_text(t!("profile-install-hint", path = path))
                     .clicked()
                 {
                     if let Err(e) = self.install_fragment() {
-                        notices.push(format!("Installing the profile failed: {e}"));
+                        notices.push(t!("profile-install-failed", error = e));
                     }
                 }
             }
@@ -115,23 +111,31 @@ impl ProfileSetup {
     }
 
     pub fn settings_ui(&mut self, ui: &mut egui::Ui, notices: &mut Vec<String>) {
-        ui.label(format!("Windows Terminal: {} ({:?})", self.install.dir.display(), self.install.kind));
-        ui.label(format!("\"NativeTerm SSH\" profile: {}", self.describe()));
+        ui.label(t!("settings-terminal", dir = self.install.dir.display().to_string(), kind = kind_name(&self.install.kind)));
+        ui.label(t!("settings-profile", status = self.describe()));
         ui.horizontal(|ui| {
             let installed = matches!(self.status, Status::Installed | Status::Outdated { .. } | Status::Disabled);
-            if ui.add_enabled(!matches!(self.status, Status::Installed), egui::Button::new("Install / update")).clicked() {
+            if ui.add_enabled(!matches!(self.status, Status::Installed), egui::Button::new(t!("profile-install-update"))).clicked() {
                 if let Err(e) = self.install_fragment() {
-                    notices.push(format!("Installing the profile failed: {e}"));
+                    notices.push(t!("profile-install-failed", error = e));
                 }
             }
-            if ui.add_enabled(installed, egui::Button::new("Remove")).clicked() {
+            if ui.add_enabled(installed, egui::Button::new(t!("profile-remove"))).clicked() {
                 if let Err(e) = self.remove_fragment() {
-                    notices.push(format!("Removing the profile failed: {e}"));
+                    notices.push(t!("profile-remove-failed", error = e));
                 }
             }
-            if ui.button("Check again").clicked() {
+            if ui.button(t!("button-check-again")).clicked() {
                 self.refresh();
             }
         });
+    }
+}
+
+fn kind_name(kind: &Kind) -> String {
+    match kind {
+        Kind::Packaged => t!("terminal-kind-packaged"),
+        Kind::Portable => t!("terminal-kind-portable"),
+        Kind::Unpackaged => t!("terminal-kind-unpackaged"),
     }
 }

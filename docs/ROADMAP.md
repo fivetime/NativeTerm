@@ -313,7 +313,10 @@
 - [ ] Per-host/folder terminal appearance: profile, color scheme, tab color;
       NativeTerm profiles shipped as a Windows Terminal JSON fragment
 - [ ] NativeTerm themes (light/dark/system, presets), Mica/Acrylic
-- [ ] Localization (English, Simplified Chinese) with runtime switching
+- [x] Localization (English, Simplified Chinese) with runtime switching:
+      `native-term-i18n` (Fluent, keys checked at compile time), setting
+      in `state.db`, shim follows the system language / `NATIVETERM_LANG`
+- [ ] Localization (rest): config library errors; more languages
 - [ ] Animations (respecting the system animation setting) and toasts
 - [ ] External SFTP handoff (shell out to a configured tool)
 - [ ] Shared credential sets (`NativeTermCredential`)

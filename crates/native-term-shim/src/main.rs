@@ -17,6 +17,7 @@
 //! `NATIVETERM_START_APP=0` (never start NativeTerm).
 
 mod args;
+mod i18n;
 mod debug;
 mod link;
 mod ssh;
@@ -127,7 +128,7 @@ fn run_without_host(link: Option<Link>) -> i32 {
                 Some(AppMessage::Close) => return 0,
                 Some(AppMessage::LocalShell) => break,
                 Some(AppMessage::Hold) => {
-                    println!("[NativeTerm] Reopening this restored session in a new tab…");
+                    println!("{}", t!("reopening"));
                     deadline = Instant::now() + Duration::from_secs(120);
                 }
                 _ => {}
@@ -168,7 +169,7 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
 
     if flags.wait {
         send(ShimMessage::Waiting);
-        println!("[NativeTerm] {alias}: restored, not connected yet.");
+        println!("{}", t!("restored", alias = alias));
         if let Next::Close = after_exit(link) {
             return 0;
         }
@@ -185,7 +186,7 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
         let mut child = match Command::new(&ssh_path).args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {
-                println!("[NativeTerm] Could not start ssh ({}): {e}", ssh_path.display());
+                println!("{}", t!("ssh-not-started", path = ssh_path.display().to_string(), error = e.to_string()));
                 send(ShimMessage::Exited { code: -1 });
                 match after_exit(link) {
                     Next::Reconnect => continue,
@@ -267,7 +268,7 @@ enum Next {
 /// ssh has exited: keep the tab, offer reconnect/close on the keyboard,
 /// and follow NativeTerm's commands.
 fn after_exit(link: Option<&Link>) -> Next {
-    println!("[NativeTerm] Press R to reconnect, C to close this tab.");
+    println!("{}", t!("reconnect-or-close"));
     let keys = win::KeyReader::open().ok();
     loop {
         let mut handles = Vec::new();
@@ -307,15 +308,15 @@ fn after_exit(link: Option<&Link>) -> Next {
 
 fn describe(end: SessionEnd, code: i32) -> String {
     match end {
-        SessionEnd::LoginFailed => format!("[NativeTerm] Login failed or cancelled (exit code {code})."),
-        SessionEnd::Disconnected => format!("[NativeTerm] Disconnected (exit code {code})."),
-        SessionEnd::Closed(c) => format!("[NativeTerm] Session ended (exit code {c})."),
+        SessionEnd::LoginFailed => t!("login-failed", code = code),
+        SessionEnd::Disconnected => t!("disconnected", code = code),
+        SessionEnd::Closed(c) => t!("ended", code = c),
     }
 }
 
 fn wait_for_any_key() {
     if let Ok(keys) = win::KeyReader::open() {
-        println!("[NativeTerm] Press any key to close.");
+        println!("{}", t!("any-key"));
         while !matches!(keys.read_key(Duration::from_secs(3600)), Ok(Some(_))) {}
     }
 }

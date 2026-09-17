@@ -2316,6 +2316,31 @@ the user's `settings.json`:
   a shared crate used by both binaries.
 - Not translated: host names, user labels, remote output.
 
+Implemented (English, Simplified Chinese):
+
+- **Where:** `native-term-i18n` embeds `i18n/<language>/<crate>.ftl`
+  (`native_term_app.ftl`, `native_term_shim.ftl`) and builds loaders.
+  Each crate that shows text has an `i18n.toml` pointing there (with a
+  `domain` override, since `fl!` would use the package name), so
+  `i18n_embed_fl::fl!` checks every key at compile time. Both crates wrap
+  it as `t!`.
+- **Choosing:** Settings → Language: "System default" (the Windows
+  display languages, via `sys-locale`) or a fixed language, kept in
+  `state.db` (`settings.language`) and applied before the window opens.
+  Switching applies at the next frame. `NATIVETERM_LANG` overrides the
+  system language for both binaries (tests use `en`).
+- **The shim** follows the system language or `NATIVETERM_LANG`; it runs
+  in Terminal's environment and doesn't read NativeTerm's setting.
+- **Details:** Fluent's Unicode isolation marks around arguments are
+  turned off (plain labels, no stray characters in UIA names); this has
+  to be repeated after every language switch, because it applies to the
+  bundles loaded at the time. A test checks that every language has
+  exactly the English message ids. Messages with counts use Fluent
+  plurals in English; Chinese has none.
+- **Not translated yet:** error texts from the config library (host
+  validation, write errors) and OS error messages (those come in the
+  Windows display language anyway).
+
 ## Effects and animation
 
 - `egui`'s built-in helpers (`animate_bool`, `animate_value_with_time`,

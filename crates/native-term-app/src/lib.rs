@@ -5,6 +5,7 @@
 
 pub mod data_dir;
 pub mod fuzzy;
+pub mod i18n;
 pub mod import;
 pub mod registry;
 pub mod tab_menu;
@@ -84,17 +85,17 @@ impl State {
 
     pub fn describe(&self) -> String {
         match self {
-            State::Opening => "opening".into(),
-            State::Detached => "looking for its tab…".into(),
-            State::Waiting => "restored, not connected".into(),
-            State::Connecting => "connecting / waiting for login".into(),
-            State::Connected => "connected".into(),
-            State::LoginFailed(c) => format!("login failed ({c})"),
-            State::Disconnected(c) => format!("disconnected ({c})"),
-            State::Ended(c) => format!("ended ({c})"),
-            State::Failed(why) => format!("failed: {why}"),
-            State::Gone => "tab gone".into(),
-            State::Closed => "closed".into(),
+            State::Opening => t!("state-opening"),
+            State::Detached => t!("state-detached"),
+            State::Waiting => t!("state-waiting"),
+            State::Connecting => t!("state-connecting"),
+            State::Connected => t!("state-connected"),
+            State::LoginFailed(c) => t!("state-login-failed", code = c),
+            State::Disconnected(c) => t!("state-disconnected", code = c),
+            State::Ended(c) => t!("state-ended", code = c),
+            State::Failed(why) => t!("state-failed", reason = why.as_str()),
+            State::Gone => t!("state-gone"),
+            State::Closed => t!("state-closed"),
         }
     }
 }
@@ -404,7 +405,7 @@ impl Core {
                 });
             }
             if !lost.is_empty() {
-                grace.notice(format!("{} sessions from the last run have no tab any more", lost.len()));
+                grace.notice(t!("notice-lost-sessions", count = lost.len()));
             }
         })?;
         Ok(Core { shared })
@@ -530,7 +531,7 @@ impl Core {
             let Some(label) = shared.update(&id, |s| s.label.clone()) else { return };
             let snapshot = refresh(&shared);
             let Some((window, tab)) = snapshot.find(&label) else {
-                shared.notice(format!("{label}: its tab wasn't found (a split tab is found once it's selected)"));
+                shared.notice(t!("notice-tab-not-found", label = label.as_str()));
                 return;
             };
             if let Err(e) = shared.terminal.select(window.handle, tab) {
@@ -557,6 +558,18 @@ impl Core {
                 core.connect(id);
             }
         });
+    }
+
+    /// The chosen language (`None`: the system's).
+    pub fn language_setting(&self) -> Option<String> {
+        self.shared.registry.as_ref()?.setting(i18n::SETTING).ok().flatten().filter(|l| !l.is_empty())
+    }
+
+    /// Choose the language (`None`: the system's), now and at the next start.
+    pub fn set_language_setting(&self, choice: Option<&str>) {
+        i18n::set_language(choice);
+        self.shared.db("setting", |r| r.set_setting(i18n::SETTING, choice.unwrap_or("")));
+        self.shared.changed();
     }
 
     pub fn auto_reconnect(&self) -> bool {
@@ -593,7 +606,7 @@ impl Core {
                     Ok(true) => {
                         shared.update(&id, |s| s.state = State::Closed);
                     }
-                    Ok(false) => shared.notice(format!("{label}: the tab changed, not closed")),
+                    Ok(false) => shared.notice(t!("notice-tab-changed", label = label.as_str())),
                     Err(e) => shared.notice(format!("{label}: {e}")),
                 },
                 None => {
@@ -617,7 +630,7 @@ impl Core {
                     self.shared.notice(format!("{id}: {e}"));
                 }
             }
-            Some((label, None)) => self.shared.notice(format!("{label}: its tab isn't connected to NativeTerm")),
+            Some((label, None)) => self.shared.notice(t!("notice-not-linked", label = label.as_str())),
             None => {}
         }
     }
@@ -660,20 +673,20 @@ fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String>
     let report = match shared.terminal.open(target, specs) {
         Ok(report) => report,
         Err(e) => {
-            shared.notice(format!("Windows Terminal could not be started: {e}"));
+            shared.notice(t!("notice-terminal-failed", error = e.to_string()));
             return fail(specs, "wt failed");
         }
     };
     let mut failed = Vec::new();
     if !report.pending.is_empty() {
-        shared.notice(format!("{} tabs were not opened: another Terminal window became active", report.pending.len()));
+        shared.notice(t!("notice-tabs-pending", count = report.pending.len()));
         failed.extend(fail(&report.pending, "not sent"));
     }
     let sent = &specs[..report.launched];
     let expected: Vec<String> = sent.iter().map(|s| s.label.clone()).collect();
     let (_, missing) = shared.terminal.wait_for(&shared.labels(), &expected, CONFIRM);
     if !missing.is_empty() {
-        shared.notice(format!("{} tabs didn't appear in Windows Terminal: {}", missing.len(), missing.join(", ")));
+        shared.notice(t!("notice-tabs-missing", count = missing.len(), labels = missing.join(", ")));
         let missing: Vec<TabSpec> = sent.iter().filter(|s| missing.contains(&s.label)).cloned().collect();
         failed.extend(fail(&missing, "tab didn't appear"));
     }
@@ -824,7 +837,7 @@ fn serve(shared: Arc<Shared>, mut listener: PipeListener) {
         let conn = match listener.accept() {
             Ok(conn) => Arc::new(conn),
             Err(e) => {
-                shared.notice(format!("pipe server stopped: {e}"));
+                shared.notice(t!("notice-pipe-stopped", error = e.to_string()));
                 return;
             }
         };
@@ -840,7 +853,7 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
         return;
     };
     if protocol != PROTOCOL_VERSION {
-        shared.notice(format!("a shim with protocol {protocol} connected (expected {PROTOCOL_VERSION}); update it"));
+        shared.notice(t!("notice-old-shim", protocol = protocol, expected = PROTOCOL_VERSION));
     }
     let _ = conn.send(&AppMessage::Welcome { protocol: PROTOCOL_VERSION });
 
@@ -1031,7 +1044,7 @@ fn schedule_reconnect(shared: &Arc<Shared>, id: &str, attempt: u32) {
     };
     if n > AUTO_RECONNECT_TRIES {
         let label = shared.update(id, |s| s.label.clone()).unwrap_or_default();
-        shared.notice(format!("{label}: gave up reconnecting after {AUTO_RECONNECT_TRIES} tries"));
+        shared.notice(t!("notice-gave-up", label = label.as_str(), tries = AUTO_RECONNECT_TRIES));
         return;
     }
     // many sessions drop together (sleep, network change): spread them

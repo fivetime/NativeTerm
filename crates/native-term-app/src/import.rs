@@ -6,6 +6,8 @@ use std::path::PathBuf;
 
 use native_term_config::securecrt::{Plan, Scan, Skip};
 
+use crate::t;
+
 /// SecureCRT's configuration folder (`HKCU\Software\VanDyke\SecureCRT`,
 /// `Config Path`), if it is installed and the folder exists.
 pub fn securecrt_config_path() -> Option<PathBuf> {
@@ -32,13 +34,13 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
     let new_folders = plan.folders.iter().filter(|f| f.existing.is_none() && !f.hosts.is_empty()).count();
     let existing = plan.folders.iter().filter(|f| f.existing.is_some() && !f.hosts.is_empty()).count();
     out.push(line(
-        format!(
-            "{} sessions found in {} folders; {} will be imported into {} new and {} existing folders",
-            scan.sessions.len(),
-            scan.folders.len(),
-            plan.host_count(),
-            new_folders,
-            existing
+        t!(
+            "summary-found",
+            sessions = scan.sessions.len(),
+            folders = scan.folders.len(),
+            hosts = plan.host_count(),
+            new = new_folders,
+            existing = existing
         ),
         false,
         plan.folders
@@ -48,102 +50,97 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
             .collect(),
     ));
 
-    let mut skipped: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut skipped: BTreeMap<(bool, String), Vec<String>> = BTreeMap::new();
     for (path, why) in &plan.skipped {
         let reason = match why {
-            Skip::AlreadyImported { .. } => "already imported".to_string(),
-            Skip::PlinkLater(p) => format!("{p}: not supported yet (planned through plink)"),
-            Skip::Protocol(p) => format!("{p}: not a terminal session NativeTerm opens"),
-            Skip::NoHostname => "no host name".to_string(),
+            Skip::AlreadyImported { .. } => (false, t!("skip-already")),
+            Skip::PlinkLater(p) => (true, t!("skip-plink-later", protocol = p.as_str())),
+            Skip::Protocol(p) => (true, t!("skip-protocol", protocol = p.as_str())),
+            Skip::NoHostname => (true, t!("skip-no-hostname")),
         };
         skipped.entry(reason).or_default().push(path.clone());
     }
-    for (reason, paths) in skipped {
-        let warning = !reason.starts_with("already");
-        out.push(line(format!("Skipped, {reason}: {}", paths.len()), warning, paths));
+    for ((warning, reason), paths) in skipped {
+        out.push(line(t!("summary-skipped", reason = reason, count = paths.len()), warning, paths));
     }
 
     let n = &plan.notes;
     if !n.duplicates.is_empty() {
         out.push(line(
-            format!("Same host, port and user in several sessions: {} groups (all imported; review them)", n.duplicates.len()),
+            t!("summary-duplicates", count = n.duplicates.len()),
             true,
             n.duplicates.iter().map(|g| g.join("  =  ")).collect(),
         ));
     }
     for (name, paths) in &n.named_firewalls {
         out.push(line(
-            format!("Firewall/proxy \u{201c}{name}\u{201d} isn't imported: {} sessions connect directly", paths.len()),
+            t!("summary-firewall", name = name.as_str(), count = paths.len()),
             true,
             paths.clone(),
         ));
     }
     if !n.unresolved_jumps.is_empty() {
         out.push(line(
-            format!("Jump session not found or not imported: {} sessions connect directly", n.unresolved_jumps.len()),
+            t!("summary-unresolved-jumps", count = n.unresolved_jumps.len()),
             true,
             n.unresolved_jumps.iter().map(|(p, t)| format!("{p}  →  {t}")).collect(),
         ));
     }
     if !n.logon_actions.is_empty() {
         out.push(line(
-            format!("Logon actions/scripts aren't imported: {} sessions", n.logon_actions.len()),
+            t!("summary-logon-actions", count = n.logon_actions.len()),
             true,
             n.logon_actions.clone(),
         ));
     }
     if n.saved_passwords > 0 {
         out.push(line(
-            format!("Saved passwords aren't imported ({} sessions); use keys or ssh-agent", n.saved_passwords),
+            t!("summary-saved-passwords", count = n.saved_passwords),
             true,
             Vec::new(),
         ));
     }
     if !n.encodings.is_empty() {
         out.push(line(
-            format!("Non-UTF-8 character sets (OpenSSH sessions are UTF-8): {} sessions", n.encodings.len()),
+            t!("summary-encodings", count = n.encodings.len()),
             true,
             n.encodings.iter().map(|(p, e)| format!("{p}  ({e})")).collect(),
         ));
     }
     if !n.bad_forwards.is_empty() {
         out.push(line(
-            format!("Unreadable port forwards left out: {} sessions", n.bad_forwards.len()),
+            t!("summary-bad-forwards", count = n.bad_forwards.len()),
             true,
             n.bad_forwards.clone(),
         ));
     }
     let mut kept = Vec::new();
     if n.forwards > 0 {
-        kept.push(format!("{} port forwards", n.forwards));
+        kept.push(t!("summary-forwards", count = n.forwards));
     }
     if n.identity_files > 0 {
-        kept.push(format!("{} key files (must be in OpenSSH format)", n.identity_files));
+        kept.push(t!("summary-keys", count = n.identity_files));
     }
     if n.joined_descriptions > 0 {
-        kept.push(format!("{} multi-line descriptions joined into one line", n.joined_descriptions));
+        kept.push(t!("summary-descriptions", count = n.joined_descriptions));
     }
     if !kept.is_empty() {
-        out.push(line(format!("Also imported: {}", kept.join(", ")), false, Vec::new()));
+        out.push(line(t!("summary-also", items = kept.join(", ")), false, Vec::new()));
     }
     if !scan.unreadable.is_empty() {
         out.push(line(
-            format!("Unreadable session files: {}", scan.unreadable.len()),
+            t!("summary-unreadable", count = scan.unreadable.len()),
             true,
             scan.unreadable.iter().map(|(p, e)| format!("{p}: {e}")).collect(),
         ));
     }
     if !scan.not_utf8.is_empty() {
         out.push(line(
-            format!("Session files that aren't UTF-8 (read with replacement characters): {}", scan.not_utf8.len()),
+            t!("summary-not-utf8", count = scan.not_utf8.len()),
             true,
             scan.not_utf8.clone(),
         ));
     }
-    out.push(line(
-        "Not imported yet: host keys (KnownHosts) and saved commands".to_string(),
-        false,
-        Vec::new(),
-    ));
+    out.push(line(t!("summary-not-yet"), false, Vec::new()));
     out
 }

@@ -6,7 +6,7 @@ use std::sync::{Arc, Weak};
 use native_term_platform::windows_terminal::menu::{Entry, MenuTab, Provider};
 use native_term_platform::Target;
 
-use crate::{lock, Core, HostRequest, Shared, State};
+use crate::{lock, t, Core, HostRequest, Shared, State};
 
 pub const CONNECT: u32 = 1;
 pub const DISCONNECT: u32 = 2;
@@ -86,23 +86,26 @@ impl Provider for Actions {
         let Some(this) = all.iter().find(|s| s.label == tab.label) else { return Vec::new() };
         let mut entries = Vec::new();
         if tab.mixed {
-            entries.push(Entry::Header(format!("{} · this tab has other panes too", tab.label)));
+            entries.push(Entry::Header(t!("tabmenu-header-mixed", label = tab.label.as_str())));
             entries.push(Entry::Separator);
         } else if tab.title != tab.label {
-            entries.push(Entry::Header(format!("{} · titled \u{201c}{}\u{201d}", tab.label, tab.title)));
+            entries.push(Entry::Header(t!("tabmenu-header-titled", label = tab.label.as_str(), title = tab.title.as_str())));
             entries.push(Entry::Separator);
         }
-        let connect = if this.state == State::Waiting { "Connect" } else { "Reconnect" };
-        entries.push(action(CONNECT, '\u{E72C}', connect, this.linked && this.state.can_connect()));
+        let connect = if this.state == State::Waiting { t!("tabmenu-connect") } else { t!("tabmenu-reconnect") };
+        entries.push(action(CONNECT, '\u{E72C}', &connect, this.linked && this.state.can_connect()));
         let live = matches!(this.state, State::Connecting | State::Connected);
-        entries.push(action(DISCONNECT, '\u{E8CD}', "Disconnect", this.linked && live));
-        entries.push(action(CLONE, '\u{E8C8}', "Clone Session", true));
+        entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), this.linked && live));
+        entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), true));
         entries.push(Entry::Separator);
-        let close = if tab.mixed { "Close This Session (keeps the other panes)" } else { "Close" };
-        entries.push(action(CLOSE, '\u{E711}', close, true));
-        entries.push(action(CLOSE_OTHERS, '\u{E8BB}', "Close Other NativeTerm Tabs", !to_close(&all, tab, CLOSE_OTHERS).is_empty()));
-        entries.push(action(CLOSE_ENDED, '\u{E894}', "Close Disconnected Tabs", !to_close(&all, tab, CLOSE_ENDED).is_empty()));
-        entries.push(action(CLOSE_RIGHT, '\u{E72A}', "Close Tabs to the Right", !to_close(&all, tab, CLOSE_RIGHT).is_empty()));
+        let close = if tab.mixed { t!("tabmenu-close-mixed") } else { t!("tabmenu-close") };
+        entries.push(action(CLOSE, '\u{E711}', &close, true));
+        let others = !to_close(&all, tab, CLOSE_OTHERS).is_empty();
+        entries.push(action(CLOSE_OTHERS, '\u{E8BB}', &t!("tabmenu-close-others"), others));
+        let ended = !to_close(&all, tab, CLOSE_ENDED).is_empty();
+        entries.push(action(CLOSE_ENDED, '\u{E894}', &t!("tabmenu-close-disconnected"), ended));
+        let right = !to_close(&all, tab, CLOSE_RIGHT).is_empty();
+        entries.push(action(CLOSE_RIGHT, '\u{E72A}', &t!("tabmenu-close-right"), right));
         entries
     }
 

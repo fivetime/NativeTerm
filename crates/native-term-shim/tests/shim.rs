@@ -32,6 +32,7 @@ fn spawn_shim(pipe: &str, args: &[&str], envs: &[(&str, &str)]) -> Child {
         .env("NATIVETERM_SSH", fake_ssh())
         .env("WT_SESSION", "6e7a0000-0000-4000-8000-00000000c0de")
         .env("NATIVETERM_START_APP", "0")
+        .env("NATIVETERM_LANG", "en")
         .stdin(Stdio::null())
         .stdout(Stdio::piped());
     for (k, v) in envs {

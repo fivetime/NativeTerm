@@ -19,7 +19,7 @@ mod window;
 use std::path::PathBuf;
 
 use native_term_app::registry::Registry;
-use native_term_app::{data_dir, default_shim_path, Core};
+use native_term_app::{data_dir, default_shim_path, t, Core};
 use native_term_platform::windows_terminal::install::Install;
 use native_term_platform::windows_terminal::WindowsTerminal;
 
@@ -83,17 +83,17 @@ fn setup() -> Result<Start, String> {
         Ok((dir, _)) => match Registry::open(&dir.join("state.db")) {
             Ok(registry) => (dir, Some(registry)),
             Err(e) => {
-                notices.push(format!("{}: {e}; open sessions won't be remembered", dir.join("state.db").display()));
+                notices.push(t!("notice-db-unavailable", path = dir.join("state.db").display().to_string(), error = e.to_string()));
                 (dir, None)
             }
         },
         Err(e) => {
-            notices.push(format!("No data directory: {e}; open sessions won't be remembered"));
+            notices.push(t!("notice-no-data-dir", error = e.to_string()));
             (std::env::temp_dir().join("NativeTerm"), None)
         }
     };
     if !shim.exists() {
-        notices.push(format!("{} is missing; tabs can't start", shim.display()));
+        notices.push(t!("notice-shim-missing", path = shim.display().to_string()));
     }
     // before the window: restored tabs may already be waiting for an answer
     let core = match Core::start(WindowsTerminal::new(install.clone(), &shim), registry) {
@@ -102,10 +102,15 @@ fn setup() -> Result<Start, String> {
             return Ok(Start::AlreadyRunning { quiet: options.from_shim });
         }
         Err(e) => {
-            notices.push(format!("NativeTerm can't serve its pipe: {e}"));
+            notices.push(t!("notice-no-pipe", error = e.to_string()));
             None
         }
     };
+    if let Some(core) = &core {
+        if let Some(language) = core.language_setting() {
+            native_term_app::i18n::set_language(Some(&language));
+        }
+    }
     Ok(Start::Run(Box::new(Setup { options, install, shim, core, data_dir, notices })))
 }
 
@@ -136,7 +141,7 @@ fn main() {
         }
     });
     if let Err(e) = result {
-        native_term_win::desktop::message_box("NativeTerm", &format!("NativeTerm's window can't start: {e}"));
+        native_term_win::desktop::message_box("NativeTerm", &t!("fatal-window", error = e));
         std::process::exit(1);
     }
 }
@@ -164,7 +169,7 @@ struct Fatal(String);
 impl window::Ui for Fatal {
     fn ui(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.heading("NativeTerm can't start");
+            ui.heading(t!("fatal-title"));
             ui.label(&self.0);
         });
     }

@@ -1,0 +1,10 @@
+[package]
+name = "native-term-i18n"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+rust-embed = "8"
+unic-langid = "0.9"
