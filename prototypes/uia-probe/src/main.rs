@@ -45,7 +45,7 @@ fn is_test_terminal(window: &UIElement) -> bool {
     if dir == "*" {
         return true;
     }
-    let pid = window.get_process_id().unwrap_or(0) as u32;
+    let pid = window.get_process_id().unwrap_or(0);
     process_image(pid).is_some_and(|p| p.to_lowercase().starts_with(&format!("{}\\", dir.to_lowercase())))
 }
 

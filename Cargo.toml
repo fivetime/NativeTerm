@@ -6,6 +6,7 @@ members = [
     "crates/native-term-session",
     "crates/native-term-platform",
     "crates/native-term-shim",
+    "crates/native-term-win",
     "prototypes/uia-probe",
     "prototypes/shim-probe",
     "prototypes/menu-hook",

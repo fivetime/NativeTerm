@@ -9,4 +9,14 @@ name = "nativeterm-shim"
 path = "src/main.rs"
 
 [dependencies]
+native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Threading",
+] }

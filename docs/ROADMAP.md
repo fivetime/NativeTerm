@@ -90,14 +90,16 @@
 - [ ] `native-term-config` (rest): file watching; `.nt.toml` non-SSH
       sessions; host create/move/rename/delete operations on top of the
       edit primitives; permission problems explained in the UI
-- [ ] `native-term-shim`: `--session <id> <alias>` plus session GUID from
-      `WT_SESSION`; builds the `ssh` command line itself; report exit code
-      over the pipe, stay alive after exit, re-run on reconnect, exit 0 to
-      close the tab, keep retrying the pipe; without a host: ask
-      NativeTerm by `WT_SESSION` (restored placeholder → replaced by
-      NativeTerm; unknown → local shell); default keepalives when not
-      configured; per-host terminal type via standard `SetEnv TERM=...`;
-      `NativeTermPreConnect`
+- [x] `native-term-shim`: `--session <id> <alias>` plus session GUID from
+      `WT_SESSION`; builds the `ssh` command line itself (`LocalCommand`
+      login helper, default keepalives only when not configured); reports
+      connecting / authenticated / exit code over the pipe, stays alive
+      after exit with R/C keys, re-runs on reconnect, exit 0 closes the
+      tab, keeps retrying the pipe and replays its state; without a host:
+      asks NativeTerm (placeholder closed) or starts a local shell;
+      end-to-end tests with a fake ssh
+- [ ] `native-term-shim` (rest): `NativeTermPreConnect`; plink sessions;
+      askpass mode
 - [ ] `native-term-platform` (Windows): open tabs via
       `wt -w 0 new-tab --profile "NativeTerm SSH" --sessionId {…} --title …
       nativeterm-shim --session <id> <alias>` (tested argument handling;
@@ -119,9 +121,12 @@
 - [ ] `state.db` (SQLite) in the data directory: open-session registry,
       recent/usage, long notes and tags keyed by `NativeTermId`;
       `notes.toml` export for sync; `NativeTermId` written on create/import
-- [ ] `native-term-session`: session records, pipe server with user-only
-      ACL and client verification, exit classification (255 and -1 are
+- [x] `native-term-session`: pipe server/client with user-only ACL,
+      remote clients rejected, single instance, non-blocking duplex;
+      versioned JSON-lines protocol; exit classification (255 and -1 are
       connection-level)
+- [ ] `native-term-session` (rest): session records; verifying the
+      client process path
 - [ ] `native-term-app`: egui shell — read-only sidebar tree (row
       virtualization for thousands of sessions), "Connect" per host, list
       of open sessions, CJK font loading; idle without repaint or polling
@@ -131,7 +136,7 @@
       `nativeterm.toml`, `HKCU\Software\NativeTerm\DataDir`, writable-folder
       default); `settings.toml` with per-machine sections, `audit\`,
       `backups\`, rotated `logs\`; atomic writes and a lock file
-- [ ] Pipe protocol version number from the first release; pipe name per
+- [x] Pipe protocol version number from the first release; pipe name per
       user SID and logon session
 - [ ] Absolute shim path everywhere; fragment rewritten when the program
       folder moves; tabs restored from an old path detected and reopened

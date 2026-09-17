@@ -1138,8 +1138,42 @@ Because `wt` launches the tab's process, NativeTerm itself never owns the
 - If the pipe is gone (NativeTerm not running, restarting, or crashed), the
   shim keeps `ssh` working normally and keeps retrying the connection in
   the background.
-- **Without a host argument** (e.g. the copy made by Windows Terminal's
-  "Duplicate tab"), the shim just starts a local shell.
+- **Without a host argument** (the profile's command line: a pane
+  restored by Windows Terminal, "Duplicate tab", a new pane from the
+  profile), the shim asks NativeTerm, which closes placeholders it
+  replaces with a real session. With no answer within a few seconds (or
+  no NativeTerm), it starts a local shell.
+- After `ssh` exits the tab shows the outcome ("Login failed or
+  cancelled", "Disconnected", "Session ended", each with the exit code)
+  and "Press R to reconnect, C to close this tab"; Enter also
+  reconnects. NativeTerm's Connect/Close commands do the same.
+
+### Shim ↔ NativeTerm protocol (implemented)
+
+- One JSON object per line over the per-user pipe (see Security),
+  `"type"` tagged. Shim → NativeTerm: `hello` (protocol version, role,
+  pid, `WT_SESSION`, `--session`, alias), `connecting`, `authenticated`,
+  `exited {code}`, `closing`. NativeTerm → shim: `welcome`, `connect`,
+  `disconnect`, `close`, `send_text {text, enter}`, `local_shell`.
+- The pipe handles are synchronous, so a blocked read would also block
+  writes on the same handle: readers peek (`PeekNamedPipe`) and poll
+  every 20 ms instead. The server always keeps one unconnected instance
+  ready, and `FILE_FLAG_FIRST_PIPE_INSTANCE` makes a second NativeTerm
+  fail to bind.
+- The shim's link runs in a background thread: it retries every 2 s and,
+  after every (re)connect, sends `hello` plus the latest lifecycle state
+  (`connecting`/`exited`, and `authenticated` if seen), so a restarted
+  NativeTerm learns each tab's state at once.
+- Login detection has two paths: the `LocalCommand` helper
+  (`nativeterm-shim --authenticated <shim pid>`) sets the named event
+  `Local\NativeTerm-auth-<shim pid>`, which the shim reads when `ssh`
+  exits (login failure vs. disconnect works without NativeTerm), and also
+  connects to the pipe with role `auth_signal`. The helper writes and
+  exits at once; the server accepts such already-closed clients
+  (`ERROR_NO_DATA`) and still reads their messages.
+- `LocalCommand` is skipped when the shim's path contains `%` (token
+  expansion) or `"`; keepalive defaults (`ServerAliveInterval=15`,
+  `ServerAliveCountMax=3`) are added only when `ssh -G` shows none.
 
 ### Closing tabs
 
@@ -1567,16 +1601,15 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
 - **Restart/crash recovery**: on startup NativeTerm re-discovers existing
   tabs via UIA, re-pairs them with shims as those reconnect to the pipe,
   and (for persistent hosts) offers to reopen detached tmux sessions.
-- **Windows Terminal's "restore previous session" setting**: if enabled,
-  Windows Terminal saves each tab's command line, title,
-  suppress-title flag, tab color, and session GUID, and relaunches them on
-  startup — so every shim comes back with its original `WT_SESSION`.
-  NativeTerm re-adopts those sessions instead of treating them as
-  duplicates. Restored shims don't connect on their own: a shim started
-  with a session GUID NativeTerm didn't just create asks NativeTerm first
-  (reconnect all, some, or none — dozens of simultaneous logins at startup
-  are rarely wanted). If NativeTerm isn't running, the shim connects
-  directly, like plain `ssh`.
+- **Windows Terminal's "restore previous session" setting**: restored
+  panes keep only the profile and the session GUID (verified in 1.26, see
+  "Restored tabs and named windows"), so they start the profile's command
+  line — the shim without a host — with their original `WT_SESSION`.
+  Nothing reconnects on its own (dozens of simultaneous logins at startup
+  are rarely wanted): NativeTerm recognizes the GUIDs from its registry,
+  offers to reopen those sessions (all, some, or none) and closes the
+  placeholders it replaces. Without NativeTerm the placeholder becomes a
+  local shell.
 - **`wt` argument handling**: see channel 1 above — the only command passed
   through `wt` is `nativeterm-shim <host-alias>`; `;` in titles is
   written `\;`. Command construction is one function with
@@ -2107,6 +2140,9 @@ another.
 - `native-term-platform` — `TerminalBackend` trait: open/focus/close tabs,
   list tabs, selection events; Windows implementation (`wt` + UIA)
 - `native-term-shim` — the per-tab helper binary
+- `native-term-win` — small Windows helpers shared by the crates above
+  (current user SID, logon session id, SDDL security descriptors, file
+  ACLs)
 - `native-term-app` — the `egui` GUI
 - `native-term-i18n` (planned) — translations shared by app and shim
 

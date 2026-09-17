@@ -1890,6 +1890,7 @@ dependencies = [
 name = "native-term-config"
 version = "0.1.0"
 dependencies = [
+ "native-term-win",
  "tempfile",
  "uuid",
  "windows 0.58.0",
@@ -1905,12 +1906,28 @@ dependencies = [
 [[package]]
 name = "native-term-session"
 version = "0.1.0"
+dependencies = [
+ "native-term-win",
+ "serde",
+ "serde_json",
+ "windows 0.58.0",
+]
 
 [[package]]
 name = "native-term-shim"
 version = "0.1.0"
 dependencies = [
+ "native-term-config",
  "native-term-session",
+ "windows 0.58.0",
+]
+
+[[package]]
+name = "native-term-win"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "windows 0.58.0",
 ]
 
 [[package]]

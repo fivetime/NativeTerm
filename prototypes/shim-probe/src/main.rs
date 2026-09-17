@@ -170,7 +170,7 @@ fn cred_read(target: &str) -> Option<String> {
         CredReadW(PCWSTR(target_w.as_ptr()), CRED_TYPE_GENERIC, 0, &mut ptr).ok()?;
         let c = &*ptr;
         let bytes = std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize);
-        let units: Vec<u16> = bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect();
+        let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).collect();
         let secret = String::from_utf16(&units).ok();
         CredFree(ptr as *const _);
         secret

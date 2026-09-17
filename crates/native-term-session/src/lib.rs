@@ -1,62 +1,46 @@
-//! Session records and the NativeTerm <-> shim protocol. Each tab runs
-//! `nativeterm-shim`, which reports ssh's exit code over a named pipe.
-//! Sessions are identified by the Windows Terminal session GUID
-//! (`wt new-tab --sessionId`, seen by the shim as `WT_SESSION`).
-//! See `docs/ARCHITECTURE.md`.
+//! The NativeTerm ↔ shim protocol. Each tab runs `nativeterm-shim`, which
+//! talks to NativeTerm over a per-user named pipe: it announces itself,
+//! reports the client's lifecycle, and executes commands (reconnect,
+//! close, type text). See `docs/ARCHITECTURE.md`, "Session lifecycle".
+//!
+//! - [`protocol`]: messages, one JSON object per line.
+//! - [`pipe`]: the named pipe (Windows).
+
+#[cfg(windows)]
+pub mod pipe;
+pub mod protocol;
 
 /// Full name: `\\.\pipe\nativeterm-<user SID>-<logon session id>`.
 pub const PIPE_NAME_PREFIX: &str = r"\\.\pipe\nativeterm-";
+/// Sent in `Hello`/`Welcome`; a newer NativeTerm keeps talking to older
+/// shims where it can.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Windows Terminal session GUID, as text.
-pub type SessionId = String;
-
+/// How a session ended, from the client's exit code and whether the
+/// login signal arrived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SessionEnd {
-    /// Connection-level failure (dropped/refused/auth/keepalive timeout):
-    /// ssh exits 255, or -1 on Windows OpenSSH when the connection closes
-    /// without a remote exit status.
+    /// Connection-level failure before login (refused, auth failed,
+    /// cancelled at a prompt). Never retried automatically.
+    LoginFailed,
+    /// Connection-level failure after login (dropped, keepalive timeout).
     Disconnected,
-    /// Any other exit code — the remote session ended normally.
-    ClosedNormally(i32),
+    /// The remote session ended with this status.
+    Closed(i32),
 }
 
-pub enum SessionState {
-    Connected,
-    Ended(SessionEnd),
+/// ssh exits 255 on connection-level failures, and Windows OpenSSH exits
+/// -1 when the connection closes without a remote exit status.
+pub fn is_connection_level(code: i32) -> bool {
+    code == 255 || code == -1
 }
 
-pub struct Session {
-    pub id: SessionId,
-    /// Also the tab title, which identifies the tab in the terminal.
-    pub label: String,
-    pub host_alias: String,
-    pub state: SessionState,
-    pub locked: bool,
-}
-
-/// Messages from a shim to NativeTerm.
-pub enum ShimEvent {
-    Registered { protocol_version: u32, session_id: SessionId, host_alias: String },
-    Authenticated { session_id: SessionId },
-    SshExited { session_id: SessionId, code: i32 },
-    TabClosing { session_id: SessionId },
-}
-
-/// Messages from NativeTerm to a shim.
-pub enum ShimCommand {
-    Connect,
-    Reconnect,
-    Disconnect,
-    /// End ssh and exit with code 0 so Windows Terminal closes the tab.
-    Close,
-    SendText(String),
-}
-
-pub fn classify_exit(code: i32) -> SessionEnd {
-    if code == 255 || code == -1 {
-        SessionEnd::Disconnected
-    } else {
-        SessionEnd::ClosedNormally(code)
+pub fn classify_exit(code: i32, authenticated: bool) -> SessionEnd {
+    match (is_connection_level(code), authenticated) {
+        (true, false) => SessionEnd::LoginFailed,
+        (true, true) => SessionEnd::Disconnected,
+        (false, _) => SessionEnd::Closed(code),
     }
 }
 
@@ -65,10 +49,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connection_level_exit_codes() {
-        assert!(matches!(classify_exit(255), SessionEnd::Disconnected));
-        assert!(matches!(classify_exit(-1), SessionEnd::Disconnected));
-        assert!(matches!(classify_exit(0), SessionEnd::ClosedNormally(0)));
-        assert!(matches!(classify_exit(130), SessionEnd::ClosedNormally(130)));
+    fn exit_classification() {
+        assert_eq!(classify_exit(255, false), SessionEnd::LoginFailed);
+        assert_eq!(classify_exit(-1, true), SessionEnd::Disconnected);
+        assert_eq!(classify_exit(255, true), SessionEnd::Disconnected);
+        assert_eq!(classify_exit(0, true), SessionEnd::Closed(0));
+        assert_eq!(classify_exit(130, false), SessionEnd::Closed(130));
     }
 }
