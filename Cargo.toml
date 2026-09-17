@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/native-term-app",
+    "crates/native-term-config",
+    "crates/native-term-session",
+    "crates/native-term-platform",
+    "crates/native-term-shim",
+    "prototypes/uia-probe",
+    "prototypes/shim-probe",
+    "prototypes/menu-hook",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/simon/NativeTerm"
+
+[profile.release]
+lto = true
+strip = true

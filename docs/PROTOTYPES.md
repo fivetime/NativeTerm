@@ -1,0 +1,556 @@
+# Prototype results (Phase 0)
+
+Environment: Windows 11 (10.0.26200), Windows Terminal 1.24.11911.0,
+OpenSSH_for_Windows_9.5p2. Prototype code: `prototypes/uia-probe`
+(UI Automation) and `prototypes/shim-probe` (console behavior). All tests
+ran in a separate Windows Terminal window (`-w nt-proto`), leaving the
+user's own window untouched, and were cleaned up afterwards.
+
+**Test environment from 2026-09-17 on**: a separate *window* isn't
+enough isolation. All windows of the Store Terminal share one process,
+and a split + tab tear-out during the menu test hung that process's UI
+thread for a while. The user's AI coding sessions run in that process;
+one OpenConsole also kept spinning afterwards. From now on, tests run
+against a **portable Terminal** at `C:\MyProjects\RustProjects\terminal-1.26.2581.0`
+(`.portable`, exe file version 1.26.2609.15001), launched by absolute
+path. `uia-probe` and `menu-hook` only see windows whose process image
+is under that folder (`NT_PROBE_WT_DIR` overrides it; `*` means all).
+Results above this note were measured on the Store build 1.24.11911.0.
+
+## `wt` command line
+
+| Test | Result |
+|---|---|
+| `wt -w <name> new-tab --title ... cmd` | Works; a named window is created on first use |
+| `--sessionId 2222...` (plain GUID) | **Silently ignored**: exit code 0, no tab, no error. Windows Terminal 1.24 parses the value with `IIDFromString`, which requires braces |
+| `--sessionId {2222...}` (braced) | Works; the tab's process sees `WT_SESSION=2222...` (no braces) |
+| Several tabs in one call (`new-tab ... ; new-tab ...`) | Works |
+| 60 tabs in one call | Works; tabs keep appearing for several seconds after `wt` returns |
+| `wt.exe` started from Git Bash (MSYS) | Nothing happens; from PowerShell (i.e. `CreateProcess`) it works. NativeTerm starts it via Rust's `Command` — to be confirmed |
+
+## Closing tabs and Ctrl+C
+
+| Test | Result |
+|---|---|
+| Tab's first process exits with 0 | Tab closes automatically (default `closeOnExit`) |
+| Exits with 1 | Tab stays, shows "process exited with code 1 … Ctrl+D to close, Enter to restart" and an error icon; Enter restarts the command (= "Restart connection") |
+| Shim ran a child, then installed `SetConsoleCtrlHandler`; `CTRL_C_EVENT` sent to its console | Shim logged and ignored it, stayed alive, tab stayed; later exited 0 and the tab closed |
+| Tab closed through its UIA close button while the shim runs | Tab closed; shim received `CTRL_CLOSE_EVENT` (time to report "tab closed") |
+
+## UI Automation
+
+Structure (control view): window `CASCADIA_HOSTING_WINDOW_CLASS` →
+`InputSite` pane → `TabView` (Tab) → `ListView` (List) → one `ListViewItem`
+(TabItem) per tab, whose children are an image, a text block, and the
+close button (Button, localized name "关闭标签页"). The terminal is a
+`TermControl` element (control type Text).
+
+| Test | Result |
+|---|---|
+| `FindAll(Descendants)` from the window | Returns **no** tab items — it doesn't cross into the XAML island. A tree walker does |
+| Tree walker, 12 tabs | All tabs, 50–60 ms |
+| Tab names | Exactly the tab title, including AI tools' live status glyphs |
+| 63 tabs (overflowing strip) | Walker sees only ~45: **tabs scrolled out of view are virtualized away** (140–170 ms) |
+| `ItemContainerPattern.FindItemByProperty(prev, 0, empty)` loop on the list | **All 63 tabs in order, names readable without realizing, 26 ms** |
+| Virtualized tab: `VirtualizedItemPattern.Realize()` + `SelectionItemPattern.Select()` | Works; the tab is scrolled into view and selected |
+| `RuntimeId` across two probe processes (no scrolling) | Unchanged |
+| `RuntimeId` after scrolling tabs out of view and back | **Changes** (e.g. 406 → 809): containers are recycled. Not a stable identity |
+| Close button via `InvokePattern` (found by control type, not name) | Closes the tab |
+| `TextPattern` on `TermControl` | Only one exists (the selected tab); ~19,500 visible characters read in 2 ms |
+| `AddAutomationEventHandler(ElementSelected, window, Subtree)` + `AddFocusChangedEventHandler` | Subscribing takes ~65 ms. A tab switch by UIA select or by `wt focus-tab` is reported 10–25 ms later |
+| Event content per switch | A burst of 5–7 `ElementSelected` events, **mixed between the new and the old tab**, plus focus events for the new tab's `ListViewItem` and `TermControl`. Use the burst as a trigger, debounce, then read `IsSelected` |
+| Focused `TermControl` name | Usually the tab title, but right after the window opened it was the profile name ("命令提示符"). Not an identity |
+
+## Input injection (console side)
+
+`WriteConsoleInputW` from another process attached to the tab's console
+(`AttachConsole` + `CONIN$`), one key-down record per UTF-16 unit with
+virtual key 0 and scan code 0, then `'\r'`:
+
+| Target | Result |
+|---|---|
+| `cmd.exe` (line input mode), text `echo 你好 😀 …` | Executed; Chinese text and emoji echoed correctly |
+| `cmd.exe`, text `exit` | All 62 test tabs exited with 0 and closed |
+| `ssh.exe` (raw + VT input mode) to the local Windows `sshd`, text `echo NT-INJECT 你好 😀 ok` | Executed on the server; output `NT-INJECT 你好 😀 ok` with Chinese text and emoji intact |
+| Same session, text `exit` | Remote shell exited, `ssh` exited with 0, the shim exited with 0, the tab closed |
+
+## Login signal (`LocalCommand`)
+
+Session started by the shim as
+`ssh -o PermitLocalCommand=yes -o LocalCommand="<shim-probe> authenticated" 192.168.3.2`
+(password authentication, typed by the user in the tab; temporary
+`known_hosts` file so the user's own wasn't touched):
+
+| Test | Result |
+|---|---|
+| Before the password was entered | No signal |
+| After a successful login | Helper ran once, silently, with the tab's `WT_SESSION` inherited |
+| Helper in a directory with spaces, `LocalCommand="<path>" authenticated` | Fired correctly (quotes survive ssh and `cmd.exe`) |
+| Wrong password with `NumberOfPasswordPrompts=1` | ssh exited **255**, no signal — distinguishable from a dropped session |
+| Logged in, then the server-side session process was killed (from inside the session, via injected `taskkill`) | ssh exited **255** |
+
+The -1 exit code (connection closed without an exit status) was not
+reproduced by this test; the classification still handles it.
+
+## Portable Windows Terminal
+
+Stable release `v1.24.11911.0` from github.com/microsoft/terminal/releases
+(same version as the installed Store build). Assets include unpackaged
+ZIPs for x64 (11.1 MB), ARM64, and x86 next to the msixbundle and a
+Windows 10 preinstall kit. The x64 ZIP unpacks to 32 MB; `wt.exe`,
+`WindowsTerminal.exe`, and `OpenConsole.exe` carry valid Microsoft
+Authenticode signatures. The ZIP contains **no** `.portable` marker; it
+was created by hand.
+
+| Test | Result |
+|---|---|
+| Launch `<zip>\wt.exe -w ntp new-tab …` while the Store Terminal runs | A second `WindowsTerminal.exe` process from the ZIP folder; the Store instance is unaffected |
+| `<zip>\wt.exe -w 0 new-tab …` | Tab lands in the portable window; the Store window's tab count is unchanged |
+| Profile from a fragment in `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments` | Loaded by the portable instance (`--profile` opened it); its stub was written to the portable `settings\settings.json` |
+| Settings location | `settings\settings.json` and `state.json` next to the exe; the Store `settings.json` wasn't modified |
+| `--sessionId '{GUID}'` + shim probe | `WT_SESSION` equals the given GUID; exit 0 closed the tab |
+| UIA | Same structure and class; the window is told apart by process id / image path |
+| Closing the last tab | Portable process exited |
+
+## Own tab menu (`WH_MOUSE_LL`)
+
+`prototypes/menu-hook` (debug build, per-monitor-v2 DPI aware):
+
+- **The hook**: a global low-level mouse hook. A right-click on a tab
+  whose title starts with a prefix is swallowed (both down and up) and
+  posted to a hidden tool window, which shows a Win32 popup menu with
+  `TrackPopupMenu`.
+- **Tab positions**: a background thread refreshes a cache of tab
+  rectangles from UIA every 300 ms.
+- **The hit test**: `WindowFromPoint` → root window → cached rectangles.
+- **Test driver**: `click-tab` right-clicks a tab's center with
+  `SendInput` (events carry `LLMHF_INJECTED`, so they go through the same
+  hook path as real clicks), then restores the cursor.
+
+Test window: `nt-menu-A` (managed) and `own-tab` (user's own).
+
+| Test | Result |
+|---|---|
+| Right-click `nt-menu-A` | Swallowed; our popup visible; **no** Terminal menu opened |
+| Right-click `own-tab` | Passed through; Terminal's own tab menu opened (更改选项卡颜色, 重命名选项卡, 复制标签页, 拆分选项卡, 移动选项卡, 导出文本, 查找, 关闭, 关闭标签页); closed with Escape |
+| Hook callback time (4 + 2 events) | avg 42–44 µs, max 86–88 µs, far below `LowLevelHooksTimeout` |
+| Hook → menu on screen | ~100 ms (posted message, menu creation) |
+| `SetForegroundWindow(owner)` from the hook-triggered handler | Succeeded; the menu had keyboard focus |
+| Keyboard choice (↓ ↓ Enter) | `TrackPopupMenu` returned command 2 (克隆会话) for the right tab |
+| Auto-dismiss via `EndMenu` from a timer | Works |
+| UIA cache refresh (2 windows, 15 tabs) | 119–145 ms per full walk (debug); must be event-driven and incremental in the real app |
+| Rectangles right after a tab opens | Changed between two refreshes (90→84, 450→456): the tab-open animation. A cache that is ~2 s stale can be a few pixels off |
+| DPI | UIA rectangles and hook points matched (the injected click landed on the tab) |
+
+**Manual test by the user (real clicks, first version with
+`TrackPopupMenu`):**
+
+- **Hook:** 36 right-button events; hook time avg 28 µs, max 104 µs. The
+  cache followed a window move.
+- **Style:** the Win32 menu was light and plain next to Terminal's dark
+  WinUI menu.
+- **Focus:** `SetForegroundWindow` failed for most real clicks. Without
+  the foreground, the menu didn't close on an outside click, and a second
+  `TrackPopupMenu` returned immediately while the first was still open.
+  The screenshot showed our menu and Terminal's menu open at the same
+  time.
+
+**Second version: a custom-drawn, non-activating popup plus a keyboard
+hook.** Injected test:
+
+| Test | Result |
+|---|---|
+| Right-click `nt-menu-A` | Popup shown (357×328 at 150 %, dark); **foreground stays Windows Terminal** |
+| ↓ ↓ then Esc | Hover moved; Esc closed the popup and didn't reach Terminal |
+| Right-click `nt-menu-B`, ↑ Enter | Chose item 6 (发送命令…) for `nt-menu-B` |
+| Right-click `nt-menu-A`, then right-click `own-tab` | Our popup closed ("outside click"), Terminal's menu opened |
+| Hook time (8 events) | avg 76 µs, max 181 µs (debug build) |
+| Look (screenshot) | Dark rounded flyout, Fluent icons, hover highlight, separators — visually close to Terminal's tab menu |
+
+**Manual tests by the user (real clicks, second version):**
+
+- **Run 1 (no theme handling yet):** 40 events, hook avg 35 µs, max
+  205 µs. Menus were always replaced or closed correctly, and no two
+  menus were open at the same time.
+- **Terminal theme set to light while Windows stayed dark:** Terminal's
+  menus turned white while ours stayed dark. This led to theme
+  resolution from the owning Terminal's `settings.json` (`theme.rs`).
+- **Run 2 (theme handling):** the user switched Terminal to `legacyLight`
+  and right-clicked NativeTerm tabs.
+  - The log shows "light (Terminal theme "legacyLight")" on every open.
+  - Building the menu took 4–22 ms, including reading and parsing
+    settings.
+  - 25 events, hook avg 42 µs, max 406 µs.
+  - With Terminal on `dark`, the popup was dark and matched (screenshot).
+
+**Third version (portable Terminal 1.26.2609.15001):**
+
+- **Identity:** tracked by RuntimeId, so it survives title changes.
+- **Mixed tabs:** detected by counting the selected tab's `TermControl`s.
+- **Terminal's menu:** a "Windows Terminal 菜单…" item replays the
+  right-click, and Shift+right-click passes through.
+
+| Test | Result |
+|---|---|
+| Right-click `nt-menu-B` | Our popup (357×390, dark from the portable settings' default theme), 14 ms to build |
+| `wt split-pane -V cmd …` on `nt-menu-B` | Tab title became "cmd"; the cache kept it as `nt-menu-B`, marked `[mixed]` |
+| Right-click the split tab | Our popup with header "nt-menu-B · 此标签还有其他窗格" and "关闭此会话（保留其他窗格）" (394×500) |
+| ↑ Enter → "Windows Terminal 菜单…" | Popup closed; right-click replayed 100 ms later; **Terminal's tab menu opened** (更改选项卡颜色, 重命名选项卡, 复制标签页, 拆分选项卡, 移动选项卡, 导出文本, 查找, 重启会话, 关闭, 关闭标签页 — 1.26 adds 重启会话) |
+| Shift+right-click `nt-menu-A` | Passed through; Terminal's menu opened |
+| Right-click `own-tab` | Passed through; Terminal's menu opened |
+| Hook time (10 events) | avg 53 µs, max 207 µs |
+
+**Manual test by the user (real clicks, third version, 3 minutes):**
+
+- **Clicks:** 30 right-button events, hook avg 25 µs, max 134 µs.
+- **Choosing items:** items chosen with the mouse were reported
+  correctly (重新连接, 关闭右侧标签, 发送命令…). "Windows Terminal 菜单…"
+  was used three times, each time replaying the click.
+- **Window moved to a second monitor:** the cache followed within about
+  0.4 s per step (x ≈ 2050–2750), and the menu opened there correctly.
+- **Tracking lost on restart:** the split `nt-menu-B` was **not**
+  tracked. The prototype had been restarted while that tab's title was
+  "cmd", and its tracking state lived only in memory, so a restart
+  forgot it. The real app can't depend on having seen the title: it has
+  to re-claim tabs from the session registry, which knows each shim's
+  `WT_SESSION` and which tab it opened. Until the SSH pane is focused
+  again, a tab like this is recognized only by position/order hints.
+
+**Second manual test (hook started before any change, 3 minutes):**
+
+- **Clicks:** 42 right-button events, hook avg 23 µs, max 117 µs.
+- **Split, then renamed:** `nt-menu-B` was split (title "命令提示符",
+  mixed), then renamed through "Windows Terminal 菜单… → 重命名选项卡"
+  to "2222". It stayed tracked as `nt-menu-B` [mixed], and the menu kept
+  working.
+- **Reordered by dragging:** the tabs were dragged into a new order
+  (#0/#1 swapped), and several new tabs were opened (`nt-menu-A` moved
+  to #5, tabs got narrower). The cache followed, with no lost claims.
+- **Window changes:** a third window appeared briefly (drag-out
+  attempt), and the other test window was closed. Both claimed tabs kept
+  their RuntimeIds and stayed tracked. During drags a UIA walk took up
+  to 670 ms.
+- **Terminal's menu:** "Windows Terminal 菜单…" was used 5 times, each
+  time opening Terminal's menu.
+- **Windows merged:** the user then merged the two windows, which were
+  both in the same portable process (pid 16380). The tabs moved *into*
+  the NativeTerm window got new RuntimeIds (339–381). The tabs already in
+  the destination window kept theirs (74, 79). Moving a tab between
+  windows therefore creates a new element, which confirms that the
+  real app re-claims moved tabs from its session registry.
+
+**After this test:** the "Windows Terminal 菜单…" replay item and
+Shift pass-through were removed by design decision. On NativeTerm tabs,
+Terminal's own menu is blocked to keep its uncontrolled paths out (see
+ARCHITECTURE, "Context menus").
+
+## Re-claiming tabs, restored tabs, named windows (portable 1.26)
+
+Setup: a hidden test profile "NT SSH Proto" was added to the *portable*
+`settings.json` (backup in the scratchpad), and
+`warning.confirmOnClose` was set to `never`. The profile's command line
+is `shim-probe.exe restored 900`, earlier `exit 1 900`. Windows were
+closed with `WM_CLOSE`. `WindowPattern.Close` via UIA did nothing.
+
+| Test | Result |
+|---|---|
+| 4 single-tab windows (`new-tab cmd /k …`; `--title`; `--suppressApplicationTitle`; `--sessionId … --title … --suppress… shim-probe`), each closed | Saved workspaces keep only profile, session GUID, and directory. Every command-line override, title, and suppression was **lost**. The shim-probe tab was saved as a synthesized "Default" profile running `cmd.exe` |
+| `wt -w nt-ws4 new-tab --title nt-G …` while `nt-ws4` had a saved workspace | Workspace restored (`cmd.exe`, `WT_SESSION` = the original GUID); **nt-G silently dropped**; workspace entry consumed |
+| Tabs opened with `--profile "NT SSH Proto" … shim-probe exit 1 901/902`, window closed | Saved as the **profile's** command line (`exit 1 900`), title "NT SSH Proto", suppression off, original session GUIDs |
+| Relaunch that workspace with a new-tab request | Restored panes ran the profile's shim with the original `WT_SESSION` (f5, f6); the request was dropped. **Sending it again worked** |
+| Split tab (NT pane + `cmd` pane, `cmd` focused) | Tab name "cmd"; NT pane `TermControl` Name = "NT SSH Proto" (profile), **HelpText = "nt-I" (the `--title`)**; foreign pane Name/HelpText "cmd" |
+| Profile command line `restored` mode: the shim sets `SetConsoleTitleW("nt-restored-<guid suffix>")` | Restored tabs titled `nt-restored-00f5` / `…00f7`; the split restored tab showed "命令提示符" but, when selected, its NT pane HelpText was `nt-restored-00f6` |
+| `menu-hook` started fresh, pane HelpText claiming added | First scan claimed all three, the split one via HelpText as `[mixed]`; right-clicks opened our menu for each |
+| Rebuilding `shim-probe.exe` while tabs ran it | Link failed: the executable is locked (the update rule applies) |
+
+## Hung Terminal and UIA (portable 1.26, process suspended)
+
+The portable `WindowsTerminal.exe` was suspended with `NtSuspendProcess`
+(`scratchpad/hang-test*.ps1`, which refuses any other process) and
+resumed at the end.
+
+| Check while suspended | Result |
+|---|---|
+| `IsHungAppWindow` | **false** throughout (~100 s): a suspended GUI thread counts as waiting for input |
+| `SendMessageTimeout(WM_NULL, SMTO_ABORTIFHUNG\|SMTO_BLOCK, 250)` | "not answered" after 250 ms, every time; answered at once after resume |
+| `uia-probe list` (root `FindAll` children), default timeouts | Did not return within 60 s (killed) |
+| Same with `IUIAutomation2` connection + transaction timeout 500 ms | Did not return within 30 s |
+| `EnumWindows` + `ElementFromHandle`, no gate, 500 ms timeouts | Did not return within 30 s |
+| `EnumWindows` + `WM_NULL` gate, unresponsive window skipped | Returned in 354 ms |
+| After resume, gated | 464 ms, normal results |
+
+## Duplicate, split, restart on a NativeTerm-profile tab (portable 1.26)
+
+Keys were sent only while the portable Terminal was the foreground window
+(`scratchpad/keys-test.ps1`). Tab `nt-K` was opened with the test profile
+and the override `shim-probe exit 1 6`.
+
+| Action | Command line run | `WT_SESSION` |
+|---|---|---|
+| Opened by `wt` | override (`exit 1 6`) | `…00b2` (assigned) |
+| Ctrl+Shift+D (duplicate tab) | profile's (`restored`) | new (`…727e`); the tab set its own title since suppression is off |
+| Alt+Shift+D (duplicate pane) | profile's | new (`…5ce3`); pane HelpText showed it |
+| Enter after exit code 1 (restart connection) | **override again** (`exit 1 6`) | **new** (`6789fc65…`), not `…00b2`. The source confirms it: `_duplicateConnectionForRestart` rebuilds the settings from the profile, restores only the command line, and the connection makes a fresh GUID |
+
+## Many tabs (portable 1.26, 64 tabs in one window)
+
+64 `cmd` tabs were opened (`nt-many-01…64`, `--title
+--suppressApplicationTitle`). Tab 5 was split with a foreign `cmd` pane,
+which had focus.
+
+| Test | Result |
+|---|---|
+| Control-view walk (realized tabs + panes) | First run 2.4 s right after opening; then 119–127 ms, 37 realized tabs of 64 |
+| `ItemContainerPattern` names | All 64 in 40 ms (0 realized) |
+| Scrolling (`select-any nt-many-60`, then `…-01`) | RuntimeIds changed (e.g. `nt-many-01`: 106 → 523) |
+| menu-hook v3 (RuntimeId tracking) during scrolling | Tracked count swung 36 → 10 → 25 → 37 → 11 → 36: **claims lost for tabs scrolled away**. The split tab (unselected, foreign pane focused) was never claimed; right-click opened Terminal's menu |
+| All UIA properties of a tab item (split vs. plain) | Only name, rectangle, class, and runtime id. **Nothing identifies the session** |
+| menu-hook v4 (full-list alignment, see ARCHITECTURE "Claiming tabs") | Start: 63 tracked (the split tab unlocated). After `focus-tab -t 4`: 64, `nt-many-05 as "cmd" [mixed]`. Scrolled to 60 and back: **64 tracked throughout** (11–37 with rectangles during the animation). Right-click on the split tab after scrolling: NativeTerm menu for `nt-many-05` (mixed) |
+| Scan time, 64 + 4 tabs, 2 windows (debug) | 195–307 ms |
+
+## plink (PuTTY 0.84): raw and Telnet (portable 1.26)
+
+Target: a local test server (`scratchpad/tcp-test-server.ps1`, 127.0.0.1
+only). It logs received bytes as hex, echoes lines, sends fixed GBK or
+UTF-8 bytes on `gbk` / `utf8`, and closes on `bye`. plink ran in a
+portable Terminal tab through a small `cmd` wrapper that prints its exit
+code; input was injected with `shim-probe inject <plink pid>`.
+
+| Test | Result |
+|---|---|
+| `-raw`: inject `hello 你好 raw`, then `bye` | Received; CR as line end; "你好" arrived as **GBK** (`c4 e3 ba c3`) with the default code page 936 |
+| `-raw`: server closes | plink stayed alive, socket in **CLOSE_WAIT**; after the next injected key it exited with **1** |
+| `-telnet`: connect | plink sent option negotiation (`WILL NAWS/TSPEED/TTYPE/NEW-ENVIRON`, `DO ECHO`, `WILL/DO SGA`) |
+| `-telnet`: inject lines | Arrived with Telnet newline **CR NUL** |
+| `-telnet`: server closes | plink exited with **0** at once |
+| Code page 65001 set before plink (`chcp 65001`): inject "你好" | Arrived as **UTF-8** (`e4 bd a0 e5 a5 bd`) |
+| Display, code page 936 | Server GBK bytes → 中文测试 (U+4E2D U+6587 U+6D4B U+8BD5); UTF-8 bytes → mojibake |
+| Display, code page 65001 | UTF-8 bytes → 中文测试; GBK bytes → mojibake |
+
+Follow-up (`scratchpad/load-test.ps1`, `shim-probe plink`):
+
+| Test | Result |
+|---|---|
+| Temporary saved session `HKCU\…\PuTTY\Sessions\NativeTerm-proto-1` (telnet, port, `PassiveTelnet=1`, `TelnetRet=0`, `LogType=1`, `LogFileName`), `plink -load`, key deleted 2 s after start | Loaded: **no client negotiation** was sent (passive). Deletion didn't affect the running plink. `TelnetRet=0` had no effect (still CR NUL). **No session log file** |
+| `plink -telnet … -sessionlog <file>` | Option accepted, **no log file** written |
+| `shim-probe plink -raw …` (plink as child, TCP table polled every 300 ms), server closes on `bye` | `CLOSE_WAIT detected` within one poll; plink ended; tab shows "disconnected". No keystroke needed |
+
+### Serial (HHD Virtual Serial Port Tools, local bridge COM30 ↔ COM31)
+
+- **com0com first:** com0com 3.0.0.0 (the signed build from SourceForge)
+  installed but **did not load** on Windows 11:
+  `CM_PROB_UNSIGNED_DRIVER`, status `0xC0000428`. It was uninstalled
+  completely: pair, service, device class, driver packages
+  `oem128–130`, folder.
+- **Then HHD:** HHD Virtual Serial Port Tools 7.35 (winget, commercial
+  trial) was installed. A local bridge pair was created through its COM
+  kit via the .NET interop assembly (`createBridgePort(30/31)`, each
+  side's `bridgePort` set to the other). PowerShell late binding failed
+  with `TYPE_E_LIBNOTREGISTERED`.
+- **The device:** `scratchpad/serial-device.ps1` simulated it on COM31.
+
+| Test | Result |
+|---|---|
+| `plink -serial COM30 -sercfg 115200,8,n,1,N` (console 65001): inject Enter, `hello 你好 serial`, `gbk`, `utf8` | Device got CR, then the text as UTF-8 (`e4 bd a0 e5 a5 bd`); banner and echo shown; UTF-8 reply → 中文测试, GBK reply → mojibake |
+| Second plink on COM30 | "Unable to open connection: Opening '\\.\COM30': Error 5: 拒绝访问。", exit 1 |
+| Device closes its end (`quit`) | plink stays alive, and still alive after another write |
+| Closing the tab | plink ended; COM30 opened fine from PowerShell right after |
+| Device at 9600, plink at 115200 (`emulateBaudrate` on) | Data arrived intact: the virtual bridge doesn't corrupt bits, so a mismatch can't be tested this way |
+
+### Title suppression and elevation (portable 1.26)
+
+This session ran elevated, so `wt` started from it went to an
+**elevated** portable instance, a separate process. There, all tab names
+and pane HelpText carried "管理员: ". A non-elevated instance was then
+started through `explorer.exe <script>`, with elevation checked via the
+process token.
+
+| Tab | Result (non-elevated) |
+|---|---|
+| `--title nt-n6 --suppressApplicationTitle cmd /k "title SET-BY-APP"` (cmd profile) | Tab renamed **SET-BY-APP**: the flag had no effect |
+| `--title nt-n4 --suppressApplicationTitle cmd /k "timeout …"` | Showed "nt-n4 - timeout …" while running |
+| `--profile "NT SSH Proto"` (profile has `suppressApplicationTitle: true`) `--title nt-p1 cmd /k "title SET-BY-APP"` | **Stayed nt-p1** |
+| Same with the flag added (`nt-p2`) | Stayed nt-p2 |
+| cmd profile by GUID + flag (`nt-p3`) | Renamed SET-BY-APP |
+
+The elevated instance behaved the same way (`nt-e4` with the flag showed
+"nt-e4 - timeout …").
+
+Earlier results in this file that relied on the flag used commands that
+never set a title. They still hold for what they measured, but
+suppression itself must come from the profile.
+
+Pitfall on the way: Windows PowerShell 5.1 reads a BOM-less UTF-8 script
+as ANSI, so string literals with Chinese in the first test server were
+wrong. The corrected server builds the strings from code points. Serial
+wasn't tested (no COM port or virtual pair on this machine).
+
+**Observed with the portable 1.26 at launch:**
+
+- **Previous window restored, `new-tab` arguments lost:** launching
+  `wt.exe -w nt-proto new-tab --title … cmd /k …` into a *not running*
+  portable instance restored the previous session's window. Its panes
+  came back as plain `cmd.exe`, except one `cmd /k echo split-pane`, and
+  without our titles. The requested new tabs did not appear.
+  `settings.json` has no `firstWindowPreference`. The same command into
+  the running instance worked normally.
+  - *Answered:* the earlier test window was named `nt-proto`, and closing
+    it saved a workspace under that name. `-w nt-proto` then restored it
+    and dropped the rest of the command line (see "Re-claiming tabs,
+    restored tabs, named windows").
+- **New in 1.26, relevant to NativeTerm:** 1.26 generates SSH profiles
+  (`Windows.Terminal.SSH`, `sshFolderGenerated` in `state.json`) and
+  shows them in the new-tab menu (`matchProfiles` with source
+  `Windows.Terminal.SSH`). With ~800 hosts in `~/.ssh`, this generator
+  matters for NativeTerm users; to evaluate.
+
+Not covered yet:
+
+- a claimed tab moved to another window, in the prototype;
+- visual confirmation of the light palette against Terminal's light menu;
+- high contrast; Windows 10 (square DWM corners);
+- elevated Terminal windows;
+- dragging tabs, and a scrolled tab strip;
+- multiple monitors with different scaling;
+- release-build timings.
+
+## Fragment stubs left behind
+
+The earlier memory test's fragment (`NativeTermProto`, deleted
+afterwards) had left two profile stubs (`"source": "NativeTermProto"`)
+in the user's Store `settings.json`. Windows Terminal writes a stub for
+every fragment profile it sees and never removes it. Per the source
+(`CascadiaSettingsSerialization.cpp`), a stub whose source no longer
+exists is marked **orphaned** and left out of the active profile list,
+so it is invisible and harmless.
+
+## Askpass helper (saved password)
+
+The password was stored by the user with
+`cmdkey /generic:<target> /user:simon /pass` (never on a command line or
+on disk). The probe then ran ssh in a new tab with
+`SSH_ASKPASS=<probe>`, `SSH_ASKPASS_REQUIRE=force`, and the `LocalCommand`
+login signal. The helper reads the generic credential (UTF-16LE blob) with
+`CredReadW`.
+
+| Test | Result |
+|---|---|
+| Known host, `simon@192.168.3.2's password: ` | Answered from Credential Manager; login without any typing; login signal fired; injected `whoami & hostname` ran |
+| Login-signal helper, first version | **Bug:** `LocalCommand` inherits ssh's environment, so the helper took the askpass path and waited on the console. Fixed by also checking the call shape (one argument, not a subcommand) |
+| Unknown host (`StrictHostKeyChecking=ask`, fresh `known_hosts`) | ssh passed the host-key question to the helper with **no** `SSH_ASKPASS_PROMPT=confirm`. The helper showed it in the tab; the answer `yes` (injected into the console) was returned to ssh, then the password was answered from Credential Manager and login completed |
+| Session exit | `exit` → ssh 0 → tab closed |
+
+The test credential, temporary `known_hosts`, and log were deleted
+afterwards.
+
+## `ssh-copy-id` under busybox-w32
+
+busybox-w32 6075-g169694ebd (scoop `main/busybox`), the unmodified
+`contrib/ssh-copy-id` from openssh-portable `v9.5.0.0`, run from a
+Windows Terminal tab as
+`busybox sh ssh-copy-id [-n] -i <tmp>\id_test -o UserKnownHostsFile=<tmp> -o StrictHostKeyChecking=accept-new root@<linux-host>`
+with `HOME=<tmp>\home` and the askpass probe answering the password from
+Credential Manager. Target: Ubuntu, OpenSSH 10.2p1. The key was a
+throwaway ed25519 key without a passphrase.
+
+| Test | Result |
+|---|---|
+| `-n` (dry run) | Remote version detected via system `ssh.exe`; key login attempt failed as expected; "Would have added" the key. No password needed |
+| Install | Password answered by askpass; "Number of key(s) added: 1", exit 0; server `~/.ssh` 700, `authorized_keys` 600 |
+| Login with the new key (`BatchMode=yes`) | Works |
+| Run again | "All keys were skipped because they already exist", exit 0 |
+| Scratch directory under `$HOME/.ssh` | Created and removed by the script; the user's `~/.ssh` untouched |
+| Noise | `expr: syntax error` (busybox `expr` rejects `--`, in the `-i` argument check) and a `^` regex portability warning; neither affected the result |
+| Windows target (read from the script, not run) | Install step is `exec sh -c '…'` → fails in `cmd.exe`; `-s` needs ControlMaster → unusable from Windows |
+| scoop package side effect | ~200 applet shims (`grep`, `ls`, `find`, …); uninstall left the orphaned `[` / `[[` shims (scoop wildcard bug), removed by hand. Coreutils, vim, and wget shims were intact afterwards |
+
+Cleanup: the test key line was removed from the server's
+`authorized_keys` (backup compared, then deleted; key login then failed
+as expected), and the credential, temporary files, and busybox were
+removed.
+
+## Windows Terminal settings reload
+
+| Test | Result |
+|---|---|
+| Write a fragment file | Not picked up: Windows Terminal only watches `settings.json` |
+| Then update `settings.json`'s modification time (content unchanged) | Settings reloaded, fragment profiles usable immediately (`wt -p "NT Proto 1000"`) |
+| Delete the fragment, touch `settings.json` again | Profiles gone |
+
+So NativeTerm must touch `settings.json`'s timestamp after changing its
+fragment, instead of asking the user to restart Windows Terminal.
+
+## Memory
+
+60 idle `cmd` tabs opened at once, default profile (`historySize` 9001),
+measured after the tabs settled:
+
+| Process | Before | After 60 tabs | Per tab |
+|---|---|---|---|
+| WindowsTerminal.exe private bytes | 1160.7 MB | 1628.5 MB | **≈ 7.8 MB** |
+| WindowsTerminal.exe working set | 480.8 MB | 750.7 MB | ≈ 4.5 MB |
+| OpenConsole.exe (one per tab), private | — | — | ≈ 2.4 MB |
+| ssh.exe (8 sessions already running on the machine), private | — | — | ≈ 3.2 MB (≈ 10 MB working set) |
+
+After closing the 60 tabs, Windows Terminal returned to 1146.5 MB private.
+
+Estimate for one SSH tab: ≈ 7.8 (terminal) + 2.4 (console host) + 3.2
+(ssh) + ~1 (shim, to be measured) ≈ **14 MB private**, i.e. roughly
+850 MB for 60 sessions.
+
+### Scrollback size
+
+20 tabs each printing 20,000 lines of ~100 characters (so the scrollback
+is full), through two test profiles installed as a fragment:
+
+| `historySize` | Windows Terminal private bytes, increase for 20 tabs | Per tab |
+|---|---|---|
+| 9001 (default) | 258.6 MB | ≈ 12.9 MB |
+| 1000 | 162.7 MB | ≈ 8.1 MB |
+
+Baselines were measured right before each set (≈ 1826–1830 MB — the
+user's own AI tabs kept producing output, so only increases are
+compared). The tabs closed themselves afterwards (exit 0).
+
+Observations:
+
+- Each tab has a floor of roughly 8 MB in Windows Terminal; a full default
+  scrollback adds about 5 MB more.
+- Per SSH tab, then: ≈ 8–13 MB (terminal, depending on scrollback) +
+  2.4 MB (console host) + 3.2 MB (ssh) + shim (to be measured), i.e.
+  **≈ 15–20 MB private**, or roughly 0.9–1.2 GB for 60 sessions.
+- The user's own AI coding tabs dominate overall: Windows Terminal's
+  baseline grew from 1.1 GB to 1.8 GB during the session with 12 of them.
+### Comparison with Tabby (Electron)
+
+Tabby 1.0.234 (portable) was started with a temporary configuration
+(`TABBY_CONFIG_DIRECTORY` plus `--user-data-dir` pointing to a temp
+folder; the user's own Tabby configuration was untouched, and the temp
+folder was deleted afterwards), scrollback set to 9001 lines like Windows
+Terminal's default. 20 tabs were opened with `Tabby.exe run <command>`,
+each printing the same 20,000 lines.
+
+| | Idle baseline | Increase per tab (full scrollback) |
+|---|---|---|
+| Windows Terminal | none extra (already running for the user's own tabs) | ≈ 13 MB (+ ≈ 2.4 MB console host, + ≈ 3.2 MB `ssh.exe` for SSH tabs) |
+| Tabby | 566 MB (5 processes) | ≈ 36 MB (samples at 30 s and 50 s: 1315 / 1269 MB total) |
+
+Estimate for 60 SSH sessions: NativeTerm's approach ≈ 1.2 GB (≈ 0.9 GB
+with a 1000-line scrollback); Tabby ≈ 2.7 GB.
+
+Notes:
+
+- Tabby's CLI turns numeric arguments into numbers, after which the
+  command fails to start silently; the probe got an argument-free mode
+  (`spew-default`) for this test.
+- The Tabby window was closed by the user after about a minute (normal
+  shutdown in the log, no crash reports); the samples above were taken
+  before that.
+- The slow TypeScript tool the user remembered was probably electerm, not
+  Tabby; no further comparison was considered necessary.
+
+Conclusion: the native approach is roughly **2× lighter** than Tabby for
+this workload — a real but not decisive advantage, and not "an order of
+magnitude". NativeTerm's case rests mainly on multi-server session
+management (which Tabby handles poorly) and on the native terminal's
+rendering and behavior, with memory as a secondary benefit.

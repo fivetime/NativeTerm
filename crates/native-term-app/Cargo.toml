@@ -1,0 +1,16 @@
+[package]
+name = "native-term-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nativeterm"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.29"
+egui = "0.29"
+native-term-config = { path = "../native-term-config" }
+native-term-session = { path = "../native-term-session" }
+native-term-platform = { path = "../native-term-platform" }

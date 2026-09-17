@@ -1,0 +1,12 @@
+[package]
+name = "native-term-shim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nativeterm-shim"
+path = "src/main.rs"
+
+[dependencies]
+native-term-session = { path = "../native-term-session" }

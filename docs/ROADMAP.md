@@ -1,0 +1,298 @@
+# Roadmap
+
+## Phase 0 — scaffolding and risk checks (current)
+- [x] Workspace layout, crate boundaries, docs
+- [x] Windows Terminal source review — settled: `-w 0` semantics and
+      precedence, `--sessionId`/`WT_SESSION`, `wt` argument joining,
+      duplicate/restart/restore behavior, tab move, `closeOnExit` and exit
+      codes, UIA exposure (`Name` only, no `AutomationId`), fragment
+      contents, hard-coded context menus, console input path, Ctrl+C
+      delivery
+- [x] Windows OpenSSH 9.5 source review — settled: raw + VT input mode
+      while connected (no win32-input-mode), how key records are forwarded,
+      Ctrl+C, prompts read directly from the console, `LocalCommand`
+      (after auth, via `cmd.exe`, synchronous), `SSH_ASKPASS` /
+      `SSH_ASKPASS_REQUIRE=force`, unusable `ControlMaster`, config/Include
+      permission checks, exit codes 255 and -1, `TERM` via `SetEnv`,
+      `RemoteCommand` conflict, agent pipe
+- [x] **End-to-end prototype of injection** — `WriteConsoleInputW` records
+      (character only, no key-up) reach a live ssh session, incl. Chinese
+      text and emoji (verified against the local Windows `sshd`)
+- [x] **Measure memory** — ≈ 15–20 MB private per SSH tab depending on
+      scrollback, vs. ≈ 36 MB per tab + 566 MB baseline for Tabby under the
+      same load (`docs/PROTOTYPES.md`); roughly 2× lighter, not an order
+      of magnitude. The real shim's footprint is measured once it exists
+- [x] **Prototype: UIA on Windows Terminal** — list tabs across all
+      windows, select, selection-change events, `TextPattern` on the
+      selected tab; `RuntimeId` stability; tabs scrolled out of view;
+      query latency with 60 tabs — see `docs/PROTOTYPES.md`
+      (virtualization confirmed, `ItemContainerPattern` lists all tabs in
+      26 ms, `RuntimeId` not stable, selection events arrive in 10–25 ms
+      but are noisy: use them as a trigger, debounce, read `IsSelected`)
+- [x] **Prototype: shim closing and Ctrl+C** — exit 0 closes the tab, other
+      codes keep it; the shim survives Ctrl+C and receives
+      `CTRL_CLOSE_EVENT` when its tab is closed (default profile; to
+      repeat with the "NativeTerm SSH" fragment profile)
+- [x] **Prototype: `LocalCommand` helper** — fires once after login,
+      silently, inheriting `WT_SESSION`; works from a path with spaces
+      (quoted); no signal on login failure (exit 255); a killed server
+      session also exits 255. Remaining for the real helper: short pipe
+      timeout
+- [x] **Prototype: `ssh-copy-id` under busybox-w32** — upstream script runs
+      unmodified and uses the system `ssh.exe` (Linux target; Unix
+      targets only, always `-i <file>`, own `HOME`, no applet shims —
+      `docs/PROTOTYPES.md`)
+- [x] **Prototype: askpass helper** — answers the session's own password
+      prompt from Credential Manager, and prompts in the same console for
+      everything else while ssh waits on it (`docs/PROTOTYPES.md`;
+      askpass mode must not be detected from the environment alone)
+- [x] **Prototype: own tab menu via `WH_MOUSE_LL`** — right-click on a
+      NativeTerm tab shows NativeTerm's popup, other right-clicks pass
+      through; callback latency (~45 µs); tab-rectangle cache from UIA;
+      DPI; foreground and dismissal (`prototypes/menu-hook`,
+      `docs/PROTOTYPES.md`). Still open: real clicks by a user, elevated
+      windows, dragged/scrolled tabs, mixed-DPI monitors
+- [x] **Prototype: re-claiming tabs** — pane HelpText keeps the session
+      label (split/renamed tabs), restored panes keep `WT_SESSION` and run
+      the profile's shim, named-window workspaces swallow commands until
+      the window exists (`docs/PROTOTYPES.md`)
+- [x] **Prototype: hung Terminal** — UIA blocks without limit even with
+      `IUIAutomation2` timeouts; `WM_NULL` probe + `EnumWindows` +
+      `ElementFromHandle` gate works
+- [x] **Prototype: duplicate / split / restart shortcuts** — restart keeps
+      the command line but gets a new `WT_SESSION` (shim carries
+      `--session`)
+- [x] **Prototype: 64 tabs** — full-list alignment via
+      `ItemContainerPattern` keeps claims through scrolling
+- [x] **Prototype: plink raw/Telnet** — input injection works, per-session
+      code page (936/65001) verified both ways, Telnet exits 0 on server
+      close, raw only notices a close on the next write
+- [x] **Prototype: plink extras** — temporary `-load` session works;
+      no session logging under plink; `CLOSE_WAIT` watch detects raw
+      disconnects
+- [x] **Prototype: plink serial** — virtual pair (HHD; com0com doesn't
+      load on Windows 11): data, code pages, busy port, device-side
+      close, port release on tab close. Baud mismatch and Break need
+      real hardware
+- [x] **Finding: title suppression must be in the profile** —
+      `--suppressApplicationTitle` on the `wt` command line has no effect
+      on 1.26; elevated NativeTerm lands in the elevated Terminal
+      instance
+- [ ] Re-check the command-line suppression flag on the Store build
+      (1.24) and on newer releases; report upstream if still broken
+- [ ] `native-term-config`: parse `~/.ssh/config` + `Include`-d
+      `config.d/*.conf` into a folder/host tree (skip wildcard `Host` and
+      `Match`); read `NativeTerm*` keys and folder defaults; effective
+      values via `ssh -G`; format-preserving write-back with change
+      detection; file watching; `~`-relative paths; restrictive ACLs on
+      written files (kept across atomic replace) and `ssh -G` validation
+      with a clear message on "Bad owner or permissions"; timestamped
+      backups before every write with automatic rollback on validation
+      failure; generated globally unique aliases with `NativeTermLabel` /
+      `NativeTermNote`
+- [ ] `native-term-shim`: `--session <id> <alias>` plus session GUID from
+      `WT_SESSION`; builds the `ssh` command line itself; report exit code
+      over the pipe, stay alive after exit, re-run on reconnect, exit 0 to
+      close the tab, keep retrying the pipe; without a host: ask
+      NativeTerm by `WT_SESSION` (restored placeholder → replaced by
+      NativeTerm; unknown → local shell); default keepalives when not
+      configured; per-host terminal type via standard `SetEnv TERM=...`;
+      `NativeTermPreConnect`
+- [ ] `native-term-platform` (Windows): open tabs via
+      `wt -w 0 new-tab --profile "NativeTerm SSH" --sessionId {…} --title …
+      nativeterm-shim --session <id> <alias>` (tested argument handling;
+      optional dedicated window, with the named-workspace check before
+      opening into it); claim tabs by the three rules (tab name, selected
+      tab's pane HelpText, full-list alignment via `ItemContainerPattern`);
+      Terminal windows via `EnumWindows` + `WM_NULL` probe +
+      `ElementFromHandle`, UIA on watchdog-guarded workers; select via
+      realize + select; UIA close only as a fallback; braced GUIDs;
+      confirm each new tab appeared, resend once; launch `wt` with the
+      user's normal token when NativeTerm is elevated
+- [ ] Connect in Tabs in New Window: `wt -w new` (unnamed) for the first
+      ~100 tabs, `-w 0` for later batches with foreground/UIA checks;
+      connections paced by the queue
+- [ ] Windows Terminal fragment: "NativeTerm SSH" profile (command line =
+      shim without host, `suppressApplicationTitle: true`, `closeOnExit`,
+      `historySize`, stable GUID), color schemes, favorites as profiles
+      and actions
+- [ ] `state.db` (SQLite) in the data directory: open-session registry,
+      recent/usage, long notes and tags keyed by `NativeTermId`;
+      `notes.toml` export for sync; `NativeTermId` written on create/import
+- [ ] `native-term-session`: session records, pipe server with user-only
+      ACL and client verification, exit classification (255 and -1 are
+      connection-level)
+- [ ] `native-term-app`: egui shell — read-only sidebar tree (row
+      virtualization for thousands of sessions), "Connect" per host, list
+      of open sessions, CJK font loading; idle without repaint or polling
+- [ ] **Measure NativeTerm's own idle CPU/memory** and the shim's per-tab
+      footprint (with the 60-tab measurement)
+- [ ] Data directory resolution (`--data-dir`, `NATIVETERM_DATA_DIR`,
+      `nativeterm.toml`, `HKCU\Software\NativeTerm\DataDir`, writable-folder
+      default); `settings.toml` with per-machine sections, `audit\`,
+      `backups\`, rotated `logs\`; atomic writes and a lock file
+- [ ] Pipe protocol version number from the first release; pipe name per
+      user SID and logon session
+- [ ] Absolute shim path everywhere; fragment rewritten when the program
+      folder moves; tabs restored from an old path detected and reopened
+- [ ] Startup checks: Windows Terminal installed and recent enough (and
+      which variant to use when several are installed; located via its
+      package if the `wt.exe` alias is off), single instance,
+      integrity-level mismatch, folder writable
+
+## Phase 1 — MVP
+- [ ] **SecureCRT importer** (folders, names, host, port, user,
+      descriptions, jump hosts, port forwards), locating the sessions via
+      SecureCRT's `Config Path` registry value; host keys merged into
+      `known_hosts`; saved commands into the command library; Telnet /
+      serial / raw / rlogin sessions imported as plink sessions; report of
+      other protocols, logon scripts, and duplicates; summary before
+      writing; tested at ~800 sessions / ~200 folders
+- [ ] PuTTY saved-session import (read-only from the PuTTY registry key)
+- [ ] First-run wizard (import, environment checks, key setup, data
+      directory / cloud sync)
+- [ ] Unique tab titles; rename reconciliation; foreign tabs excluded from
+      batch operations
+- [ ] Rename / Lock / Save Session (writes back to config.d)
+- [ ] Session states incl. "waiting for login" and "login failed"
+      (`LocalCommand` signal)
+- [ ] Reconnect in place / Disconnect / Close; optional auto-reconnect that
+      never retries login failures
+- [ ] "Install my key" for a host or folder (bundled busybox-w32 +
+      `ssh-copy-id`), network devices excluded
+- [ ] Close Others / Close Disconnected / Close Tab Group
+- [ ] Close Tabs to the Right (real tab order via UIA)
+- [ ] Clone session (port forwards cleared)
+- [ ] Open a whole folder (batched `wt` calls, rate-limited connections,
+      chosen tab selected at the end); same queue for mass reconnect after
+      resume
+- [ ] Quick connect to `user@host[:port]`, optionally save afterwards
+- [ ] "Remove this host's old key" (`ssh-keygen -R`, confirmed)
+- [ ] Recovery after NativeTerm restart (re-discover tabs, re-pair shims by
+      session GUID / `--session`, unlocated sessions with position hints
+      and "Locate"); restored placeholders (session restore, workspaces)
+      replaced by proper tabs in their original order, with a
+      "reconnect all / some / none" prompt
+- [ ] Own tab menu (`WH_MOUSE_LL` + non-activating custom popup, style
+      following the owning Terminal's theme / high contrast / text size;
+      Terminal's menu blocked on NativeTerm tabs; mixed-tab header and
+      scoped actions; unlocated right-click: select, rescan, else restore
+      selection and replay to Terminal); keyboard hook only while open;
+      Direct2D rendering
+- [ ] Non-SSH sessions via plink: `.nt.toml` storage in the same tree,
+      plink located (bundled or installed PuTTY), shim runs plink as a
+      child with the session's code page (UTF-8 default, GBK etc.),
+      temporary `-load` session for options without a command-line flag,
+      Telnet exit 0 = disconnected, raw `CLOSE_WAIT` watch, serial port
+      picker, "port busy" with owner, "no data since …" for serial
+- [ ] Session options dialog (SecureCRT categories; algorithm lists from
+      `ssh -Q`, `ssh -G` validation; plink pages for non-SSH sessions)
+- [ ] Setting "Hide Windows Terminal's own SSH profiles"
+      (`disabledProfileSources`, backed-up explicit edit)
+- [ ] Shared app-level command layer used by every UI surface
+- [ ] "Change data directory" (copy + update pointer); `config.d` location
+      setting (maintains the `Include` line)
+- [ ] OneDrive placeholder detection with "Always keep on this device"
+      guidance; visible sync-conflict notices
+- [ ] ssh-agent check and guidance; agent-forwarding notice when opening
+      many `ForwardAgent` hosts
+
+## Phase 2 — quality of life
+- [ ] Session search (label, alias, IP, user, folder, note; pinyin
+      initials for Chinese labels); favorites (`NativeTermFavorite`) and
+      per-machine recent list
+- [ ] Command library (`commands.toml`) and post-login commands
+      (`NativeTermOnLogin`)
+- [ ] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
+      Mac keyboards
+- [ ] Throttle snapshots, previews, and sync on battery power
+- [ ] Active-session tracking (foreground hook + UIA selection, sticky)
+- [ ] Send Commands to Active Session, command input at the bottom of the
+      sidebar; refused before login; audit log
+- [ ] Send Commands to This Group — shim injection (source-confirmed),
+      `tmux send-keys` as a fallback for persistent sessions; confirmation
+      dialog, per-folder "no group send"
+- [ ] Persistent sessions via tmux (`NativeTermPersistent`): attach-or-create,
+      via `-o RemoteCommand` (hosts with their own `RemoteCommand` are
+      skipped), `sh -c` wrapper with fallback when tmux is missing, optional hidden
+      status bar, list/reopen/kill remote `nt-*` sessions, `screen` support
+- [ ] Optional saved passwords (Windows Credential Manager + per-process
+      `SSH_ASKPASS=force`, shim as helper): answers only the session's own
+      password prompt and handles every other prompt in the console, one
+      attempt then mark invalid, risk warning in the UI; helper checks its
+      caller chain (shim → ssh → helper)
+- [ ] Tab switcher: all tabs in all windows (including the user's own,
+      with live titles) + search; last-seen text (UIA `TextPattern`) or
+      image snapshots; tmux text preview for persistent sessions
+- [ ] NativeTerm SSH profile with a moderate scrollback size
+- [ ] Sidebar auto-hide/pin drawer (QQ-style)
+- [ ] Floating action button, shown only while the sidebar is hidden
+- [ ] Optional `RegisterHotKey` shortcut, off by default
+- [ ] Per-host/folder terminal appearance: profile, color scheme, tab color;
+      NativeTerm profiles shipped as a Windows Terminal JSON fragment
+- [ ] NativeTerm themes (light/dark/system, presets), Mica/Acrylic
+- [ ] Localization (English, Simplified Chinese) with runtime switching
+- [ ] Animations (respecting the system animation setting) and toasts
+- [ ] External SFTP handoff (shell out to a configured tool)
+- [ ] Shared credential sets (`NativeTermCredential`)
+- [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
+      `ProxyCommand`)
+- [ ] Optional `trzsz ssh` per host (`NativeTermTrzsz`, user-installed)
+- [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions
+- [ ] Optional `plink -ssh` for GBK SSH hosts (host/port/user/key from
+      `ssh -G`, `.ppk` key, Pageant)
+- [ ] Server-side session logging for persistent sessions (`tmux pipe-pane`)
+- [ ] Optional cloud sync via user-installed rclone: explanation and
+      consent page, rclone detection/version check, `bisync` of
+      `config.d` and settings, conflict UI, `known_hosts` line merge,
+      per-machine audit logs, `~`-relative paths, `crypt` recommendation;
+      private-key sync left to the user's choice, with risk information
+
+## Phase 3 — release and other platforms
+- [ ] Code signing
+- [ ] Update check via GitHub Releases, signature-verified packages,
+      rename-then-replace for in-use shims, switch to turn the check off
+- [ ] Supported platforms: Windows 11 and Windows 10 2004 (19041)+, x64
+      and ARM64; Windows 10 pass of the UIA and shim prototypes (with the
+      portable Windows Terminal ZIP if no Store/winget is available)
+- [ ] Windows Terminal variant detection: packaged (Store, Preview) and
+      unpackaged/portable by path; absolute `wt.exe` per variant; UIA
+      windows filtered by process image path
+- [ ] Optional bundled portable Windows Terminal (stable ZIP, `.portable`,
+      license text) as a fallback package
+- [ ] "Clean up" (remove the Windows Terminal fragment) before deleting
+      the folder; tell the user about the lines left in `~/.ssh`
+- [ ] State "no telemetry" in README and the About page
+- [ ] Third-party license texts and busybox-w32 source pointer in the release
+- [ ] Integration test suite against a real Windows Terminal, including an
+      install path with spaces
+- [ ] Installed mode: winget/MSI packaging (updates via the installer,
+      uninstaller removes the fragment), scoop manifest with `persist`,
+      per-user data directories
+- [ ] macOS backend — Terminal.app / iTerm2 tab scripting
+- [ ] Linux backend — investigate VTE
+
+## Explicitly not planned
+- Self-rendered terminal emulation of any kind
+- A bundled SSH implementation (always the system's own `ssh`; auth, keys,
+  and known_hosts stay where the OS keeps them)
+- Moving a running tab to a new window from NativeTerm ("Send to New
+  Window") — no `wt` command exists; dragging the tab out works and is
+  re-claimed
+- Managing the user's own tabs (local shells, AI coding sessions): they
+  are listed in the tab switcher, nothing more
+- Live thumbnails of background tabs (the terminal doesn't render them)
+- Client-side session logging (output never passes through NativeTerm)
+- Importing SecureCRT's stored passwords
+- Bundling or silently installing rclone
+- Syncing saved passwords
+- A double-tap-Shift trigger (needs a global low-level keyboard hook;
+  conflicts with Chinese IMEs and JetBrains IDEs)
+- Per-session character sets for OpenSSH sessions (Windows OpenSSH works
+  in UTF-8; plink sessions do get them)
+- Conditional logon scripts ("wait for X, send Y"), SecureCRT-style
+  logon scripts, and keyword highlighting — all require reading terminal
+  output
+- Windows Terminal's own tab menu on NativeTerm tabs (blocked on purpose)
+- Telemetry of any kind
+- Multiple sessions per tab via panes (for now; would need its own design)
