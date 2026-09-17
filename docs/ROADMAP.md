@@ -269,7 +269,7 @@
       window), theme cached and reloaded on settings change; unlocated
       right-click (select, rescan, else restore selection and replay to
       Terminal); confirmation before a batch close closes a whole mixed
-      tab; lock, send commands, rename; localized labels
+      tab; rename; localized labels
 - [ ] Non-SSH sessions via plink: `.nt.toml` storage in the same tree,
       plink located (bundled or installed PuTTY), shim runs plink as a
       child with the session's code page (UTF-8 default, GBK etc.),

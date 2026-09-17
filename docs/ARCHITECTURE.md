@@ -420,7 +420,7 @@ Therefore NativeTerm provides its own menus:
 | Close Disconnected Tabs | Yes | Shim reports ssh exit code 255 → those shims exit with 0 |
 | Close Other Tabs / Close Tab Group | Yes | Batch over NativeTerm's own tabs only |
 | Close Tabs to the Right | Yes | Uses the **real tab order**, read via UIA |
-| Lock | Yes | Our own flag, excluded from batch closes |
+| Lock | Yes | Our own flag (`state.db`), excluded from batch closes and from "All" in group send; Close is disabled until unlocked. Windows Terminal's own close button can't be blocked |
 | Clone Session | Yes | New tab with the same host and a unique title; port forwards cleared |
 | Connect in Tabs in New Window / Clone in New Window | **Yes** | `wt -w new` (unnamed window), batches of ~100 tabs; see "Opening sessions in a new window" |
 | Connect in Tabs in New Tab Group | As a new window | Windows Terminal has no tab groups |
