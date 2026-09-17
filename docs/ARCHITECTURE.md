@@ -1830,12 +1830,13 @@ In order of preference:
    `echo 你好 😀` arrived as two lines.
 
    Implemented (`Core::send_text`):
-   - text is sent line by line (`` after each; after the last only if
+   - text is sent line by line (`
+` after each; after the last only if
      "Press Enter after the last line" is on); CRLF is folded;
    - only to sessions in the "connected" state with a shim: others are
      listed as not sent (in the test, the session still at its login
      prompt got nothing);
-   - every send is appended to `<data dir>udit\commands-YYYY-MM.log`
+   - every send is appended to `<data dir>\audit\commands-YYYY-MM.log`
      (UTC time, the sessions, the text with line breaks shown as ⏎);
    - UI: "Send…" on each logged-in session card, "Send to several…"
      above the list (all logged-in sessions ticked; more than one target
