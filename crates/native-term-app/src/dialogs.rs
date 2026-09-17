@@ -3,7 +3,6 @@
 
 use std::path::PathBuf;
 
-use eframe::egui;
 use native_term_config::ops::HostDraft;
 
 pub enum Outcome<T> {

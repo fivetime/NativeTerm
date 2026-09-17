@@ -3,7 +3,6 @@
 
 use std::path::{Path, PathBuf};
 
-use eframe::egui;
 use native_term_app::{Core, SessionView, State};
 use native_term_config::ops::{Editor, HostDraft};
 use native_term_config::write::Writer;
@@ -48,12 +47,12 @@ fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext, setup: Setup) -> App {
+    pub fn new(ctx: &egui::Context, setup: Setup) -> App {
         let Setup { options, install, shim, core, data_dir, mut notices } = setup;
         let mut profile = ProfileSetup::new(install, shim);
         notices.extend(profile.fix_moved());
         if let Some(core) = &core {
-            let ctx = cc.egui_ctx.clone();
+            let ctx = ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
             if let Err(e) = core.start_tab_menu() {
                 notices.push(format!("NativeTerm's tab menu isn't available: {e}"));
@@ -292,15 +291,16 @@ fn session_row(ui: &mut egui::Ui, core: &Core, s: &SessionView) {
     });
 }
 
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl crate::window::Ui for App {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = &ui.ctx().clone();
         if let Some(core) = &self.core {
             self.notices.extend(core.take_notices());
         }
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
             self.view.focus_search();
         }
-        egui::TopBottomPanel::top("status").show(ctx, |ui| {
+        egui::Panel::top("status").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.toggle_value(&mut self.show_settings, "⚙ Settings");
             });
@@ -321,14 +321,14 @@ impl eframe::App for App {
         });
         let recent = self.recent();
         let mut actions = Vec::new();
-        egui::SidePanel::left("tree")
+        egui::Panel::left("tree")
             .resizable(true)
-            .default_width(320.0)
-            .show(ctx, |ui| actions = self.view.show(ui, &self.tree, self.generation, &recent));
+            .default_size(320.0)
+            .show_inside(ui, |ui| actions = self.view.show(ui, &self.tree, self.generation, &recent));
         for action in actions {
             self.handle(action);
         }
-        egui::CentralPanel::default().show(ctx, |ui| self.sessions_panel(ui));
+        egui::CentralPanel::default().show_inside(ui, |ui| self.sessions_panel(ui));
         self.show_dialog(ctx);
     }
 }

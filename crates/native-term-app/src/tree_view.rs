@@ -5,7 +5,6 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use eframe::egui;
 use native_term_app::fuzzy;
 use native_term_app::HostRequest;
 use native_term_config::{HostEntry, SessionTree};
@@ -57,7 +56,7 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, selected: bool, weak: bo
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact_selectable(&response, selected);
         if selected || response.hovered() || response.highlighted() {
-            ui.painter().rect_filled(rect, visuals.rounding, visuals.weak_bg_fill);
+            ui.painter().rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
         }
         let color = if weak { ui.visuals().weak_text_color() } else { visuals.text_color() };
         let font = egui::TextStyle::Body.resolve(ui.style());
@@ -228,20 +227,20 @@ impl TreeView {
                         response.context_menu(|ui| {
                             if ui.add_enabled(!hosts.is_empty(), egui::Button::new("Connect All")).clicked() {
                                 actions.push(TreeAction::Open(hosts.clone(), Target::Recent));
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui.add_enabled(!hosts.is_empty(), egui::Button::new("Connect All in New Window")).clicked() {
                                 actions.push(TreeAction::Open(hosts.clone(), Target::NewWindow));
-                                ui.close_menu();
+                                ui.close();
                             }
                             ui.separator();
                             if ui.button("New Host…").clicked() {
                                 actions.push(TreeAction::NewHost((*file).clone()));
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui.add_enabled(!is_main, egui::Button::new("Rename Folder…")).clicked() {
                                 actions.push(TreeAction::RenameFolder((*file).clone()));
-                                ui.close_menu();
+                                ui.close();
                             }
                         });
                     }
@@ -263,28 +262,28 @@ impl TreeView {
                         response.context_menu(|ui| {
                             if ui.button("Connect").clicked() {
                                 actions.push(TreeAction::Open(vec![request(host)], Target::Recent));
-                                ui.close_menu();
+                                ui.close();
                             }
                             if ui.button("Connect in New Window").clicked() {
                                 actions.push(TreeAction::Open(vec![request(host)], Target::NewWindow));
-                                ui.close_menu();
+                                ui.close();
                             }
                             ui.separator();
                             if ui.button("Edit…").clicked() {
                                 actions.push(TreeAction::Edit(alias.to_string()));
-                                ui.close_menu();
+                                ui.close();
                             }
                             ui.menu_button("Move to", |ui| {
                                 for (title, file) in &folder_files {
                                     if *file != host.file && ui.button(title).clicked() {
                                         actions.push(TreeAction::Move(alias.to_string(), file.clone()));
-                                        ui.close_menu();
+                                        ui.close();
                                     }
                                 }
                             });
                             if ui.button("Delete…").clicked() {
                                 actions.push(TreeAction::Delete(alias.to_string()));
-                                ui.close_menu();
+                                ui.close();
                             }
                         });
                     }

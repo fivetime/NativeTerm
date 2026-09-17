@@ -397,6 +397,48 @@ Idle CPU was 0 ms in every variant. With one open session, the 2 s tab
 refresh cost 78 ms per 10 s (debug build). Per GPU counters, the process
 used the AMD Radeon Pro 5600M, the only GPU Windows sees under Boot Camp.
 
+### CPU renderer (release, same machine)
+
+Where the GPU renderer's memory went (an empty eframe window and a
+probe that stops at each wgpu stage, Vulkan, AMD Radeon Pro 5600M):
+
+| Stage | Private | GPU memory |
+|---|---|---|
+| Process, no graphics | 2.0 MB | — |
+| wgpu instance | 21.3 MB | 8.1 MB |
+| + adapter | 21.3 MB | 8.1 MB |
+| + device | 46.0 MB | 26.1 MB |
+| + eframe window (surface, egui) | 73.7 MB | 45.6 MB |
+| NativeTerm (Vulkan) | 75 MB | 55.3 MB |
+| NativeTerm, wgpu GL backend | 139 MB | 43.5 MB |
+| NativeTerm, Direct3D 12 | 164 MB | 79.7 MB |
+
+The app's own share was ~2 MB, so no GPU backend could reach "tens of
+MB". With the CPU renderer (`egui_software_backend` 0.0.3, egui 0.34,
+own winit runner):
+
+| Case | Private | GPU memory |
+|---|---|---|
+| Probe window, 200 rows, font read into memory | 29.7 MB | 0 |
+| NativeTerm at start (3 hosts) | 20 MB | 0 |
+| NativeTerm after opening a session and searching | 28.8 MB | 0 |
+| NativeTerm, 2000 hosts / 50 folders | 25.0 MB | 0 |
+
+- Idle CPU 0 ms in every case; start with 2000 hosts ≈ 1.45 s.
+- 50 mouse-wheel steps over the 2000-host tree (1440×960 physical):
+  first 722 frames and 2.5 s CPU (no vsync, smooth scrolling repainted
+  continuously); with frames capped at the refresh rate, 157 frames and
+  0.97 s CPU. Per frame: UI 0.9 ms, tessellation 0.06 ms, rasterization
+  4.2 ms, GDI present 0.7 ms. The GPU build, same test: 0.20–0.33 s CPU and 79–87 MB private (vsync-capped, the GPU rasterizes). So scrolling costs 3–4× the CPU of the GPU build (≈ 20 % of one core while the wheel turns), while memory drops by ~55 MB and idle stays at 0. egui 0.34 spreads every wheel notch over several frames and has no setting for that; fewer frames per notch would need a change in egui. The executable shrank from 13.9 MB to 8.5 MB.
+- UIA still sees every widget (AccessKit): the GUI smoke script found
+  the tree, opened a session, filled the search box with Chinese text,
+  and pressed "Close" through the Invoke pattern.
+- Context menu and the host dialog (egui 0.34 menus and windows) render
+  and work; the dialog keeps its shadow.
+- First try: the window never appeared. It is created hidden, and a
+  hidden window gets no `WM_PAINT`, so the redraw request never arrived.
+  The first frame is now painted directly.
+
 ## Tab menu in the app (portable 1.26)
 
 `crates/native-term-app/tests/menu_portable.rs`, three NativeTerm tabs

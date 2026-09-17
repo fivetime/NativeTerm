@@ -10,8 +10,8 @@ use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, PostMessageW, SetForegroundWindow,
-    ShowWindow, GW_OWNER, SW_RESTORE, WM_CLOSE,
+    EnumWindows, GetWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, MessageBoxW, PostMessageW,
+    SetForegroundWindow, ShowWindow, GW_OWNER, MB_ICONERROR, MB_OK, SW_RESTORE, WM_CLOSE,
 };
 
 /// A string value under `HKEY_CURRENT_USER` (`REG_SZ`, or `REG_EXPAND_SZ`
@@ -91,6 +91,13 @@ pub fn bring_to_front(handle: isize) -> bool {
 /// Ask a window to close, as its close button would.
 pub fn close_window(handle: isize) -> bool {
     unsafe { PostMessageW(Some(HWND(handle as *mut _)), WM_CLOSE, Default::default(), Default::default()) }.is_ok()
+}
+
+/// An error for a program without a window (or whose window failed).
+pub fn message_box(title: &str, text: &str) {
+    unsafe {
+        MessageBoxW(None, &HSTRING::from(text), &HSTRING::from(title), MB_OK | MB_ICONERROR);
+    }
 }
 
 #[cfg(test)]

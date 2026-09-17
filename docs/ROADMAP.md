@@ -172,8 +172,11 @@
 - [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
       CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
       6.6 MB working set)
-- [ ] Bring NativeTerm's memory down toward "tens of MB" (the renderer
-      dominates)
+- [x] Bring NativeTerm's memory down toward "tens of MB": CPU renderer
+      (egui 0.34, own winit runner with AccessKit and IME,
+      `egui_software_backend` + `softbuffer`): 20 MB private at start,
+      25 MB with 2000 hosts, no GPU memory; frames capped at the monitor
+      rate
 - [x] Data directory resolution (`--data-dir`, `NATIVETERM_DATA_DIR`,
       `nativeterm.toml`, `HKCU\Software\NativeTerm\DataDir`, writable-folder
       default)
@@ -312,7 +315,13 @@
       rename-then-replace for in-use shims, switch to turn the check off
 - [ ] Supported platforms: Windows 11 and Windows 10 2004 (19041)+, x64
       and ARM64; Windows 10 pass of the UIA and shim prototypes (with the
-      portable Windows Terminal ZIP if no Store/winget is available)
+      portable Windows Terminal ZIP if no Store/winget is available).
+      Not run yet: no Windows 10 machine or VM was available. Already
+      prepared for it: GDI presentation (no GPU requirement), Segoe MDL2
+      Assets fallback for the menu icons. Still to check there: API
+      availability on 19041: UIA events and tab rectangles, the
+      tab menu's square corners, the fragment path, the elevated launch
+      through Explorer
 - [ ] Windows Terminal variant detection: packaged (Store, Preview) and
       unpackaged/portable by path; absolute `wt.exe` per variant; UIA
       windows filtered by process image path

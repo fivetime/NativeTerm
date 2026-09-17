@@ -13,10 +13,10 @@ mod app;
 mod dialogs;
 mod terminal_profile;
 mod tree_view;
+mod window;
 
 use std::path::PathBuf;
 
-use eframe::egui;
 use native_term_app::registry::Registry;
 use native_term_app::{data_dir, default_shim_path, Core};
 use native_term_platform::windows_terminal::install::Install;
@@ -108,7 +108,7 @@ fn setup() -> Result<Start, String> {
     Ok(Start::Run(Box::new(Setup { options, install, shim, core, data_dir, notices })))
 }
 
-fn main() -> eframe::Result<()> {
+fn main() {
     let setup = match setup() {
         Ok(Start::AlreadyRunning { quiet }) => {
             if !quiet {
@@ -118,62 +118,25 @@ fn main() -> eframe::Result<()> {
                     }
                 }
             }
-            return Ok(());
+            return;
         }
         Ok(Start::Run(setup)) => Ok(*setup),
         Err(e) => Err(e),
     };
-    let native = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_title("NativeTerm").with_inner_size([960.0, 640.0]),
-        wgpu_options: wgpu_options(),
-        ..Default::default()
-    };
-    let result = eframe::run_native(
-        "NativeTerm",
-        native,
-        Box::new(move |cc| {
-            install_fonts(&cc.egui_ctx);
-            let app: Box<dyn eframe::App> = match setup {
-                Ok(setup) => Box::new(App::new(cc, setup)),
-                Err(e) => Box::new(Fatal(e)),
-            };
-            Ok(app)
-        }),
-    );
-    // no Vulkan (VMs, remote sessions, old drivers): a window system can
-    // only be set up once per process, so start again with Direct3D 12
-    if let Err(eframe::Error::Wgpu(_)) = &result {
-        let first_try = std::env::var_os(FALLBACK_ENV).is_none() && std::env::var_os("WGPU_BACKEND").is_none();
-        if let (true, Ok(exe)) = (first_try, std::env::current_exe()) {
-            if std::process::Command::new(exe).args(std::env::args_os().skip(1)).env(FALLBACK_ENV, "1").spawn().is_ok() {
-                return Ok(());
-            }
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("NativeTerm")
+        .with_app_id("NativeTerm")
+        .with_inner_size([960.0, 640.0]);
+    let result = window::run(viewport, move |ctx| {
+        install_fonts(ctx);
+        match setup {
+            Ok(setup) => Box::new(App::new(ctx, setup)),
+            Err(e) => Box::new(Fatal(e)),
         }
-    }
-    result
-}
-
-/// Set when NativeTerm restarted itself because the first graphics API
-/// didn't work.
-const FALLBACK_ENV: &str = "NATIVETERM_RENDERER_FALLBACK";
-
-/// A small UI: the integrated GPU where there is a choice (a discrete one
-/// costs battery), one graphics API, and wgpu's memory-saving allocator.
-/// Vulkan is the default: idle, it took 79 MB private memory against 165 MB
-/// with Direct3D 12 (106 MB with both enabled). `WGPU_BACKEND` overrides it.
-fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
-    use eframe::wgpu;
-    let defaults = eframe::egui_wgpu::WgpuConfiguration::default();
-    let base = defaults.device_descriptor.clone();
-    let preferred = if std::env::var_os(FALLBACK_ENV).is_some() { wgpu::Backends::DX12 } else { wgpu::Backends::VULKAN };
-    eframe::egui_wgpu::WgpuConfiguration {
-        supported_backends: wgpu::util::backend_bits_from_env().unwrap_or(preferred),
-        power_preference: wgpu::util::power_preference_from_env().unwrap_or(wgpu::PowerPreference::LowPower),
-        device_descriptor: std::sync::Arc::new(move |adapter| wgpu::DeviceDescriptor {
-            memory_hints: wgpu::MemoryHints::MemoryUsage,
-            ..base(adapter)
-        }),
-        ..defaults
+    });
+    if let Err(e) = result {
+        native_term_win::desktop::message_box("NativeTerm", &format!("NativeTerm's window can't start: {e}"));
+        std::process::exit(1);
     }
 }
 
@@ -188,7 +151,7 @@ fn install_fonts(ctx: &egui::Context) {
         return;
     };
     let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert("cjk".into(), egui::FontData::from_static(bytes));
+    fonts.font_data.insert("cjk".into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));
     for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
         fonts.families.entry(family).or_default().push("cjk".into());
     }
@@ -197,9 +160,9 @@ fn install_fonts(ctx: &egui::Context) {
 
 struct Fatal(String);
 
-impl eframe::App for Fatal {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+impl window::Ui for Fatal {
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.heading("NativeTerm can't start");
             ui.label(&self.0);
         });

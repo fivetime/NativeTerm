@@ -1156,8 +1156,9 @@ Host ceph-cluster.osp-control1
   - Rows are drawn by hand (full width, left-aligned) and still carry
     accessibility info.
   - Only visible rows are laid out (`show_rows`).
-  - With 2000 hosts in 50 folders: 78 MB private memory, and no CPU when
-    idle, even with the search box focused.
+  - With 2000 hosts in 50 folders: 25 MB private memory (78 MB with the
+    earlier GPU renderer), and no CPU when idle, even with the search box
+    focused.
 - **Recent hosts:** the top of the tree shows the five most recently
   opened hosts (from `state.db`).
 
@@ -1996,9 +1997,11 @@ on a laptop:
 - **Idle NativeTerm**: no repaint unless something changes (egui's
   on-demand repaint), event-driven UIA and foreground tracking, no polling
   loops; target idle CPU ≈ 0 and memory in the tens of MB.
-  - **Measured (first slice, release build):** idle CPU 0 ms over 10 s,
-    and the window isn't repainted. Private memory is 74 MB, most of it
-    the renderer (see "Renderer").
+  - **Measured (release build):** idle CPU 0 ms over 10 s, and the
+    window isn't repainted. Private memory is **20 MB** at start, ~28 MB
+    after use (glyph caches), and no GPU memory. With the earlier GPU
+    renderer it was 74 MB, almost all of it the graphics driver (see
+    "Renderer").
   - **With open sessions** (implemented, measured in release with three
     sessions, idle for a minute): NativeTerm used 16 ms of CPU and the
     shim 0 ms.
@@ -2061,8 +2064,11 @@ small draggable floating button, bottom-right by default.
 - **Target display**: actions on the active session show its name.
 - **Drag vs. click**: a press that moves more than a few pixels is a drag.
 - **Position**: remembered; clamped to the visible work area on startup.
-- **Implementation**: a separate `eframe` viewport — borderless,
-  transparent, always-on-top — dragged via `ViewportCommand::StartDrag`.
+- **Implementation**: a second window of NativeTerm's own runner
+  (`src/window.rs`, one window today) — borderless, always-on-top —
+  dragged via `ViewportCommand::StartDrag`. Transparency needs a layered
+  window with the CPU renderer (per-pixel alpha from the rendered
+  buffer).
 
 All UI surfaces (sidebar, FAB, shortcut, tab switcher) invoke one shared
 app-level command layer.
@@ -2078,20 +2084,44 @@ app-level command layer.
   **memory-mapped**, not read: egui clones owned font data while
   parsing, so reading the 20 MB `msyh.ttc` cost ≈ 55 MB of private
   memory; a mapped file's pages are shared with the file cache.
-- **Renderer**: eframe with wgpu, not glow. glow goes through glutin
-  0.32.3, whose WGL pixel-format query sets a vector's length to the
-  driver's total match count, beyond the buffer (undefined behavior,
-  caught by Rust's debug checks on this machine). wgpu uses **Vulkan** by
-  default: idle, it took 74–79 MB private memory against 162–165 MB
-  with Direct3D 12 (106 MB with both enabled). eframe builds wgpu
-  without Direct3D 12, so the app enables that feature itself. If
-  Vulkan can't start (VMs, remote sessions, old drivers), NativeTerm
-  restarts itself once with Direct3D 12. A window system can be set up
-  only once per process, so the retry needs a new process. `WGPU_BACKEND`
-  overrides the choice. The adapter is requested with low power
-  preference, so hybrid laptops don't wake the discrete GPU for
-  NativeTerm. On a MacBook Pro under Boot Camp, Windows only has the AMD
-  GPU anyway.
+- **Renderer: the CPU, not the GPU.** NativeTerm's window is small,
+  mostly static, and repainted only on input, so it doesn't need a GPU.
+  - **Why.** Any GPU backend costs more than the whole rest of the app.
+    An empty eframe window on wgpu/Vulkan took 74 MB private memory:
+    Vulkan instance +19 MB, device +25 MB, window surface +28 MB, all in
+    the driver (the app itself added ~2 MB). Direct3D 12 took 162–165 MB,
+    wgpu's GL backend 139 MB. glow (eframe's default) crashed on
+    glutin 0.32.3, whose WGL pixel-format query sets a vector's length
+    beyond the buffer (undefined behavior, caught by Rust's debug
+    checks).
+  - **How.** `src/window.rs` runs egui on winit with `egui-winit`
+    (input, IME, clipboard, AccessKit) and paints with
+    `egui_software_backend`'s rasterizer (SSE4.1/AVX2 picked at run time,
+    tile cache: only changed tiles are redrawn) into a `softbuffer`
+    surface, which presents with GDI. There is no eframe: its runner is
+    tied to a GPU painter, and the software backend's own runner has no
+    AccessKit and ignores IME requests.
+  - **Result.** 20 MB private at start, no GPU memory; a frame at
+    1440×960 takes ~1.5 ms of UI and tessellation and 2–4 ms of
+    rasterization. Idle stays at 0 CPU.
+  - **Frame cap.** Without vsync, egui's smooth scrolling repainted as
+    fast as the CPU allowed (720 frames for 50 wheel steps). Frames are
+    now spaced by the monitor's refresh rate.
+  - **Trade-off.** Scrolling costs 3–4× the CPU of the GPU build
+    (≈ 20 % of one core while the wheel turns: egui spreads each notch
+    over several frames, and each frame redraws the scrolled panel).
+    Idle, typing and clicking stay cheap, and memory is ~55 MB lower.
+  - **Rules in the runner.** The window starts hidden and is shown
+    after the first frame (AccessKit must be set up before it is
+    visible; a hidden window gets no redraw, so the first frame is
+    painted directly). A minimized window runs no UI pass, so texture
+    updates are never produced without being painted. Repaint requests
+    from background threads (the core) arrive as user events and are
+    dropped if a newer frame already ran. `NATIVETERM_FRAME_LOG=<file>`
+    writes per-frame timings.
+  - **Side effects.** Works the same in VMs, over Remote Desktop and on
+    old drivers, with no fallback or restart logic; no discrete GPU is
+    ever woken on hybrid laptops.
 - **Windows 11 materials**: Mica/Acrylic backdrops via the
   `window-vibrancy` crate on a transparent window; rounded corners for
   borderless windows (drawer, FAB) via `DwmSetWindowAttribute`

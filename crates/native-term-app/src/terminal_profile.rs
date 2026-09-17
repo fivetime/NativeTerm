@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 
-use eframe::egui;
 use native_term_platform::windows_terminal::install::Install;
 use native_term_platform::windows_terminal::profile::{self, Status};
 
