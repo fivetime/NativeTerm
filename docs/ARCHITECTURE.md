@@ -555,6 +555,55 @@ Consequences:
     registry lost. The shim offers a local shell or closing the tab.
   - *No NativeTerm running:* the shim starts it, or explains, and never
     connects by itself.
+- **How it is implemented** (verified with portable 1.26,
+  `tests/restore_portable.rs`):
+  - **Placeholders:**
+    - A shim without a host waits 1 s for NativeTerm.
+    - If NativeTerm isn't there, the shim starts `nativeterm.exe
+      --from-shim` from its own folder and waits up to 15 s. That copy
+      exits quietly if another NativeTerm already serves the pipe.
+    - NativeTerm answers `hold` for a session it knows. The shim then
+      shows "Reopening this restored session in a new tab…" and waits up
+      to two minutes.
+  - **Replacement:**
+    - NativeTerm gathers placeholders for 1.5 s.
+    - Per Terminal window, it activates the window: the shim reports its
+      console's owner window, and `-w 0` means the most recently activated
+      window.
+    - It then opens the replacement tabs with `--wait`: same session id
+      and label, a new GUID.
+    - Once they show up, it tells the placeholders to close. If a tab
+      doesn't show up, the placeholder becomes a local shell.
+    - A `--wait` shim reports `waiting` and connects only on `connect` or
+      the R key.
+  - **Which sessions can be restored:**
+    - *Open in `state.db`:* NativeTerm wasn't running when the window
+      closed.
+    - *Closed with their window:* the shim reported closing, and the
+      window was gone within 10 s. Terminal keeps its last window for
+      more than 1.5 s while saving the layout, so the first 1.5 s check
+      missed it.
+    - These stay replaceable for 7 days. Closing the last tab also closes
+      the window and records such a session, but Terminal saves no
+      layout for it, so the entry never matches and simply expires.
+  - **NativeTerm restarts:**
+    - Sessions open in `state.db` start as "looking for its tab".
+    - Their shims reconnect within 2 s and replay the current attempt,
+      then its login, then its outcome, in that order. The first version
+      replayed the outcome before the login, which would have shown a
+      disconnected session as connected. The shim also never reported
+      the login itself, so a restarted NativeTerm couldn't know it.
+    - Sessions whose shim doesn't show up within 12 s are marked gone.
+  - **A race found on the way:**
+    - NativeTerm answers "local shell" and hangs up within about 40 ms.
+    - The shim polled its "connected" flag every 50 ms and missed the
+      whole connection, then waited 15 s for a NativeTerm it had already
+      reached.
+    - The link now remembers that it reached NativeTerm, and the answer
+      waits in its inbox.
+  - **Diagnostics:** if `%TEMP%\nativeterm-shim-debug` exists, each shim
+    logs to `%TEMP%\nativeterm-shim-<pid>.log`; `NATIVETERM_DEBUG` shows
+    NativeTerm's own diagnostics as notices.
 - **A hung Terminal blocks UIA without limit** (verified by suspending the
   portable process). A root `FindAll`, and even `ElementFromHandle` with
   `IUIAutomation2` connection/transaction timeouts of 500 ms, did not
@@ -1638,7 +1687,9 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   26 ms, walking the tree 140–170 ms, and a lookup while 60 tabs were
   still opening took 1.5 s. NativeTerm keeps a cached tab list updated by
   events and refreshes it on demand, never in a tight polling loop.
-- **Single instance**: a second launch activates the existing NativeTerm.
+- **Single instance**: the pipe is bound before the window opens. If
+  another NativeTerm owns it, the new copy brings that one's window to
+  the front and exits (quietly when started by a restored tab).
 - **Dependency check**: on startup, verify Windows Terminal is installed and
   new enough for `-w`, `--sessionId`, and `--suppressApplicationTitle`,
   and record the `ssh -V` version (behavior here was reviewed for Windows

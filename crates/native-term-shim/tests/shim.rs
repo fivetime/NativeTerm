@@ -31,6 +31,7 @@ fn spawn_shim(pipe: &str, args: &[&str], envs: &[(&str, &str)]) -> Child {
         .env("NATIVETERM_PIPE", pipe)
         .env("NATIVETERM_SSH", fake_ssh())
         .env("WT_SESSION", "6e7a0000-0000-4000-8000-00000000c0de")
+        .env("NATIVETERM_START_APP", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped());
     for (k, v) in envs {
@@ -41,6 +42,16 @@ fn spawn_shim(pipe: &str, args: &[&str], envs: &[(&str, &str)]) -> Child {
 
 fn expect(conn: &PipeConnection) -> ShimMessage {
     conn.recv::<ShimMessage>(WAIT).unwrap().expect("message within timeout")
+}
+
+/// The next message that isn't the shim's own login report.
+fn expect_skipping_login(conn: &PipeConnection) -> ShimMessage {
+    loop {
+        match expect(conn) {
+            ShimMessage::Authenticated => continue,
+            other => return other,
+        }
+    }
 }
 
 fn wait_exit(child: &mut Child) -> i32 {
@@ -85,13 +96,13 @@ fn login_disconnect_reconnect_close() {
     }
     assert_eq!(expect(&helper), ShimMessage::Authenticated);
 
-    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    assert_eq!(expect_skipping_login(&conn), ShimMessage::Exited { code: 255 });
 
     // reconnect on command
     conn.send(&AppMessage::Connect).unwrap();
     assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 2 });
     let _second_helper = listener.accept().unwrap();
-    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    assert_eq!(expect_skipping_login(&conn), ShimMessage::Exited { code: 255 });
 
     conn.send(&AppMessage::Close).unwrap();
     assert_eq!(wait_exit(&mut shim), 0, "exit 0 closes the tab");
@@ -99,6 +110,32 @@ fn login_disconnect_reconnect_close() {
     let output = shim.wait_with_output().unwrap();
     let text = String::from_utf8_lossy(&output.stdout);
     assert_eq!(text.matches("Disconnected (exit code 255)").count(), 2, "login seen, so not a login failure:\n{text}");
+}
+
+#[test]
+fn state_is_replayed_in_order_after_nativeterm_restarts() {
+    let name = pipe_name("replay");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(
+        &name,
+        &["--session", "s-7", "web01"],
+        &[("FAKE_SSH_LOGIN", "1"), ("FAKE_SSH_CODE", "255"), ("FAKE_SSH_MS", "800")],
+    );
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    let _helper = listener.accept().unwrap();
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    assert_eq!(expect(&conn), ShimMessage::Authenticated, "the shim reports the login itself");
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    // NativeTerm restarts
+    drop(conn);
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { session: Some(s), .. } if s == "s-7"));
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    assert_eq!(expect(&conn), ShimMessage::Authenticated);
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 }, "so it reads as disconnected, not connected");
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
 }
 
 #[test]
@@ -146,6 +183,37 @@ fn placeholder_without_host_is_closed_by_nativeterm() {
 }
 
 #[test]
+fn restored_session_waits_for_connect() {
+    let name = pipe_name("wait");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(&name, &["--session", "s-9", "--wait", "web01"], &[("FAKE_SSH_CODE", "255")]);
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    assert_eq!(expect(&conn), ShimMessage::Waiting);
+    assert_eq!(conn.recv::<ShimMessage>(Duration::from_millis(500)).unwrap(), None, "no connection yet");
+    conn.send(&AppMessage::Connect).unwrap();
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
+}
+
+#[test]
+fn held_placeholder_waits_to_be_closed() {
+    let name = pipe_name("hold");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(&name, &[], &[]);
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { alias: None, .. }));
+    conn.send(&AppMessage::Hold).unwrap();
+    // well past the usual 3 s grace period
+    std::thread::sleep(Duration::from_secs(5));
+    assert!(shim.try_wait().unwrap().is_none(), "still held");
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
+}
+
+#[test]
 fn placeholder_without_an_answer_becomes_a_local_shell() {
     let name = pipe_name("goeslocal");
     let mut listener = PipeListener::bind(&name).unwrap();
@@ -158,6 +226,21 @@ fn placeholder_without_an_answer_becomes_a_local_shell() {
     assert!(started.elapsed() >= Duration::from_millis(2500), "waited for NativeTerm first");
     // and it has hung up instead of reconnecting
     assert_eq!(conn.recv::<ShimMessage>(WAIT).unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+}
+
+#[test]
+fn placeholder_answered_and_hung_up_at_once() {
+    // NativeTerm answers "local shell" and closes within milliseconds
+    let name = pipe_name("quickanswer");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(&name, &[], &[]);
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { alias: None, .. }));
+    conn.send(&AppMessage::LocalShell).unwrap();
+    drop(conn);
+    let started = std::time::Instant::now();
+    assert_eq!(wait_exit(&mut shim), 0, "the local shell (no input) ends at once");
+    assert!(started.elapsed() < Duration::from_millis(1500), "took {:?}", started.elapsed());
 }
 
 #[test]

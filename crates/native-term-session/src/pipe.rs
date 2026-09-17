@@ -236,6 +236,7 @@ mod tests {
                 wt_session: None,
                 session: Some("s".into()),
                 alias: Some("web01".into()),
+                terminal_window: None,
             })
             .unwrap();
         assert_eq!(client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(), Some(AppMessage::Welcome { protocol: 1 }));

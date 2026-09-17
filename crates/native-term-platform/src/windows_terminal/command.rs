@@ -15,7 +15,7 @@ pub const MAX_COMMAND_LINE: usize = 30_000;
 
 /// Arguments of one `new-tab` subcommand.
 pub fn new_tab(tab: &TabSpec, shim: &Path) -> Vec<OsString> {
-    vec![
+    let mut args: Vec<OsString> = vec![
         "new-tab".into(),
         "--profile".into(),
         PROFILE_NAME.into(),
@@ -28,8 +28,12 @@ pub fn new_tab(tab: &TabSpec, shim: &Path) -> Vec<OsString> {
         shim.into(),
         "--session".into(),
         tab.session.clone().into(),
-        tab.alias.clone().into(),
-    ]
+    ];
+    if tab.wait {
+        args.push("--wait".into());
+    }
+    args.push(tab.alias.clone().into());
+    args
 }
 
 /// `wt` splits subcommands at `;` anywhere in an argument unless escaped.
@@ -122,6 +126,7 @@ mod tests {
             label: label.to_string(),
             session: format!("s-{n}"),
             alias: format!("host{n}"),
+            wait: false,
         }
     }
 
@@ -153,6 +158,14 @@ mod tests {
                 "host1",
             ]
         );
+    }
+
+    #[test]
+    fn waiting_tab() {
+        let mut t = tab(1, "a");
+        t.wait = true;
+        let args = strings(&new_tab(&t, Path::new("shim")));
+        assert_eq!(args[args.len() - 4..], ["--session", "s-1", "--wait", "host1"]);
     }
 
     #[test]

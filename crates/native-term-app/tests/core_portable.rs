@@ -24,7 +24,7 @@ fn core() -> Core {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf();
     let shim = root.join("target").join("debug").join("nativeterm-shim.exe");
     assert!(shim.exists(), "build the shim first");
-    Core::start(WindowsTerminal::new(install, &shim), || {}).expect("is a NativeTerm running?")
+    Core::start(WindowsTerminal::new(install, &shim), None).expect("is a NativeTerm running?")
 }
 
 /// Only this test's sessions (a core adopts tabs left by earlier runs).
@@ -65,7 +65,7 @@ fn open_track_reconnect_close() {
 
     // reconnect: the shim runs ssh again, which fails again
     let pid = first.shim_pid;
-    core.reconnect(&ids[0]);
+    core.connect(&ids[0]);
     wait_until(&core, &ids, "reconnected and failed again", |s| {
         s[0].attempt == 2 && matches!(s[0].state, State::LoginFailed(255)) && s[0].shim_pid == pid
     });

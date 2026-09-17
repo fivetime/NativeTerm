@@ -30,7 +30,14 @@ pub enum ShimMessage {
         session: Option<String>,
         /// Host alias; absent when started without a host.
         alias: Option<String>,
+        /// The Windows Terminal window hosting the tab (its HWND), if the
+        /// shim could tell.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal_window: Option<i64>,
     },
+    /// Started with `--wait`: waiting for `Connect` (or the user) before
+    /// the first connection.
+    Waiting,
     /// The client (ssh) was started; `attempt` counts from 1 per shim.
     Connecting { attempt: u32 },
     /// Logged in (`LocalCommand` fired).
@@ -56,6 +63,9 @@ pub enum AppMessage {
     SendText { text: String, enter: bool },
     /// For a shim started without a host: be a local shell.
     LocalShell,
+    /// For a shim started without a host: stay, NativeTerm is replacing
+    /// this tab and will close it.
+    Hold,
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
@@ -87,7 +97,9 @@ mod tests {
                 wt_session: Some("6e7a0000-0000-4000-8000-0000000000b2".into()),
                 session: Some("s-1".into()),
                 alias: Some("ceph-cluster.osd1".into()),
+                terminal_window: Some(0x5a0b2c),
             },
+            ShimMessage::Waiting,
             ShimMessage::Connecting { attempt: 2 },
             ShimMessage::Authenticated,
             ShimMessage::Exited { code: -1 },
@@ -98,6 +110,9 @@ mod tests {
             assert!(line.ends_with('\n') && !line[..line.len() - 1].contains('\n'), "{line}");
             assert_eq!(decode::<ShimMessage>(&line).unwrap(), m);
         }
+        // older shims don't send the window
+        let old = r#"{"type":"hello","protocol":1,"role":"shim","pid":1,"wt_session":null,"session":null,"alias":null}"#;
+        assert!(matches!(decode::<ShimMessage>(old).unwrap(), ShimMessage::Hello { terminal_window: None, .. }));
         let text = AppMessage::SendText { text: "echo 你好\n😀".into(), enter: true };
         assert_eq!(decode::<AppMessage>(&encode(&text)).unwrap(), text);
     }

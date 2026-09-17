@@ -128,9 +128,18 @@
       outdated / turned off / missing), install and remove on the user's
       request, automatic rewrite after the program folder moved
 - [ ] Fragment: color schemes, favorites as profiles and actions
-- [ ] `state.db` (SQLite) in the data directory: open-session registry,
-      recent/usage, long notes and tags keyed by `NativeTermId`;
-      `notes.toml` export for sync; `NativeTermId` written on create/import
+- [x] `state.db` (SQLite, bundled, rollback journal) in the data
+      directory: open-session registry (GUIDs, label, alias, position
+      hints, "closed with its window"), usage counts; schema version
+- [x] Restarts and session restore: sessions from `state.db` wait for
+      their shims (lost after 12 s); restored placeholders held, replaced
+      per window by waiting tabs (`--wait`), then closed; sessions closed
+      with their window stay replaceable for 7 days; placeholders start
+      NativeTerm when it isn't running; a second NativeTerm brings the
+      first to the front. Live test `tests/restore_portable.rs`
+- [ ] `state.db` (rest): long notes and tags keyed by `NativeTermId`;
+      `notes.toml` export for sync; `NativeTermId` written on create/import;
+      position hints used for unlocated split tabs
 - [x] `native-term-session`: pipe server/client with user-only ACL,
       remote clients rejected, single instance, non-blocking duplex;
       versioned JSON-lines protocol; exit classification (255 and -1 are
@@ -148,16 +157,16 @@
       1.26
 - [ ] `native-term-app` (rest): row virtualization for thousands of
       sessions, search, selection events instead of the 2 s refresh,
-      registry in `state.db` (restored placeholders replaced), connection
-      pacing
+      connection pacing
 - [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
       CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
       6.6 MB working set)
 - [ ] Bring NativeTerm's memory down toward "tens of MB" (the renderer
       dominates)
-- [ ] Data directory resolution (`--data-dir`, `NATIVETERM_DATA_DIR`,
+- [x] Data directory resolution (`--data-dir`, `NATIVETERM_DATA_DIR`,
       `nativeterm.toml`, `HKCU\Software\NativeTerm\DataDir`, writable-folder
-      default); `settings.toml` with per-machine sections, `audit\`,
+      default)
+- [ ] Data directory (rest): `settings.toml` with per-machine sections, `audit\`,
       `backups\`, rotated `logs\`; atomic writes and a lock file
 - [x] Pipe protocol version number from the first release; pipe name per
       user SID and logon session

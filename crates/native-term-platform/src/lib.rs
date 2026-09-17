@@ -17,6 +17,8 @@ pub struct TabSpec {
     pub session: String,
     /// Host alias for the shim (sanitized: no spaces, quotes or `;`).
     pub alias: String,
+    /// Don't connect until NativeTerm (or the user) says so.
+    pub wait: bool,
 }
 
 /// Which window new tabs go to.

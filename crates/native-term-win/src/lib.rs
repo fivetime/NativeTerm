@@ -3,6 +3,8 @@
 //! file mappings.
 #![cfg(windows)]
 
+pub mod desktop;
+
 use std::io;
 use std::fs::File;
 use std::os::windows::io::AsRawHandle;

@@ -7,8 +7,9 @@ use std::time::Duration;
 use windows::core::{w, BOOL, HSTRING};
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOTOWNER};
 use windows::Win32::System::Console::{
-    ReadConsoleInputW, SetConsoleCtrlHandler, WriteConsoleInputW, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
+    GetConsoleWindow, ReadConsoleInputW, SetConsoleCtrlHandler, WriteConsoleInputW, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
     INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
 };
 use windows::Win32::System::Threading::{
@@ -50,6 +51,19 @@ impl AuthEvent {
         unsafe {
             let _ = ResetEvent(self.0 .0);
         }
+    }
+}
+
+/// The Windows Terminal window of this console: ConPTY's hidden console
+/// window is owned by the Terminal window hosting the tab.
+pub fn terminal_window() -> Option<i64> {
+    unsafe {
+        let console = GetConsoleWindow();
+        if console.is_invalid() {
+            return None;
+        }
+        let owner = GetAncestor(console, GA_ROOTOWNER);
+        (!owner.is_invalid() && owner != console).then_some(owner.0 as i64)
     }
 }
 

@@ -8,19 +8,23 @@
 //! - Stays after ssh exits and offers reconnect or close; exits with 0
 //!   only to close the tab.
 //! - Executes NativeTerm's commands: connect, disconnect, close, type text.
-//! - Without a host (restored layout, duplicated pane): asks NativeTerm,
-//!   which closes placeholders it replaces; otherwise a local shell.
+//! - Without a host (restored layout, duplicated pane): asks NativeTerm
+//!   (starting it if it isn't running), which closes placeholders it
+//!   replaces; otherwise a local shell.
+//! - `--wait`: a restored session; connects only when told to.
 //!
-//! Test hooks: `NATIVETERM_PIPE` (pipe name), `NATIVETERM_SSH` (ssh path).
+//! Test hooks: `NATIVETERM_PIPE` (pipe name), `NATIVETERM_SSH` (ssh path),
+//! `NATIVETERM_START_APP=0` (never start NativeTerm).
 
 mod args;
+mod debug;
 mod link;
 mod ssh;
 mod win;
 
 use std::path::PathBuf;
 use std::process::{Child, Command};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 use native_term_session::{classify_exit, pipe, SessionEnd, PROTOCOL_VERSION};
@@ -41,8 +45,8 @@ fn main() {
     };
     match mode {
         Mode::Authenticated { shim_pid } => authenticated(shim_pid),
-        Mode::Shim { session, alias } => {
-            let code = run(session, alias);
+        Mode::Shim { session, alias, wait } => {
+            let code = run(session, alias, wait);
             std::process::exit(code);
         }
     }
@@ -69,12 +73,14 @@ fn authenticated(shim_pid: u32) {
             wt_session: wt_session(),
             session: None,
             alias: None,
+            terminal_window: None,
         });
         let _ = conn.send(&ShimMessage::Authenticated);
     }
 }
 
-fn run(session: Option<String>, alias: Option<String>) -> i32 {
+fn run(session: Option<String>, alias: Option<String>, wait: bool) -> i32 {
+    debug::log(format!("start session={session:?} alias={alias:?} wait={wait} wt_session={:?} pipe={:?}", wt_session(), pipe_name()));
     let hello = ShimMessage::Hello {
         protocol: PROTOCOL_VERSION,
         role: Role::Shim,
@@ -82,6 +88,7 @@ fn run(session: Option<String>, alias: Option<String>) -> i32 {
         wt_session: wt_session(),
         session,
         alias: alias.clone(),
+        terminal_window: win::terminal_window(),
     };
     let link = pipe_name().map(|name| Link::start(name, hello));
     if let Some(link) = &link {
@@ -95,19 +102,33 @@ fn run(session: Option<String>, alias: Option<String>) -> i32 {
     }
 
     match alias {
-        Some(alias) => run_host(&alias, link.as_ref()),
+        Some(alias) => run_host(&alias, link.as_ref(), wait),
         None => run_without_host(link),
     }
 }
 
 /// Restored or duplicated pane: NativeTerm decides.
 fn run_without_host(link: Option<Link>) -> i32 {
-    if let Some(link) = link.as_ref().filter(|l| l.wait_connected(Duration::from_secs(2))) {
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        while std::time::Instant::now() < deadline {
-            match link.recv(POLL) {
+    let connected = link.as_ref().is_some_and(|l| {
+        l.wait_reached(Duration::from_secs(1))
+            || (start_app() && l.wait_reached(Duration::from_secs(15)))
+            || l.wait_reached(Duration::from_secs(1))
+    });
+    debug::log(format!("placeholder connected={connected}"));
+    if let (true, Some(link)) = (connected, link.as_ref()) {
+        let mut deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            let message = link.recv(POLL);
+            if message.is_some() {
+                debug::log(format!("placeholder got {message:?}"));
+            }
+            match message {
                 Some(AppMessage::Close) => return 0,
                 Some(AppMessage::LocalShell) => break,
+                Some(AppMessage::Hold) => {
+                    println!("[NativeTerm] Reopening this restored session in a new tab…");
+                    deadline = Instant::now() + Duration::from_secs(120);
+                }
                 _ => {}
             }
         }
@@ -119,7 +140,20 @@ fn run_without_host(link: Option<Link>) -> i32 {
     0
 }
 
-fn run_host(alias: &str, link: Option<&Link>) -> i32 {
+/// Restored tabs run the shim before NativeTerm may be running: start it
+/// (it exits quietly if another copy already serves the pipe).
+fn start_app() -> bool {
+    if std::env::var("NATIVETERM_START_APP").as_deref() == Ok("0") {
+        return false;
+    }
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let app = exe.with_file_name("nativeterm.exe");
+    let started = app.exists() && Command::new(&app).arg("--from-shim").spawn().is_ok();
+    debug::log(format!("started {}: {started}", app.display()));
+    started
+}
+
+fn run_host(alias: &str, link: Option<&Link>, wait: bool) -> i32 {
     let send = |m: ShimMessage| {
         if let Some(link) = link {
             link.send(m);
@@ -130,6 +164,14 @@ fn run_host(alias: &str, link: Option<&Link>) -> i32 {
     let pid = std::process::id();
     let auth = win::AuthEvent::create(pid).ok();
     let mut attempt = 0;
+
+    if wait {
+        send(ShimMessage::Waiting);
+        println!("[NativeTerm] {alias}: restored, not connected yet.");
+        if let Next::Close = after_exit(link) {
+            return 0;
+        }
+    }
 
     loop {
         attempt += 1;
@@ -151,7 +193,7 @@ fn run_host(alias: &str, link: Option<&Link>) -> i32 {
             }
         };
 
-        let code = match supervise(&mut child, link) {
+        let code = match supervise(&mut child, link, auth.as_ref()) {
             Supervised::Exited(code) => code,
             Supervised::Close => return 0,
         };
@@ -170,11 +212,20 @@ enum Supervised {
     Close,
 }
 
-/// Wait for ssh while serving NativeTerm's commands.
-fn supervise(child: &mut Child, link: Option<&Link>) -> Supervised {
+/// Wait for ssh while serving NativeTerm's commands. The login is also
+/// reported from here (the helper reports it too), so a reconnecting link
+/// can replay it.
+fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEvent>) -> Supervised {
+    let mut reported = false;
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             return Supervised::Exited(status.code().unwrap_or(-1));
+        }
+        if let (false, Some(link), Some(auth)) = (reported, link, auth) {
+            if auth.is_set() {
+                link.send(ShimMessage::Authenticated);
+                reported = true;
+            }
         }
         let Some(link) = link else {
             std::thread::sleep(POLL);

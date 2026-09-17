@@ -324,6 +324,24 @@ fragments folder:
 | Fragment edited to `D:\Old\nativeterm-shim.exe`, restart | First read as missing: the file had a BOM (PowerShell 5.1) and was parsed as strict JSON. With the lenient parser: rewritten, notice "Updated … moved to …" |
 | Side effect of the first two clicks | The Store Terminal's `settings.json` got a new timestamp (content unchanged), because installing touches every installed Terminal. With a test fragments folder only the chosen Terminal is touched now |
 
+NativeTerm restarts and session restore (`tests/restore_portable.rs`).
+Portable settings: `firstWindowPreference: persistedLayout`,
+`warning.confirmOnClose: never`. Each step is a separate NativeTerm run
+(`examples/core_probe.rs`) with one `state.db`:
+
+| Step | Result |
+|---|---|
+| Open two tabs in a new window; next run | Both re-attached from `state.db`: "login failed (255)", linked, located, attempt 1 (after the replay-order fix) |
+| Close the window while NativeTerm runs | Shims reported closing; with a 1.5 s check the window still existed (Terminal keeps its last window while saving) and nothing was restorable. With up to 10 s: marked closed with their window |
+| `wt` without arguments (Terminal restores the layout) | Saved layout: the profile's command line, the original session GUIDs, title "NativeTerm SSH". Placeholders held, replaced in the same window by `--wait` tabs, then closed: the window had only "nt-r a" and "nt-r 中文 b", both "restored, not connected" |
+| First attempt of the above | Placeholders answered "local shell" at once, but the shim missed the 40 ms connection (race), started `nativeterm.exe --from-shim` and fell back 18 s later |
+| Connect one restored session | Attempt 1, "login failed (255)" |
+| Close the window while NativeTerm isn't running, restore | Sessions still open in `state.db`: replaced the same way |
+| Close all | No sessions in the next run |
+| Second GUI launch | Exited with 0 and brought the first window to the front; with `--from-shim` it exited without doing so |
+
+Whole suite: 47 s, passed twice in a row; no shims left.
+
 Idle footprint, release build, no sessions, 6–10 s samples:
 
 | Variant | Private memory |

@@ -2,9 +2,10 @@
 //! sessions. First slice: connect (here or in a new window), focus,
 //! reconnect, disconnect, close.
 //!
-//! `nativeterm [--terminal-dir <portable Terminal folder>] [--ssh-dir <dir>]`
-//! (also `NATIVETERM_TERMINAL_DIR`). Without a folder the installed
-//! Windows Terminal is used.
+//! `nativeterm [--terminal-dir <portable Terminal folder>] [--ssh-dir <dir>]
+//! [--data-dir <dir>]` (also `NATIVETERM_TERMINAL_DIR`). Without a folder
+//! the installed Windows Terminal is used. `--from-shim`: started by a
+//! restored tab; exits quietly if NativeTerm is already running.
 
 #![windows_subsystem = "windows"]
 
@@ -13,7 +14,8 @@ mod terminal_profile;
 use std::path::PathBuf;
 
 use eframe::egui;
-use native_term_app::{default_shim_path, Core, HostRequest, SessionView, State};
+use native_term_app::registry::Registry;
+use native_term_app::{data_dir, default_shim_path, Core, HostRequest, SessionView, State};
 use native_term_config::SessionTree;
 use native_term_platform::windows_terminal::install::Install;
 use native_term_platform::windows_terminal::WindowsTerminal;
@@ -23,21 +25,27 @@ use native_term_platform::Target;
 struct Options {
     terminal_dir: Option<PathBuf>,
     ssh_dir: PathBuf,
+    data_dir: Option<PathBuf>,
+    from_shim: bool,
 }
 
 fn options() -> Result<Options, String> {
     let mut terminal_dir = std::env::var_os("NATIVETERM_TERMINAL_DIR").map(PathBuf::from);
     let mut ssh_dir = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"));
+    let mut data_dir = None;
+    let mut from_shim = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().map(PathBuf::from).ok_or(format!("{arg} needs a value"));
         match arg.as_str() {
             "--terminal-dir" => terminal_dir = Some(value()?),
             "--ssh-dir" => ssh_dir = Some(value()?),
+            "--data-dir" => data_dir = Some(value()?),
+            "--from-shim" => from_shim = true,
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    Ok(Options { terminal_dir, ssh_dir: ssh_dir.ok_or("USERPROFILE is not set")? })
+    Ok(Options { terminal_dir, ssh_dir: ssh_dir.ok_or("USERPROFILE is not set")?, data_dir, from_shim })
 }
 
 fn choose_install(dir: Option<&PathBuf>) -> Result<Install, String> {
@@ -47,12 +55,71 @@ fn choose_install(dir: Option<&PathBuf>) -> Result<Install, String> {
     }
 }
 
+struct Setup {
+    options: Options,
+    install: Install,
+    shim: PathBuf,
+    core: Option<Core>,
+    notices: Vec<String>,
+}
+
+enum Start {
+    Run(Box<Setup>),
+    /// Another NativeTerm serves the pipe.
+    AlreadyRunning { quiet: bool },
+}
+
+fn setup() -> Result<Start, String> {
+    let options = options()?;
+    let install = choose_install(options.terminal_dir.as_ref())?;
+    let shim = default_shim_path().map_err(|e| e.to_string())?;
+    let mut notices = Vec::new();
+    let inputs = data_dir::Inputs::from_system(options.data_dir.clone()).map_err(|e| e.to_string())?;
+    let registry = match data_dir::resolve(&inputs) {
+        Ok((dir, _)) => match Registry::open(&dir.join("state.db")) {
+            Ok(registry) => Some(registry),
+            Err(e) => {
+                notices.push(format!("{}: {e}; open sessions won't be remembered", dir.join("state.db").display()));
+                None
+            }
+        },
+        Err(e) => {
+            notices.push(format!("No data directory: {e}; open sessions won't be remembered"));
+            None
+        }
+    };
+    if !shim.exists() {
+        notices.push(format!("{} is missing; tabs can't start", shim.display()));
+    }
+    // before the window: restored tabs may already be waiting for an answer
+    let core = match Core::start(WindowsTerminal::new(install.clone(), &shim), registry) {
+        Ok(core) => Some(core),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            return Ok(Start::AlreadyRunning { quiet: options.from_shim });
+        }
+        Err(e) => {
+            notices.push(format!("NativeTerm can't serve its pipe: {e}"));
+            None
+        }
+    };
+    Ok(Start::Run(Box::new(Setup { options, install, shim, core, notices })))
+}
+
 fn main() -> eframe::Result<()> {
-    let setup = options().and_then(|o| {
-        let install = choose_install(o.terminal_dir.as_ref())?;
-        let shim = default_shim_path().map_err(|e| e.to_string())?;
-        Ok((o, install, shim))
-    });
+    let setup = match setup() {
+        Ok(Start::AlreadyRunning { quiet }) => {
+            if !quiet {
+                if let Ok(exe) = std::env::current_exe() {
+                    for window in native_term_win::desktop::windows_of_other_instances(&exe) {
+                        native_term_win::desktop::bring_to_front(window);
+                    }
+                }
+            }
+            return Ok(());
+        }
+        Ok(Start::Run(setup)) => Ok(*setup),
+        Err(e) => Err(e),
+    };
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_title("NativeTerm").with_inner_size([960.0, 640.0]),
         wgpu_options: wgpu_options(),
@@ -64,7 +131,7 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
             let app: Box<dyn eframe::App> = match setup {
-                Ok((options, install, shim)) => Box::new(App::new(cc, options, install, shim)),
+                Ok(setup) => Box::new(App::new(cc, setup)),
                 Err(e) => Box::new(Fatal(e)),
             };
             Ok(app)
@@ -147,24 +214,14 @@ struct App {
 }
 
 impl App {
-    fn new(cc: &eframe::CreationContext, options: Options, install: Install, shim: PathBuf) -> App {
-        let ctx = cc.egui_ctx.clone();
-        let mut profile = ProfileSetup::new(install.clone(), shim.clone());
-        let mut notices: Vec<String> = profile.fix_moved().into_iter().collect();
-        if !shim.exists() {
-            notices.push(format!("{} is missing; tabs can't start", shim.display()));
+    fn new(cc: &eframe::CreationContext, setup: Setup) -> App {
+        let Setup { options, install, shim, core, mut notices } = setup;
+        let mut profile = ProfileSetup::new(install, shim);
+        notices.extend(profile.fix_moved());
+        if let Some(core) = &core {
+            let ctx = cc.egui_ctx.clone();
+            core.set_repaint(move || ctx.request_repaint());
         }
-        let core = match Core::start(WindowsTerminal::new(install, &shim), move || ctx.request_repaint()) {
-            Ok(core) => Some(core),
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-                notices.push("NativeTerm is already running.".into());
-                None
-            }
-            Err(e) => {
-                notices.push(format!("NativeTerm can't serve its pipe: {e}"));
-                None
-            }
-        };
         let tree = SessionTree::load(&options.ssh_dir);
         App {
             core,
@@ -327,9 +384,9 @@ fn session_row(ui: &mut egui::Ui, core: &Core, s: &SessionView) {
         if ui.add_enabled(s.location.is_some(), egui::Button::new("Focus")).clicked() {
             core.focus(&s.id);
         }
-        let ended = matches!(s.state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_));
-        if ui.add_enabled(open && s.linked && ended, egui::Button::new("Reconnect")).clicked() {
-            core.reconnect(&s.id);
+        let label = if s.state == State::Waiting { "Connect" } else { "Reconnect" };
+        if ui.add_enabled(open && s.linked && s.state.can_connect(), egui::Button::new(label)).clicked() {
+            core.connect(&s.id);
         }
         let live = matches!(s.state, State::Connecting | State::Connected);
         if ui.add_enabled(open && s.linked && live, egui::Button::new("Disconnect")).clicked() {

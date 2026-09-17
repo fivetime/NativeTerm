@@ -1,29 +1,49 @@
-//! NativeTerm's core, without UI: the open-session registry, the pipe
-//! server the shims talk to, and the Terminal backend doing the work on
-//! background threads. The GUI (`main.rs`) only reads views and sends
-//! commands.
+//! NativeTerm's core, without UI: the open sessions (kept in `state.db`),
+//! the pipe server the shims talk to, and the Terminal backend doing the
+//! work on background threads. The GUI (`main.rs`) only reads views and
+//! sends commands.
+
+pub mod data_dir;
+pub mod registry;
 
 use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use native_term_platform::windows_terminal::WindowsTerminal;
+use native_term_platform::windows_terminal::{window, WindowsTerminal};
 use native_term_platform::{Snapshot, TabSpec, Target};
 use native_term_session::pipe::{self, PipeConnection, PipeListener};
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 use native_term_session::{classify_exit, SessionEnd, PROTOCOL_VERSION};
 
+use registry::{Record, Registry};
+
 /// How often tab positions are refreshed while sessions are open.
 const REFRESH: Duration = Duration::from_secs(2);
 const CONFIRM: Duration = Duration::from_secs(15);
+/// Sessions from `state.db` whose shim doesn't turn up by then are gone
+/// (their window was closed while NativeTerm wasn't running).
+pub const DETACHED_GRACE: Duration = Duration::from_secs(12);
+/// Restored placeholders arrive one by one; replace them together.
+const REPLACE_GATHER: Duration = Duration::from_millis(1500);
+/// A session that reported closing is "closed with its window" if the
+/// window is gone this soon after (Terminal keeps its last window a while
+/// to save the layout).
+const WINDOW_CLOSE_CHECK: Duration = Duration::from_secs(10);
+/// How long Terminal's session restore may bring back such a session.
+pub const RESTORABLE_FOR: Duration = Duration::from_secs(7 * 24 * 3600);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State {
     /// `wt` was asked; the shim hasn't said hello yet.
     Opening,
+    /// Known from `state.db`; its shim hasn't said hello yet.
+    Detached,
+    /// A restored session in a new tab, not connected yet.
+    Waiting,
     Connecting,
     Connected,
     LoginFailed(i32),
@@ -41,9 +61,16 @@ impl State {
         !matches!(self, State::Failed(_) | State::Gone | State::Closed)
     }
 
+    /// Ssh isn't running: connecting is possible.
+    pub fn can_connect(&self) -> bool {
+        matches!(self, State::Waiting | State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_))
+    }
+
     pub fn describe(&self) -> String {
         match self {
             State::Opening => "opening".into(),
+            State::Detached => "looking for its tab…".into(),
+            State::Waiting => "restored, not connected".into(),
             State::Connecting => "connecting / waiting for login".into(),
             State::Connected => "connected".into(),
             State::LoginFailed(c) => format!("login failed ({c})"),
@@ -83,8 +110,8 @@ pub struct SessionView {
 
 struct Session {
     id: String,
-    /// The GUID NativeTerm assigned; the shim's current one may differ
-    /// after "Restart connection".
+    /// The GUID of the tab NativeTerm opened; the shim's current one may
+    /// differ after "Restart connection".
     terminal_session: String,
     current_terminal_session: Option<String>,
     label: String,
@@ -95,9 +122,28 @@ struct Session {
     shim_pid: Option<u32>,
     link: Option<Arc<PipeConnection>>,
     location: Option<Location>,
+    /// Closed together with its window: a restored pane may bring it back.
+    restorable: bool,
 }
 
 impl Session {
+    fn new(id: String, terminal_session: String, label: String, alias: String, state: State) -> Session {
+        Session {
+            id,
+            terminal_session,
+            current_terminal_session: None,
+            label,
+            alias,
+            state,
+            authenticated: false,
+            attempt: 0,
+            shim_pid: None,
+            link: None,
+            location: None,
+            restorable: false,
+        }
+    }
+
     fn view(&self) -> SessionView {
         SessionView {
             id: self.id.clone(),
@@ -118,16 +164,30 @@ impl Session {
     }
 }
 
+/// A restored pane waiting to be replaced by a proper tab.
+struct Placeholder {
+    session: String,
+    conn: Arc<PipeConnection>,
+    window: Option<isize>,
+}
+
+type Repaint = Box<dyn Fn() + Send + Sync>;
+
 struct Shared {
     terminal: WindowsTerminal,
+    registry: Option<Registry>,
     sessions: Mutex<Vec<Session>>,
+    /// Closed with their window in an earlier run; only matched against
+    /// restored placeholders, not shown.
+    restorable: Mutex<Vec<Session>>,
     notices: Mutex<Vec<String>>,
     snapshot: Mutex<Snapshot>,
     /// Terminal windows in the order NativeTerm first saw them, for
     /// stable window numbers (Z order changes with every activation).
     window_order: Mutex<Vec<isize>>,
-    repaint: Box<dyn Fn() + Send + Sync>,
+    repaint: Mutex<Option<Repaint>>,
     wake: Mutex<Sender<()>>,
+    placeholders: Mutex<Sender<Placeholder>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -136,7 +196,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Shared {
     fn changed(&self) {
-        (self.repaint)();
+        if let Some(repaint) = lock(&self.repaint).as_ref() {
+            repaint();
+        }
     }
 
     fn notice(&self, text: String) {
@@ -152,10 +214,33 @@ impl Shared {
         lock(&self.sessions).iter().filter(|s| s.state.is_open()).map(|s| s.label.clone()).collect()
     }
 
+    /// Write to `state.db`; failures become notices.
+    fn db(&self, what: &str, f: impl FnOnce(&Registry) -> registry::Result<()>) {
+        if let Some(registry) = &self.registry {
+            if let Err(e) = f(registry) {
+                self.notice(format!("state.db ({what}): {e}"));
+            }
+        }
+    }
+
+    /// Change a session; a session that ends or comes back is recorded.
     fn update<R>(&self, id: &str, f: impl FnOnce(&mut Session) -> R) -> Option<R> {
-        let result = lock(&self.sessions).iter_mut().find(|s| s.id == id).map(f);
+        let (result, ended, back) = {
+            let mut sessions = lock(&self.sessions);
+            let s = sessions.iter_mut().find(|s| s.id == id)?;
+            let was_open = s.state.is_open();
+            let result = f(s);
+            let open = s.state.is_open();
+            (result, was_open && !open, (!was_open && open).then(|| s.current_terminal_session.clone()))
+        };
+        if ended {
+            self.db("close", |r| r.closed(id));
+        }
+        if let Some(guid) = back {
+            self.db("reopen", |r| r.seen_terminal_session(id, guid.as_deref()));
+        }
         self.changed();
-        result
+        Some(result)
     }
 }
 
@@ -172,19 +257,42 @@ pub struct HostRequest {
 }
 
 impl Core {
-    /// Serve the pipe and start the background threads. Fails with
-    /// `AddrInUse` if another NativeTerm is running.
-    pub fn start(terminal: WindowsTerminal, repaint: impl Fn() + Send + Sync + 'static) -> io::Result<Core> {
+    /// Serve the pipe, pick up the sessions `state.db` knows, and start the
+    /// background threads. Fails with `AddrInUse` if another NativeTerm is
+    /// running.
+    pub fn start(terminal: WindowsTerminal, registry: Option<Registry>) -> io::Result<Core> {
         let listener = PipeListener::bind(&pipe::pipe_name()?)?;
         let (wake, woken) = mpsc::channel();
+        let (placeholders, queued) = mpsc::channel();
+        let mut sessions = Vec::new();
+        let mut restorable = Vec::new();
+        let mut notices = Vec::new();
+        if let Some(registry) = &registry {
+            let to_session = |r: Record, state: State| {
+                let mut s = Session::new(r.id, r.terminal_session, r.label, r.alias, state);
+                s.current_terminal_session = r.current_terminal_session;
+                s
+            };
+            match registry.open_sessions() {
+                Ok(records) => sessions.extend(records.into_iter().map(|r| to_session(r, State::Detached))),
+                Err(e) => notices.push(format!("state.db: {e}")),
+            }
+            match registry.restorable_sessions(RESTORABLE_FOR) {
+                Ok(records) => restorable.extend(records.into_iter().map(|r| to_session(r, State::Closed))),
+                Err(e) => notices.push(format!("state.db: {e}")),
+            }
+        }
         let shared = Arc::new(Shared {
             terminal,
-            sessions: Mutex::new(Vec::new()),
-            notices: Mutex::new(Vec::new()),
+            registry,
+            sessions: Mutex::new(sessions),
+            restorable: Mutex::new(restorable),
+            notices: Mutex::new(notices),
             snapshot: Mutex::new(Snapshot::default()),
             window_order: Mutex::new(Vec::new()),
-            repaint: Box::new(repaint),
+            repaint: Mutex::new(None),
             wake: Mutex::new(wake),
+            placeholders: Mutex::new(placeholders),
         });
         let server = Arc::clone(&shared);
         std::thread::Builder::new().name("pipe-server".into()).spawn(move || serve(server, listener))?;
@@ -197,11 +305,38 @@ impl Core {
                 }
             }
         })?;
+        let replacer = Arc::clone(&shared);
+        std::thread::Builder::new().name("replace-restored".into()).spawn(move || replace_placeholders(&replacer, queued))?;
+        let grace = Arc::clone(&shared);
+        std::thread::Builder::new().name("detached-grace".into()).spawn(move || {
+            std::thread::sleep(DETACHED_GRACE);
+            let lost: Vec<String> =
+                lock(&grace.sessions).iter().filter(|s| s.state == State::Detached).map(|s| s.id.clone()).collect();
+            for id in &lost {
+                grace.update(id, |s| {
+                    if s.state == State::Detached {
+                        s.state = State::Gone;
+                    }
+                });
+            }
+            if !lost.is_empty() {
+                grace.notice(format!("{} sessions from the last run have no tab any more", lost.len()));
+            }
+        })?;
         Ok(Core { shared })
+    }
+
+    /// Called when anything visible changed (from background threads).
+    pub fn set_repaint(&self, repaint: impl Fn() + Send + Sync + 'static) {
+        *lock(&self.shared.repaint) = Some(Box::new(repaint));
     }
 
     pub fn terminal(&self) -> &WindowsTerminal {
         &self.shared.terminal
+    }
+
+    pub fn registry(&self) -> Option<&Registry> {
+        self.shared.registry.as_ref()
     }
 
     pub fn sessions(&self) -> Vec<SessionView> {
@@ -231,22 +366,23 @@ impl Core {
                     label: label.clone(),
                     session: native_term_config::new_id(),
                     alias: host.alias.clone(),
+                    wait: false,
                 };
-                sessions.push(Session {
-                    id: spec.session.clone(),
-                    terminal_session: spec.terminal_session.clone(),
-                    current_terminal_session: None,
+                sessions.push(Session::new(
+                    spec.session.clone(),
+                    spec.terminal_session.clone(),
                     label,
-                    alias: host.alias.clone(),
-                    state: State::Opening,
-                    authenticated: false,
-                    attempt: 0,
-                    shim_pid: None,
-                    link: None,
-                    location: None,
-                });
+                    host.alias.clone(),
+                    State::Opening,
+                ));
                 specs.push(spec);
             }
+        }
+        for spec in &specs {
+            self.shared.db("open", |r| {
+                r.opened(&record_for(spec))?;
+                r.count_use(&spec.alias)
+            });
         }
         self.shared.changed();
         let ids: Vec<String> = specs.iter().map(|s| s.session.clone()).collect();
@@ -273,7 +409,8 @@ impl Core {
         });
     }
 
-    pub fn reconnect(&self, id: &str) {
+    /// Connect a waiting session, or reconnect an ended one.
+    pub fn connect(&self, id: &str) {
         self.send(id, AppMessage::Connect);
     }
 
@@ -331,6 +468,19 @@ impl Core {
     }
 }
 
+fn record_for(spec: &TabSpec) -> Record {
+    Record {
+        id: spec.session.clone(),
+        terminal_session: spec.terminal_session.clone(),
+        current_terminal_session: None,
+        label: spec.label.clone(),
+        alias: spec.alias.clone(),
+        opened_at: registry::now(),
+        window_number: None,
+        tab_index: None,
+    }
+}
+
 /// `label`, or `label (2)`, `label (3)`, … if taken.
 pub fn unique_label(label: &str, taken: &HashSet<String>) -> String {
     if !taken.contains(label) {
@@ -339,28 +489,29 @@ pub fn unique_label(label: &str, taken: &HashSet<String>) -> String {
     (2..).map(|n| format!("{label} ({n})")).find(|l| !taken.contains(l)).expect("unbounded")
 }
 
-fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) {
+/// Open tabs and confirm them; returns the sessions whose tab didn't show.
+fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String> {
     let fail = |specs: &[TabSpec], why: &str| {
-        let mut sessions = lock(&shared.sessions);
         for spec in specs {
-            if let Some(s) = sessions.iter_mut().find(|s| s.id == spec.session && s.state == State::Opening) {
-                s.state = State::Failed(why.to_string());
-            }
+            shared.update(&spec.session, |s| {
+                if s.state == State::Opening {
+                    s.state = State::Failed(why.to_string());
+                }
+            });
         }
-        drop(sessions);
-        shared.changed();
+        specs.iter().map(|s| s.session.clone()).collect::<Vec<_>>()
     };
     let report = match shared.terminal.open(target, specs) {
         Ok(report) => report,
         Err(e) => {
             shared.notice(format!("Windows Terminal could not be started: {e}"));
-            fail(specs, "wt failed");
-            return;
+            return fail(specs, "wt failed");
         }
     };
+    let mut failed = Vec::new();
     if !report.pending.is_empty() {
         shared.notice(format!("{} tabs were not opened: another Terminal window became active", report.pending.len()));
-        fail(&report.pending, "not sent");
+        failed.extend(fail(&report.pending, "not sent"));
     }
     let sent = &specs[..report.launched];
     let expected: Vec<String> = sent.iter().map(|s| s.label.clone()).collect();
@@ -368,9 +519,60 @@ fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) {
     if !missing.is_empty() {
         shared.notice(format!("{} tabs didn't appear in Windows Terminal: {}", missing.len(), missing.join(", ")));
         let missing: Vec<TabSpec> = sent.iter().filter(|s| missing.contains(&s.label)).cloned().collect();
-        fail(&missing, "tab didn't appear");
+        failed.extend(fail(&missing, "tab didn't appear"));
     }
     shared.refresh_soon();
+    failed
+}
+
+/// Replace restored placeholders with proper tabs (same label and
+/// session, a new terminal GUID, not connected), then close them. Each
+/// window's placeholders are replaced together, in that window.
+fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
+    while let Ok(first) = queued.recv() {
+        let mut batch = vec![first];
+        let deadline = Instant::now() + REPLACE_GATHER;
+        while let Ok(next) = queued.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            batch.push(next);
+        }
+        let mut windows: Vec<Option<isize>> = Vec::new();
+        for p in &batch {
+            if !windows.contains(&p.window) {
+                windows.push(p.window);
+            }
+        }
+        for target_window in windows {
+            let group: Vec<&Placeholder> = batch.iter().filter(|p| p.window == target_window).collect();
+            let mut specs = Vec::new();
+            for p in &group {
+                let spec = shared.update(&p.session, |s| {
+                    s.terminal_session = native_term_config::new_id();
+                    s.current_terminal_session = None;
+                    s.state = State::Opening;
+                    TabSpec {
+                        terminal_session: s.terminal_session.clone(),
+                        label: s.label.clone(),
+                        session: s.id.clone(),
+                        alias: s.alias.clone(),
+                        wait: true,
+                    }
+                });
+                if let Some(spec) = spec {
+                    shared.db("replace", |r| r.opened(&record_for(&spec)));
+                    specs.push(spec);
+                }
+            }
+            // `-w 0` goes to the most recently activated window
+            if let Some(handle) = target_window {
+                window::activate(handle);
+            }
+            let failed = open_tabs(shared, &Target::Recent, &specs);
+            for p in group {
+                let message = if failed.contains(&p.session) { AppMessage::LocalShell } else { AppMessage::Close };
+                let _ = p.conn.send(&message);
+            }
+        }
+    }
 }
 
 /// Read all tabs and store each session's position.
@@ -395,6 +597,7 @@ fn refresh(shared: &Shared) -> Snapshot {
         }
         order.clone()
     };
+    let mut moved = Vec::new();
     {
         let mut sessions = lock(&shared.sessions);
         for s in sessions.iter_mut() {
@@ -416,10 +619,19 @@ fn refresh(shared: &Shared) -> Snapshot {
             });
             // an incomplete scan keeps what was known
             if (found.is_some() || snapshot.complete) && s.location != found {
+                let position = |l: &Option<Location>| l.as_ref().map(|l| (l.window_number, l.tab_index));
+                if found.is_some() && position(&found) != position(&s.location) {
+                    moved.push((s.id.clone(), position(&found)));
+                }
                 s.location = found;
                 changed = true;
             }
         }
+    }
+    for (id, position) in moved {
+        shared.db("position", |r| {
+            r.moved(&id, position.map(|p| p.0 as i64), position.map(|p| p.1 as i64))
+        });
     }
     if changed {
         *lock(&shared.snapshot) = snapshot.clone();
@@ -444,7 +656,7 @@ fn serve(shared: Arc<Shared>, mut listener: PipeListener) {
 }
 
 fn handle_connection(shared: &Shared, conn: Arc<PipeConnection>) {
-    let Ok(Some(ShimMessage::Hello { protocol, role, pid, wt_session, session, alias })) =
+    let Ok(Some(ShimMessage::Hello { protocol, role, pid, wt_session, session, alias, terminal_window })) =
         conn.recv::<ShimMessage>(Duration::from_secs(10))
     else {
         return;
@@ -458,69 +670,131 @@ fn handle_connection(shared: &Shared, conn: Arc<PipeConnection>) {
         // the LocalCommand helper: one message, then it's gone
         if let Ok(Some(ShimMessage::Authenticated)) = conn.recv::<ShimMessage>(Duration::from_secs(5)) {
             if let Some(guid) = wt_session {
-                let mut sessions = lock(&shared.sessions);
-                if let Some(s) = sessions.iter_mut().find(|s| s.matches_terminal_session(&guid)) {
-                    s.authenticated = true;
-                    s.state = State::Connected;
+                let id = lock(&shared.sessions).iter().find(|s| s.matches_terminal_session(&guid)).map(|s| s.id.clone());
+                if let Some(id) = id {
+                    shared.update(&id, |s| {
+                        s.authenticated = true;
+                        s.state = State::Connected;
+                    });
                 }
-                drop(sessions);
-                shared.changed();
             }
         }
         return;
     }
 
     let Some(alias) = alias else {
-        // restored or duplicated pane; without a registry of earlier runs
-        // there is nothing to replace it with
-        let _ = conn.send(&AppMessage::LocalShell);
+        // a restored pane of a session NativeTerm knows gets replaced;
+        // anything else (duplicated panes, unknown GUIDs) is a local shell
+        let restored = wt_session.as_deref().and_then(|guid| {
+            let detached = {
+                let mut sessions = lock(&shared.sessions);
+                let taken: HashSet<String> =
+                    sessions.iter().filter(|s| s.state.is_open()).map(|s| s.label.clone()).collect();
+                sessions
+                    .iter_mut()
+                    .filter(|s| s.link.is_none() && s.matches_terminal_session(guid))
+                    .find(|s| s.state == State::Detached || (s.restorable && !s.state.is_open()))
+                    .map(|s| {
+                        if s.restorable {
+                            // closed with its window earlier in this run
+                            s.restorable = false;
+                            s.label = unique_label(&s.label, &taken);
+                            s.state = State::Detached;
+                        }
+                        s.id.clone()
+                    })
+            };
+            detached.or_else(|| {
+                // closed with its window: bring it back into the list
+                let mut restorable = lock(&shared.restorable);
+                let index = restorable.iter().position(|s| s.matches_terminal_session(guid))?;
+                let mut s = restorable.remove(index);
+                drop(restorable);
+                let mut sessions = lock(&shared.sessions);
+                let taken: HashSet<String> =
+                    sessions.iter().filter(|s| s.state.is_open()).map(|s| s.label.clone()).collect();
+                s.label = unique_label(&s.label, &taken);
+                s.state = State::Detached;
+                let id = s.id.clone();
+                sessions.push(s);
+                Some(id)
+            })
+        });
+        match restored {
+            Some(session) => {
+                let _ = conn.send(&AppMessage::Hold);
+                let placeholder = Placeholder { session, conn, window: terminal_window.map(|w| w as isize) };
+                let _ = lock(&shared.placeholders).send(placeholder);
+            }
+            None => {
+                let _ = conn.send(&AppMessage::LocalShell);
+            }
+        }
         return;
     };
 
-    let id = {
-        let mut sessions = lock(&shared.sessions);
-        let known = sessions.iter().position(|s| {
-            session.as_deref() == Some(s.id.as_str())
-                || wt_session.as_deref().is_some_and(|g| s.matches_terminal_session(g))
-        });
-        let index = match known {
-            Some(i) => i,
-            None => {
-                // a tab from an earlier NativeTerm run: adopt it
+    let known = lock(&shared.sessions)
+        .iter()
+        .find(|s| {
+            session.as_deref() == Some(s.id.as_str()) || wt_session.as_deref().is_some_and(|g| s.matches_terminal_session(g))
+        })
+        .map(|s| s.id.clone());
+    let id = match known {
+        Some(id) => id,
+        None => {
+            // a tab from an earlier run that state.db doesn't know: adopt it
+            let (id, label) = {
+                let mut sessions = lock(&shared.sessions);
                 let taken: HashSet<String> =
                     sessions.iter().filter(|s| s.state.is_open()).map(|s| s.label.clone()).collect();
-                sessions.push(Session {
-                    id: session.clone().unwrap_or_else(native_term_config::new_id),
-                    terminal_session: wt_session.clone().unwrap_or_default(),
-                    current_terminal_session: None,
-                    label: unique_label(&alias, &taken),
-                    alias: alias.clone(),
-                    state: State::Connecting,
-                    authenticated: false,
-                    attempt: 0,
-                    shim_pid: None,
-                    link: None,
-                    location: None,
-                });
-                sessions.len() - 1
-            }
-        };
-        let s = &mut sessions[index];
-        s.current_terminal_session = wt_session.clone();
-        s.shim_pid = Some(pid);
-        s.link = Some(Arc::clone(&conn));
-        if s.state == State::Opening {
-            s.state = State::Connecting;
+                let id = session.clone().unwrap_or_else(native_term_config::new_id);
+                let label = unique_label(&alias, &taken);
+                let guid = wt_session.clone().unwrap_or_default();
+                sessions.push(Session::new(id.clone(), guid, label.clone(), alias.clone(), State::Connecting));
+                (id, label)
+            };
+            let record = Record {
+                id: id.clone(),
+                terminal_session: wt_session.clone().unwrap_or_default(),
+                current_terminal_session: None,
+                label,
+                alias: alias.clone(),
+                opened_at: registry::now(),
+                window_number: None,
+                tab_index: None,
+            };
+            shared.db("adopt", |r| r.opened(&record));
+            id
         }
-        s.id.clone()
     };
-    shared.changed();
+    let current = shared
+        .update(&id, |s| {
+            let differs = wt_session.as_deref().is_some_and(|g| !g.eq_ignore_ascii_case(&s.terminal_session));
+            s.current_terminal_session = if differs { wt_session.clone() } else { None };
+            s.shim_pid = Some(pid);
+            s.link = Some(Arc::clone(&conn));
+            if !s.state.is_open() || matches!(s.state, State::Opening | State::Detached) {
+                s.state = State::Connecting;
+            }
+            s.current_terminal_session.clone()
+        })
+        .flatten();
+    shared.db("hello", |r| r.seen_terminal_session(&id, current.as_deref()));
     shared.refresh_soon();
 
     loop {
         match conn.recv::<ShimMessage>(Duration::from_secs(3600)) {
             Ok(Some(message)) => {
-                shared.update(&id, |s| apply(s, &message));
+                let window = shared.update(&id, |s| {
+                    apply(s, &message);
+                    s.location.as_ref().map(|l| l.window)
+                });
+                if let ShimMessage::Closing = &message {
+                    match window.flatten() {
+                        Some(window) => check_window_closed(shared, &id, window),
+                        None => debug(shared, format!("{id}: closing, but its window isn't known")),
+                    }
+                }
             }
             Ok(None) => {}
             Err(_) => break,
@@ -537,8 +811,30 @@ fn handle_connection(shared: &Shared, conn: Arc<PipeConnection>) {
     shared.refresh_soon();
 }
 
+/// Watch, while the tab's shim is ending, whether its window goes too.
+fn check_window_closed(shared: &Shared, id: &str, window: isize) {
+    let deadline = Instant::now() + WINDOW_CLOSE_CHECK;
+    while Instant::now() < deadline {
+        if !shared.terminal.windows().iter().any(|w| w.handle == window) {
+            shared.update(id, |s| s.restorable = true);
+            shared.db("closed with window", |r| r.closed_with_window(id));
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    debug(shared, format!("{id}: closed, its window stayed"));
+}
+
+/// Diagnostics as notices when `NATIVETERM_DEBUG` is set.
+fn debug(shared: &Shared, text: String) {
+    if std::env::var_os("NATIVETERM_DEBUG").is_some() {
+        shared.notice(format!("debug: {text}"));
+    }
+}
+
 fn apply(s: &mut Session, message: &ShimMessage) {
     match message {
+        ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {
             s.authenticated = false;
             s.attempt = *attempt;
@@ -578,24 +874,20 @@ mod tests {
     }
 
     fn session() -> Session {
-        Session {
-            id: "s".into(),
-            terminal_session: "6E7A0000-0000-4000-8000-000000000001".into(),
-            current_terminal_session: None,
-            label: "web01".into(),
-            alias: "web01".into(),
-            state: State::Opening,
-            authenticated: false,
-            attempt: 0,
-            shim_pid: None,
-            link: None,
-            location: None,
-        }
+        Session::new(
+            "s".into(),
+            "6E7A0000-0000-4000-8000-000000000001".into(),
+            "web01".into(),
+            "web01".into(),
+            State::Opening,
+        )
     }
 
     #[test]
     fn lifecycle() {
         let mut s = session();
+        apply(&mut s, &ShimMessage::Waiting);
+        assert!(s.state.can_connect());
         apply(&mut s, &ShimMessage::Connecting { attempt: 1 });
         assert_eq!(s.state, State::Connecting);
         apply(&mut s, &ShimMessage::Exited { code: 255 });
@@ -603,6 +895,7 @@ mod tests {
         apply(&mut s, &ShimMessage::Connecting { attempt: 2 });
         apply(&mut s, &ShimMessage::Authenticated);
         assert_eq!(s.state, State::Connected);
+        assert!(!s.state.can_connect());
         apply(&mut s, &ShimMessage::Exited { code: -1 });
         assert_eq!(s.state, State::Disconnected(-1));
         apply(&mut s, &ShimMessage::Connecting { attempt: 3 });
