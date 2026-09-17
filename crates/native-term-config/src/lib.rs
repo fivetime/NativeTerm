@@ -20,6 +20,7 @@ pub mod document;
 pub mod effective;
 pub mod header;
 pub mod include;
+pub mod keys;
 pub mod known_hosts;
 pub mod ops;
 pub mod securecrt;

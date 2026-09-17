@@ -53,6 +53,11 @@ fn main() {
             wait_for_any_key();
             std::process::exit(code);
         }
+        Mode::AddKeys => {
+            let code = keys::add_to_agent();
+            wait_for_any_key();
+            std::process::exit(code);
+        }
         Mode::CreateKey { path } => {
             let code = keys::create(&path);
             wait_for_any_key();

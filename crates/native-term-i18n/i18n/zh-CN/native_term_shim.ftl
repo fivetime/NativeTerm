@@ -15,3 +15,6 @@ key-creating = [NativeTerm] 正在 { $path } 生成密钥对。可以设置私�
 key-created = [NativeTerm] 已生成，公钥是 { $path }。
 key-exists = [NativeTerm] { $path } 已经存在，没有做任何修改。
 key-create-failed = [NativeTerm] 没有生成密钥：{ $error }
+agent-adding = [NativeTerm] 正在把你的密钥添加到 ssh-agent，每把密钥输入一次私钥密码。
+agent-added = [NativeTerm] 完成：在注销之前，ssh 不会再询问这些私钥密码。
+agent-add-failed = [NativeTerm] ssh-add 失败：{ $error }。ssh-agent 服务在运行吗？

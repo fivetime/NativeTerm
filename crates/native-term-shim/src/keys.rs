@@ -107,6 +107,26 @@ pub fn create(path: &str) -> i32 {
     }
 }
 
+pub fn add_to_agent() -> i32 {
+    let ssh = native_term_session::ssh_program();
+    let ssh_add = native_term_config::keys::tool_for(&ssh, "ssh-add");
+    println!("{}", t!("agent-adding"));
+    match Command::new(&ssh_add).status() {
+        Ok(s) if s.success() => {
+            println!("{}", t!("agent-added"));
+            0
+        }
+        Ok(s) => {
+            println!("{}", t!("agent-add-failed", error = format!("exit {}", s.code().unwrap_or(-1))));
+            1
+        }
+        Err(e) => {
+            println!("{}", t!("agent-add-failed", error = e.to_string()));
+            1
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

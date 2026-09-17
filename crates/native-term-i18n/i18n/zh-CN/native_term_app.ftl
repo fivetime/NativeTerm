@@ -15,6 +15,29 @@ dock-pin-hint = 已停靠在屏幕{ $edge ->
         [left] 左侧
        *[right] 右侧
     }：鼠标离开后自动收起，钉住后不收起。把窗口拖离边缘即可取消停靠。
+agent-section = SSH 密钥和 ssh-agent
+agent-other = 已设置 SSH_AUTH_SOCK：ssh 使用它指定的 agent。
+agent-checking = 正在检查…
+agent-service = ssh-agent 服务：{ $state }
+agent-running = 运行中
+agent-stopped = 已停止
+agent-disabled = 已禁用（Windows 默认）
+agent-missing = 未安装
+agent-no-keys = { $dir } 里没有密钥对。
+agent-key-protected = 设了私钥密码
+agent-key-open = 没有私钥密码
+agent-key-unknown = 无法判断
+agent-loaded = agent 里已有密钥：连接时不会再询问私钥密码。
+agent-empty = agent 里还没有密钥。
+agent-unreachable = agent 没有响应。
+agent-add = 把我的密钥添加到 agent…
+agent-add-tab = ssh-add
+agent-why = 有密钥设了私钥密码，所以每次连接都会询问。ssh-agent 可以在注销前一直记住它。要开启服务，请以管理员身份在 PowerShell 中运行下面的命令，然后使用"把我的密钥添加到 agent"：
+agent-copy = 复制
+agent-admin = NativeTerm 不会自己修改 Windows 服务。
+agent-hint = 你的私钥设了密码，但 ssh-agent 没有运行：每次连接都会询问私钥密码。
+agent-hint-show = 查看解决办法
+agent-hint-dismiss = 不再提示
 settings-terminal = Windows Terminal：{ $dir }（{ $kind }）
 terminal-kind-packaged = 商店版
 terminal-kind-portable = 便携版

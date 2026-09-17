@@ -17,3 +17,6 @@ key-creating = [NativeTerm] Creating a key pair at { $path }. A passphrase prote
 key-created = [NativeTerm] Created. The public key is { $path }.
 key-exists = [NativeTerm] { $path } exists already; nothing was changed.
 key-create-failed = [NativeTerm] No key was created: { $error }
+agent-adding = [NativeTerm] Adding your keys to ssh-agent; type each key's passphrase once.
+agent-added = [NativeTerm] Done: until you sign out, ssh won't ask for these passphrases again.
+agent-add-failed = [NativeTerm] ssh-add failed: { $error }. Is the ssh-agent service running?

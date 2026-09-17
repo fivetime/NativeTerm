@@ -5,6 +5,7 @@
 
 pub mod desktop;
 pub mod dock;
+pub mod service;
 pub mod watch;
 
 use std::io;

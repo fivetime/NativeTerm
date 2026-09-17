@@ -1945,6 +1945,16 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   enable it if not. Windows OpenSSH talks to `\\.\pipe\openssh-ssh-agent`
   unless `SSH_AUTH_SOCK` is set; the shim never changes `SSH_AUTH_SOCK`,
   and the check honors it if the user set one (e.g. for another agent). Key installation: see "Installing public keys".
+  - Implemented: Settings → "SSH keys and ssh-agent" shows the service
+    state (read through the service manager; NativeTerm never changes
+    it), each key pair in `~/.ssh` with whether it has a passphrase
+    (`ssh-keygen -y -P ""` succeeds only without one; NativeTerm doesn't
+    read private keys itself), and whether the agent holds keys
+    (`ssh-add -l`). Only when a key has a passphrase and no agent is
+    available does a hint appear at the top (dismissable); it explains
+    the administrator command to enable the service (with a copy button).
+    "Add my keys to the agent…" opens a tab running `ssh-add`, where the
+    passphrases are typed.
 - **Agent forwarding**: with `ForwardAgent yes`, every host the user logs
   into can use the user's keys to reach other hosts while the session is
   open. When opening many such hosts at once, NativeTerm points this out.

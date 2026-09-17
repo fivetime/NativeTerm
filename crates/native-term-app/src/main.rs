@@ -9,6 +9,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod agent;
 mod app;
 mod dialogs;
 mod dock;

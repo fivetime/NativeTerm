@@ -13,6 +13,8 @@ pub enum Mode {
     InstallKey { key: String, alias: String },
     /// Create a key pair at `path` (ssh-keygen asks for the passphrase).
     CreateKey { path: String },
+    /// Load the default keys into ssh-agent (ssh-add asks for passphrases).
+    AddKeys,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -38,6 +40,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 let alias = args.next().filter(|a| !a.starts_with('-')).ok_or("--install-key needs a host")?;
                 return Ok(Mode::InstallKey { key, alias });
             }
+            "--add-keys" => return Ok(Mode::AddKeys),
             "--create-key" => {
                 let path = args.next().ok_or("--create-key needs a path")?;
                 return Ok(Mode::CreateKey { path });

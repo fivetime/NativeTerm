@@ -282,7 +282,9 @@
       setting (maintains the `Include` line)
 - [ ] OneDrive placeholder detection with "Always keep on this device"
       guidance; visible sync-conflict notices
-- [ ] ssh-agent check and guidance; agent-forwarding notice when opening
+- [x] ssh-agent check and guidance (service state, protected keys, keys
+      in the agent, hint only when needed, `ssh-add` in a tab)
+- [ ] Agent-forwarding notice when opening
       many `ForwardAgent` hosts
 
 ## Phase 2 — quality of life

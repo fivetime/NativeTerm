@@ -70,6 +70,7 @@ pub struct App {
     loaded_from: Fingerprint,
     view_right: View,
     tab_list: TabList,
+    agent: crate::agent::AgentCheck,
     tree: SessionTree,
     /// Bumped on every reload.
     generation: u64,
@@ -138,6 +139,11 @@ impl App {
             loaded_from,
             view_right: View::Sessions,
             tab_list: TabList::default(),
+            agent: {
+                let check = crate::agent::AgentCheck::default();
+                check.refresh(&options.ssh_dir, ctx);
+                check
+            },
             tree,
             generation: 0,
             editor: editor_for(&options.ssh_dir, &data_dir),
@@ -677,9 +683,15 @@ impl crate::window::Ui for App {
                         language_choice(ui, core);
                         theme_choice(ui, core);
                     }
+                    ui.separator();
+                    self.agent.settings_ui(ui, &self.ssh_dir, self.core.as_ref());
+                    if ui.small_button(t!("button-check-again")).clicked() {
+                        self.agent.refresh(&self.ssh_dir, ui.ctx());
+                    }
                 });
             }
             self.profile.banner(ui, &mut self.notices);
+            self.agent.banner(ui, self.core.as_ref(), &mut self.show_settings);
             if !self.notices.is_empty() {
                 let mut clear = false;
                 ui.horizontal_wrapped(|ui| {

@@ -18,6 +18,29 @@ dock-pin-hint = Docked at the { $edge ->
         [left] left
        *[right] right
     } edge: it slides away when the pointer leaves, unless pinned. Drag it away from the edge to undock.
+agent-section = SSH keys and ssh-agent
+agent-other = SSH_AUTH_SOCK is set: ssh uses that agent.
+agent-checking = Checking…
+agent-service = ssh-agent service: { $state }
+agent-running = running
+agent-stopped = stopped
+agent-disabled = disabled (Windows' default)
+agent-missing = not installed
+agent-no-keys = No key pairs in { $dir }.
+agent-key-protected = has a passphrase
+agent-key-open = no passphrase
+agent-key-unknown = can't tell
+agent-loaded = The agent holds keys: connects don't ask for passphrases.
+agent-empty = The agent holds no keys yet.
+agent-unreachable = The agent doesn't answer.
+agent-add = Add my keys to the agent…
+agent-add-tab = ssh-add
+agent-why = A key has a passphrase, so every connect asks for it. ssh-agent can remember it until you sign out. To turn the service on, run this in PowerShell as administrator, then use "Add my keys":
+agent-copy = Copy
+agent-admin = NativeTerm doesn't change Windows services itself.
+agent-hint = Your key has a passphrase but ssh-agent isn't running: every connect will ask for it.
+agent-hint-show = How to fix
+agent-hint-dismiss = Don't show again
 settings-terminal = Windows Terminal: { $dir } ({ $kind })
 terminal-kind-packaged = Store package
 terminal-kind-portable = portable
