@@ -1798,6 +1798,7 @@ dependencies = [
  "tempfile",
  "toml",
  "wgpu",
+ "windows 0.62.2",
 ]
 
 [[package]]

@@ -29,8 +29,8 @@ use windows::Win32::UI::Accessibility::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetClassNameW, GetMessageW, GetWindowThreadProcessId, PostThreadMessageW, TranslateMessage,
-    EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_SHOW, EVENT_SYSTEM_FOREGROUND, MSG, WINEVENT_OUTOFCONTEXT,
-    WINEVENT_SKIPOWNPROCESS, WM_QUIT,
+    EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_SHOW, EVENT_SYSTEM_FOREGROUND,
+    MSG, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_QUIT,
 };
 use windows_core::{implement, Ref};
 
@@ -43,8 +43,17 @@ pub enum Change {
     Windows,
     /// A Terminal window (or something else) became the foreground window.
     Foreground,
-    /// A tab was selected, opened, closed or moved.
+    /// The tab strip changed (tabs opened, closed, moved): tab rectangles
+    /// are stale.
     Tabs,
+    /// A tab was selected, or a tab's content changed (panes, focus):
+    /// worth a rescan, rectangles unchanged.
+    Content,
+    /// A flyout menu or popup opened or closed (e.g. Terminal's own tab
+    /// menu): nothing NativeTerm tracks changed.
+    Popup,
+    /// A Terminal window moved or changed size: tab rectangles are stale.
+    Moved,
 }
 
 pub type Notify = Arc<dyn Fn(Change) + Send + Sync>;
@@ -56,6 +65,10 @@ pub struct Counts {
     pub foreground: AtomicU64,
     pub selected: AtomicU64,
     pub structure: AtomicU64,
+    pub moved: AtomicU64,
+    /// Structure-change senders by (change type, control type, class),
+    /// when `NATIVETERM_EVENT_SENDERS` is set (diagnostics).
+    pub senders: Mutex<HashMap<(i32, i32, String), u64>>,
 }
 
 /// A UIA registration taking longer than this means the thread is stuck.
@@ -155,6 +168,39 @@ type HookCallback = Box<dyn FnMut(u32, HWND)>;
 
 thread_local! {
     static HOOK_CALLBACK: RefCell<Option<HookCallback>> = const { RefCell::new(None) };
+    /// Location-change hooks, one per Terminal process: that event also
+    /// fires for every mouse move on the desktop, so it is only taken from
+    /// the Terminal itself.
+    static LOCATION_HOOKS: RefCell<HashMap<u32, HWINEVENTHOOK>> = RefCell::new(HashMap::new());
+}
+
+fn sync_location_hooks(install: &Install) {
+    let pids: HashSet<u32> = terminal_windows(install).iter().map(|w| w.pid).collect();
+    LOCATION_HOOKS.with(|hooks| {
+        let mut hooks = hooks.borrow_mut();
+        hooks.retain(|pid, hook| {
+            let keep = pids.contains(pid);
+            if !keep {
+                unsafe {
+                    let _ = UnhookWinEvent(*hook);
+                }
+            }
+            keep
+        });
+        for pid in pids {
+            hooks.entry(pid).or_insert_with(|| unsafe {
+                SetWinEventHook(
+                    EVENT_OBJECT_LOCATIONCHANGE,
+                    EVENT_OBJECT_LOCATIONCHANGE,
+                    None,
+                    Some(on_win_event),
+                    pid,
+                    0,
+                    WINEVENT_OUTOFCONTEXT,
+                )
+            });
+        }
+    });
 }
 
 unsafe extern "system" fn on_win_event(
@@ -192,6 +238,7 @@ fn win_event_loop(
 ) {
     let mut known: HashSet<isize> = terminal_windows(&install).iter().map(|w| w.handle).collect();
     let mut ours_by_pid: HashMap<u32, bool> = HashMap::new();
+    sync_location_hooks(&install);
     let callback = move |event: u32, hwnd: HWND| {
         let handle = hwnd.0 as isize;
         let mut ours = |hwnd: HWND| {
@@ -206,12 +253,18 @@ fn win_event_loop(
                 known.insert(handle);
                 counts.windows.fetch_add(1, Ordering::Relaxed);
                 sync_uia();
+                sync_location_hooks(&install);
                 notify(Change::Windows);
             }
             EVENT_OBJECT_HIDE | EVENT_OBJECT_DESTROY if known.remove(&handle) => {
                 counts.windows.fetch_add(1, Ordering::Relaxed);
                 sync_uia();
+                sync_location_hooks(&install);
                 notify(Change::Windows);
+            }
+            EVENT_OBJECT_LOCATIONCHANGE if known.contains(&handle) => {
+                counts.moved.fetch_add(1, Ordering::Relaxed);
+                notify(Change::Moved);
             }
             EVENT_SYSTEM_FOREGROUND => {
                 counts.foreground.fetch_add(1, Ordering::Relaxed);
@@ -241,9 +294,38 @@ fn win_event_loop(
             let _ = UnhookWinEvent(hook);
         }
     }
+    LOCATION_HOOKS.with(|hooks| {
+        for (_, hook) in hooks.borrow_mut().drain() {
+            unsafe {
+                let _ = UnhookWinEvent(hook);
+            }
+        }
+    });
 }
 
 // ---- UIA events ----------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structure_changes_as_measured() {
+        // tab strip
+        assert_eq!(classify_structure_change(50019, "ListViewItem"), Change::Tabs);
+        assert_eq!(classify_structure_change(50008, "ListView"), Change::Tabs);
+        assert_eq!(classify_structure_change(50032, WINDOW_CLASS), Change::Tabs);
+        // Terminal's tab menu
+        assert_eq!(classify_structure_change(50009, "MenuFlyout"), Change::Popup);
+        assert_eq!(classify_structure_change(50011, "MenuFlyoutSubItem"), Change::Popup);
+        assert_eq!(classify_structure_change(50032, "Popup"), Change::Popup);
+        assert_eq!(classify_structure_change(50033, "Xaml_WindowedPopupClass"), Change::Popup);
+        // tab contents
+        assert_eq!(classify_structure_change(50020, "TermControl"), Change::Content);
+        assert_eq!(classify_structure_change(50014, "ScrollBar"), Change::Content);
+        assert_eq!(classify_structure_change(50020, "TextBlock"), Change::Content);
+    }
+}
 
 #[implement(IUIAutomationEventHandler)]
 struct OnSelected(Notify, Arc<Counts>);
@@ -251,7 +333,7 @@ struct OnSelected(Notify, Arc<Counts>);
 impl IUIAutomationEventHandler_Impl for OnSelected_Impl {
     fn HandleAutomationEvent(&self, _sender: Ref<IUIAutomationElement>, _id: UIA_EVENT_ID) -> windows_core::Result<()> {
         self.1.selected.fetch_add(1, Ordering::Relaxed);
-        (self.0)(Change::Tabs);
+        (self.0)(Change::Content);
         Ok(())
     }
 }
@@ -262,13 +344,55 @@ struct OnStructure(Notify, Arc<Counts>);
 impl IUIAutomationStructureChangedEventHandler_Impl for OnStructure_Impl {
     fn HandleStructureChangedEvent(
         &self,
-        _sender: Ref<IUIAutomationElement>,
-        _change: StructureChangeType,
+        sender: Ref<IUIAutomationElement>,
+        change: StructureChangeType,
         _runtime_id: *const windows::Win32::System::Com::SAFEARRAY,
     ) -> windows_core::Result<()> {
         self.1.structure.fetch_add(1, Ordering::Relaxed);
-        (self.0)(Change::Tabs);
+        let (kind, class) = match sender.as_ref() {
+            Some(e) => unsafe {
+                (
+                    e.CurrentControlType().map(|t| t.0).unwrap_or(0),
+                    e.CurrentClassName().map(|c| c.to_string()).unwrap_or_default(),
+                )
+            },
+            None => (0, String::new()),
+        };
+        if std::env::var_os("NATIVETERM_EVENT_SENDERS").is_some() {
+            *self.1.senders.lock().unwrap_or_else(|e| e.into_inner()).entry((change.0, kind, class.clone())).or_default() +=
+                1;
+        }
+        (self.0)(classify_structure_change(kind, &class));
         Ok(())
+    }
+}
+
+/// Who reported a structure change decides what it means (measured on
+/// Terminal 1.26): the tab strip reports through its `ListView` and
+/// `ListViewItem`s (and the window when it is created); Terminal's own tab
+/// menu through `MenuFlyout*` items, their text and a windowed popup;
+/// selecting a tab through the terminal control and its scroll bar.
+pub fn classify_structure_change(control_type: i32, class: &str) -> Change {
+    use windows::Win32::UI::Accessibility::{
+        UIA_ListControlTypeId, UIA_MenuControlTypeId, UIA_MenuItemControlTypeId, UIA_TabControlTypeId,
+        UIA_TabItemControlTypeId, UIA_WindowControlTypeId,
+    };
+    let is = |id: windows::Win32::UI::Accessibility::UIA_CONTROLTYPE_ID| control_type == id.0;
+    if is(UIA_MenuControlTypeId)
+        || is(UIA_MenuItemControlTypeId)
+        || class.starts_with("MenuFlyout")
+        || class == "Popup"
+        || class == "Xaml_WindowedPopupClass"
+    {
+        Change::Popup
+    } else if is(UIA_TabItemControlTypeId)
+        || is(UIA_ListControlTypeId)
+        || is(UIA_TabControlTypeId)
+        || (is(UIA_WindowControlTypeId) && class == WINDOW_CLASS)
+    {
+        Change::Tabs
+    } else {
+        Change::Content
     }
 }
 

@@ -397,6 +397,45 @@ Idle CPU was 0 ms in every variant. With one open session, the 2 s tab
 refresh cost 78 ms per 10 s (debug build). Per GPU counters, the process
 used the AMD Radeon Pro 5600M, the only GPU Windows sees under Boot Camp.
 
+## Tab menu in the app (portable 1.26)
+
+`crates/native-term-app/tests/menu_portable.rs`, three NativeTerm tabs
+(`m a`, `m b`, `m c`, failed logins) and one user tab (`cmd`) in one
+window, real right-clicks with `SendInput`:
+
+- Right-click on `m b` opens NativeTerm's menu; Esc closes it (key
+  swallowed, Terminal saw nothing). The menu was open by the first check
+  after the click (< 100 ms).
+- Right-click on the user tab opens Terminal's own menu; NativeTerm's
+  open count doesn't change.
+- Right-click on `m a` right after closing Terminal's menu: first run
+  failed, the click went to Terminal. Cause: Terminal's menu closing sent
+  UIA structure changes, which marked the rectangles stale. With the
+  senders counted (`NATIVETERM_EVENT_SENDERS`), the menu's events come
+  from `MenuFlyout*`/`Popup`/`Xaml_WindowedPopupClass` elements, the tab
+  strip's from `ListView`/`ListViewItem`, a tab selection's from the
+  terminal control and its scroll bar. Classified accordingly
+  (`classify_structure_change`); passes since.
+- Down, Down moves the highlight over enabled items (Disconnect is
+  disabled for a failed login and skipped). Earlier the highlight
+  jumped back: the popup opens under the cursor, and mouse-move /
+  mouse-leave messages reset a keyboard highlight. Now only a move over
+  an item changes it, and leave clears only a mouse highlight.
+- "Close Tabs to the Right" on `m a` closes `m b` and `m c`; the window
+  keeps `["m a", "user tab"]`, the user's tab right of them untouched.
+- The first test runs missed every tab: the test process wasn't DPI
+  aware (150 % display), so `SetCursorPos` and the UIA rectangles used
+  different coordinates. NativeTerm itself is per-monitor aware.
+- Idle cost: with no NativeTerm tabs, no hooks are installed. The global
+  `EVENT_OBJECT_LOCATIONCHANGE` hook tried first fired constantly (caret,
+  cursor, other apps); it is now registered per Terminal process id.
+- Two runs in a row, plus the core, restore and platform live suites:
+  all pass, no shims left.
+- Manual check with the GUI (`实验室 A` tab, `menu-hook click-tab`):
+  after the right-click, a visible `NativeTermMenuPopup` window, no
+  Terminal menu open, Terminal still in the foreground. (The popup had
+  closed before a screenshot was taken.)
+
 ## Hung Terminal and UIA (portable 1.26, process suspended)
 
 The portable `WindowsTerminal.exe` was suspended with `NtSuspendProcess`

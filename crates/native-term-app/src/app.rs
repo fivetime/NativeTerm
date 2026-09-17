@@ -55,6 +55,9 @@ impl App {
         if let Some(core) = &core {
             let ctx = cc.egui_ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
+            if let Err(e) = core.start_tab_menu() {
+                notices.push(format!("NativeTerm's tab menu isn't available: {e}"));
+            }
         }
         let tree = SessionTree::load(&options.ssh_dir);
         App {

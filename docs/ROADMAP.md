@@ -221,12 +221,22 @@
       and "Locate"); restored placeholders (session restore, workspaces)
       replaced by proper tabs in their original order, with a
       "reconnect all / some / none" prompt
-- [ ] Own tab menu (`WH_MOUSE_LL` + non-activating custom popup, style
-      following the owning Terminal's theme / high contrast / text size;
-      Terminal's menu blocked on NativeTerm tabs; mixed-tab header and
-      scoped actions; unlocated right-click: select, rescan, else restore
-      selection and replay to Terminal); keyboard hook only while open;
-      Direct2D rendering
+- [x] Own tab menu, first version (`windows_terminal::menu` +
+      `tab_menu`): `WH_MOUSE_LL`/`WH_KEYBOARD_LL` installed only while
+      NativeTerm has located tabs; non-activating GDI popup following the
+      owning Terminal's theme / high contrast / text size; Terminal's
+      menu blocked on NativeTerm tabs only; stale rectangles pass the
+      click through; structure changes classified by sender (Terminal's
+      own menu doesn't invalidate); location hooks per Terminal process;
+      connect / disconnect / clone / close / close others / close
+      disconnected / close to the right; mixed and renamed tab headers;
+      live test `menu_portable`
+- [ ] Tab menu, rest: Direct2D/DirectWrite rendering (emoji, font
+      fallback), acrylic if wanted, Windows 10 rounded shape (layered
+      window), theme cached and reloaded on settings change; unlocated
+      right-click (select, rescan, else restore selection and replay to
+      Terminal); confirmation before a batch close closes a whole mixed
+      tab; lock, send commands, rename; localized labels
 - [ ] Non-SSH sessions via plink: `.nt.toml` storage in the same tree,
       plink located (bundled or installed PuTTY), shim runs plink as a
       child with the session's code page (UTF-8 default, GBK etc.),

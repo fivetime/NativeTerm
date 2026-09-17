@@ -17,12 +17,12 @@ fn main() {
     let watcher = Watcher::start(
         install,
         Arc::new(move |change: Change| {
-            if change != Change::Foreground {
+            if !matches!(change, Change::Foreground | Change::Moved | Change::Popup) {
                 println!("{:>7.2} {change:?}", started.elapsed().as_secs_f64());
             }
         }),
     );
-    let mut last = (0, 0, 0, 0);
+    let mut last = (0, 0, 0, 0, 0);
     while started.elapsed() < Duration::from_secs(seconds) {
         std::thread::sleep(Duration::from_secs(1));
         let c = watcher.counts();
@@ -31,18 +31,26 @@ fn main() {
             c.foreground.load(Ordering::Relaxed),
             c.selected.load(Ordering::Relaxed),
             c.structure.load(Ordering::Relaxed),
+            c.moved.load(Ordering::Relaxed),
         );
         if now != last {
             println!(
-                "{:>7.2} totals: windows {} foreground {} selected {} structure {}",
+                "{:>7.2} totals: windows {} foreground {} selected {} structure {} moved {}",
                 started.elapsed().as_secs_f64(),
                 now.0,
                 now.1,
                 now.2,
-                now.3
+                now.3,
+                now.4
             );
             last = now;
         }
     }
     println!("abandoned UIA threads: {}", watcher.abandoned());
+    let senders = watcher.counts().senders.lock().unwrap();
+    let mut list: Vec<_> = senders.iter().collect();
+    list.sort();
+    for ((change, kind, class), n) in list {
+        println!("structure change {change} from control type {kind} class {class:?}: {n}");
+    }
 }

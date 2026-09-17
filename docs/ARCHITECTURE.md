@@ -336,6 +336,72 @@ Therefore NativeTerm provides its own menus:
      only for changed windows), not by polling. Rectangles move for a
      moment while a tab opens (animation); refresh again shortly after
      structure changes.
+   - **Implementation (first version).** `native-term-platform`
+     (`windows_terminal::menu`) owns the hooks and the popup, with no
+     knowledge of sessions; `native-term-app` (`tab_menu`) supplies the
+     entries and runs the chosen action through the core (a `Provider`).
+     - One menu thread per process owns an invisible owner window, the
+       popup (class `NativeTermMenuPopup`) and the hooks. The hook
+       callbacks only read atomics and `try_lock` the rectangle list, then
+       post to that thread (`WM_SHOW_MENU`, `WM_CLOSE_MENU`,
+       `WM_MENU_KEY`).
+     - **The hooks exist only while NativeTerm has located tabs.** Each
+       core scan hands the claimed tabs (window, rectangle, label, title,
+       mixed, index) to `set_tabs`; with an empty list both hooks are
+       removed, so a NativeTerm without open tabs adds nothing to the
+       desktop's input path.
+     - **Stale rectangles pass the click through.** Any change that can
+       move tabs (`Tabs`, `Windows`, `Moved`, see below) marks the list
+       stale until the next scan (debounced, ~150 ms after the last
+       event); a right-click in that window goes to Terminal. The hit test
+       also requires `GetAncestor(WindowFromPoint(pt), GA_ROOT)` to be the
+       tab's window, so a window covering the tab strip gets its click.
+     - **What a UIA structure change means depends on the sender**
+       (`classify_structure_change`, measured on 1.26 with
+       `examples/watch_events` and `NATIVETERM_EVENT_SENDERS`): the tab
+       strip reports through its `ListView`/`ListViewItem`s (and the
+       Terminal window when it is created) → `Tabs`; Terminal's own tab
+       menu reports through `MenuFlyout*` items, their text, `Popup` and
+       `Xaml_WindowedPopupClass` → `Popup`; selecting a tab reports
+       through the terminal control and its scroll bar → `Content`.
+       `Popup` is ignored (no scan). Before this split, opening and
+       closing Terminal's own menu marked the rectangles stale, and a
+       right-click on a NativeTerm tab right after it went to Terminal.
+       `Content` triggers a scan (pane changes) but doesn't invalidate
+       the rectangles.
+     - Window moves and resizes: `EVENT_OBJECT_LOCATIONCHANGE` is hooked
+       **per Terminal process id** only (the hooks are re-synced when
+       Terminal windows appear or go), since a global location hook
+       fires for every caret and cursor move on the desktop. The core's
+       debounce waits until the events stop (up to 20 × 150 ms), so a
+       drag produces one scan at the end.
+     - Painting is GDI in this version (Segoe UI, Segoe Fluent Icons or
+       Segoe MDL2 Assets on Windows 10), with DWM rounded corners, border
+       color and shadow on Windows 11. The theme (`theme::look`) is read
+       from the owning install's settings on every open; high contrast
+       and text size apply as described above. Direct2D, acrylic and
+       Windows 10's own rounded shape are still open (ROADMAP).
+     - Highlight: Up/Down move over enabled items only. A mouse move
+       changes the highlight only over an item, and leaving the popup
+       clears only a highlight the mouse set, so the keyboard highlight
+       isn't lost when the cursor rests elsewhere.
+     - Items (English for now): Connect/Reconnect (a waiting or ended
+       session with a shim), Disconnect (connecting or connected),
+       Clone Session (same alias, base label, most recent window),
+       Close (for a mixed tab: "Close This Session (keeps the other
+       panes)"), Close Other NativeTerm Tabs, Close Disconnected Tabs
+       (all windows), Close Tabs to the Right. Every close set contains
+       only NativeTerm sessions; the user's tabs between or right of them
+       are never touched. A mixed tab or a renamed one gets a header
+       line. Lock, send commands and the confirmation for closing a
+       whole mixed tab are still open.
+     - Tests: `crates/native-term-app/tests/menu_portable.rs` right-clicks
+       real tabs with `SendInput` in the portable Terminal. The test
+       process must be per-monitor DPI aware, like NativeTerm, or the
+       cursor position and the UIA rectangles disagree on a scaled
+       display. It picks items through `choose(id)` (`WM_CHOOSE_ID`)
+       after checking the keyboard highlight, instead of counting
+       Down presses.
 2. **Keys in a disconnected tab.** After `ssh` exits, the tab's first
    process is the shim, so it can show "R reconnect · D clone · C close"
    and read the key itself — the same pattern as Terminal's own "press

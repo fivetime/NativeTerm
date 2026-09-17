@@ -6,15 +6,17 @@
 pub mod data_dir;
 pub mod fuzzy;
 pub mod registry;
+pub mod tab_menu;
 
 use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant};
 
 use native_term_platform::windows_terminal::events::{Change, Watcher};
+use native_term_platform::windows_terminal::menu::{MenuTab, TabMenu};
 use native_term_platform::windows_terminal::{window, WindowsTerminal};
 use native_term_platform::{Snapshot, TabSpec, Target};
 use native_term_session::pipe::{self, PipeConnection, PipeListener};
@@ -114,20 +116,20 @@ pub struct SessionView {
     pub location: Option<Location>,
 }
 
-struct Session {
-    id: String,
+pub(crate) struct Session {
+    pub(crate) id: String,
     /// The GUID of the tab NativeTerm opened; the shim's current one may
     /// differ after "Restart connection".
     terminal_session: String,
     current_terminal_session: Option<String>,
-    label: String,
-    alias: String,
-    state: State,
+    pub(crate) label: String,
+    pub(crate) alias: String,
+    pub(crate) state: State,
     authenticated: bool,
     attempt: u32,
     shim_pid: Option<u32>,
-    link: Option<Arc<PipeConnection>>,
-    location: Option<Location>,
+    pub(crate) link: Option<Arc<PipeConnection>>,
+    pub(crate) location: Option<Location>,
     /// Closed together with its window: a restored pane may bring it back.
     restorable: bool,
 }
@@ -179,10 +181,10 @@ struct Placeholder {
 
 type Repaint = Box<dyn Fn() + Send + Sync>;
 
-struct Shared {
+pub(crate) struct Shared {
     terminal: WindowsTerminal,
     registry: Option<Registry>,
-    sessions: Mutex<Vec<Session>>,
+    pub(crate) sessions: Mutex<Vec<Session>>,
     /// Closed with their window in an earlier run; only matched against
     /// restored placeholders, not shown.
     restorable: Mutex<Vec<Session>>,
@@ -195,12 +197,14 @@ struct Shared {
     wake: Mutex<Sender<()>>,
     /// Keeps the Terminal change notifications alive.
     watcher: Mutex<Option<Watcher>>,
+    /// NativeTerm's own tab menu, once started.
+    menu: Mutex<Option<TabMenu>>,
     /// Full tab scans so far (diagnostics).
     scans: std::sync::atomic::AtomicU64,
     placeholders: Mutex<Sender<Placeholder>>,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -256,7 +260,7 @@ impl Shared {
 
 #[derive(Clone)]
 pub struct Core {
-    shared: Arc<Shared>,
+    pub(crate) shared: Arc<Shared>,
 }
 
 /// A host to open: its alias and the label it is shown with.
@@ -303,18 +307,30 @@ impl Core {
             repaint: Mutex::new(None),
             wake: Mutex::new(wake.clone()),
             watcher: Mutex::new(None),
+            menu: Mutex::new(None),
             scans: Default::default(),
             placeholders: Mutex::new(placeholders),
         });
         let server = Arc::clone(&shared);
         std::thread::Builder::new().name("pipe-server".into()).spawn(move || serve(server, listener))?;
         let wake = Mutex::new(wake);
+        let weak: Weak<Shared> = Arc::downgrade(&shared);
         let watcher = Watcher::start(
             shared.terminal.install().clone(),
             Arc::new(move |change: Change| {
-                if change != Change::Foreground {
-                    let _ = lock(&wake).send(());
+                match change {
+                    Change::Foreground | Change::Popup => return,
+                    Change::Content => {}
+                    Change::Tabs | Change::Windows | Change::Moved => {
+                        // tab rectangles are stale until the next scan
+                        if let Some(shared) = weak.upgrade() {
+                            if let Some(menu) = lock(&shared.menu).as_ref() {
+                                menu.invalidate();
+                            }
+                        }
+                    }
                 }
+                let _ = lock(&wake).send(());
             }),
         );
         *lock(&shared.watcher) = Some(watcher);
@@ -323,9 +339,14 @@ impl Core {
             match woken.recv_timeout(FALLBACK_REFRESH) {
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
                 Ok(()) => {
-                    // let the burst finish, then scan once
-                    std::thread::sleep(DEBOUNCE);
-                    while woken.try_recv().is_ok() {}
+                    // let the burst finish (or the window drag end), then
+                    // scan once
+                    for _ in 0..20 {
+                        std::thread::sleep(DEBOUNCE);
+                        if woken.try_iter().count() == 0 {
+                            break;
+                        }
+                    }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
@@ -350,6 +371,36 @@ impl Core {
             }
         })?;
         Ok(Core { shared })
+    }
+
+    /// Start NativeTerm's own right-click menu on its tabs (once).
+    pub fn start_tab_menu(&self) -> io::Result<()> {
+        let settings = self.shared.terminal.install().settings_json();
+        let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared) });
+        let menu = TabMenu::start(settings, provider)?;
+        *lock(&self.shared.menu) = Some(menu);
+        self.shared.refresh_soon();
+        Ok(())
+    }
+
+    /// Choose an item of the open tab menu (automation, tests).
+    pub fn tab_menu_choose(&self, id: u32) {
+        if let Some(menu) = lock(&self.shared.menu).as_ref() {
+            menu.choose(id);
+        }
+    }
+
+    pub fn tab_menu_hovered(&self) -> Option<u32> {
+        lock(&self.shared.menu).as_ref().and_then(|m| m.hovered())
+    }
+
+    pub fn tab_menu_debug(&self) -> String {
+        lock(&self.shared.menu).as_ref().map(|m| m.debug_state()).unwrap_or_default()
+    }
+
+    /// Menus opened so far and whether one is open (diagnostics, tests).
+    pub fn tab_menu_state(&self) -> Option<(u32, bool)> {
+        lock(&self.shared.menu).as_ref().map(|m| (m.opened(), m.is_open()))
     }
 
     /// Called when anything visible changed (from background threads).
@@ -672,6 +723,26 @@ fn refresh(shared: &Shared) -> Snapshot {
         shared.db("position", |r| {
             r.moved(&id, position.map(|p| p.0 as i64), position.map(|p| p.1 as i64))
         });
+    }
+    if let Some(menu) = lock(&shared.menu).as_ref() {
+        let tabs = snapshot
+            .windows
+            .iter()
+            .flat_map(|w| {
+                w.tabs.iter().filter_map(move |t| {
+                    let claim = t.claim.as_ref()?;
+                    Some(MenuTab {
+                        window: w.handle,
+                        rect: t.rect?,
+                        label: claim.label.clone(),
+                        title: t.name.clone(),
+                        mixed: claim.mixed,
+                        index: t.index,
+                    })
+                })
+            })
+            .collect();
+        menu.set_tabs(tabs);
     }
     if changed {
         *lock(&shared.snapshot) = snapshot.clone();

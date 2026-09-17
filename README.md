@@ -49,18 +49,20 @@ code with a per-user data directory. It collects no telemetry of any kind.
 
 Early development. Phase 0 prototypes are done (`prototypes/`, results in
 [`docs/PROTOTYPES.md`](docs/PROTOTYPES.md)). A first working slice
-exists: it reads the session tree from `~/.ssh`, opens hosts as tabs of
-Windows Terminal (in the current or a new window), tracks their state
-and position, and focuses, reconnects, and closes them.
+exists: it reads the session tree from `~/.ssh` (search, create, edit,
+move, delete hosts and folders), opens hosts as tabs of Windows Terminal
+(in the current or a new window), tracks their state and position from
+Terminal's events, and focuses, reconnects, and closes them. Sessions are
+recorded in `state.db`; tabs restored by Terminal are replaced by proper
+sessions. Right-clicking a NativeTerm tab opens NativeTerm's own menu.
 
 ```
 cargo build --release -p native-term-app -p native-term-shim
 target\release\nativeterm.exe [--terminal-dir <portable Terminal>] [--ssh-dir <dir>]
 ```
 
-The chosen Terminal needs the "NativeTerm SSH" profile (see
-`crates/native-term-platform/src/windows_terminal/profile.rs`); the app
-doesn't install it yet.
+The chosen Terminal needs the "NativeTerm SSH" profile; the app offers to
+install it (a Terminal fragment) under Settings.
 
 ## License
 
