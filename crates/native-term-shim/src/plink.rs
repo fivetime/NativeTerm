@@ -7,7 +7,7 @@
 //!   (serial: it has run for a second), reported through the same event
 //!   as an ssh login, so post-login commands and the session card work
 //!   alike.
-//! - ntplink (built from PuTTY's source, see `tools/build-ntplink.cmd`)
+//! - ntplink (the PuTTY fork's, see `tools/get-ntplink.ps1`)
 //!   takes the session's PuTTY options on its command line (`-set`), never
 //!   reads the registry, follows the tab's size, keeps Ctrl+C a key, ends
 //!   when the far end closes, and takes Break and Telnet's commands over a

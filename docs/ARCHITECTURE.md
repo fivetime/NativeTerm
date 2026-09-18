@@ -1201,14 +1201,28 @@ protocol code. So NativeTerm builds its own frontend, `ntplink.exe`, over
 PuTTY 0.85's **unmodified** backends — the SSH-free set PuTTYtel uses
 (`be_list(ntplink NTPlink SERIAL OTHERBACKENDS)`): Telnet, raw, rlogin,
 SUPDUP, serial. A Rust rewrite was considered and rejected: years of device
-quirks live in `telnet.c` and `serial` handling. The source is a local git
-tree (`putty-win-src`, tag `upstream-0.85` is the download); NativeTerm's
-additions are all in its `nativeterm\` folder plus one
-`add_subdirectory` line, recorded in its `CHANGELOG.md`, so a new PuTTY
-release is taken over by replacing the upstream files.
-`tools\build-ntplink.cmd` builds it (CMake + Visual Studio's C++ tools,
-static C runtime: ~420 KB, imports only KERNEL32 and ADVAPI32) and puts it
-next to the shim.
+quirks live in `telnet.c` and `serial` handling.
+
+The source is a PuTTY fork, `github.com/fivetime/putty` (private for now):
+upstream PuTTY plus the fork's additions, all in its `patches/` folder,
+one `add_subdirectory(patches)` line, its `CHANGELOG.md` and its CI. The
+CI merges upstream `main` automatically (no conflicts: upstream files
+aren't edited) and publishes cross-platform binaries as a GitHub Release
+tagged `0.85-YYYY-MM-DD.<commit>`; the Windows zips (x86_64, aarch64,
+i686, llvm-mingw, UCRT) contain `ntplink.exe`. Getting it next to the
+shim:
+
+- `tools\get-ntplink.ps1 [-Tag …] [-Arch …]`: downloads the latest (or a
+  given) release through `gh` (signed in, since the fork is private),
+  checks it against the release's `SHA256SUMS`, and copies `ntplink.exe`
+  into `target\debug` and `target\release`.
+- `tools\build-ntplink.cmd <checkout>` (or `PUTTY_SRC`): builds it locally
+  with CMake and Visual Studio's C++ tools (static C runtime, ~420 KB,
+  imports only KERNEL32 and ADVAPI32) and copies it the same way.
+
+Both were verified: the CI build (release `3edb436`) passed the same
+end-to-end and raw tests in the portable Terminal as the local MSVC
+build, and imports no `Reg*` functions either.
 
 | | plink | ntplink |
 |---|---|---|

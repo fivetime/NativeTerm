@@ -908,7 +908,7 @@ rendering and behavior, with memory as a secondary benefit.
 
 ## ntplink (PuTTY 0.85 backends, own frontend; portable 1.26)
 
-`ntplink.exe` built from `putty-win-src` (static CRT), run in portable
+`ntplink.exe` built from the PuTTY fork (static CRT), run in portable
 Terminal tabs against local Python test servers (a Telnet server that logs
 NAWS and Telnet commands, a raw server that logs EOF), and compared with
 the official plink where it mattered.

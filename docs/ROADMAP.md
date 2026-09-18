@@ -344,16 +344,18 @@
       plink always loads NativeTerm's temporary session, which also
       carries the tab's size at connect time (Telnet window size)
 - [x] ntplink: NativeTerm's own console client over PuTTY 0.85's
-      unmodified Telnet / raw / rlogin / SUPDUP / serial code (local git
-      tree `putty-win-src`, additions in its `nativeterm` folder and
-      `CHANGELOG.md`; `tools/build-ntplink.cmd`). No registry (options as
+      unmodified Telnet / raw / rlogin / SUPDUP / serial code (PuTTY fork
+      `fivetime/putty`, additions in its `patches` folder, synced with
+      upstream and released by its CI; `tools/get-ntplink.ps1` downloads
+      a release, `tools/build-ntplink.cmd` builds one). No registry (options as
       `-set`), follows tab resizes (NAWS), Ctrl+C a key, raw ends on the
       server's close, echo / line editing for every protocol, Break and
       Telnet commands over a control pipe ("Break" on the card, "Send
       Break" in the tab menu), clear exit codes. The shim prefers it and
       falls back to plink with the old workarounds
 - [ ] Serial Break on a real device (the virtual COM driver doesn't pass
-      Break on); ship `ntplink.exe` with releases
+      Break on); include `ntplink.exe` in NativeTerm's own packages (from
+      the fork's release; needs the fork public, or the binary vendored)
 - [ ] Output logging for non-SSH sessions (possible now in ntplink)
 - [x] "No data since …" for serial sessions (the shim watches the console
       near the cursor; quiet after 30 s, cleared by new output; replayed
