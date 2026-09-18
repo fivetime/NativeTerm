@@ -2725,8 +2725,29 @@ Implemented (first version):
 - Not yet: transparency / a round shape (needs a layered window), a
   "send command" entry (needs the command layer).
 
-All UI surfaces (sidebar, FAB, shortcut, tab switcher) invoke one shared
-app-level command layer.
+All UI surfaces invoke one shared app-level command layer
+(`native_term_app::actions`), implemented:
+
+- `SessionCommand` (connect / reconnect, disconnect, clone, close, lock /
+  unlock, clear screen, switch to, send) with one `applies(&SessionView)`
+  rule each; the session card, the tab menu and the floating button grey
+  their buttons out by it and run them with `Core::run`, which checks the
+  rule again. Before, each surface had its own version of the rules
+  (the card also required an open session, the tab menu didn't).
+- `CloseSet` (others in this window, to the right, ended in all windows,
+  restored and still waiting) computed by one function over the
+  sessions: locked sessions never, the user's own tabs never (they
+  aren't sessions). `Core::close_sessions` closes a set unless it takes
+  a tab that also holds other panes; then it returns the ids for the
+  confirmation dialog (`Core::close_ids` after it). The floating
+  button's "Close disconnected tabs" used to close such tabs without
+  asking; it now asks like the tab menu.
+- Surface-specific parts stay with the surface: send opens its dialog or
+  line, rename opens the host dialog. Keyboard shortcuts and the tab
+  switcher will call the same commands.
+- Live test `menu_portable` passes on it; its input is sent only while a
+  window of the portable test Terminal is in front (checked before every
+  `SendInput`).
 
 ## Appearance
 

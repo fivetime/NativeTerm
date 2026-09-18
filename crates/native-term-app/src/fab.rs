@@ -7,6 +7,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use native_term_app::quick::{self, QuickTarget};
+use native_term_app::actions::{close_set, CloseSet, Closing, SessionCommand};
+use native_term_app::tab_menu::MenuRequest;
 use native_term_app::{fuzzy, t, Core, HostRequest, State};
 use native_term_platform::Target;
 
@@ -162,16 +164,16 @@ impl Fab {
                     ui.label(t!("fab-active", label = active.label.as_str()));
                     ui.horizontal(|ui| {
                         let connect = if active.state == State::Waiting { t!("button-connect") } else { t!("button-reconnect") };
-                        if ui.add_enabled(active.linked && active.state.can_connect(), egui::Button::new(connect)).clicked() {
-                            core.connect(&active.id);
+                        if ui.add_enabled(SessionCommand::Connect.applies(&active), egui::Button::new(connect)).clicked() {
+                            core.run(&active.id, SessionCommand::Connect);
                             close = true;
                         }
-                        if ui.button(t!("tabmenu-clone")).clicked() {
-                            core.clone_session(&active.id);
+                        if ui.add_enabled(SessionCommand::Clone.applies(&active), egui::Button::new(t!("tabmenu-clone"))).clicked() {
+                            core.run(&active.id, SessionCommand::Clone);
                             close = true;
                         }
                     });
-                    if active.state == State::Connected {
+                    if SessionCommand::Send.applies(&active) {
                         let line = ui.add(
                             egui::TextEdit::singleline(&mut self.line)
                                 .hint_text(t!("fab-send-hint"))
@@ -193,13 +195,12 @@ impl Fab {
                 shell::show_tabs();
                 close = true;
             }
-            let ended = core
-                .sessions()
-                .iter()
-                .filter(|s| matches!(s.state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_)))
-                .count();
+            let ended = close_set(&core.sessions(), &CloseSet::Ended).len();
             if ui.add_enabled(ended > 0, egui::Button::new(icons::with(icons::CLEAR, t!("tabmenu-close-disconnected")))).clicked() {
-                core.close_ended();
+                // like the tab menu: a tab holding other panes is asked about first
+                if let Closing::Confirm(ids) = core.close_sessions(&CloseSet::Ended) {
+                    crate::shell::ask(MenuRequest::ConfirmClose(ids));
+                }
                 close = true;
             }
             if ui.button(icons::with(icons::OPEN, t!("fab-show-main"))).clicked() {

@@ -350,7 +350,10 @@
       (`disabledProfileSources`, backed-up explicit edit: a textual change
       of the top-level list only, comments and layout kept, the result
       re-read before writing; unticking removes what ticking added)
-- [ ] Shared app-level command layer used by every UI surface
+- [x] Shared app-level command layer used by every UI surface
+      (`actions`: one applies-rule per session command, one close-set
+      function; card, tab menu and floating button use it; the floating
+      button's "close disconnected" now confirms tabs with other panes)
 - [x] "Change data directory" (Settings: an empty or new folder; files
       copied, `state.db` as a `VACUUM INTO` snapshot; `nativeterm.toml` in
       portable mode, `HKCU\Software\NativeTerm\DataDir` otherwise; used from

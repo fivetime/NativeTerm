@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use native_term_app::actions::{CloseSet, Closing, SessionCommand};
+use native_term_app::tab_menu::MenuRequest;
 use native_term_app::{t, Core, SessionView, State};
 use native_term_config::ops::{Editor, HostDraft};
 use native_term_config::write::Writer;
@@ -874,9 +876,7 @@ impl App {
                 Outcome::Cancel => true,
                 Outcome::Submit(()) => {
                     if let Some(core) = &self.core {
-                        for id in &d.ids {
-                            core.close(id);
-                        }
+                        core.close_ids(&d.ids);
                     }
                     true
                 }
@@ -955,8 +955,8 @@ impl App {
                     core.connect_all(waiting.iter().map(|s| s.id.clone()).collect());
                 }
                 if ui.button(t!("sessions-close-all")).clicked() {
-                    for s in waiting.iter().filter(|s| !s.locked) {
-                        core.close(&s.id);
+                    if let Closing::Confirm(ids) = core.close_sessions(&CloseSet::Waiting) {
+                        crate::shell::ask(MenuRequest::ConfirmClose(ids));
                     }
                 }
                 ui.weak(t!("sessions-one-by-one"));
@@ -1169,27 +1169,27 @@ fn session_card(
                 None => {}
             }
             ui.add_space(12.0);
-            let open = s.state.is_open();
-            if ui.add_enabled(s.location.is_some(), egui::Button::new(t!("button-focus")).small()).clicked() {
-                core.focus(&s.id);
+            let button = |ui: &mut egui::Ui, command: SessionCommand, text: String| {
+                ui.add_enabled(command.applies(s), egui::Button::new(text).small())
+            };
+            if button(ui, SessionCommand::Focus, t!("button-focus")).clicked() {
+                core.run(&s.id, SessionCommand::Focus);
             }
             let label = if s.state == State::Waiting { t!("button-connect") } else { t!("button-reconnect") };
-            if ui.add_enabled(open && s.linked && s.state.can_connect(), egui::Button::new(label).small()).clicked() {
-                core.connect(&s.id);
+            if button(ui, SessionCommand::Connect, label).clicked() {
+                core.run(&s.id, SessionCommand::Connect);
             }
-            let live = matches!(s.state, State::Connecting | State::Connected);
-            if ui.add_enabled(open && s.linked && live, egui::Button::new(t!("button-disconnect")).small()).clicked() {
-                core.disconnect(&s.id);
+            if button(ui, SessionCommand::Disconnect, t!("button-disconnect")).clicked() {
+                core.run(&s.id, SessionCommand::Disconnect);
             }
-            if ui.add_enabled(open && !s.locked, egui::Button::new(t!("button-close")).small()).clicked() {
-                core.close(&s.id);
+            if button(ui, SessionCommand::Close, t!("button-close")).clicked() {
+                core.run(&s.id, SessionCommand::Close);
             }
             let lock = if s.locked { icons::with(icons::UNLOCK, t!("session-unlock")) } else { icons::with(icons::LOCK, t!("session-lock")) };
-            if ui.add_enabled(open, egui::Button::new(lock).small()).on_hover_text(t!("session-lock-hint")).clicked() {
-                core.set_locked(&s.id, !s.locked);
+            if button(ui, SessionCommand::ToggleLock, lock).on_hover_text(t!("session-lock-hint")).clicked() {
+                core.run(&s.id, SessionCommand::ToggleLock);
             }
-            let ready = s.state == State::Connected && s.linked;
-            if ui.add_enabled(ready, egui::Button::new(icons::with(icons::SEND, t!("session-send"))).small()).clicked() {
+            if button(ui, SessionCommand::Send, icons::with(icons::SEND, t!("session-send"))).clicked() {
                 action = Some(CardAction::Send);
             }
             if let Some(target) = typed {

@@ -4,9 +4,9 @@
 use std::sync::{Arc, Weak};
 
 use native_term_platform::windows_terminal::menu::{Entry, MenuTab, Provider};
-use native_term_platform::Target;
 
-use crate::{lock, t, Core, HostRequest, Shared, State};
+use crate::actions::{close_set, CloseSet, Closing, SessionCommand};
+use crate::{t, Core, SessionView, Shared, State};
 
 pub const CONNECT: u32 = 1;
 pub const DISCONNECT: u32 = 2;
@@ -37,42 +37,6 @@ pub(crate) struct Actions {
     pub(crate) ask: Arc<dyn Fn(MenuRequest) + Send + Sync>,
 }
 
-/// A session as the menu sees it.
-struct MenuSession {
-    id: String,
-    alias: String,
-    label: String,
-    state: State,
-    linked: bool,
-    window: Option<isize>,
-    index: Option<usize>,
-    locked: bool,
-    /// Its tab holds other panes as well.
-    mixed: bool,
-}
-
-fn sessions(shared: &Shared) -> Vec<MenuSession> {
-    lock(&shared.sessions)
-        .iter()
-        .filter(|s| s.state.is_open())
-        .map(|s| MenuSession {
-            id: s.id.clone(),
-            alias: s.alias.clone(),
-            label: s.label.clone(),
-            state: s.state.clone(),
-            linked: s.link.is_some(),
-            window: s.location.as_ref().map(|l| l.window),
-            index: s.location.as_ref().map(|l| l.tab_index),
-            locked: s.locked,
-            mixed: s.location.as_ref().is_some_and(|l| l.mixed),
-        })
-        .collect()
-}
-
-fn ended(state: &State) -> bool {
-    matches!(state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_))
-}
-
 /// `web01 (2)` → `web01`, for cloning.
 pub(crate) fn base_label(label: &str) -> &str {
     if let Some(open) = label.rfind(" (") {
@@ -84,29 +48,39 @@ pub(crate) fn base_label(label: &str) -> &str {
     label
 }
 
-/// Sessions the "close …" items would close, for the tab `tab`; locked
-/// ones never.
-fn to_close(all: &[MenuSession], tab: &MenuTab, id: u32) -> Vec<String> {
-    all.iter()
-        .filter(|s| !s.locked)
-        .filter(|s| match id {
-            CLOSE_OTHERS => s.window == Some(tab.window) && s.label != tab.label,
-            CLOSE_RIGHT => s.window == Some(tab.window) && s.index.is_some_and(|i| i > tab.index),
-            CLOSE_ENDED => ended(&s.state),
-            _ => false,
-        })
-        .map(|s| s.id.clone())
-        .collect()
-}
-
 fn action(id: u32, glyph: char, text: &str, enabled: bool) -> Entry {
     Entry::Action { id, glyph, text: text.to_string(), enabled }
+}
+
+/// The "close …" items and the set each one closes.
+fn close_item(id: u32, this: &str) -> Option<CloseSet> {
+    match id {
+        CLOSE_OTHERS => Some(CloseSet::Others(this.to_string())),
+        CLOSE_RIGHT => Some(CloseSet::RightOf(this.to_string())),
+        CLOSE_ENDED => Some(CloseSet::Ended),
+        _ => None,
+    }
+}
+
+/// The session commands behind the menu's items.
+fn command(id: u32) -> Option<SessionCommand> {
+    match id {
+        CONNECT => Some(SessionCommand::Connect),
+        DISCONNECT => Some(SessionCommand::Disconnect),
+        CLONE => Some(SessionCommand::Clone),
+        CLOSE => Some(SessionCommand::Close),
+        LOCK => Some(SessionCommand::ToggleLock),
+        CLEAR => Some(SessionCommand::ClearScreen),
+        SEND => Some(SessionCommand::Send),
+        _ => None,
+    }
 }
 
 impl Provider for Actions {
     fn entries(&self, tab: &MenuTab) -> Vec<Entry> {
         let Some(shared) = self.core.upgrade() else { return Vec::new() };
-        let all = sessions(&shared);
+        let core = Core { shared };
+        let all: Vec<SessionView> = core.sessions().into_iter().filter(|s| s.state.is_open()).collect();
         let Some(this) = all.iter().find(|s| s.label == tab.label) else { return Vec::new() };
         let mut entries = Vec::new();
         if tab.mixed {
@@ -116,59 +90,41 @@ impl Provider for Actions {
             entries.push(Entry::Header(t!("tabmenu-header-titled", label = tab.label.as_str(), title = tab.title.as_str())));
             entries.push(Entry::Separator);
         }
+        let applies = |id: u32| command(id).is_some_and(|c| c.applies(this));
         let connect = if this.state == State::Waiting { t!("tabmenu-connect") } else { t!("tabmenu-reconnect") };
-        entries.push(action(CONNECT, '\u{E72C}', &connect, this.linked && this.state.can_connect()));
-        let live = matches!(this.state, State::Connecting | State::Connected);
-        entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), this.linked && live));
-        entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), true));
-        entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), this.linked && this.state == State::Connected));
-        entries.push(action(CLEAR, '\u{E75C}', &t!("tabmenu-clear"), this.linked));
+        entries.push(action(CONNECT, '\u{E72C}', &connect, applies(CONNECT)));
+        entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), applies(DISCONNECT)));
+        entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), applies(CLONE)));
+        entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), applies(SEND)));
+        entries.push(action(CLEAR, '\u{E75C}', &t!("tabmenu-clear"), applies(CLEAR)));
         entries.push(action(RENAME, '\u{E8AC}', &t!("tabmenu-rename"), true));
         if this.locked {
-            entries.push(action(LOCK, '\u{E785}', &t!("tabmenu-unlock"), true));
+            entries.push(action(LOCK, '\u{E785}', &t!("tabmenu-unlock"), applies(LOCK)));
         } else {
-            entries.push(action(LOCK, '\u{E72E}', &t!("tabmenu-lock"), true));
+            entries.push(action(LOCK, '\u{E72E}', &t!("tabmenu-lock"), applies(LOCK)));
         }
         entries.push(Entry::Separator);
         let close = if tab.mixed { t!("tabmenu-close-mixed") } else { t!("tabmenu-close") };
-        entries.push(action(CLOSE, '\u{E711}', &close, !this.locked));
-        let others = !to_close(&all, tab, CLOSE_OTHERS).is_empty();
-        entries.push(action(CLOSE_OTHERS, '\u{E8BB}', &t!("tabmenu-close-others"), others));
-        let ended = !to_close(&all, tab, CLOSE_ENDED).is_empty();
-        entries.push(action(CLOSE_ENDED, '\u{E894}', &t!("tabmenu-close-disconnected"), ended));
-        let right = !to_close(&all, tab, CLOSE_RIGHT).is_empty();
-        entries.push(action(CLOSE_RIGHT, '\u{E72A}', &t!("tabmenu-close-right"), right));
+        entries.push(action(CLOSE, '\u{E711}', &close, applies(CLOSE)));
+        let some = |id: u32| close_item(id, &this.id).is_some_and(|set| !close_set(&all, &set).is_empty());
+        entries.push(action(CLOSE_OTHERS, '\u{E8BB}', &t!("tabmenu-close-others"), some(CLOSE_OTHERS)));
+        entries.push(action(CLOSE_ENDED, '\u{E894}', &t!("tabmenu-close-disconnected"), some(CLOSE_ENDED)));
+        entries.push(action(CLOSE_RIGHT, '\u{E72A}', &t!("tabmenu-close-right"), some(CLOSE_RIGHT)));
         entries
     }
 
     fn chosen(&self, tab: &MenuTab, id: u32) {
         let Some(shared) = self.core.upgrade() else { return };
-        let core = Core { shared: Arc::clone(&shared) };
-        let all = sessions(&shared);
-        let Some(this) = all.iter().find(|s| s.label == tab.label) else { return };
-        match id {
-            CONNECT => core.connect(&this.id),
-            DISCONNECT => core.disconnect(&this.id),
-            CLONE => {
-                let on_login = lock(&shared.sessions).iter().find(|s| s.id == this.id).and_then(|s| s.on_login.clone());
-                let label = shared.fresh_label(&this.alias, &this.label);
-                let host = HostRequest { no_forwards: true, on_login, ..HostRequest::new(&this.alias, label) };
-                core.open(&[host], Target::Recent);
-            }
-            CLOSE if !this.locked => core.close(&this.id),
-            LOCK => core.set_locked(&this.id, !this.locked),
-            SEND => (self.ask)(MenuRequest::Send(this.id.clone())),
-            RENAME => (self.ask)(MenuRequest::Rename(this.alias.clone())),
-            CLEAR => core.clear_screen(&this.id),
-            CLOSE_OTHERS | CLOSE_ENDED | CLOSE_RIGHT => {
-                let ids = to_close(&all, tab, id);
-                // a mixed tab holds panes that aren't NativeTerm's: ask first
-                if all.iter().any(|s| ids.contains(&s.id) && s.mixed) {
+        let core = Core { shared };
+        let Some(this) = core.sessions().into_iter().find(|s| s.state.is_open() && s.label == tab.label) else { return };
+        match (id, command(id), close_item(id, &this.id)) {
+            (SEND, _, _) => (self.ask)(MenuRequest::Send(this.id.clone())),
+            (RENAME, _, _) => (self.ask)(MenuRequest::Rename(this.alias.clone())),
+            (_, Some(command), _) => core.run(&this.id, command),
+            (_, _, Some(set)) => {
+                // a tab that holds other panes is closed only when confirmed
+                if let Closing::Confirm(ids) = core.close_sessions(&set) {
                     (self.ask)(MenuRequest::ConfirmClose(ids));
-                } else {
-                    for id in ids {
-                        core.close(&id);
-                    }
                 }
             }
             _ => {}
@@ -179,48 +135,6 @@ impl Provider for Actions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use native_term_platform::Rect;
-
-    fn session(id: &str, window: isize, index: usize, state: State) -> MenuSession {
-        MenuSession {
-            id: id.into(),
-            alias: "h".into(),
-            label: id.into(),
-            state,
-            linked: true,
-            window: Some(window),
-            index: Some(index),
-            locked: false,
-            mixed: false,
-        }
-    }
-
-    fn tab(label: &str, window: isize, index: usize) -> MenuTab {
-        MenuTab { window, rect: Rect::default(), label: label.into(), title: label.into(), mixed: false, index }
-    }
-
-    #[test]
-    fn close_sets_stay_within_nativeterm_tabs() {
-        let all = vec![
-            session("a", 1, 0, State::Connected),
-            // the user's own tabs sit at 1 and 3, they aren't sessions
-            session("b", 1, 2, State::Disconnected(255)),
-            session("c", 1, 4, State::Connected),
-            session("d", 2, 0, State::LoginFailed(255)),
-        ];
-        let t = tab("b", 1, 2);
-        assert_eq!(to_close(&all, &t, CLOSE_OTHERS), ["a", "c"]);
-        assert_eq!(to_close(&all, &t, CLOSE_RIGHT), ["c"]);
-        assert_eq!(to_close(&all, &t, CLOSE_ENDED), ["b", "d"], "all windows");
-        assert!(to_close(&all, &tab("c", 1, 4), CLOSE_RIGHT).is_empty());
-
-        let mut all = all;
-        all[2].locked = true;
-        all[3].locked = true;
-        assert_eq!(to_close(&all, &t, CLOSE_OTHERS), ["a"], "locked sessions stay");
-        assert!(to_close(&all, &t, CLOSE_RIGHT).is_empty());
-        assert_eq!(to_close(&all, &t, CLOSE_ENDED), ["b"]);
-    }
 
     #[test]
     fn clone_label() {

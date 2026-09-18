@@ -18,7 +18,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, MOUSEEVENTF_RIGHTDOWN,
     MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_DOWN, VK_ESCAPE,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, SetCursorPos, SetForegroundWindow};
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, SetCursorPos, SetForegroundWindow};
 
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -46,7 +46,18 @@ fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
     println!("{what}: {} ms", started.elapsed().as_millis());
 }
 
+/// Whether a window of the portable test Terminal is in front: input goes
+/// to the foreground window, which must never be anything else (the
+/// Store Terminal, the user's work).
+fn portable_in_front() -> bool {
+    let dir = std::env::var("NATIVETERM_TEST_WT_DIR").expect("NATIVETERM_TEST_WT_DIR");
+    let install = Install::from_dir(dir.as_ref()).unwrap();
+    let front = unsafe { GetForegroundWindow() }.0 as isize;
+    native_term_platform::windows_terminal::window::terminal_windows(&install).iter().any(|w| w.handle == front)
+}
+
 fn send(inputs: &[INPUT]) {
+    assert!(portable_in_front(), "the portable test Terminal isn't in front: no input sent");
     unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) };
     std::thread::sleep(Duration::from_millis(60));
 }

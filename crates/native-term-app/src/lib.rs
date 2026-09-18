@@ -3,6 +3,7 @@
 //! work on background threads. The GUI (`main.rs`) only reads views and
 //! sends commands.
 
+pub mod actions;
 pub mod commands;
 mod connect_queue;
 pub mod data_dir;
@@ -844,15 +845,8 @@ impl Core {
 
     /// Close every session whose connection ended or failed.
     pub fn close_ended(&self) -> usize {
-        let ended: Vec<String> = self
-            .sessions()
-            .into_iter()
-            .filter(|s| !s.locked && matches!(s.state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_)))
-            .map(|s| s.id)
-            .collect();
-        for id in &ended {
-            self.close(id);
-        }
+        let ended = actions::close_set(&self.sessions(), &actions::CloseSet::Ended);
+        self.close_ids(&ended);
         ended.len()
     }
 
