@@ -2208,6 +2208,73 @@ NativeTerm ever does.
 Windows Terminal's own tab search (`tabSearch` action) also lists tabs by
 title and benefits from the same stable labels.
 
+### Taking over Ctrl+Tab (source review, Terminal 1.26, 2026-09-18)
+
+Terminal's Ctrl+Tab list is the command palette in "tab switch" mode
+(`defaults.json`: `ctrl+tab` → `Terminal.NextTab`, `nextTab`/`prevTab`
+with the global `tabSwitcherMode` of `inOrder` / `mru` / `disabled`;
+`CommandPalette.cpp`). It shows title, icon and status glyphs only, its
+"preview" is a real tab switch, and it commits when no modifier is held
+any more (`_anchorKeyUpHandler`, polled on every key-up). What the source
+rules out:
+
+- **No extension point.** No action can call another program: the only
+  ways out of the process are launching a pane's command line
+  (`newTab`/`splitPane`), `ShellExecute` through `searchWeb`'s
+  `queryUrl`, writing a file (`exportBuffer`), or `sendInput` into the
+  pane's own connection — which for NativeTerm means ssh types it to the
+  remote host, so it is useless here.
+- **Fragments can't bind keys** (`CascadiaSettingsSerialization.cpp`:
+  "fragments shouldn't be allowed to bind actions to keys directly"), so
+  a rebind would mean editing the user's own `settings.json`.
+- **Unbinding Ctrl+Tab doesn't help either.** It would then reach the
+  process in the tab (ConPTY forces win32-input-mode, so a real
+  `VK_TAB` + Ctrl record arrives), but while a session is connected ssh
+  owns the console input, not the shim — the key would go to the remote
+  host.
+
+So the way to take it over is NativeTerm's existing low-level keyboard
+hook (installed only while it has located tabs, already used for the tab
+menu): swallow Ctrl+Tab while the foreground window is a Terminal window
+with NativeTerm tabs and the setting is on, show NativeTerm's own
+switcher without taking the focus, follow further Tab presses, and commit
+when Ctrl is released — the same semantics Terminal uses. Terminal's own
+list still appears when NativeTerm isn't running or the setting is off.
+Committing selects the tab through UIA (`wt -w <id> focus-tab -t <n>`
+would also work).
+
+Thumbnails can only come from captures taken while a tab was selected:
+a non-selected tab's content is unparented from the XAML tree, its UIA
+peer is unreachable and its UIA renderer is disabled, so neither its text
+nor an image is obtainable from outside (Terminal itself has no tab
+thumbnails anywhere — no `RenderTargetBitmap`, no DWM tab thumbnails, and
+its tab tooltip is text only). Measured here: `PrintWindow` with
+`PW_RENDERFULLCONTENT` captures a Terminal window even while it is fully
+covered by another window (25 ms for 1752×936), and a capture scaled to
+320 px costs ~21 ms with GDI+ and ~214 KB per thumbnail. So the switcher
+would capture each window's current tab when it opens, keep the snapshot
+of a tab when it is switched away, and show title and state for tabs it
+has never seen.
+
+### Controlling Terminal from outside (source review, 1.26)
+
+The Monarch/Peasant COM architecture was removed in late 2024 ("Remove
+Monarch/Peasant & Make UI single-threaded"); `src/cascadia/Remoting` is
+empty. Terminal is now one process, and a second `wt.exe` hands its
+command line to the running instance with `WM_COPYDATA` after finding its
+message window by a class name that hashes the user's SID (and the
+install path when unpackaged). Consequences:
+
+- **No COM and no IPC lists or reads tabs.** The only tab operation from
+  outside is the write-only `wt -w <id> focus-tab -t <n>`. Reading tab
+  titles and the selection stays UIA's job, as NativeTerm already does.
+- **Terminal's `WM_USER` messages are in-process only**; `WM_GET_WINDOW_LIST`
+  passes a raw pointer through `LPARAM`, so sending it from another
+  process would write into Terminal's address space. Never do that.
+- `ITerminalHandoff3` is the one COM class still registered, and it only
+  accepts an inbound ConPTY session (defterm), so it is no use here.
+- Spawning `wt.exe` stays the right way to open tabs.
+
 Implemented (first version, no previews yet): "All tabs" next to "Open
 sessions" (or Ctrl+T, which also focuses its search box).
 
