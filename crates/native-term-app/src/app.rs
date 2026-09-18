@@ -132,6 +132,8 @@ pub struct App {
     profile: ProfileSetup,
     show_settings: bool,
     notices: Vec<String>,
+    /// OneDrive / Dropbox folders on this computer, for the wizard.
+    sync_roots: Vec<(String, PathBuf)>,
     /// PuTTY has saved sessions (checked at start).
     putty_sessions: bool,
     wizard: Option<crate::wizard::Wizard>,
@@ -234,6 +236,7 @@ impl App {
             profile,
             show_settings: false,
             notices,
+            sync_roots: native_term_win::cloud::sync_roots(),
             putty_sessions: native_term_config::putty::has_sessions(),
             wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
             securecrt: native_term_app::import::securecrt_config_path(),
@@ -464,26 +467,65 @@ impl App {
         });
         ui.weak(t!("folders-move-note"));
         if let Some(new) = chosen {
-            match self.editor.move_folders(&new) {
-                Ok(count) => {
-                    if let Some(core) = &self.core {
-                        core.set_setting(FOLDERS_SETTING, &new.display().to_string());
-                    }
-                    set_folders_dir(Some(new.clone()));
-                    self.folders_watcher = watch_folders(&self.ssh_dir, &self.ssh_changed, &self.egui_ctx);
-                    self.notices.push(t!(
-                        "folders-moved",
-                        count = count,
-                        path = new.display().to_string(),
-                        old = current.display().to_string()
-                    ));
-                    self.folders_move = None;
-                    self.reload();
-                }
-                Err(e) => self.notices.push(t!("folders-move-failed", error = e.to_string())),
+            // a folder with sessions in it already (synced from another
+            // computer) is used as it is, never copied onto
+            let done = if native_term_config::ops::holds_folders(&new) {
+                self.adopt_folders_at(new)
+            } else {
+                self.move_folders_to(new)
+            };
+            if done {
+                self.folders_move = None;
             }
         } else if cancel {
             self.folders_move = None;
+        }
+    }
+
+    /// The session folders are at `new` now: a per-machine setting, and
+    /// the tree follows them there.
+    fn folders_now_at(&mut self, new: &Path) {
+        if let Some(core) = &self.core {
+            core.set_setting(FOLDERS_SETTING, &new.display().to_string());
+        }
+        set_folders_dir(Some(new.to_path_buf()));
+        self.folders_watcher = watch_folders(&self.ssh_dir, &self.ssh_changed, &self.egui_ctx);
+        self.reload();
+    }
+
+    /// Copy the session folders to `new` and use them there (Settings and
+    /// the wizard's sync step); says how it went. `true` when it worked.
+    fn move_folders_to(&mut self, new: PathBuf) -> bool {
+        let current = self.editor.folders_dir();
+        match self.editor.move_folders(&new) {
+            Ok(count) => {
+                self.folders_now_at(&new);
+                let (path, old) = (new.display().to_string(), current.display().to_string());
+                self.notices.push(t!("folders-moved", count = count, path = path, old = old));
+                true
+            }
+            Err(e) => {
+                self.notices.push(t!("folders-move-failed", error = e.to_string()));
+                false
+            }
+        }
+    }
+
+    /// Use the session folders already in `new` (synced from another
+    /// computer); this computer's own stay where they were.
+    fn adopt_folders_at(&mut self, new: PathBuf) -> bool {
+        let current = self.editor.folders_dir();
+        match self.editor.adopt_folders(&new) {
+            Ok(count) => {
+                self.folders_now_at(&new);
+                let (path, old) = (new.display().to_string(), current.display().to_string());
+                self.notices.push(t!("folders-adopted", count = count, path = path, old = old));
+                true
+            }
+            Err(e) => {
+                self.notices.push(t!("folders-move-failed", error = e.to_string()));
+                false
+            }
         }
     }
 
@@ -601,6 +643,7 @@ impl App {
             return;
         }
         let Some(wizard) = self.wizard.as_mut() else { return };
+        let folders_dir = self.editor.folders_dir();
         let facts = crate::wizard::Facts {
             terminal: self.profile.terminal_text(),
             profile: self.profile.describe(),
@@ -615,6 +658,8 @@ impl App {
             data_movable: native_term_app::data_dir::pointer_for(self.data_source)
                 != native_term_app::data_dir::Pointer::Fixed,
             can_open_tabs: self.core.is_some(),
+            folders_dir: &folders_dir,
+            sync_roots: &self.sync_roots,
         };
         let actions = wizard.show(ctx, &facts);
         for action in actions {
@@ -650,6 +695,12 @@ impl App {
                     if !hosts.is_empty() {
                         self.dialog = Some(Dialog::Key(Box::new(KeyDialog::new(hosts, &self.ssh_dir))));
                     }
+                }
+                WizardAction::MoveFolders(path) => {
+                    self.move_folders_to(path);
+                }
+                WizardAction::AdoptFolders(path) => {
+                    self.adopt_folders_at(path);
                 }
                 WizardAction::MoveData(path) => {
                     self.move_data(&path);

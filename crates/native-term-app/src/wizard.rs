@@ -29,6 +29,10 @@ pub enum WizardAction {
     OpenFolder(PathBuf),
     /// Copy NativeTerm's data to this folder, used from the next start.
     MoveData(PathBuf),
+    /// Move the session folders here (a synced folder).
+    MoveFolders(PathBuf),
+    /// Use the session folders already here (synced from another computer).
+    AdoptFolders(PathBuf),
     /// Finished or skipped: don't show it again.
     Done,
 }
@@ -50,6 +54,15 @@ pub struct Facts<'a> {
     pub data_movable: bool,
     /// Tabs can be opened (the core runs).
     pub can_open_tabs: bool,
+    /// Where the session folders are now.
+    pub folders_dir: &'a Path,
+    /// Folders a sync client keeps in step (name, path).
+    pub sync_roots: &'a [(String, PathBuf)],
+}
+
+/// Where the session folders go in a synced folder.
+pub fn synced_folders(root: &Path) -> PathBuf {
+    root.join("NativeTerm").join("ssh-folders")
 }
 
 pub struct Wizard {
@@ -215,6 +228,34 @@ impl Wizard {
             });
         } else {
             ui.weak(t!("data-dir-fixed"));
+        }
+        ui.add_space(8.0);
+        ui.strong(t!("wizard-sync-title"));
+        let inside = facts.sync_roots.iter().find(|(_, root)| facts.folders_dir.starts_with(root));
+        match inside {
+            Some((name, _)) => {
+                let path = facts.folders_dir.display().to_string();
+                check_line(ui, true, t!("wizard-sync-inside", name = name.as_str(), path = path));
+            }
+            None if facts.sync_roots.is_empty() => {
+                ui.label(t!("wizard-sync-none"));
+            }
+            None => {
+                ui.label(t!("wizard-sync-intro"));
+                for (name, root) in facts.sync_roots {
+                    let target = synced_folders(root);
+                    ui.horizontal_wrapped(|ui| {
+                        if native_term_config::ops::holds_folders(&target) {
+                            if ui.button(t!("wizard-sync-adopt", name = name.as_str())).clicked() {
+                                actions.push(WizardAction::AdoptFolders(target.clone()));
+                            }
+                        } else if ui.button(t!("wizard-sync-move", name = name.as_str())).clicked() {
+                            actions.push(WizardAction::MoveFolders(target.clone()));
+                        }
+                        ui.weak(target.display().to_string());
+                    });
+                }
+            }
         }
         ui.weak(t!("wizard-sync-note"));
     }

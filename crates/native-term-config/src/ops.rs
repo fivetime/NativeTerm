@@ -151,6 +151,21 @@ fn is_folder_file(path: &Path) -> bool {
     name.ends_with(".conf") || name.ends_with(&format!(".{}", plink::EXTENSION))
 }
 
+/// A folder's files in `dir` (`.conf` and `.nt.toml`), sorted.
+fn folder_files(dir: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|entries| entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_file() && is_folder_file(p)).collect())
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+/// Whether `dir` holds session folders already (synced from another
+/// computer, for example).
+pub fn holds_folders(dir: &Path) -> bool {
+    !folder_files(dir).is_empty()
+}
+
 /// The `Include` pattern for folder files in `dir`.
 fn include_for(dir: &Path) -> String {
     format!("{}/*.conf", dir.to_string_lossy().replace('\\', "/"))
@@ -211,19 +226,7 @@ impl Editor {
         if norm(new_dir) == norm(&self.folders) {
             return Err(EditError::Invalid("that is where the folders are".into()));
         }
-        let conf = |dir: &Path| -> Vec<PathBuf> {
-            let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-                .map(|entries| {
-                    entries
-                        .filter_map(Result::ok)
-                        .map(|e| e.path())
-                        .filter(|p| p.is_file() && is_folder_file(p))
-                        .collect()
-                })
-                .unwrap_or_default();
-            files.sort();
-            files
-        };
+        let conf = folder_files;
         if !conf(new_dir).is_empty() {
             return Err(EditError::Invalid(format!("{} already holds session folders", new_dir.display())));
         }
@@ -321,6 +324,33 @@ impl Editor {
         }
         self.writer.write(file, &plink::render(&sessions), fingerprint, || Ok(()))?;
         Ok(())
+    }
+
+    /// Use the session folders already in `dir` instead of the current
+    /// ones (another computer's, synced): only the main config's
+    /// `Include` changes, nothing is copied, and ssh must accept the
+    /// result, or it is undone. The current folder is left as it was.
+    /// Returns how many folder files `dir` has.
+    pub fn adopt_folders(&mut self, dir: &Path) -> Result<usize, EditError> {
+        if !dir.is_absolute() {
+            return Err(EditError::Invalid("not a full path".into()));
+        }
+        let files = folder_files(dir);
+        if files.is_empty() {
+            return Err(EditError::Invalid(format!("{} holds no session folders", dir.display())));
+        }
+        let (old, new) = (self.include.clone(), include_for(dir));
+        edit_file(
+            &self.writer,
+            &self.main_config(),
+            |doc| {
+                header::replace_include(doc, &old, &new);
+            },
+            || self.validate(PARSE_CHECK_HOST, None),
+        )?;
+        self.include = new;
+        self.folders = dir.to_path_buf();
+        Ok(files.len())
     }
 
     /// `ssh -G <alias>` must succeed; with `expect`, the host name must match.
@@ -1062,6 +1092,26 @@ mod tests {
 
     fn draft(label: &str, hostname: &str) -> HostDraft {
         HostDraft { label: label.into(), hostname: hostname.into(), ..HostDraft::default() }
+    }
+
+    /// A second computer: its sessions are in the synced folder already,
+    /// so it points its `Include` there instead of copying.
+    #[test]
+    fn synced_folders_are_adopted() {
+        let Some((home, mut editor)) = setup() else { return };
+        let synced = home.path().join("OneDrive").join("NativeTerm");
+        assert!(editor.adopt_folders(&synced).is_err(), "nothing there yet");
+        std::fs::create_dir_all(&synced).unwrap();
+        std::fs::write(synced.join("prod.conf"), "Host web\n    HostName 10.0.0.1\n").unwrap();
+        crate::acl::restrict_to_owner(&synced.join("prod.conf")).unwrap();
+        std::fs::write(synced.join("prod.nt.toml"), "[[session]]\nname = \"sw\"\nhost = \"10.0.0.2\"\n").unwrap();
+        assert!(holds_folders(&synced));
+        assert!(editor.move_folders(&synced).is_err(), "moving onto them is refused");
+        assert_eq!(editor.adopt_folders(&synced).unwrap(), 2);
+        assert_eq!(editor.folders_dir(), synced);
+        let t = tree(&editor);
+        assert!(t.find("web").is_some() && t.find("sw").is_some());
+        assert!(editor.effective("web").unwrap().iter().any(|(k, v)| k == "hostname" && v == "10.0.0.1"));
     }
 
     #[test]

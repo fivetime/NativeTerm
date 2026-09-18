@@ -56,6 +56,28 @@ pub fn cloud_state(path: &Path) -> Option<CloudState> {
     Some(classify(data.dwFileAttributes, tag))
 }
 
+/// Folders a sync client keeps in step across computers, by name:
+/// OneDrive (personal and work, from the variables its client sets) and
+/// Dropbox (its default folder). Only ones that exist.
+pub fn sync_roots() -> Vec<(String, std::path::PathBuf)> {
+    use std::path::PathBuf;
+    let mut roots: Vec<(String, PathBuf)> = Vec::new();
+    for (var, name) in [("OneDriveConsumer", "OneDrive"), ("OneDriveCommercial", "OneDrive (work)"), ("OneDrive", "OneDrive")] {
+        if let Some(dir) = std::env::var_os(var).map(PathBuf::from).filter(|d| d.is_dir()) {
+            if !roots.iter().any(|(_, d)| d == &dir) {
+                roots.push((name.to_string(), dir));
+            }
+        }
+    }
+    if let Some(profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+        let dropbox = profile.join("Dropbox");
+        if dropbox.is_dir() {
+            roots.push(("Dropbox".to_string(), dropbox));
+        }
+    }
+    roots
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
