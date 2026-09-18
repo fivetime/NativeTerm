@@ -5,21 +5,22 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+use native_term_app::tab_menu::MenuRequest;
 use native_term_app::HostRequest;
 
 static SHOW_MAIN: AtomicBool = AtomicBool::new(false);
 static SHOW_TABS: AtomicBool = AtomicBool::new(false);
 static HOSTS: Mutex<Vec<HostEntry>> = Mutex::new(Vec::new());
-static SEND_TO: Mutex<Option<String>> = Mutex::new(None);
+static REQUESTS: Mutex<Vec<MenuRequest>> = Mutex::new(Vec::new());
 
-/// Open the send dialog for a session (from the tab menu).
-pub fn send_to(session: &str) {
-    *SEND_TO.lock().unwrap_or_else(|e| e.into_inner()) = Some(session.to_string());
+/// What the tab menu asked for (its dialogs live in the main window).
+pub fn ask(request: MenuRequest) {
+    REQUESTS.lock().unwrap_or_else(|e| e.into_inner()).push(request);
     show_main();
 }
 
-pub fn take_send_to() -> Option<String> {
-    SEND_TO.lock().unwrap_or_else(|e| e.into_inner()).take()
+pub fn take_requests() -> Vec<MenuRequest> {
+    std::mem::take(&mut *REQUESTS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
 /// A saved host, for the floating button's search.

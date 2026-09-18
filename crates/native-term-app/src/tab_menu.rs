@@ -18,11 +18,23 @@ pub const CLOSE_RIGHT: u32 = 7;
 pub const SEND: u32 = 8;
 pub const LOCK: u32 = 9;
 pub const CLEAR: u32 = 10;
+pub const RENAME: u32 = 11;
+
+/// What the menu asks the main window to do (its dialogs live there).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MenuRequest {
+    /// Send commands to this session.
+    Send(String),
+    /// Rename this host.
+    Rename(String),
+    /// Closing these sessions would close tabs that hold other panes too.
+    ConfirmClose(Vec<String>),
+}
 
 pub(crate) struct Actions {
     pub(crate) core: Weak<Shared>,
-    /// Opens the send dialog (the window lives in the binary).
-    pub(crate) send: Arc<dyn Fn(&str) + Send + Sync>,
+    /// Asks the main window; its dialogs live in the binary.
+    pub(crate) ask: Arc<dyn Fn(MenuRequest) + Send + Sync>,
 }
 
 /// A session as the menu sees it.
@@ -35,6 +47,8 @@ struct MenuSession {
     window: Option<isize>,
     index: Option<usize>,
     locked: bool,
+    /// Its tab holds other panes as well.
+    mixed: bool,
 }
 
 fn sessions(shared: &Shared) -> Vec<MenuSession> {
@@ -50,6 +64,7 @@ fn sessions(shared: &Shared) -> Vec<MenuSession> {
             window: s.location.as_ref().map(|l| l.window),
             index: s.location.as_ref().map(|l| l.tab_index),
             locked: s.locked,
+            mixed: s.location.as_ref().is_some_and(|l| l.mixed),
         })
         .collect()
 }
@@ -108,6 +123,7 @@ impl Provider for Actions {
         entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), true));
         entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), this.linked && this.state == State::Connected));
         entries.push(action(CLEAR, '\u{E75C}', &t!("tabmenu-clear"), this.linked));
+        entries.push(action(RENAME, '\u{E8AC}', &t!("tabmenu-rename"), true));
         if this.locked {
             entries.push(action(LOCK, '\u{E785}', &t!("tabmenu-unlock"), true));
         } else {
@@ -141,11 +157,18 @@ impl Provider for Actions {
             }
             CLOSE if !this.locked => core.close(&this.id),
             LOCK => core.set_locked(&this.id, !this.locked),
-            SEND => (self.send)(&this.id),
+            SEND => (self.ask)(MenuRequest::Send(this.id.clone())),
+            RENAME => (self.ask)(MenuRequest::Rename(this.alias.clone())),
             CLEAR => core.clear_screen(&this.id),
             CLOSE_OTHERS | CLOSE_ENDED | CLOSE_RIGHT => {
-                for id in to_close(&all, tab, id) {
-                    core.close(&id);
+                let ids = to_close(&all, tab, id);
+                // a mixed tab holds panes that aren't NativeTerm's: ask first
+                if all.iter().any(|s| ids.contains(&s.id) && s.mixed) {
+                    (self.ask)(MenuRequest::ConfirmClose(ids));
+                } else {
+                    for id in ids {
+                        core.close(&id);
+                    }
                 }
             }
             _ => {}
@@ -168,6 +191,7 @@ mod tests {
             window: Some(window),
             index: Some(index),
             locked: false,
+            mixed: false,
         }
     }
 

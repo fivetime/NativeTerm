@@ -491,9 +491,9 @@ impl Core {
 
     /// Start NativeTerm's own right-click menu on its tabs (once).
     /// `send` opens the send dialog for a session id.
-    pub fn start_tab_menu(&self, send: impl Fn(&str) + Send + Sync + 'static) -> io::Result<()> {
+    pub fn start_tab_menu(&self, ask: impl Fn(tab_menu::MenuRequest) + Send + Sync + 'static) -> io::Result<()> {
         let settings = self.shared.terminal.install().settings_json();
-        let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared), send: Arc::new(send) });
+        let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared), ask: Arc::new(ask) });
         let menu = TabMenu::start(settings, provider)?;
         *lock(&self.shared.menu) = Some(menu);
         self.shared.refresh_soon();

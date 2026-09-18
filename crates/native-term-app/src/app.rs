@@ -9,7 +9,7 @@ use native_term_config::ops::{Editor, HostDraft};
 use native_term_config::write::Writer;
 use native_term_config::SessionTree;
 
-use crate::dialogs::{ConfirmDelete, ConfirmForget, FolderDialog, HostDialog, Outcome};
+use crate::dialogs::{ConfirmCloseMixed, ConfirmDelete, ConfirmForget, FolderDialog, HostDialog, Outcome};
 use crate::import_dialog::ImportDialog;
 use crate::key_dialog::KeyDialog;
 use crate::options_dialog::{OptionsDialog, OptionsTarget};
@@ -29,6 +29,7 @@ enum Dialog {
     Delete(ConfirmDelete),
     Forget(ConfirmForget),
     Key(Box<KeyDialog>),
+    CloseMixed(ConfirmCloseMixed),
     Options(Box<OptionsDialog>),
     Import(Box<ImportDialog>),
     Send(Box<SendDialog>),
@@ -129,11 +130,11 @@ impl App {
             let repaint = ctx.clone();
             let ctx = ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
-            let send = move |id: &str| {
-                crate::shell::send_to(id);
+            let ask = move |request| {
+                crate::shell::ask(request);
                 repaint.request_repaint();
             };
-            if let Err(e) = core.start_tab_menu(send) {
+            if let Err(e) = core.start_tab_menu(ask) {
                 notices.push(t!("notice-tab-menu-unavailable", error = e.to_string()));
             }
         }
@@ -392,6 +393,42 @@ impl App {
         }
     }
 
+    /// What the tab menu asked for: it has no dialogs of its own.
+    fn handle_menu_request(&mut self, request: native_term_app::tab_menu::MenuRequest) {
+        use native_term_app::tab_menu::MenuRequest;
+        if self.dialog.is_some() {
+            self.notices.push(t!("notice-dialog-open"));
+            return;
+        }
+        match request {
+            MenuRequest::Send(id) => {
+                if let Some(core) = &self.core {
+                    self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(core, &[id], &self.data_dir))));
+                }
+            }
+            MenuRequest::Rename(alias) => match self.tree.find(&alias) {
+                Some((_, host)) => {
+                    self.dialog = Some(Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))));
+                }
+                None => self.notices.push(t!("notice-not-saved", alias = alias.as_str())),
+            },
+            MenuRequest::ConfirmClose(ids) => {
+                let labels = self
+                    .core
+                    .as_ref()
+                    .map(|c| {
+                        c.sessions()
+                            .into_iter()
+                            .filter(|s| ids.contains(&s.id))
+                            .map(|s| (s.label, s.location.is_some_and(|l| l.mixed)))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                self.dialog = Some(Dialog::CloseMixed(ConfirmCloseMixed::new(ids, labels)));
+            }
+        }
+    }
+
     fn show_wizard(&mut self, ctx: &egui::Context) {
         use crate::wizard::WizardAction;
         // a dialog the wizard opened comes first; the wizard waits behind it
@@ -575,6 +612,18 @@ impl App {
                             false
                         }
                     }
+                }
+            },
+            Dialog::CloseMixed(d) => match d.show(ctx) {
+                Outcome::Open => false,
+                Outcome::Cancel => true,
+                Outcome::Submit(()) => {
+                    if let Some(core) = &self.core {
+                        for id in &d.ids {
+                            core.close(id);
+                        }
+                    }
+                    true
                 }
             },
             Dialog::Delete(d) => match d.show(ctx) {
@@ -904,10 +953,8 @@ impl crate::window::Ui for App {
             self.view.focus_search();
         }
         self.reload_if_changed();
-        if let Some(id) = crate::shell::take_send_to() {
-            if let (Some(core), None) = (&self.core, &self.dialog) {
-                self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(core, &[id], &self.data_dir))));
-            }
+        for request in crate::shell::take_requests() {
+            self.handle_menu_request(request);
         }
         if crate::shell::take_show_tabs() {
             self.view_right = View::Tabs;

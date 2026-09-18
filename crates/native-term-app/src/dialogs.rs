@@ -241,6 +241,55 @@ impl ConfirmForget {
 }
 
 /// "Really delete?"
+/// A batch close that would close tabs holding other panes as well.
+pub struct ConfirmCloseMixed {
+    pub ids: Vec<String>,
+    /// (label, its tab holds other panes)
+    sessions: Vec<(String, bool)>,
+}
+
+impl ConfirmCloseMixed {
+    pub fn new(ids: Vec<String>, sessions: Vec<(String, bool)>) -> ConfirmCloseMixed {
+        ConfirmCloseMixed { ids, sessions }
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
+        let mut outcome = Outcome::Open;
+        let mut open = true;
+        let mixed: Vec<&str> = self.sessions.iter().filter(|(_, m)| *m).map(|(l, _)| l.as_str()).collect();
+        egui::Window::new(t!("close-mixed-title"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(t!("close-mixed-what", count = self.sessions.len(), mixed = mixed.len()));
+                ui.weak(t!("close-mixed-hint"));
+                egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                    for (label, mixed) in &self.sessions {
+                        if *mixed {
+                            ui.label(format!("{label}  ·  {}", t!("session-split")));
+                        } else {
+                            ui.weak(label);
+                        }
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button(t!("close-mixed-close", count = self.sessions.len())).clicked() {
+                        outcome = Outcome::Submit(());
+                    }
+                    if ui.button(t!("button-cancel")).clicked() {
+                        outcome = Outcome::Cancel;
+                    }
+                });
+            });
+        if !open {
+            outcome = Outcome::Cancel;
+        }
+        outcome
+    }
+}
+
 pub struct ConfirmDelete {
     pub alias: String,
     label: String,

@@ -292,8 +292,10 @@
       fallback), acrylic if wanted, Windows 10 rounded shape (layered
       window), theme cached and reloaded on settings change; unlocated
       right-click (select, rescan, else restore selection and replay to
-      Terminal); confirmation before a batch close closes a whole mixed
-      tab; rename; localized labels
+      Terminal)
+- [x] Tab menu: rename (opens the host dialog in the main window) and a
+      confirmation before a batch close would close a tab that holds other
+      panes; the menu asks the main window, whose dialogs it uses
 - [ ] Non-SSH sessions via plink: `.nt.toml` storage in the same tree,
       plink located (bundled or installed PuTTY), shim runs plink as a
       child with the session's code page (UTF-8 default, GBK etc.),
