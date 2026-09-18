@@ -134,6 +134,11 @@ pub struct App {
     editor: Editor,
     view: TreeView,
     send_line: SendLine,
+    /// The recent hosts, read from `state.db` at most every 2 s (the tree
+    /// asks on every frame, and scrolling draws many).
+    recent_cache: std::cell::RefCell<(Option<std::time::Instant>, Vec<String>)>,
+    /// Hosts of folders marked "No group send", per tree generation.
+    no_group_cache: std::cell::RefCell<(u64, std::collections::HashSet<String>)>,
     dialog: Option<Dialog>,
     profile: ProfileSetup,
     show_settings: bool,
@@ -239,6 +244,8 @@ impl App {
             ssh_dir: options.ssh_dir,
             view: TreeView::default(),
             send_line: SendLine::default(),
+            recent_cache: std::cell::RefCell::new((None, Vec::new())),
+            no_group_cache: std::cell::RefCell::new((u64::MAX, std::collections::HashSet::new())),
             dialog: None,
             profile,
             show_settings: false,
@@ -270,12 +277,19 @@ impl App {
     }
 
     fn recent(&self) -> Vec<String> {
-        self.core
-            .as_ref()
-            .and_then(|c| c.registry())
-            .and_then(|r| r.recent(20).ok())
-            .map(|list| list.into_iter().map(|u| u.alias).collect())
-            .unwrap_or_default()
+        const FRESH: std::time::Duration = std::time::Duration::from_secs(2);
+        let mut cache = self.recent_cache.borrow_mut();
+        if cache.0.is_none_or(|at| at.elapsed() >= FRESH) {
+            let list = self
+                .core
+                .as_ref()
+                .and_then(|c| c.registry())
+                .and_then(|r| r.recent(20).ok())
+                .map(|list| list.into_iter().map(|u| u.alias).collect())
+                .unwrap_or_default();
+            *cache = (Some(std::time::Instant::now()), list);
+        }
+        cache.1.clone()
     }
 
     /// A serial line can be held by one session only: requests for a line
@@ -318,7 +332,12 @@ impl App {
 
     /// Hosts in folders marked "No group send".
     fn no_group_send(&self) -> std::collections::HashSet<String> {
-        self.tree.hosts().filter(|(f, _)| f.no_group_send()).map(|(_, h)| h.alias().to_string()).collect()
+        let mut cache = self.no_group_cache.borrow_mut();
+        if cache.0 != self.generation {
+            let hosts = self.tree.hosts().filter(|(f, _)| f.no_group_send()).map(|(_, h)| h.alias().to_string()).collect();
+            *cache = (self.generation, hosts);
+        }
+        cache.1.clone()
     }
 
     /// A folder's tab color and color scheme defaults.

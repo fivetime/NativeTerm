@@ -3073,6 +3073,14 @@ All UI surfaces invoke one shared app-level command layer
     (≈ 20 % of one core while the wheel turns: egui spreads each notch
     over several frames, and each frame redraws the scrolled panel).
     Idle, typing and clicking stay cheap, and memory is ~55 MB lower.
+  - **Debug builds.** Unoptimized, the rasterizer took 131 ms for the
+    tree's part of a 480×900 window at 200 % (3.8 ms optimized), so a
+    debug build scrolled a tree of 735 hosts at a few frames per second.
+    `[profile.dev.package."*"] opt-level = 3` in the workspace
+    `Cargo.toml` optimizes dependencies in debug builds too (our crates
+    stay debuggable): ~5.5 ms per frame. The tree also builds a host's
+    tooltip only while it shows, and the recent list (`state.db`) is read
+    at most every 2 s instead of on every frame.
   - **Rules in the runner.** The window starts hidden and is shown
     after the first frame (AccessKit must be set up before it is
     visible; a hidden window gets no redraw, so the first frame is
@@ -3103,7 +3111,10 @@ All UI surfaces invoke one shared app-level command layer
     Ctrl+Shift adds them); right-clicking a selected host then offers
     "Connect These N" (through the connection queue), in a new window,
     and "Install My Key on These N"; right-clicking outside the
-    selection selects that host alone.
+    selection selects that host alone. A click opens or closes a folder;
+    the second click of a double click is ignored (it closed the folder
+    that had just been opened, which looked like the tree collapsing by
+    itself).
 - **Windows 11 materials**: Mica/Acrylic backdrops via the
   `window-vibrancy` crate on a transparent window; rounded corners for
   borderless windows (drawer, FAB) via `DwmSetWindowAttribute`

@@ -23,3 +23,10 @@ repository = "https://github.com/fivetime/NativeTerm"
 [profile.release]
 lto = true
 strip = true
+
+# Dependencies are optimized in debug builds too: the CPU renderer
+# (egui_software_backend) rasterized a 480x900 part of the window at 200 %
+# in 131 ms unoptimized, 3.8 ms optimized, so a debug build scrolled at a
+# few frames per second. Our own crates stay unoptimized for debugging.
+[profile.dev.package."*"]
+opt-level = 3

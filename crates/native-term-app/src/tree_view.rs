@@ -539,7 +539,9 @@ impl TreeView {
                             indent: *depth as f32 * INDENT,
                         };
                         let response = draw_row(ui, row_height, &text, look);
-                        if response.clicked() {
+                        // a double click (Explorer's way to open) reports two
+                        // clicks: the second would close the folder again
+                        if response.clicked() && !response.double_clicked() {
                             toggle = Some((path.clone(), !*open));
                         }
                         let own = folder.and_then(|i| folders.get(i)).map(|f| (f.file.clone(), f.name.is_empty()));
@@ -662,7 +664,10 @@ impl TreeView {
                             weak: false,
                             indent: *depth as f32 * INDENT,
                         };
-                        let response = draw_row(ui, row_height, &text, look).on_hover_text(hover(folders[*folder], host));
+                        // the tooltip's text only while it shows, not for every row on every frame
+                        let response = draw_row(ui, row_height, &text, look).on_hover_ui(|ui| {
+                            ui.label(hover(folders[*folder], host));
+                        });
                         if response.clicked() {
                             click = Some((index, alias.to_string()));
                         }
