@@ -375,17 +375,21 @@ Therefore NativeTerm provides its own menus:
        fires for every caret and cursor move on the desktop. The core's
        debounce waits until the events stop (up to 20 × 150 ms), so a
        drag produces one scan at the end.
-     - Painting is GDI in this version (Segoe UI, Segoe Fluent Icons or
-       Segoe MDL2 Assets on Windows 10), with DWM rounded corners, border
-       color and shadow on Windows 11. The theme (`theme::look`) is read
+     - Painting is Direct2D with DirectWrite text (`menu_draw`): Segoe UI
+       with DirectWrite's font fallback (CJK in the user's locale, color
+       emoji through `ENABLE_COLOR_FONT`), icons from Segoe Fluent Icons
+       or Segoe MDL2 Assets on Windows 10; a DC render target draws into
+       the popup's paint DC in software (no GPU needed), in physical
+       pixels; measuring uses `IDWriteTextLayout`. DWM gives the rounded
+       corners, border color and shadow on Windows 11. The theme (`theme::look`) is read
        from the owning install's settings on every open; high contrast
        and text size apply as described above. The Terminal theme from
        `settings.json` is cached by the file's time and size (parsing it
        was the slow part); the Windows theme, high contrast and text size
        are read on every open (registry and `SystemParametersInfo`,
        microseconds). Acrylic was decided against: Terminal's own menus
-       are solid in both themes. Direct2D and Windows 10's own rounded
-       shape are still open (ROADMAP).
+       are solid in both themes. Windows 10's own rounded shape is
+       still open (ROADMAP).
      - Highlight: Up/Down move over enabled items only. A mouse move
        changes the highlight only over an item, and leaving the popup
        clears only a highlight the mouse set, so the keyboard highlight

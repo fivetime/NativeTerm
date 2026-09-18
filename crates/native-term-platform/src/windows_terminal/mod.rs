@@ -7,6 +7,7 @@ pub mod install;
 pub mod jsonc;
 pub mod launch;
 pub mod menu;
+mod menu_draw;
 pub mod profile;
 pub mod sources;
 pub mod theme;

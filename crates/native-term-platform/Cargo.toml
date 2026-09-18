@@ -14,7 +14,12 @@ windows-core = "0.62.2"
 # the version uiautomation uses, so raw interfaces are interchangeable
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
     "Win32_Security",
     "Win32_Storage_Packaging_Appx",

@@ -308,8 +308,8 @@
       file changes (reading it was the slow part of opening the menu)
 - [x] Tab menu: acrylic decided against (Terminal's own menus are solid in
       both themes; GDI can't draw it anyway)
-- [ ] Tab menu, rest: Direct2D/DirectWrite rendering (color emoji, font
-      fallback)
+- [x] Tab menu drawn with Direct2D/DirectWrite (font fallback, color emoji;
+      a DC render target in software, so no GPU needed)
 - [ ] Tab menu: Windows 10's own rounded shape (layered window) — needs a
       Windows 10 machine to verify
 - Moved to Phase 2: a right-click on a NativeTerm tab whose rectangle is

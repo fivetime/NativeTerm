@@ -8,27 +8,27 @@
 //!   only while they are current: after a change notification it lets
 //!   clicks through until the next scan. It is installed only while
 //!   NativeTerm has tabs.
-//! - The popup is custom-drawn like a WinUI menu flyout, follows the
-//!   Terminal's theme, and never activates (the Terminal keeps focus). A
-//!   keyboard hook handles Up/Down/Enter/Esc while it is open.
+//! - The popup is custom-drawn like a WinUI menu flyout (Direct2D and
+//!   DirectWrite, see `menu_draw`), follows the Terminal's theme, and
+//!   never activates (the Terminal keeps focus). A keyboard hook handles
+//!   Up/Down/Enter/Esc while it is open.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
 };
+use windows::Win32::Graphics::DirectWrite::IDWriteTextFormat;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreateSolidBrush, DeleteDC,
-    DeleteObject, DrawTextW, EndPaint, FillRect, GetDC, GetMonitorInfoW, GetStockObject, GetTextExtentPoint32W,
-    InvalidateRect, MonitorFromPoint, ReleaseDC, RoundRect, SelectObject, SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
-    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DT_LEFT, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_NORMAL, HFONT,
-    MONITORINFO, MONITOR_DEFAULTTONEAREST, NULL_PEN, OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
+    BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -48,6 +48,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
+use super::menu_draw::Painter;
 use super::theme::{self, Look};
 use crate::Rect;
 
@@ -235,8 +236,8 @@ struct Menu {
     scale: f32,
     look: Look,
     size: SIZE,
-    text_font: HFONT,
-    icon_font: HFONT,
+    text_format: IDWriteTextFormat,
+    icon_format: IDWriteTextFormat,
     /// (top, bottom) per entry, physical pixels.
     rows: Vec<(i32, i32)>,
 }
@@ -394,39 +395,29 @@ fn sync_hooks() {
     });
 }
 
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
+thread_local! {
+    /// Direct2D and DirectWrite, made on the menu thread when first needed.
+    static PAINTER: RefCell<Option<Rc<Painter>>> = const { RefCell::new(None) };
 }
 
-fn font(px: i32, face: PCWSTR) -> HFONT {
-    unsafe {
-        CreateFontW(
-            -px,
-            0,
-            0,
-            0,
-            FW_NORMAL.0 as i32,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY,
-            0,
-            face,
-        )
-    }
+fn painter() -> Option<Rc<Painter>> {
+    PAINTER.with(|p| {
+        let mut p = p.borrow_mut();
+        if p.is_none() {
+            *p = Painter::new().ok().map(Rc::new);
+        }
+        p.clone()
+    })
 }
 
-fn icon_face() -> PCWSTR {
+fn icon_face() -> &'static str {
     // Windows 11 has Segoe Fluent Icons; Windows 10 the same code points in
     // Segoe MDL2 Assets
     let fonts = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     if fonts.join(r"Fonts\SegoeIcons.ttf").exists() {
-        w!("Segoe Fluent Icons")
+        "Segoe Fluent Icons"
     } else {
-        w!("Segoe MDL2 Assets")
+        "Segoe MDL2 Assets"
     }
 }
 
@@ -444,12 +435,14 @@ fn open_menu(tab: MenuTab, pt: POINT) {
         let px = |v: f32| (v * scale).round() as i32;
         let look = theme::look(&s.settings);
         let ts = look.text_scale;
-        let text_font = font(px(14.0 * ts), w!("Segoe UI"));
-        let icon_font = font(px(16.0), icon_face());
+        let Some(painter) = painter() else { return };
+        let (Ok(text_format), Ok(icon_format)) =
+            (painter.format("Segoe UI", px(14.0 * ts) as f32), painter.format(icon_face(), px(16.0) as f32))
+        else {
+            return;
+        };
 
         // measure
-        let hdc = GetDC(None);
-        let old = SelectObject(hdc, text_font.into());
         let mut text_w = 0;
         for entry in &entries {
             let (text, x) = match entry {
@@ -457,12 +450,8 @@ fn open_menu(tab: MenuTab, pt: POINT) {
                 Entry::Header(text) => (text, px(ICON_X)),
                 Entry::Separator => continue,
             };
-            let mut size = SIZE::default();
-            let _ = GetTextExtentPoint32W(hdc, &wide(text), &mut size);
-            text_w = text_w.max(x + size.cx);
+            text_w = text_w.max(x + painter.width(&text_format, text).ceil() as i32);
         }
-        SelectObject(hdc, old);
-        ReleaseDC(None, hdc);
 
         let mut rows = Vec::new();
         let mut y = px(PAD_V);
@@ -525,8 +514,8 @@ fn open_menu(tab: MenuTab, pt: POINT) {
                 scale,
                 look,
                 size,
-                text_font,
-                icon_font,
+                text_format,
+                icon_format,
                 rows,
             })
         });
@@ -545,8 +534,6 @@ fn close_menu() -> Option<Menu> {
     }
     unsafe {
         let _ = DestroyWindow(menu.popup);
-        let _ = DeleteObject(menu.text_font.into());
-        let _ = DeleteObject(menu.icon_font.into());
     }
     Some(menu)
 }
@@ -623,77 +610,40 @@ fn paint(hwnd: HWND) {
         let Some(menu) = menu.as_ref() else { return };
         let colors = &menu.look.palette;
         let px = |v: f32| (v * menu.scale).round() as i32;
+        let (w, h) = (menu.size.cx, menu.size.cy);
         unsafe {
             let mut ps = PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
-            let (w, h) = (menu.size.cx, menu.size.cy);
-            let mem = CreateCompatibleDC(Some(hdc));
-            let bmp = CreateCompatibleBitmap(hdc, w, h);
-            let old_bmp = SelectObject(mem, bmp.into());
-
-            let background = CreateSolidBrush(colors.background);
-            FillRect(mem, &RECT { left: 0, top: 0, right: w, bottom: h }, background);
-            SetBkMode(mem, TRANSPARENT);
-            let flags = DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX;
-            let old_font = SelectObject(mem, menu.text_font.into());
-
-            for (n, (entry, (top, bottom))) in menu.entries.iter().zip(&menu.rows).enumerate() {
-                match entry {
-                    Entry::Separator => {
-                        let mid = (top + bottom) / 2;
-                        let line = CreateSolidBrush(colors.separator);
-                        FillRect(mem, &RECT { left: 0, top: mid, right: w, bottom: mid + px(1.0).max(1) }, line);
-                        let _ = DeleteObject(line.into());
-                    }
-                    Entry::Header(text) => {
-                        SetTextColor(mem, colors.dim);
-                        SelectObject(mem, menu.text_font.into());
-                        let mut text = wide(text);
-                        let mut r = RECT { left: px(ICON_X), top: *top, right: w, bottom: *bottom };
-                        DrawTextW(mem, &mut text, &mut r, flags);
-                    }
-                    Entry::Action { glyph, text, enabled, .. } => {
-                        let hovered = *enabled && menu.hover == Some(n);
-                        if hovered {
-                            let brush = CreateSolidBrush(colors.hover);
-                            let old_brush = SelectObject(mem, brush.into());
-                            let old_pen = SelectObject(mem, GetStockObject(NULL_PEN));
-                            let _ = RoundRect(
-                                mem,
-                                px(ROW_INSET),
-                                top + px(2.0),
-                                w - px(ROW_INSET) + 1,
-                                bottom - px(2.0) + 1,
-                                px(8.0),
-                                px(8.0),
-                            );
-                            SelectObject(mem, old_pen);
-                            SelectObject(mem, old_brush);
-                            let _ = DeleteObject(brush.into());
+            if let Some(painter) = painter() {
+                let _ = painter.paint(hdc, w, h, colors.background, |canvas| {
+                    for (n, (entry, (top, bottom))) in menu.entries.iter().zip(&menu.rows).enumerate() {
+                        let (top, bottom) = (*top, *bottom);
+                        match entry {
+                            Entry::Separator => {
+                                let mid = (top + bottom) / 2;
+                                canvas.fill(0, mid, w, mid + px(1.0).max(1), colors.separator);
+                            }
+                            Entry::Header(text) => {
+                                canvas.text(&menu.text_format, text, px(ICON_X), top, w, bottom, colors.dim);
+                            }
+                            Entry::Action { glyph, text, enabled, .. } => {
+                                let hovered = *enabled && menu.hover == Some(n);
+                                if hovered {
+                                    let (left, right) = (px(ROW_INSET), w - px(ROW_INSET));
+                                    canvas.fill_rounded(left, top + px(2.0), right, bottom - px(2.0), px(4.0) as f32, colors.hover);
+                                }
+                                let color = match (enabled, hovered) {
+                                    (false, _) => colors.dim,
+                                    (true, true) => colors.hover_text,
+                                    (true, false) => colors.text,
+                                };
+                                canvas.text(&menu.icon_format, &glyph.to_string(), px(ICON_X), top, px(TEXT_X), bottom, color);
+                                canvas.text(&menu.text_format, text, px(TEXT_X), top, w, bottom, color);
+                            }
                         }
-                        let color = match (enabled, hovered) {
-                            (false, _) => colors.dim,
-                            (true, true) => colors.hover_text,
-                            (true, false) => colors.text,
-                        };
-                        SetTextColor(mem, color);
-                        SelectObject(mem, menu.icon_font.into());
-                        let mut icon = wide(&glyph.to_string());
-                        let mut r = RECT { left: px(ICON_X), top: *top, right: px(TEXT_X), bottom: *bottom };
-                        DrawTextW(mem, &mut icon, &mut r, flags);
-                        SelectObject(mem, menu.text_font.into());
-                        let mut label = wide(text);
-                        let mut r = RECT { left: px(TEXT_X), top: *top, right: w, bottom: *bottom };
-                        DrawTextW(mem, &mut label, &mut r, flags);
                     }
-                }
+                });
             }
-            SelectObject(mem, old_font);
-            let _ = BitBlt(hdc, 0, 0, w, h, Some(mem), 0, 0, SRCCOPY);
-            let _ = DeleteObject(background.into());
-            SelectObject(mem, old_bmp);
-            let _ = DeleteObject(bmp.into());
-            let _ = DeleteDC(mem);
             let _ = EndPaint(hwnd, &ps);
         }
     });
