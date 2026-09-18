@@ -590,7 +590,11 @@ focused, right after NativeTerm starts. NativeTerm knows how many exist
 (registered shims minus claimed tabs) and shows them as such. They are
 located as soon as their tab gets selected: the selection event triggers
 a rescan, and rule 2 applies. NativeTerm never cycles through tabs on its
-own to find them; a "Locate" command does that on request. A tab item
+own to find them; a "Locate" command does that on request (implemented:
+the sessions panel offers it while sessions are unlocated; it selects
+each unclaimed tab, rescans after 250 ms, stops as soon as every session
+is found, and selects the tabs that were selected before; it says how
+many tabs it looked at, or how many sessions are still missing). A tab item
 exposes nothing beyond its name and rectangle (all UIA properties were
 dumped), so an unselected split tab can't be identified any other way.
 Two things narrow it down:

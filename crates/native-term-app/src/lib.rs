@@ -47,6 +47,8 @@ const CONFIRM: Duration = Duration::from_secs(15);
 /// Sessions from `state.db` whose shim doesn't turn up by then are gone
 /// (their window was closed while NativeTerm wasn't running).
 pub const DETACHED_GRACE: Duration = Duration::from_secs(12);
+/// After selecting a tab, its panes are read a moment later ("Locate").
+const LOCATE_SETTLE: Duration = Duration::from_millis(250);
 /// Restored placeholders arrive one by one; replace them together.
 const REPLACE_GATHER: Duration = Duration::from_millis(1500);
 /// A session that reported closing is "closed with its window" if the
@@ -134,6 +136,9 @@ pub struct SessionView {
     /// The host's name in the tree when it was renamed after the tab
     /// opened (the tab keeps its title; clones and new tabs use this).
     pub renamed_to: Option<String>,
+    /// Where the tab was when NativeTerm last saw it (window, tab), for
+    /// sessions it hasn't found again.
+    pub last_position: Option<(usize, usize)>,
 }
 
 pub(crate) struct Session {
@@ -162,6 +167,8 @@ pub(crate) struct Session {
     /// When the current connection logged in.
     connected_at: Option<Instant>,
     locked: bool,
+    /// Window number and tab index from `state.db`.
+    last_position: Option<(usize, usize)>,
 }
 
 impl Session {
@@ -184,6 +191,7 @@ impl Session {
             connected_at: None,
             on_login: None,
             locked: false,
+            last_position: None,
         }
     }
 
@@ -201,6 +209,7 @@ impl Session {
                 .then_some(self.auto_retries),
             locked: self.locked,
             renamed_to: None,
+            last_position: self.last_position,
         }
     }
 
@@ -370,6 +379,7 @@ impl Core {
                 s.current_terminal_session = r.current_terminal_session;
                 s.no_forwards = r.no_forwards;
                 s.locked = r.locked;
+                s.last_position = r.window_number.zip(r.tab_index).map(|(w, t)| (w as usize, t as usize));
                 s
             };
             match registry.open_sessions() {
@@ -615,6 +625,61 @@ impl Core {
             }
         });
         ids
+    }
+
+    /// Sessions whose tab NativeTerm hasn't found (a split tab that isn't
+    /// selected shows no pane titles, for example).
+    pub fn unlocated(&self) -> usize {
+        lock(&self.shared.sessions).iter().filter(|s| s.state.is_open() && s.link.is_some() && s.location.is_none()).count()
+    }
+
+    /// Look for them: only the selected tab shows its panes, so each
+    /// unclaimed tab is selected once, until every session is found. The
+    /// selection is put back afterwards. Never done on its own.
+    pub fn locate(&self) {
+        let shared = Arc::clone(&self.shared);
+        let core = self.clone();
+        std::thread::spawn(move || {
+            if core.unlocated() == 0 {
+                return;
+            }
+            let snapshot = refresh(&shared);
+            if core.unlocated() == 0 {
+                return;
+            }
+            let mut selected = Vec::new();
+            let mut candidates = Vec::new();
+            for window in &snapshot.windows {
+                if let Some(tab) = window.tabs.iter().find(|t| t.selected) {
+                    selected.push((window.handle, tab.clone()));
+                }
+                for tab in window.tabs.iter().filter(|t| t.claim.is_none() && !t.selected) {
+                    candidates.push((window.handle, tab.clone()));
+                }
+            }
+            let mut looked_at = 0;
+            for (window, tab) in candidates {
+                if core.unlocated() == 0 {
+                    break;
+                }
+                if shared.terminal.select(window, &tab).is_err() {
+                    continue;
+                }
+                looked_at += 1;
+                std::thread::sleep(LOCATE_SETTLE);
+                refresh(&shared);
+            }
+            for (window, tab) in selected {
+                let _ = shared.terminal.select(window, &tab);
+            }
+            refresh(&shared);
+            let left = core.unlocated();
+            shared.notice(if left == 0 {
+                t!("notice-located", count = looked_at)
+            } else {
+                t!("notice-still-unlocated", count = left)
+            });
+        });
     }
 
     /// Bring the session's tab to the front.

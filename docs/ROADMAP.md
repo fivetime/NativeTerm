@@ -272,8 +272,9 @@
       waiting tabs in their original order (see Phase 0, restarts)
 - [x] Restored sessions: "Connect all" (paced) / "Close all" in the
       sessions panel, single ones from their row
-- [ ] Recovery (rest): unlocated sessions with position hints and
-      "Locate"
+- [x] Recovery (rest): unlocated sessions show where their tab last was
+      (from `state.db`), and "Locate" selects the unclaimed tabs one by
+      one until every session is found, then puts the selection back
 - [x] Tab menu: "Clear Screen and Scrollback" (after login the shim
       clears the tab, then types Ctrl+L so the remote side redraws on an
       empty screen; before login only the scrollback; see PROTOTYPES.md)

@@ -256,6 +256,7 @@ mod tests {
             auto_retry: None,
             locked: false,
             renamed_to: None,
+            last_position: None,
         }
     }
 

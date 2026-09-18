@@ -630,6 +630,10 @@ impl App {
             if ui.small_button(t!("sessions-clear-finished")).clicked() {
                 core.clear_finished();
             }
+            let unlocated = core.unlocated();
+            if unlocated > 0 && ui.small_button(t!("sessions-locate", count = unlocated)).on_hover_text(t!("sessions-locate-hint")).clicked() {
+                core.locate();
+            }
             let logged_in = sessions.iter().filter(|s| s.state == State::Connected).count();
             if ui.add_enabled(logged_in > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked() && self.dialog.is_none() {
                 self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[], &self.data_dir))));
@@ -844,7 +848,14 @@ fn session_card(
                     }
                 }
                 None if s.state.is_open() => {
-                    ui.weak(t!("session-not-located"));
+                    let text = match s.last_position {
+                        Some((window, tab)) => {
+                            let tab = tab + 1;
+                            t!("session-not-located-hint", window = window, tab = tab)
+                        }
+                        None => t!("session-not-located"),
+                    };
+                    ui.weak(text);
                 }
                 None => {}
             }
