@@ -59,7 +59,7 @@ pub fn custom_ssh_dir() -> Option<PathBuf> {
 }
 
 /// `--ssh-dir`, `NATIVETERM_SSH_DIR` (tests), or `~/.ssh`.
-fn ssh_dir() -> PathBuf {
+pub fn ssh_dir() -> PathBuf {
     if let Some(dir) = custom_ssh_dir() {
         return dir;
     }

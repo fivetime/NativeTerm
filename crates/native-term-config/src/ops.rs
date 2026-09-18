@@ -17,6 +17,7 @@ use crate::effective;
 use crate::folder_options;
 use crate::header;
 use crate::options;
+use crate::persistent;
 use crate::plink::{self, PlinkSession};
 use crate::securecrt::{self, Plan};
 use crate::tree::{HostEntry, SessionTree, FOLDER_DEFAULTS_HOST};
@@ -36,6 +37,9 @@ pub struct HostDraft {
     pub note: Option<String>,
     /// Typed after every login (`NativeTermOnLogin`), one line.
     pub on_login: Option<String>,
+    /// The host's own `NativeTermPersistent` (`tmux`, `screen`, `off`);
+    /// `None` follows the folder.
+    pub persistent: Option<String>,
 }
 
 impl HostDraft {
@@ -49,6 +53,7 @@ impl HostDraft {
             identity_files: host.identity_files.clone(),
             note: host.nt.get("note").map(str::to_string),
             on_login: host.nt.get("onlogin").map(str::to_string),
+            persistent: host.nt.get(persistent::KEY).map(str::to_string),
         }
     }
 
@@ -74,6 +79,11 @@ impl HostDraft {
         }
         if self.on_login.as_deref().is_some_and(|n| n.contains(['\r', '\n'])) {
             return Err(EditError::Invalid("the login command must be one line".into()));
+        }
+        if let Some(p) = &self.persistent {
+            if !matches!(p.as_str(), "tmux" | "screen" | "off") {
+                return Err(EditError::Invalid(format!("persistent session {p:?}: tmux, screen or off")));
+            }
         }
         if self.port == Some(0) {
             return Err(EditError::Invalid("port 0".into()));
@@ -416,6 +426,36 @@ impl Editor {
         Ok(())
     }
 
+    /// Persistent sessions for every host in a folder file that has no
+    /// setting of its own (`tmux`, `screen`; `None` removes the default).
+    pub fn set_folder_persistent(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
+        if value.is_some_and(|v| !matches!(v, "tmux" | "screen")) {
+            return Err(EditError::Invalid(format!("persistent sessions {value:?}: tmux or screen")));
+        }
+        if file == self.main_config() {
+            return Err(EditError::Invalid("the main config has no folder settings".into()));
+        }
+        let stem = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        edit_file(
+            &self.writer,
+            file,
+            |doc| {
+                let block = match doc.find_host_block(FOLDER_DEFAULTS_HOST) {
+                    Some(block) => block,
+                    None if value.is_none() => return,
+                    None => {
+                        prepend_folder_block(doc, &stem);
+                        let Some(block) = doc.find_host_block(FOLDER_DEFAULTS_HOST) else { return };
+                        block
+                    }
+                };
+                set_or_remove(doc, block, "NativeTermPersistent", value);
+            },
+            || self.validate(PARSE_CHECK_HOST, None),
+        )?;
+        Ok(())
+    }
+
     /// Add a host to `file` (a folder file, or the main config). Returns
     /// the new alias.
     pub fn create_host(&self, tree: &SessionTree, file: &Path, draft: &HostDraft) -> Result<String, EditError> {
@@ -469,6 +509,7 @@ impl Editor {
                 set_or_remove(doc, block, "NativeTermLabel", (label != alias).then_some(label));
                 set_or_remove(doc, block, "NativeTermNote", draft.note.as_deref().filter(|n| !n.trim().is_empty()));
                 set_or_remove(doc, block, "NativeTermOnLogin", draft.on_login.as_deref().filter(|n| !n.trim().is_empty()));
+                set_or_remove(doc, block, "NativeTermPersistent", draft.persistent.as_deref());
             },
             || self.validate(&alias, Some(draft.hostname.trim())),
         )?;
@@ -966,6 +1007,9 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
     if let Some(command) = draft.on_login.as_deref().filter(|n| !n.trim().is_empty()) {
         entries.push(("NativeTermOnLogin", command.to_string()));
     }
+    if let Some(persistent) = &draft.persistent {
+        entries.push(("NativeTermPersistent", persistent.clone()));
+    }
     if let Some(id) = id {
         entries.push(("NativeTermId", id.to_string()));
     }
@@ -1290,6 +1334,44 @@ mod tests {
 
         editor.rename_folder(&folder, "Ceph").unwrap();
         assert_eq!(tree(&editor).folders().find(|f| f.file == folder).unwrap().label(), "Ceph");
+    }
+
+    /// `NativeTermPersistent`: a folder default reaches its hosts, a host's
+    /// own value (including `off`) wins, and ssh accepts the file.
+    #[test]
+    fn persistent_sessions_per_folder_and_host() {
+        use crate::persistent::{for_host, Persistence};
+        let Some((_home, editor)) = setup() else { return };
+        let prod = editor.create_folder("生产").unwrap();
+        editor.create_host(&tree(&editor), &prod, &draft("web", "10.0.0.1")).unwrap();
+        let mut own = draft("db", "10.0.0.2");
+        own.persistent = Some("off".into());
+        editor.create_host(&tree(&editor), &prod, &own).unwrap();
+        let setting = |alias: &str| {
+            let t = tree(&editor);
+            let (folder, host) = t.find(alias).unwrap();
+            for_host(folder, host)
+        };
+        assert_eq!(setting("web"), None);
+
+        editor.set_folder_persistent(&prod, Some("tmux")).unwrap();
+        assert_eq!(setting("web"), Some(Persistence::Tmux), "the folder default");
+        assert_eq!(setting("db"), None, "the host's own off wins");
+        assert_eq!(tree(&editor).find("web").unwrap().0.label(), "生产", "the folder keeps its name");
+        assert!(editor.effective("web").is_ok(), "ssh ignores the key");
+
+        let web = tree(&editor).find("web").unwrap().1.clone();
+        let mut screen = HostDraft::from_host(&web);
+        screen.persistent = Some("screen".into());
+        editor.update_host(&web, &screen).unwrap();
+        assert_eq!(setting("web"), Some(Persistence::Screen));
+        screen.persistent = Some("mosh".into());
+        assert!(editor.update_host(&web, &screen).is_err());
+
+        editor.set_folder_persistent(&prod, None).unwrap();
+        assert_eq!(setting("web"), Some(Persistence::Screen), "its own value stays");
+        assert!(!std::fs::read_to_string(&prod).unwrap().contains("NativeTermPersistent tmux"));
+        assert!(editor.set_folder_persistent(&editor.main_config(), Some("tmux")).is_err());
     }
 
     #[test]

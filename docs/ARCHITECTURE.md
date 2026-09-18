@@ -2134,7 +2134,7 @@ Opt-in per host or folder (`NativeTermPersistent tmux`). Instead of a
 plain login shell, the tab runs:
 
 ```
-ssh -o RequestTTY=yes -o RemoteCommand="tmux new-session -A -s nt-<session-id>" <host>
+ssh -o RequestTTY=yes -o RemoteCommand="sh -c '… exec tmux new-session -A -s nt-<alias>-<id8> …'" <host>
 ```
 
 `-A` attaches to the tmux session if it already exists, otherwise creates
@@ -2193,16 +2193,42 @@ Costs and caveats — why it's opt-in, not default:
   it's missing, fall back to a plain shell and show it in the UI.
 - **Nesting**: if the host's shell profile already starts tmux, don't wrap
   it again.
-- **Naming**: tmux names can't contain `.` or `:`, so names are
-  `nt-<session-id>`, not the label.
+- **Naming**: `nt-<alias>-<first 8 hex digits of the session id>`
+  (`nt-ceph-cluster_osd1-0f3a9c21`): readable in `tmux ls`, stable for the
+  tab's lifetime (reconnects, NativeTerm restarts), new for a new tab.
+  tmux names can't contain `.` or `:`, and ssh expands `%` in
+  `RemoteCommand`, so only letters, digits, `-` and `_` are kept.
 - **Leftovers**: detached sessions accumulate on servers; NativeTerm
   provides "list / kill remote NativeTerm sessions" per host and folder.
 - **Security**: a detached shell stays logged in on the server until
   killed.
 
-`screen` can be supported the same way (`screen -D -R nt-<id>`) for hosts
+`screen` is supported the same way (`screen -D -R -S <name>`) for hosts
 without tmux; `dtach`/`abduco` keep native scrollback but aren't installed
 by default and don't restore screen contents.
+
+Implemented (`native_term_config::persistent`, shim `persistent.rs`):
+
+- **Setting**: `NativeTermPersistent tmux|screen|off` on a host, or
+  `tmux|screen` in the folder's `Host __nativeterm_folder__` block as the
+  default for its hosts; a host's own value wins, so `off` exempts one
+  host from a persistent folder. The host dialog has "Keep on the
+  server" (as the folder / tmux / screen / off); a folder's menu has
+  "Keep sessions on the server" (off / tmux / screen); the host's tooltip
+  shows what applies.
+- **Shim**: read again at every attempt (an edit applies at the next
+  reconnect). Needs the tab's session id (`--session`); a host whose
+  config has its own `RemoteCommand` is left alone with a notice. The
+  tab shows "Kept on the server in tmux (session …)" before ssh starts.
+- **Command**: `sh -c 'if command -v tmux >/dev/null 2>&1; then exec tmux
+  new-session -A -s <name>; fi; echo "<missing>" >&2; exec
+  "${SHELL:-/bin/sh}" -l'`, where `<missing>` is the localized "tmux is
+  not installed on this host: a plain shell, not kept after a
+  disconnect" (quotes, `%` and backslashes removed). Checked that
+  Windows OpenSSH 9.5 and 8.1 pass `-o RemoteCommand=` through verbatim
+  (`ssh -G`).
+- **Not yet**: listing / reopening / killing detached `nt-*` sessions,
+  hiding tmux's status bar, `tmux send-keys` group send, previews.
 
 ## Active session tracking
 

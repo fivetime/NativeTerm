@@ -27,7 +27,7 @@ use crate::Setup;
 const PINNED_SETTING: &str = "dock_pinned";
 
 enum Dialog {
-    Host(HostDialog),
+    Host(Box<HostDialog>),
     Plink(Box<PlinkDialog>),
     Folder(FolderDialog),
     Delete(ConfirmDelete),
@@ -311,6 +311,12 @@ impl App {
             .unwrap_or_else(|| file.display().to_string())
     }
 
+    /// A folder's `NativeTermPersistent` default.
+    fn folder_persistent(&self, file: &Path) -> Option<String> {
+        let folder = self.tree.folders().find(|f| f.file == file)?;
+        folder.defaults.get(native_term_config::persistent::KEY).map(str::to_string)
+    }
+
     fn handle(&mut self, action: TreeAction) {
         match action {
             TreeAction::Open(hosts, target) => {
@@ -350,7 +356,8 @@ impl App {
             }
             TreeAction::NewHost(file) => {
                 let label = self.folder_label(&file);
-                self.dialog = Some(Dialog::Host(HostDialog::new_host(file, &label)));
+                let folder = self.folder_persistent(&file);
+                self.dialog = Some(Dialog::Host(Box::new(HostDialog::new_host(file, &label).with_folder_default(folder))));
             }
             TreeAction::NewPlink(file) => {
                 let label = self.folder_label(&file);
@@ -360,7 +367,10 @@ impl App {
                 if let Some((_, host)) = self.tree.find(&alias) {
                     self.dialog = Some(match &host.plink {
                         Some(session) => Dialog::Plink(Box::new(PlinkDialog::edit(session))),
-                        None => Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))),
+                        None => {
+                            let folder = self.folder_persistent(&host.file);
+                            Dialog::Host(Box::new(HostDialog::edit(&alias, &HostDraft::from_host(host)).with_folder_default(folder)))
+                        }
                     });
                 }
             }
@@ -398,6 +408,12 @@ impl App {
                     }
                     Err(e) => self.notices.push(e.to_string()),
                 }
+            }
+            TreeAction::FolderPersistent(file, value) => {
+                if let Err(e) = self.editor.set_folder_persistent(&file, value.as_deref()) {
+                    self.notices.push(e.to_string());
+                }
+                self.reload();
             }
             TreeAction::Favorite(alias, on) => {
                 let result = match self.tree.find(&alias) {
@@ -617,7 +633,9 @@ impl App {
             }
             MenuRequest::Rename(alias) => match self.tree.find(&alias) {
                 Some((_, host)) => {
-                    self.dialog = Some(Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))));
+                    let folder = self.folder_persistent(&host.file);
+                    let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host)).with_folder_default(folder);
+                    self.dialog = Some(Dialog::Host(Box::new(dialog)));
                 }
                 None => self.notices.push(t!("notice-not-saved", alias = alias.as_str())),
             },
@@ -999,7 +1017,7 @@ impl App {
             };
             let main = self.editor.main_config();
             let folder = self.folder_label(&main);
-            self.dialog = Some(Dialog::Host(HostDialog::new_host_from(main, &folder, &draft)));
+            self.dialog = Some(Dialog::Host(Box::new(HostDialog::new_host_from(main, &folder, &draft))));
         }
     }
 }

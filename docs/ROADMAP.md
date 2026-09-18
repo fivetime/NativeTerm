@@ -422,10 +422,14 @@
 - [ ] Send commands (rest): input line at the bottom of the sidebar;
       `tmux send-keys` fallback for persistent sessions; per-folder "no
       group send"
-- [ ] Persistent sessions via tmux (`NativeTermPersistent`): attach-or-create,
-      via `-o RemoteCommand` (hosts with their own `RemoteCommand` are
-      skipped), `sh -c` wrapper with fallback when tmux is missing, optional hidden
-      status bar, list/reopen/kill remote `nt-*` sessions, `screen` support
+- [x] Persistent sessions via tmux or screen (`NativeTermPersistent`, per
+      host or folder default, `off` per host): attach-or-create via
+      `-o RemoteCommand` (hosts with their own `RemoteCommand` are
+      skipped), `sh -c` wrapper with a plain-shell fallback when the
+      program is missing; host dialog, folder menu, tooltip. Unit and
+      shim tests pass; a live test against a real tmux host is pending
+- [ ] Persistent sessions (rest): list / reopen / kill remote `nt-*`
+      sessions per host and folder, optional hidden status bar
 - [ ] Optional saved passwords (Windows Credential Manager + per-process
       `SSH_ASKPASS=force`, shim as helper): answers only the session's own
       password prompt and handles every other prompt in the console, one

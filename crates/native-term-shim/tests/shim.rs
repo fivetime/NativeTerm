@@ -154,6 +154,60 @@ fn login_failure_is_reported_as_such() {
     assert!(text.contains("Login failed or cancelled"), "{text}");
 }
 
+/// A persistent host (the folder's default): ssh gets a terminal and a
+/// `RemoteCommand` that attaches to (or creates) the tab's own tmux
+/// session, the same name on every attempt; a host set to `off` doesn't.
+#[test]
+fn persistent_hosts_run_inside_tmux() {
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join(".ssh");
+    std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+    std::fs::write(ssh.join("config"), format!("Include {}/config.d/*.conf\n", ssh.display())).unwrap();
+    std::fs::write(
+        ssh.join("config.d").join("lab.conf"),
+        "Host __nativeterm_folder__\n    NativeTermPersistent tmux\n\nHost web01\n    HostName 10.0.0.1\n\n\
+         Host db01\n    HostName 10.0.0.2\n    NativeTermPersistent off\n",
+    )
+    .unwrap();
+    let log = dir.path().join("ssh.log");
+    let run = |alias: &str, session: &str| {
+        let name = pipe_name(&format!("persist-{alias}"));
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let mut shim = spawn_shim(
+            &name,
+            &["--ssh-dir", ssh.to_str().unwrap(), "--session", session, alias],
+            &[("FAKE_SSH_LOG", log.to_str().unwrap()), ("FAKE_SSH_CODE", "255")],
+        );
+        let conn = listener.accept().unwrap();
+        assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+        assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+        assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+        conn.send(&AppMessage::Connect).unwrap();
+        assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 2 });
+        assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+        conn.send(&AppMessage::Close).unwrap();
+        assert_eq!(wait_exit(&mut shim), 0);
+        String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string()
+    };
+
+    let text = run("web01", "0f3a9c21-7d4e-4b8a-9c1d-2e3f4a5b6c7d");
+    assert!(text.contains("Kept on the server in tmux (session nt-web01-0f3a9c21)"), "{text}");
+    let lines = std::fs::read_to_string(&log).unwrap();
+    let connects: Vec<&str> = lines.lines().filter(|l| !l.contains("| -G |")).collect();
+    assert_eq!(connects.len(), 2, "{lines}");
+    for line in &connects {
+        assert!(line.contains("-o | RequestTTY=yes | -o | RemoteCommand=sh -c '"), "{line}");
+        assert!(line.contains("exec tmux new-session -A -s nt-web01-0f3a9c21;"), "the same session each time: {line}");
+        assert!(line.ends_with("| -- | web01"), "{line}");
+    }
+
+    std::fs::remove_file(&log).unwrap();
+    let text = run("db01", "11111111-2222-3333-4444-555555555555");
+    assert!(!text.contains("Kept on the server"), "{text}");
+    let lines = std::fs::read_to_string(&log).unwrap();
+    assert!(!lines.contains("RemoteCommand"), "{lines}");
+}
+
 /// A direct connection (no proxy in `ssh -G`) that never got a TCP
 /// connection up: "could not connect", not a failed login.
 #[test]

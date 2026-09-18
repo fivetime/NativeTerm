@@ -32,6 +32,8 @@ pub enum TreeAction {
     NewFolder,
     RenameFolder(PathBuf),
     FolderOptions(PathBuf),
+    /// The folder's persistent-session default (`tmux`, `screen`, none).
+    FolderPersistent(PathBuf, Option<String>),
     Reload,
 }
 
@@ -563,6 +565,26 @@ impl TreeView {
                                     actions.push(TreeAction::FolderOptions(file.clone()));
                                     ui.close();
                                 }
+                                if !is_main {
+                                    let current = folder
+                                        .and_then(|i| folders.get(i))
+                                        .and_then(|f| f.defaults.get(native_term_config::persistent::KEY))
+                                        .and_then(native_term_config::persistent::parse)
+                                        .map(|p| p.name().to_string());
+                                    ui.menu_button(t!("menu-folder-persistent"), |ui| {
+                                        let choices =
+                                            [(None, t!("persistent-off")), (Some("tmux"), "tmux".into()), (Some("screen"), "screen".into())];
+                                        for (value, text) in choices {
+                                            let value = value.map(str::to_string);
+                                            if ui.radio(current == value, text).clicked() {
+                                                actions.push(TreeAction::FolderPersistent(file.clone(), value));
+                                                ui.close();
+                                            }
+                                        }
+                                    })
+                                    .response
+                                    .on_hover_text(t!("field-persistent-hint"));
+                                }
                             }
                         });
                     }
@@ -588,7 +610,7 @@ impl TreeView {
                             weak: false,
                             indent: *depth as f32 * INDENT,
                         };
-                        let response = draw_row(ui, row_height, &text, look).on_hover_text(hover(host));
+                        let response = draw_row(ui, row_height, &text, look).on_hover_text(hover(folders[*folder], host));
                         if response.clicked() {
                             click = Some((index, alias.to_string()));
                         }
@@ -720,7 +742,7 @@ impl TreeView {
     }
 }
 
-fn hover(host: &HostEntry) -> String {
+fn hover(folder: &Folder, host: &HostEntry) -> String {
     if let Some(session) = &host.plink {
         let mut text = format!("{} · {}", crate::plink_dialog::protocol_text(session.protocol), session.target());
         if let Some(charset) = &session.charset {
@@ -743,6 +765,9 @@ fn hover(host: &HostEntry) -> String {
     }
     if let Some(note) = host.nt.get("note") {
         text.push_str(&format!("\n{note}"));
+    }
+    if let Some(p) = native_term_config::persistent::for_host(folder, host) {
+        text.push_str(&format!("\n{}", t!("host-persistent", program = p.name())));
     }
     text.push_str(&format!("\n{}", t!("host-alias", alias = host.alias())));
     text

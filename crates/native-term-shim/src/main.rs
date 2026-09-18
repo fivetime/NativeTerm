@@ -22,6 +22,7 @@ mod keys;
 mod i18n;
 mod debug;
 mod link;
+mod persistent;
 mod plink;
 mod ssh;
 mod win;
@@ -124,7 +125,7 @@ fn run(session: Option<String>, alias: Option<String>, flags: args::Flags) -> i3
         role: Role::Shim,
         pid: std::process::id(),
         wt_session: wt_session(),
-        session,
+        session: session.clone(),
         alias: alias.clone(),
         terminal_window: win::terminal_window(),
     };
@@ -140,7 +141,7 @@ fn run(session: Option<String>, alias: Option<String>, flags: args::Flags) -> i3
     }
 
     match alias {
-        Some(alias) => run_host(&alias, link.as_ref(), flags),
+        Some(alias) => run_host(&alias, session.as_deref(), link.as_ref(), flags),
         None => run_without_host(link),
     }
 }
@@ -191,7 +192,7 @@ fn start_app() -> bool {
     started
 }
 
-fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
+fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args::Flags) -> i32 {
     if plink::lookup(alias).is_some() {
         return plink::run(alias, link, flags);
     }
@@ -220,7 +221,10 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
         attempt += 1;
         let effective =
             native_term_config::effective::effective_with(&ssh_path, config.as_deref(), alias).unwrap_or_default();
-        let arguments = ssh::arguments(alias, &shim_exe, pid, &effective, flags.no_forwards, config.as_deref());
+        // read again on every attempt: an edit applies at the next connect
+        let remote = persistent::remote_command(alias, session, &effective);
+        let arguments =
+            ssh::arguments(alias, &shim_exe, pid, &effective, flags.no_forwards, config.as_deref(), remote.as_deref());
         if let Some(event) = &auth {
             event.reset();
         }

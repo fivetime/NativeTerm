@@ -27,6 +27,10 @@ pub struct HostDialog {
     identity_files: String,
     note: String,
     on_login: String,
+    /// The host's own `NativeTermPersistent`; `None` follows the folder.
+    persistent: Option<String>,
+    /// The folder's default, shown with "as the folder".
+    folder_persistent: Option<String>,
     pub error: Option<String>,
 }
 
@@ -62,8 +66,16 @@ impl HostDialog {
             identity_files: d.identity_files.join("\n"),
             note: d.note.clone().unwrap_or_default(),
             on_login: d.on_login.clone().unwrap_or_default(),
+            persistent: d.persistent.clone(),
+            folder_persistent: None,
             error: None,
         }
+    }
+
+    /// The folder's `NativeTermPersistent`, for "as the folder (…)".
+    pub fn with_folder_default(mut self, value: Option<String>) -> HostDialog {
+        self.folder_persistent = value;
+        self
     }
 
     fn draft(&self) -> Result<HostDraft, String> {
@@ -82,7 +94,22 @@ impl HostDialog {
             identity_files: self.identity_files.lines().filter_map(opt).collect(),
             note: opt(&self.note),
             on_login: opt(&self.on_login),
+            persistent: self.persistent.clone(),
         })
+    }
+
+    /// The choices for "keep on the server": (stored value, text).
+    fn persistent_choices(&self) -> Vec<(Option<String>, String)> {
+        let folder = match self.folder_persistent.as_deref() {
+            Some(p @ ("tmux" | "screen")) => p.to_string(),
+            _ => t!("persistent-off"),
+        };
+        vec![
+            (None, t!("persistent-folder", value = folder.as_str())),
+            (Some("tmux".into()), "tmux".into()),
+            (Some("screen".into()), "screen".into()),
+            (Some("off".into()), t!("persistent-off")),
+        ]
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<HostDraft> {
@@ -115,6 +142,15 @@ impl HostDialog {
                     ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("field-on-login-hint"));
+                    ui.label(t!("field-persistent")).on_hover_text(t!("field-persistent-hint"));
+                    let choices = self.persistent_choices();
+                    let current = choices.iter().find(|(v, _)| *v == self.persistent).map(|(_, t)| t.clone()).unwrap_or_default();
+                    egui::ComboBox::from_id_salt("host-persistent").selected_text(current).width(280.0).show_ui(ui, |ui| {
+                        for (value, text) in choices {
+                            ui.selectable_value(&mut self.persistent, value, text);
+                        }
+                    });
+                    ui.end_row();
                 });
                 if let Some(alias) = &self.alias {
                     ui.weak(t!("host-alias-kept", alias = alias.as_str()));
