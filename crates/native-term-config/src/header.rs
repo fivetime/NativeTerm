@@ -18,6 +18,26 @@ pub const DEFAULT_INCLUDE: &str = "~/.ssh/config.d/*.conf";
 
 /// Make sure the header is present; returns whether the document changed.
 pub fn ensure(doc: &mut Document, include: &str) -> bool {
+    let (mut changed, ignore_line) = ignore_unknown(doc);
+    let already = global_directive_lines(doc, "Include")
+        .into_iter()
+        .any(|i| doc.lines[i].directive().is_some_and(|d| d.args.iter().any(|a| same_path(a, include))));
+    if !already {
+        doc.insert_line(ignore_line + 1, "Include", include);
+        changed = true;
+    }
+    changed
+}
+
+/// Only the `IgnoreUnknown NativeTerm*` line (before every `Include`):
+/// needed before any `NativeTerm*` key is written, also in a config whose
+/// `Include` lines the user wrote. Returns whether the document changed.
+pub fn ensure_ignore(doc: &mut Document) -> bool {
+    ignore_unknown(doc).0
+}
+
+/// (changed, the `IgnoreUnknown` line).
+fn ignore_unknown(doc: &mut Document) -> (bool, usize) {
     let mut changed = false;
     let global = 0;
     debug_assert_eq!(doc.blocks()[global].kind, BlockKind::Global);
@@ -50,15 +70,7 @@ pub fn ensure(doc: &mut Document, include: &str) -> bool {
             changed = true;
         }
     }
-
-    let already = global_directive_lines(doc, "Include")
-        .into_iter()
-        .any(|i| doc.lines[i].directive().is_some_and(|d| d.args.iter().any(|a| same_path(a, include))));
-    if !already {
-        doc.insert_line(ignore_line + 1, "Include", include);
-        changed = true;
-    }
-    changed
+    (changed, ignore_line)
 }
 
 /// Point NativeTerm's `Include` (the one naming `old`) at `new` instead,

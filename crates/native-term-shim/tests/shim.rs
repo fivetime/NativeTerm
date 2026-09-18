@@ -191,7 +191,7 @@ fn persistent_hosts_run_inside_tmux() {
     };
 
     let text = run("web01", "0f3a9c21-7d4e-4b8a-9c1d-2e3f4a5b6c7d");
-    assert!(text.contains("Kept on the server in tmux (session nt-web01-0f3a9c21)"), "{text}");
+    assert!(text.contains("Attaching to tmux session nt-web01-0f3a9c21 on the server"), "{text}");
     let lines = std::fs::read_to_string(&log).unwrap();
     let connects: Vec<&str> = lines.lines().filter(|l| !l.contains("| -G |")).collect();
     assert_eq!(connects.len(), 2, "{lines}");
@@ -203,7 +203,7 @@ fn persistent_hosts_run_inside_tmux() {
 
     std::fs::remove_file(&log).unwrap();
     let text = run("db01", "11111111-2222-3333-4444-555555555555");
-    assert!(!text.contains("Kept on the server"), "{text}");
+    assert!(!text.contains("Attaching to"), "{text}");
     let lines = std::fs::read_to_string(&log).unwrap();
     assert!(!lines.contains("RemoteCommand"), "{lines}");
 }

@@ -388,6 +388,17 @@ impl Editor {
         Ok(changed)
     }
 
+    /// `IgnoreUnknown NativeTerm*` in the main config, before a
+    /// `NativeTerm*` key is written anywhere: without it ssh rejects the
+    /// key (and the change is rolled back). A config NativeTerm didn't set
+    /// up (hand-written, or older) may lack it.
+    fn ensure_ignore_unknown(&self) -> Result<(), EditError> {
+        edit_file(&self.writer, &self.main_config(), |doc| {
+            header::ensure_ignore(doc);
+        }, || self.validate(PARSE_CHECK_HOST, None))?;
+        Ok(())
+    }
+
     /// A new, empty folder file; returns its path.
     pub fn create_folder(&self, label: &str) -> Result<PathBuf, EditError> {
         let label = label.trim();
@@ -414,6 +425,7 @@ impl Editor {
         if label.is_empty() || label.contains(['\r', '\n']) {
             return Err(EditError::Invalid("the folder name must be one non-empty line".into()));
         }
+        self.ensure_ignore_unknown()?;
         edit_file(
             &self.writer,
             file,
@@ -436,6 +448,7 @@ impl Editor {
             return Err(EditError::Invalid("the main config has no folder settings".into()));
         }
         let stem = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        self.ensure_ignore_unknown()?;
         edit_file(
             &self.writer,
             file,
@@ -467,6 +480,8 @@ impl Editor {
         let refs: Vec<(&str, &str)> = entries.iter().map(|(k, v)| (*k, v.as_str())).collect();
         if file != self.main_config() {
             self.ensure_header()?;
+        } else {
+            self.ensure_ignore_unknown()?;
         }
         edit_file(
             &self.writer,
@@ -489,6 +504,7 @@ impl Editor {
         if Document::parse(&text).find_host_block(&alias).is_none() {
             return Err(EditError::NotFound(format!("host {alias} in {}", host.file.display())));
         }
+        self.ensure_ignore_unknown()?;
         edit_file(
             &self.writer,
             &host.file,
@@ -621,6 +637,9 @@ impl Editor {
                 named(sessions, &alias)?.favorite = on;
                 Ok(())
             });
+        }
+        if on {
+            self.ensure_ignore_unknown()?;
         }
         edit_file(
             &self.writer,
@@ -1372,6 +1391,34 @@ mod tests {
         assert_eq!(setting("web"), Some(Persistence::Screen), "its own value stays");
         assert!(!std::fs::read_to_string(&prod).unwrap().contains("NativeTermPersistent tmux"));
         assert!(editor.set_folder_persistent(&editor.main_config(), Some("tmux")).is_err());
+    }
+
+    /// A config NativeTerm didn't set up: no `IgnoreUnknown`, the user's own
+    /// `Include`. Writing a `NativeTerm*` key adds `IgnoreUnknown` first
+    /// (ssh rejected the key before, found on the Windows 10 pass), and no
+    /// second `Include`.
+    #[test]
+    fn nativeterm_keys_in_a_hand_written_config() {
+        let Some((_home, editor)) = setup() else { return };
+        let dir = editor.main_config().parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(dir.join("config.d")).unwrap();
+        let lab = dir.join("config.d").join("lab.conf");
+        std::fs::write(&lab, "Host web\n    HostName 10.0.0.1\n").unwrap();
+        crate::acl::restrict_to_owner(&lab).unwrap();
+        let include = format!("Include {}/config.d/*.conf\n", dir.display().to_string().replace('\\', "/"));
+        std::fs::write(editor.main_config(), &include).unwrap();
+        crate::acl::restrict_to_owner(&editor.main_config()).unwrap();
+
+        let web = tree(&editor).find("web").unwrap().1.clone();
+        let mut draft = HostDraft::from_host(&web);
+        draft.persistent = Some("tmux".into());
+        draft.note = Some("lab".into());
+        editor.update_host(&web, &draft).unwrap();
+        let main = std::fs::read_to_string(editor.main_config()).unwrap();
+        assert!(main.starts_with("IgnoreUnknown NativeTerm*"), "{main}");
+        assert_eq!(main.matches("Include").count(), 1, "the user's Include only: {main}");
+        assert!(editor.effective("web").is_ok());
+        editor.set_favorite(&tree(&editor).find("web").unwrap().1.clone(), true).unwrap();
     }
 
     #[test]

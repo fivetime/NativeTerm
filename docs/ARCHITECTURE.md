@@ -2219,7 +2219,7 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
 - **Shim**: read again at every attempt (an edit applies at the next
   reconnect). Needs the tab's session id (`--session`); a host whose
   config has its own `RemoteCommand` is left alone with a notice. The
-  tab shows "Kept on the server in tmux (session …)" before ssh starts.
+  tab shows "Attaching to tmux session … on the server" before ssh starts.
 - **Command**: `sh -c 'if command -v tmux >/dev/null 2>&1; then exec tmux
   new-session -A -s <name>; fi; echo "<missing>" >&2; exec
   "${SHELL:-/bin/sh}" -l'`, where `<missing>` is the localized "tmux is
@@ -2227,8 +2227,25 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
   disconnect" (quotes, `%` and backslashes removed). Checked that
   Windows OpenSSH 9.5 and 8.1 pass `-o RemoteCommand=` through verbatim
   (`ssh -G`).
-- **Not yet**: listing / reopening / killing detached `nt-*` sessions,
-  hiding tmux's status bar, `tmux send-keys` group send, previews.
+- **Windows servers**: their sshd runs `RemoteCommand` with its default
+  shell (`cmd.exe`), where `sh -c` doesn't exist, so a persistent folder
+  holding Windows hosts needs `off` on those hosts.
+- **Verified** against a temporary Ubuntu 24.04 container (tmux 3.4,
+  screen 4.09, bash): from the portable Terminal on Windows 11 and from
+  Terminal 1.24 on Windows 10 (OpenSSH 8.1), a marker exported in the
+  shell survived a disconnect (`tmux ls`: the session stayed, detached)
+  and a killed `ssh.exe`; after the reconnect `echo $NT_MARK` printed it,
+  with the screen intact. The same with screen (`Attached` → `Detached`
+  → same shell). With tmux moved away: the fallback line, a plain shell,
+  nothing kept. Also found there: editing a host of a config NativeTerm
+  hadn't set up failed ("Bad configuration option: nativetermpersistent",
+  rolled back), because only "new host" added `IgnoreUnknown
+  NativeTerm*`; every write of a `NativeTerm*` key now does
+  (`header::ensure_ignore`, without touching the user's `Include` lines).
+- **Not yet**: listing / reopening / killing detached `nt-*` sessions
+  (today a closed tab's session stays on the server, and opening the host
+  again starts a new one), hiding tmux's status bar, `tmux send-keys`
+  group send, previews.
 
 ## Active session tracking
 

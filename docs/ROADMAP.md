@@ -426,10 +426,14 @@
       host or folder default, `off` per host): attach-or-create via
       `-o RemoteCommand` (hosts with their own `RemoteCommand` are
       skipped), `sh -c` wrapper with a plain-shell fallback when the
-      program is missing; host dialog, folder menu, tooltip. Unit and
-      shim tests pass; a live test against a real tmux host is pending
+      program is missing; host dialog, folder menu, tooltip. Verified
+      against a temporary Ubuntu container from Windows 11 and Windows 10
+      (tmux and screen: disconnect / killed ssh, reconnect, same shell;
+      fallback without tmux)
 - [ ] Persistent sessions (rest): list / reopen / kill remote `nt-*`
-      sessions per host and folder, optional hidden status bar
+      sessions per host and folder (a closed tab's session stays on the
+      server; opening the host again starts a new one), optional hidden
+      status bar
 - [ ] Optional saved passwords (Windows Credential Manager + per-process
       `SSH_ASKPASS=force`, shim as helper): answers only the session's own
       password prompt and handles every other prompt in the console, one
