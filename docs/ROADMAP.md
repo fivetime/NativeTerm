@@ -231,7 +231,9 @@
       key creation / "Install my key" on all hosts; where sessions and data
       are kept, with sync advice); shown once (`first_run_done`), again from
       Settings; every button opens the usual dialog or tab
-- [ ] First-run wizard (rest): choosing the data directory; cloud sync
+- [x] First-run wizard: moving the data folder from step 4 (same copy and
+      pointer as Settings)
+- [ ] First-run wizard (rest): cloud sync
 - [x] Unique tab titles (`web01 (2)`); foreign tabs excluded from batch
       operations (tab menu close sets contain NativeTerm sessions only)
 - [x] Rename reconciliation (a host renamed in the tree while its tab is

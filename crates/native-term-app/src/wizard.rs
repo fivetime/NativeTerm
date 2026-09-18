@@ -27,6 +27,8 @@ pub enum WizardAction {
     CreateKey,
     InstallKeys,
     OpenFolder(PathBuf),
+    /// Copy NativeTerm's data to this folder, used from the next start.
+    MoveData(PathBuf),
     /// Finished or skipped: don't show it again.
     Done,
 }
@@ -43,12 +45,17 @@ pub struct Facts<'a> {
     pub public_keys: usize,
     pub ssh_dir: &'a Path,
     pub data_dir: &'a Path,
+    /// The data folder can be changed from here (not set by `--data-dir`
+    /// or the environment).
+    pub data_movable: bool,
     /// Tabs can be opened (the core runs).
     pub can_open_tabs: bool,
 }
 
 pub struct Wizard {
     step: usize,
+    /// Step 4: the new data folder being typed.
+    new_data_dir: String,
     /// `ssh -V`, asked in the background.
     ssh: Arc<Mutex<Option<Result<String, String>>>>,
 }
@@ -96,7 +103,7 @@ impl Wizard {
             *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(result);
             ctx.request_repaint();
         });
-        Wizard { step: 0, ssh }
+        Wizard { step: 0, new_data_dir: String::new(), ssh }
     }
 
     fn step_title(&self) -> String {
@@ -187,7 +194,7 @@ impl Wizard {
         }
     }
 
-    fn data(&self, ui: &mut egui::Ui, facts: &Facts, actions: &mut Vec<WizardAction>) {
+    fn data(&mut self, ui: &mut egui::Ui, facts: &Facts, actions: &mut Vec<WizardAction>) {
         ui.label(t!("wizard-data-intro"));
         for (what, path) in [(t!("wizard-sessions-dir"), facts.ssh_dir), (t!("wizard-data-dir"), facts.data_dir)] {
             ui.horizontal_wrapped(|ui| {
@@ -196,6 +203,18 @@ impl Wizard {
                     actions.push(WizardAction::OpenFolder(path.to_path_buf()));
                 }
             });
+        }
+        if facts.data_movable {
+            ui.horizontal(|ui| {
+                ui.label(t!("wizard-data-move"));
+                ui.add(egui::TextEdit::singleline(&mut self.new_data_dir).hint_text(r"D:\Sync\NativeTerm").desired_width(260.0));
+                let ready = !self.new_data_dir.trim().is_empty();
+                if ui.add_enabled(ready, egui::Button::new(t!("data-dir-move"))).clicked() {
+                    actions.push(WizardAction::MoveData(PathBuf::from(self.new_data_dir.trim())));
+                }
+            });
+        } else {
+            ui.weak(t!("data-dir-fixed"));
         }
         ui.weak(t!("wizard-sync-note"));
     }

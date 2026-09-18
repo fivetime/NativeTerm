@@ -364,32 +364,42 @@ impl App {
         });
         ui.weak(t!("data-dir-move-note"));
         if let Some(new) = chosen {
-            let result = data_dir::check_target(&self.data_dir, &new).and_then(|()| {
-                let core = self.core.as_ref().ok_or_else(|| "state.db isn't open".to_string())?;
-                let copied =
-                    data_dir::copy_data(&self.data_dir, &new, |db| core.copy_state_to(db)).map_err(|e| e.to_string())?;
-                let program_dir = std::env::current_exe()
-                    .ok()
-                    .and_then(|e| e.parent().map(Path::to_path_buf))
-                    .ok_or_else(|| "the program folder isn't known".to_string())?;
-                data_dir::set_pointer(pointer, &program_dir, &new).map_err(|e| e.to_string())?;
-                Ok(copied)
-            });
-            match result {
-                Ok(copied) => {
-                    self.notices.push(t!(
-                        "data-dir-moved",
-                        count = copied,
-                        path = new.display().to_string(),
-                        old = self.data_dir.display().to_string()
-                    ));
-                    done = true;
-                }
-                Err(e) => self.notices.push(t!("data-dir-move-failed", error = e)),
-            }
+            done = self.move_data(&new);
         }
         if done {
             self.data_move = None;
+        }
+    }
+
+    /// Copy the data to `new` and point the next start at it; says how it
+    /// went in a notice. `true` when it worked.
+    fn move_data(&mut self, new: &Path) -> bool {
+        use native_term_app::data_dir;
+        let pointer = data_dir::pointer_for(self.data_source);
+        let result = data_dir::check_target(&self.data_dir, new).and_then(|()| {
+            let core = self.core.as_ref().ok_or_else(|| "state.db isn't open".to_string())?;
+            let copied = data_dir::copy_data(&self.data_dir, new, |db| core.copy_state_to(db)).map_err(|e| e.to_string())?;
+            let program_dir = std::env::current_exe()
+                .ok()
+                .and_then(|e| e.parent().map(Path::to_path_buf))
+                .ok_or_else(|| "the program folder isn't known".to_string())?;
+            data_dir::set_pointer(pointer, &program_dir, new).map_err(|e| e.to_string())?;
+            Ok(copied)
+        });
+        match result {
+            Ok(copied) => {
+                self.notices.push(t!(
+                    "data-dir-moved",
+                    count = copied,
+                    path = new.display().to_string(),
+                    old = self.data_dir.display().to_string()
+                ));
+                true
+            }
+            Err(e) => {
+                self.notices.push(t!("data-dir-move-failed", error = e));
+                false
+            }
         }
     }
 
@@ -447,6 +457,8 @@ impl App {
             public_keys: crate::key_dialog::public_keys(&self.ssh_dir).len(),
             ssh_dir: &self.ssh_dir,
             data_dir: &self.data_dir,
+            data_movable: native_term_app::data_dir::pointer_for(self.data_source)
+                != native_term_app::data_dir::Pointer::Fixed,
             can_open_tabs: self.core.is_some(),
         };
         let actions = wizard.show(ctx, &facts);
@@ -479,6 +491,9 @@ impl App {
                     if !hosts.is_empty() {
                         self.dialog = Some(Dialog::Key(Box::new(KeyDialog::new(hosts, &self.ssh_dir))));
                     }
+                }
+                WizardAction::MoveData(path) => {
+                    self.move_data(&path);
                 }
                 WizardAction::OpenFolder(path) => {
                     let _ = std::process::Command::new("explorer.exe").arg(path).spawn();

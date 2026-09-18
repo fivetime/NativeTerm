@@ -2346,10 +2346,11 @@ A short wizard, each step skippable:
    ("Install my key").
 4. Choose the data directory and, optionally, cloud sync.
 
-Implemented (`wizard.rs`), except choosing the data directory and cloud
-sync: step 4 shows where sessions and NativeTerm's data are, with "Open"
-buttons and advice to sync `~/.ssh/config.d` (never private keys) with a
-tool the user trusts. The wizard opens once, until finished or skipped
+Implemented (`wizard.rs`), except cloud sync: step 4 shows where sessions
+and NativeTerm's data are, with "Open" buttons, a field to move the data
+folder (the same copy and pointer as Settings; not offered when
+`--data-dir` or the environment chose it), and advice to sync
+`~/.ssh/config.d` (never private keys) with a tool the user trusts. The wizard opens once, until finished or skipped
 (`first_run_done` in `state.db`), and again from Settings. Its buttons
 only open the existing dialogs (import, install my key) or tabs (key
 creation); while such a dialog is open the wizard waits behind it.
