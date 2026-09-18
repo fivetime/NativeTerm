@@ -228,6 +228,7 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
         // put back after ssh: Windows 10's OpenSSH 8.1 leaves the console
         // without "processed output" (line breaks shown as ♪◙)
         let modes = win::ConsoleModes::save();
+        let direct = ssh::is_direct(&effective);
         let mut child = match Command::new(&ssh_path).args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {
@@ -240,14 +241,22 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
             }
         };
 
+        let reached = direct.then(|| ssh::Reached::watch(child.id()));
         let code = match supervise(&mut child, link, auth.as_ref(), None) {
             Supervised::Exited(code) => code,
             Supervised::Close => return 0,
         };
         drop(modes);
-        send(ShimMessage::Exited { code });
         let authenticated = auth.as_ref().is_some_and(|e| e.is_set());
-        println!("\r\n{}", describe(classify_exit(code, authenticated), code));
+        let end = classify_exit(code, authenticated);
+        // only a direct connection shows whether the server was reached
+        let unreachable = end == SessionEnd::LoginFailed && reached.is_some_and(|r| !r.stop());
+        if unreachable {
+            send(ShimMessage::Unreachable);
+        }
+        send(ShimMessage::Exited { code });
+        let text = if unreachable { t!("unreachable", code = code) } else { describe(end, code) };
+        println!("\r\n{text}");
         match after_exit(link) {
             Next::Reconnect => continue,
             Next::Close => return 0,

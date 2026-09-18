@@ -278,6 +278,7 @@ state-waiting = 已恢复，未连接
 state-connecting = 正在连接 / 等待登录
 state-connected = 已连接
 state-login-failed = 登录失败（{ $code }）
+state-unreachable = 无法连接（{ $code }）
 state-disconnected = 已断开（{ $code }）
 state-ended = 已结束（{ $code }）
 state-failed = 失败：{ $reason }

@@ -90,7 +90,10 @@ pub fn close_set(sessions: &[SessionView], set: &CloseSet) -> Vec<String> {
                 CloseSet::RightOf(id) => {
                     place(id).zip(here).is_some_and(|((window, index), (w, i))| w == window && i > index)
                 }
-                CloseSet::Ended => matches!(s.state, State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_)),
+                CloseSet::Ended => matches!(
+                    s.state,
+                    State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Ended(_)
+                ),
                 CloseSet::Waiting => s.state == State::Waiting && s.linked,
             }
         })

@@ -970,6 +970,8 @@ the built-in Administrator, whose Explorer runs elevated as well
 included; it needs an ordinary administrator's session. Also not
 covered: ARM64, a Windows 10 without any `vcruntime140.dll`.
 
-Seen but not Windows 10 specific: a connection timeout is reported as
-"Login failed or cancelled" (exit 255 before any login); the card's
-Break button wraps onto a second row in a narrow window.
+Seen but not Windows 10 specific: a connection timeout was reported as
+"Login failed or cancelled" (exit 255 before any login) — now "could not
+connect" for direct connections (ARCHITECTURE, "Could not connect"),
+verified on the VM; the card's Break button wraps onto a second row in a
+narrow window.

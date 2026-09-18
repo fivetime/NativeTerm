@@ -52,6 +52,10 @@ pub enum ShimMessage {
     Quiet { since: u64 },
     /// Output again after `Quiet`.
     Heard,
+    /// Sent just before `Exited`: the client never reached the server
+    /// (a direct ssh connection that was never established), so the end
+    /// is "couldn't connect", not a failed login.
+    Unreachable,
     /// The client takes these commands (`AppMessage::Special`) for this
     /// connection, e.g. "brk" (a serial line's Break, Telnet's Break);
     /// sent after `Connecting`, none until then.
@@ -121,6 +125,7 @@ mod tests {
             ShimMessage::Exited { code: -1 },
             ShimMessage::Closing,
             ShimMessage::Specials { names: vec!["brk".into(), "ayt".into()] },
+            ShimMessage::Unreachable,
         ];
         for m in messages {
             let line = encode(&m);

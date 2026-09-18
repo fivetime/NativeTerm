@@ -48,7 +48,9 @@ impl Activity {
         match state {
             State::Connected => Some(Activity::Connected),
             State::Opening | State::Detached | State::Waiting | State::Connecting => Some(Activity::Busy),
-            State::LoginFailed(_) | State::Disconnected(_) | State::Failed(_) => Some(Activity::Failed),
+            State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Failed(_) => {
+                Some(Activity::Failed)
+            }
             State::Ended(_) | State::Gone | State::Closed => None,
         }
     }

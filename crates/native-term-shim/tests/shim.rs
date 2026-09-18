@@ -154,6 +154,24 @@ fn login_failure_is_reported_as_such() {
     assert!(text.contains("Login failed or cancelled"), "{text}");
 }
 
+/// A direct connection (no proxy in `ssh -G`) that never got a TCP
+/// connection up: "could not connect", not a failed login.
+#[test]
+fn a_server_never_reached_is_reported_as_unreachable() {
+    let name = pipe_name("unreachable");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(&name, &["web01"], &[("FAKE_SSH_CODE", "255"), ("FAKE_SSH_DIRECT", "1")]);
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    assert_eq!(expect(&conn), ShimMessage::Unreachable);
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
+    let text = String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string();
+    assert!(text.contains("Could not connect to the server (exit code 255)"), "{text}");
+}
+
 #[test]
 fn close_while_connected_ends_ssh() {
     let name = pipe_name("closelive");

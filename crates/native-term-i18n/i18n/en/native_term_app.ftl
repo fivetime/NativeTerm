@@ -289,6 +289,7 @@ state-waiting = restored, not connected
 state-connecting = connecting / waiting for login
 state-connected = connected
 state-login-failed = login failed ({ $code })
+state-unreachable = could not connect ({ $code })
 state-disconnected = disconnected ({ $code })
 state-ended = ended ({ $code })
 state-failed = failed: { $reason }

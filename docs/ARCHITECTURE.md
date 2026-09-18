@@ -1895,7 +1895,7 @@ How Windows OpenSSH runs it, and what that requires of the helper:
   host.
 
 Session states: *connecting / waiting for login* → *connected* →
-*disconnected* or *login failed* or *closed*.
+*disconnected* or *login failed* or *could not connect* or *closed*.
 
 With `ProxyJump` and password authentication, one session asks for two
 passwords (jump host, then target); the "authenticated" signal only
@@ -1913,8 +1913,21 @@ through both prompts.
   excluded sessions.
 - **Connection-level exit (255 / -1) before authentication** → "login
   failed / cancelled"; **after authentication** → "disconnected".
+- **Could not connect**: when ssh connects directly (`ssh -G` shows no
+  `ProxyCommand` / `ProxyJump`), the shim polls ssh's own TCP connections
+  (`GetExtendedTcpTable`, every 250 ms until one is established). A 255
+  before login with none ever established is "could not connect to the
+  server" (`ShimMessage::Unreachable` before `Exited`; state
+  `Unreachable`). Through a proxy the connection may be another process's
+  (or not TCP at all), so it stays "login failed / cancelled". Verified on
+  Windows 10 (OpenSSH 8.1): an unreachable address showed "could not
+  connect (255)", a normal login still "connected".
 - **Auto-reconnect never retries a login failure**, to avoid repeated bad
-  attempts triggering server-side bans (e.g. fail2ban).
+  attempts triggering server-side bans (e.g. fail2ban). It does go on
+  after a reconnect that never reached the server (*could not connect*:
+  no login was tried, e.g. the network is still down after sleep); before,
+  the first such failure ended the retries, which is exactly when they
+  are needed.
   - Implemented as a setting (off by default, kept in `state.db`'s
     `settings` table): "Reconnect dropped sessions automatically".
   - Only a drop after login (`Disconnected`) is retried; the core sends
@@ -1925,11 +1938,16 @@ through both prompts.
     reconnected, closed it, or the setting was turned off).
   - The count starts over only after a connection stayed up for 60 s; a
     host that accepts the login and closes at once isn't retried forever.
+    A failed reconnect always counts on (the last login's age says
+    nothing then), and giving up resets the count.
   - The session row shows "auto-reconnect n" while it is retrying.
   - Live test: `tests/auto_reconnect.rs` (shims started directly, fake
     ssh): the dropped session reconnected twice in 17.5 s, the failed
     login stayed at attempt 1, nothing happened after the setting was
-    turned off.
+    turned off; a host that goes away after the first login
+    (`FAKE_SSH_LOGIN_ONCE`, seen as direct and never reached) was retried
+    on after the failed reconnects, shown as "could not connect" with
+    "auto-reconnect 2".
 - **Restored sessions** wait for Connect. When there are any, the
   sessions panel offers "Connect all" (200 ms apart, so jump hosts
   aren't hit at once) and "Close all"; single sessions connect from

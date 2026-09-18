@@ -72,6 +72,9 @@ pub enum State {
     Connecting,
     Connected,
     LoginFailed(i32),
+    /// The server was never reached (a direct connection that was never
+    /// established); otherwise like `LoginFailed`.
+    Unreachable(i32),
     Disconnected(i32),
     Ended(i32),
     /// The tab never appeared, or wasn't sent.
@@ -88,7 +91,10 @@ impl State {
 
     /// Ssh isn't running: connecting is possible.
     pub fn can_connect(&self) -> bool {
-        matches!(self, State::Waiting | State::LoginFailed(_) | State::Disconnected(_) | State::Ended(_))
+        matches!(
+            self,
+            State::Waiting | State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Ended(_)
+        )
     }
 
     pub fn describe(&self) -> String {
@@ -99,6 +105,7 @@ impl State {
             State::Connecting => t!("state-connecting"),
             State::Connected => t!("state-connected"),
             State::LoginFailed(c) => t!("state-login-failed", code = c),
+            State::Unreachable(c) => t!("state-unreachable", code = c),
             State::Disconnected(c) => t!("state-disconnected", code = c),
             State::Ended(c) => t!("state-ended", code = c),
             State::Failed(why) => t!("state-failed", reason = why.as_str()),
@@ -180,6 +187,11 @@ pub(crate) struct Session {
     last_position: Option<(usize, usize)>,
     quiet_since: Option<u64>,
     specials: Vec<String>,
+    /// The shim said the server wasn't reached in this attempt.
+    unreachable: bool,
+    /// The attempt an automatic reconnect started: if it fails too, the
+    /// retries go on.
+    retry_attempt: Option<u32>,
 }
 
 impl Session {
@@ -205,6 +217,8 @@ impl Session {
             last_position: None,
             quiet_since: None,
             specials: Vec::new(),
+            unreachable: false,
+            retry_attempt: None,
         }
     }
 
@@ -218,14 +232,23 @@ impl Session {
             attempt: self.attempt,
             linked: self.link.is_some(),
             location: self.location.clone(),
-            auto_retry: (self.auto_retries > 0 && matches!(self.state, State::Disconnected(_) | State::Connecting))
-                .then_some(self.auto_retries),
+            auto_retry: (self.auto_retries > 0
+                && (matches!(self.state, State::Disconnected(_) | State::Connecting) || self.retrying()))
+            .then_some(self.auto_retries),
             locked: self.locked,
             renamed_to: None,
             last_position: self.last_position,
             quiet_since: self.quiet_since.filter(|_| self.state.is_open()),
             specials: if self.state.is_open() { self.specials.clone() } else { Vec::new() },
         }
+    }
+
+    /// This attempt was an automatic reconnect that never reached the
+    /// server (the network is still down): the retries go on. A failed
+    /// login, or an end that can't be told apart from one, stops them:
+    /// repeated bad logins get addresses banned (fail2ban).
+    fn retrying(&self) -> bool {
+        matches!(self.state, State::Unreachable(_)) && self.retry_attempt == Some(self.attempt)
     }
 
     fn matches_terminal_session(&self, guid: &str) -> bool {
@@ -1382,15 +1405,20 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                         apply(s, &message);
                         let logged_in = s.state == State::Connected && !was_connected;
                         let login = if logged_in { s.on_login.clone() } else { None };
-                        let retry = matches!(s.state, State::Disconnected(_)) && matches!(message, ShimMessage::Exited { .. });
-                        (s.location.as_ref().map(|l| l.window), retry.then_some(s.attempt), login)
+                        let exited = matches!(message, ShimMessage::Exited { .. });
+                        let retry = match &s.state {
+                            State::Disconnected(_) if exited => Some(Retry::AfterDrop),
+                            _ if exited && s.retrying() => Some(Retry::AfterFailedRetry),
+                            _ => None,
+                        };
+                        (s.location.as_ref().map(|l| l.window), retry.map(|r| (s.attempt, r)), login)
                     })
                     .map_or((None, None, None), |(w, r, l)| (Some(w), Some(r), l));
                 if let Some(command) = login {
                     Core { shared: Arc::clone(shared) }.send_text(std::slice::from_ref(&id), &command, true);
                 }
-                if let Some(attempt) = retry.flatten() {
-                    schedule_reconnect(shared, &id, attempt);
+                if let Some((attempt, why)) = retry.flatten() {
+                    schedule_reconnect(shared, &id, attempt, why);
                 }
                 if let ShimMessage::Closing = &message {
                     match window.flatten() {
@@ -1433,21 +1461,42 @@ fn next_retry(previous: u32, connected_for: Option<Duration>) -> u32 {
     }
 }
 
-/// A dropped session (never a failed login) is connected again after a
-/// while, if the setting is on and nothing happened to it meanwhile.
-fn schedule_reconnect(shared: &Arc<Shared>, id: &str, attempt: u32) {
+/// Why an automatic reconnect is scheduled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Retry {
+    /// The connection dropped after a login.
+    AfterDrop,
+    /// An automatic reconnect never reached the server (the network is
+    /// still down): it counts as the next try.
+    AfterFailedRetry,
+}
+
+/// A dropped session (never a failed first login) is connected again after
+/// a while, if the setting is on and nothing happened to it meanwhile; a
+/// reconnect that fails is tried again, up to `AUTO_RECONNECT_TRIES`.
+fn schedule_reconnect(shared: &Arc<Shared>, id: &str, attempt: u32, why: Retry) {
     use std::sync::atomic::Ordering;
     if !shared.auto_reconnect.load(Ordering::Relaxed) {
         return;
     }
     let Some(n) = shared.update(id, |s| {
-        s.auto_retries = next_retry(s.auto_retries, s.connected_at.map(|t| t.elapsed()));
+        s.auto_retries = match why {
+            Retry::AfterDrop => next_retry(s.auto_retries, s.connected_at.map(|t| t.elapsed())),
+            // the last login's age says nothing here: keep counting
+            Retry::AfterFailedRetry => s.auto_retries + 1,
+        };
         s.auto_retries
     }) else {
         return;
     };
     if n > AUTO_RECONNECT_TRIES {
-        let label = shared.update(id, |s| s.label.clone()).unwrap_or_default();
+        let label = shared
+            .update(id, |s| {
+                s.auto_retries = 0;
+                s.retry_attempt = None;
+                s.label.clone()
+            })
+            .unwrap_or_default();
         shared.notice(t!("notice-gave-up", label = label.as_str(), tries = AUTO_RECONNECT_TRIES));
         return;
     }
@@ -1459,7 +1508,15 @@ fn schedule_reconnect(shared: &Arc<Shared>, id: &str, attempt: u32) {
     std::thread::spawn(move || {
         std::thread::sleep(delay);
         let still = shared
-            .update(&id, |s| matches!(s.state, State::Disconnected(_)) && s.attempt == attempt && s.link.is_some())
+            .update(&id, |s| {
+                let waiting = matches!(s.state, State::Disconnected(_)) || s.retrying();
+                let still = waiting && s.attempt == attempt && s.link.is_some();
+                if still {
+                    // the shim numbers its next attempt this way
+                    s.retry_attempt = Some(attempt + 1);
+                }
+                still
+            })
             .unwrap_or(false);
         if still && shared.auto_reconnect.load(Ordering::Relaxed) {
             shared.queue_connect(&[id]);
@@ -1523,13 +1580,17 @@ fn debug(shared: &Shared, text: String) {
 }
 
 fn apply(s: &mut Session, message: &ShimMessage) {
-    if !matches!(message, ShimMessage::Quiet { .. } | ShimMessage::Hello { .. } | ShimMessage::Specials { .. }) {
+    if !matches!(
+        message,
+        ShimMessage::Quiet { .. } | ShimMessage::Hello { .. } | ShimMessage::Specials { .. } | ShimMessage::Unreachable
+    ) {
         s.quiet_since = None;
     }
     match message {
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {
             s.authenticated = false;
+            s.unreachable = false;
             s.specials.clear();
             s.attempt = *attempt;
             s.state = State::Connecting;
@@ -1542,6 +1603,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         ShimMessage::Exited { code } => {
             s.specials.clear();
             s.state = match classify_exit(*code, s.authenticated) {
+                SessionEnd::LoginFailed if s.unreachable => State::Unreachable(*code),
                 SessionEnd::LoginFailed => State::LoginFailed(*code),
                 SessionEnd::Disconnected => State::Disconnected(*code),
                 SessionEnd::Closed(c) => State::Ended(c),
@@ -1550,6 +1612,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         ShimMessage::Closing => s.state = State::Closed,
         ShimMessage::Quiet { since } => s.quiet_since = Some(*since),
         ShimMessage::Specials { names } => s.specials = names.clone(),
+        ShimMessage::Unreachable => s.unreachable = true,
         ShimMessage::Heard | ShimMessage::Hello { .. } => {}
     }
 }

@@ -1091,7 +1091,7 @@ fn state_color(ui: &egui::Ui, state: &State) -> egui::Color32 {
         State::Opening | State::Connecting | State::Detached | State::Waiting => {
             egui::Color32::from_rgb(0xd0, 0x9a, 0x1a)
         }
-        State::LoginFailed(_) | State::Disconnected(_) | State::Failed(_) => egui::Color32::from_rgb(0xd0, 0x3a, 0x3a),
+        State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Failed(_) => egui::Color32::from_rgb(0xd0, 0x3a, 0x3a),
         _ => ui.visuals().weak_text_color(),
     }
 }

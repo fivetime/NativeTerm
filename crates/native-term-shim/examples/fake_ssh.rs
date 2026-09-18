@@ -1,6 +1,8 @@
 //! A stand-in for `ssh` in the shim's integration tests.
 //!
-//! - `-G …`: prints nothing (no user keepalive settings), exit 0.
+//! - `-G …`: prints nothing (no user keepalive settings), exit 0; with
+//!   `FAKE_SSH_DIRECT=1` a host name, so the shim takes the connection for
+//!   a direct one (and, as the fake never connects, for unreachable).
 //! - Otherwise: runs the `LocalCommand` through `cmd.exe /c` like Windows
 //!   OpenSSH if `FAKE_SSH_LOGIN=1`, with `FAKE_SSH_ECHO=1` logs typed lines
 //!   (`input: …`) until `exit`, sleeps `FAKE_SSH_MS`, and exits with
@@ -13,6 +15,9 @@
 //!   interactively (a local stand-in for the remote side).
 //! - As ntplink: with `-nt-control <pipe>`, opens that pipe and logs each
 //!   command line received (`control: …`) while it runs.
+//! - `FAKE_SSH_LOGIN_ONCE=<file>`: logs in (as `FAKE_SSH_LOGIN=1`) only
+//!   while `<file>` doesn't exist, and creates it: the host "goes away"
+//!   after the first connection.
 
 use std::io::Write;
 use std::os::windows::process::CommandExt;
@@ -27,13 +32,17 @@ fn main() {
         }
     }
     if args.first().map(String::as_str) == Some("-G") {
+        if std::env::var("FAKE_SSH_DIRECT").as_deref() == Ok("1") {
+            println!("hostname {}", args.last().cloned().unwrap_or_default());
+        }
         return;
     }
     if let Some(pipe) = args.iter().position(|a| a == "-nt-control").and_then(|i| args.get(i + 1)) {
         control_log(pipe);
     }
     let env_num = |key: &str, default: i64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
-    if std::env::var("FAKE_SSH_LOGIN").as_deref() == Ok("1") {
+    let once = std::env::var("FAKE_SSH_LOGIN_ONCE").ok().filter(|f| std::fs::File::create_new(f).is_ok());
+    if std::env::var("FAKE_SSH_LOGIN").as_deref() == Ok("1") || once.is_some() {
         std::thread::sleep(Duration::from_millis(env_num("FAKE_SSH_LOGIN_DELAY_MS", 0) as u64));
         let local = args.iter().find_map(|a| a.strip_prefix("LocalCommand="));
         if let Some(command) = local {

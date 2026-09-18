@@ -54,9 +54,61 @@ pub fn arguments(
     args
 }
 
+/// Whether ssh connects to the host itself: no `ProxyCommand` or
+/// `ProxyJump` in `effective` (from `ssh -G`). Only then do ssh's own TCP
+/// connections show whether the server was reached. Unknown (no `ssh -G`
+/// output) counts as not direct.
+pub fn is_direct(effective: &[(String, String)]) -> bool {
+    let set = |key: &str| effective.iter().any(|(k, v)| k == key && !v.eq_ignore_ascii_case("none"));
+    !effective.is_empty() && !set("proxycommand") && !set("proxyjump")
+}
+
+/// Watches ssh's TCP connections until one is established.
+pub struct Reached {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    reached: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Reached {
+    const EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+
+    pub fn watch(pid: u32) -> Reached {
+        use std::sync::atomic::Ordering;
+        let watch = Reached { stop: Default::default(), reached: Default::default() };
+        let (stop, reached) = (watch.stop.clone(), watch.reached.clone());
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                if crate::win::tcp_states(pid).contains(&crate::win::TCP_ESTABLISHED) {
+                    reached.store(true, Ordering::Relaxed);
+                    return;
+                }
+                std::thread::sleep(Self::EVERY);
+            }
+        });
+        watch
+    }
+
+    /// Stops watching; whether a connection was established.
+    pub fn stop(self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.stop.store(true, Ordering::Relaxed);
+        self.reached.load(Ordering::Relaxed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_only_without_a_proxy() {
+        let pair = |k: &str, v: &str| (k.to_string(), v.to_string());
+        assert!(is_direct(&[pair("hostname", "10.0.0.1")]));
+        assert!(is_direct(&[pair("hostname", "10.0.0.1"), pair("proxycommand", "none")]));
+        assert!(!is_direct(&[pair("hostname", "10.0.0.1"), pair("proxyjump", "bastion")]));
+        assert!(!is_direct(&[pair("proxycommand", "ssh -W %h:%p bastion")]));
+        assert!(!is_direct(&[]), "unknown");
+    }
 
     fn strings(args: &[OsString]) -> Vec<String> {
         args.iter().map(|a| a.to_string_lossy().to_string()).collect()
