@@ -18,6 +18,7 @@
 #[cfg(windows)]
 pub mod acl;
 pub mod alias;
+pub mod appearance;
 pub mod document;
 pub mod effective;
 pub mod folder_options;

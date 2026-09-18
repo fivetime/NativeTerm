@@ -3100,6 +3100,35 @@ Set per host or folder (`NativeTermProfile`, `NativeTermColorScheme`,
 `NativeTermTabColor`), e.g. production tabs red, test tabs green, which
 also reduces mistakes on production machines.
 
+Implemented (`native_term_config::appearance`, shim `look.rs`):
+
+- **Tab color**: `NativeTermTabColor` on a host or in the folder's `Host
+  __nativeterm_folder__` block (a preset name red / orange / yellow /
+  green / blue / purple, `#RRGGBB` or `#RGB`, or `none` to have none in a
+  colored folder), passed as `wt new-tab --tabColor #RRGGBB`. The app
+  keeps each saved host's look (`Core::set_host_looks`, refreshed with
+  the tree), so new tabs, clones and replaced placeholders all get it;
+  the tree shows the color as a bar before the host's icon.
+- **Color scheme**: `NativeTermColorScheme` (one of the 16 schemes of
+  Windows Terminal's `defaults.json`, or `none`). `wt new-tab
+  --colorScheme` had no effect in Terminal 1.26 — not on a plain `cmd`
+  tab either — so the shim applies the scheme itself before every
+  connect, with OSC 4 (the 16 colors), 10, 11 and 12; back to `none`, it
+  sends OSC 104 / 110 / 111 / 112 at the next connect. The colors come
+  from `defaults.json` (1.26), taken over unchanged. A remote `reset`
+  (RIS) puts the Terminal's colors back until the next connect. The
+  user's own schemes aren't offered: NativeTerm has no colors for them.
+- **Profile**: not per host. Every NativeTerm tab uses the "NativeTerm
+  SSH" profile, which keeps the title fixed; another profile might not,
+  and the title is how NativeTerm finds its tabs.
+- **UI**: the host dialog has "Tab color" (as the folder / none / the
+  presets with a swatch / custom `#RRGGBB`) and "Color scheme" (as the
+  folder / Terminal's default / the 16); a folder's menu has "Tab Color"
+  and "Color Scheme" submenus; the host tooltip shows what applies.
+- Verified in the portable Terminal 1.26: a tab from NativeTerm red,
+  still found as window 1 · tab 1; the shim's OSC gave a tab One Half
+  Light (light background, dark text) where `--colorScheme` did nothing.
+
 The NativeTerm-provided SSH profile also sets a moderate scrollback size
 (`historySize`) to keep per-tab memory in check. These settings apply only
 to tabs NativeTerm opens; the user's own tabs keep the user's own default

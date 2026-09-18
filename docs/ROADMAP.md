@@ -467,8 +467,10 @@
       tabs, close disconnected, show NativeTerm; draggable, position kept
 - [ ] Floating action button (rest): round/transparent shape, send command
 - [ ] Optional `RegisterHotKey` shortcut, off by default
-- [ ] Per-host/folder terminal appearance: profile, color scheme, tab color;
-      NativeTerm profiles shipped as a Windows Terminal JSON fragment
+- [x] Per-host/folder tab color (`--tabColor`) and color scheme (applied by
+      the shim with OSC, since `--colorScheme` had no effect in 1.26);
+      tree shows the color; no per-host profile (the NativeTerm profile
+      keeps the title fixed)
 - [x] Light / dark / system theme (title bar included), Fluent/MDL2 icons,
       nested folders in the tree, status dots on hosts
 - [ ] NativeTerm themes (rest): presets, Mica/Acrylic

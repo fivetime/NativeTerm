@@ -321,6 +321,13 @@ impl App {
         self.tree.hosts().filter(|(f, _)| f.no_group_send()).map(|(_, h)| h.alias().to_string()).collect()
     }
 
+    /// A folder's tab color and color scheme defaults.
+    fn folder_look(&self, file: &Path) -> (Option<String>, Option<String>) {
+        use native_term_config::appearance::{COLOR_SCHEME, TAB_COLOR};
+        let Some(folder) = self.tree.folders().find(|f| f.file == file) else { return (None, None) };
+        (folder.defaults.get(TAB_COLOR).map(str::to_string), folder.defaults.get(COLOR_SCHEME).map(str::to_string))
+    }
+
     /// A folder's `NativeTermPersistent` default.
     fn folder_persistent(&self, file: &Path) -> Option<String> {
         let folder = self.tree.folders().find(|f| f.file == file)?;
@@ -367,7 +374,9 @@ impl App {
             TreeAction::NewHost(file) => {
                 let label = self.folder_label(&file);
                 let folder = self.folder_persistent(&file);
-                self.dialog = Some(Dialog::Host(Box::new(HostDialog::new_host(file, &label).with_folder_default(folder))));
+                let (color, scheme) = self.folder_look(&file);
+                let dialog = HostDialog::new_host(file, &label).with_folder_default(folder).with_folder_look(color, scheme);
+                self.dialog = Some(Dialog::Host(Box::new(dialog)));
             }
             TreeAction::NewPlink(file) => {
                 let label = self.folder_label(&file);
@@ -380,8 +389,11 @@ impl App {
                         None => {
                             let folder = self.folder_persistent(&host.file);
                             let account = self.editor.effective(&alias).ok().and_then(|e| native_term_config::password::target(&e));
-                            let dialog =
-                                HostDialog::edit(&alias, &HostDraft::from_host(host)).with_folder_default(folder).with_password(account);
+                            let (color, scheme) = self.folder_look(&host.file);
+                            let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host))
+                                .with_folder_default(folder)
+                                .with_folder_look(color, scheme)
+                                .with_password(account);
                             Dialog::Host(Box::new(dialog))
                         }
                     });
@@ -430,6 +442,18 @@ impl App {
                     let dialog = ServerSessionsDialog::new(&self.egui_ctx, &alias, host.label(), on_login, ssh, config);
                     self.dialog = Some(Dialog::ServerSessions(Box::new(dialog)));
                 }
+            }
+            TreeAction::FolderTabColor(file, value) => {
+                if let Err(e) = self.editor.set_folder_tab_color(&file, value.as_deref()) {
+                    self.notices.push(e.to_string());
+                }
+                self.reload();
+            }
+            TreeAction::FolderColorScheme(file, value) => {
+                if let Err(e) = self.editor.set_folder_color_scheme(&file, value.as_deref()) {
+                    self.notices.push(e.to_string());
+                }
+                self.reload();
             }
             TreeAction::FolderNoGroupSend(file, on) => {
                 if let Err(e) = self.editor.set_folder_no_group_send(&file, on) {
@@ -1064,6 +1088,8 @@ impl App {
 fn publish_hosts(tree: &SessionTree, core: Option<&Core>) {
     if let Some(core) = core {
         core.set_host_labels(tree.hosts().map(|(_, h)| (h.alias().to_string(), h.label().to_string())).collect());
+        let looks = tree.hosts().map(|(f, h)| (h.alias().to_string(), native_term_config::appearance::for_host(f, h)));
+        core.set_host_looks(looks.collect());
     }
     let hosts = tree
         .folders()

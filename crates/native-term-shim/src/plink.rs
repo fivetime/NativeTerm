@@ -141,6 +141,7 @@ pub fn run(alias: &str, link: Option<&Link>, flags: crate::args::Flags) -> i32 {
     let mut attempt = 0;
     loop {
         attempt += 1;
+        crate::look::apply(alias);
         send(ShimMessage::Connecting { attempt });
         match attempt_once(alias, attempt, link, auth.as_ref()) {
             Attempt::Close => return 0,

@@ -22,6 +22,7 @@ mod keys;
 mod i18n;
 mod debug;
 mod link;
+mod look;
 mod persistent;
 mod plink;
 mod saved;
@@ -220,6 +221,7 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
     let config = plink::custom_ssh_dir().map(|dir| dir.join("config"));
     loop {
         attempt += 1;
+        look::apply(alias);
         let effective =
             native_term_config::effective::effective_with(&ssh_path, config.as_deref(), alias).unwrap_or_default();
         // read again on every attempt: an edit applies at the next connect

@@ -108,7 +108,7 @@ fn guid(n: u32) -> String {
 }
 
 fn spec(n: u32, label: &str) -> TabSpec {
-    TabSpec { terminal_session: guid(n), label: label.to_string(), session: format!("s-{n}"), alias: HOST.to_string(), wait: false, no_forwards: false }
+    TabSpec { terminal_session: guid(n), label: label.to_string(), session: format!("s-{n}"), alias: HOST.to_string(), wait: false, no_forwards: false, tab_color: None }
 }
 
 /// Closes its tabs when dropped, also when an assertion failed.

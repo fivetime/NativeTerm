@@ -298,6 +298,8 @@ pub(crate) struct Shared {
     audit_dir: Mutex<Option<PathBuf>>,
     /// Each saved host's current name, by alias.
     host_labels: Mutex<HashMap<String, String>>,
+    /// Each saved host's tab look, by alias (from the app's tree).
+    host_looks: Mutex<HashMap<String, native_term_config::appearance::Appearance>>,
     /// Sessions to connect, in order (see `connect_queue`).
     connect_queue: Mutex<Sender<String>>,
 }
@@ -324,6 +326,11 @@ impl Shared {
 
     /// The name a new tab for this session gets: the host's current name
     /// in the tree, else the session's own without its `(2)` suffix.
+    /// A host's tab look now (after an edit too).
+    fn look(&self, alias: &str) -> native_term_config::appearance::Appearance {
+        lock(&self.host_looks).get(alias).cloned().unwrap_or_default()
+    }
+
     pub(crate) fn fresh_label(&self, alias: &str, label: &str) -> String {
         lock(&self.host_labels).get(alias).cloned().unwrap_or_else(|| tab_menu::base_label(label).to_string())
     }
@@ -464,6 +471,7 @@ impl Core {
             last_terminal: Default::default(),
             audit_dir: Mutex::new(None),
             host_labels: Mutex::new(HashMap::new()),
+            host_looks: Mutex::new(HashMap::new()),
             connect_queue: Mutex::new(to_connect),
         });
         let queue = Arc::downgrade(&shared);
@@ -614,6 +622,12 @@ impl Core {
     }
 
     /// The saved hosts' current names (alias → name), after every reload.
+    /// Each saved host's tab color and color scheme, for the tabs opened
+    /// from now on.
+    pub fn set_host_looks(&self, looks: HashMap<String, native_term_config::appearance::Appearance>) {
+        *lock(&self.shared.host_looks) = looks;
+    }
+
     pub fn set_host_labels(&self, labels: HashMap<String, String>) {
         *lock(&self.shared.host_labels) = labels;
         self.shared.changed();
@@ -634,6 +648,7 @@ impl Core {
             for host in hosts {
                 let label = unique_label(&host.label, &taken);
                 taken.insert(label.clone());
+                let look = self.shared.look(&host.alias);
                 let spec = TabSpec {
                     terminal_session: native_term_config::new_id(),
                     label: label.clone(),
@@ -641,6 +656,7 @@ impl Core {
                     alias: host.alias.clone(),
                     wait: paced,
                     no_forwards: host.no_forwards,
+                    tab_color: look.tab_color,
                 };
                 sessions.push(Session::new(
                     spec.session.clone(),
@@ -1127,6 +1143,7 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
             let mut specs = Vec::new();
             for p in &group {
                 let taken = shared.labels();
+                let look = shared.update(&p.session, |s| s.alias.clone()).map(|alias| shared.look(&alias)).unwrap_or_default();
                 let spec = shared.update(&p.session, |s| {
                     // a host renamed since: the new tab gets the new name
                     let fresh = shared.fresh_label(&s.alias, &s.label);
@@ -1143,6 +1160,7 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
                         alias: s.alias.clone(),
                         wait: true,
                         no_forwards: s.no_forwards,
+                        tab_color: look.tab_color.clone(),
                     }
                 });
                 if let Some(spec) = spec {

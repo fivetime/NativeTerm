@@ -38,6 +38,9 @@ pub enum TreeAction {
     ServerSessions(String),
     /// Keep the folder out of sends to several sessions (or not).
     FolderNoGroupSend(PathBuf, bool),
+    /// The folder's tab color / color scheme default (`None`: none).
+    FolderTabColor(PathBuf, Option<String>),
+    FolderColorScheme(PathBuf, Option<String>),
     Reload,
 }
 
@@ -173,6 +176,8 @@ const INDENT: f32 = 16.0;
 /// leading glyph, the text, and an optional status dot after it.
 struct RowLook {
     icon: Option<char>,
+    /// The host's tab color, as a bar at the row's start.
+    stripe: Option<egui::Color32>,
     dot: Option<egui::Color32>,
     selected: bool,
     weak: bool,
@@ -193,6 +198,10 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
         let font = egui::TextStyle::Body.resolve(ui.style());
         let painter = ui.painter().with_clip_rect(rect);
         let mut x = rect.left() + 6.0 + look.indent;
+        if let Some(stripe) = look.stripe {
+            let bar = egui::Rect::from_min_size(egui::pos2(x - 5.0, rect.top() + 4.0), egui::vec2(3.0, rect.height() - 8.0));
+            painter.rect_filled(bar, 1.0, stripe);
+        }
         if let Some(glyph) = look.icon {
             let galley = painter.layout_no_wrap(glyph.to_string(), font.clone(), weak);
             painter.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, weak);
@@ -496,11 +505,11 @@ impl TreeView {
                 let index = first + offset;
                 match row {
                     Row::Heading(text) => {
-                        let look = RowLook { icon: None, dot: None, selected: false, weak: true, indent: 0.0 };
+                        let look = RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
                         draw_row(ui, row_height, text, look);
                     }
                     Row::Quick(target) => {
-                        let look = RowLook { icon: Some(icons::CONNECT), dot: None, selected: false, weak: false, indent: 0.0 };
+                        let look = RowLook { icon: Some(icons::CONNECT), stripe: None, dot: None, selected: false, weak: false, indent: 0.0 };
                         let text = t!("quick-connect", target = target.label());
                         let response = draw_row(ui, row_height, &text, look);
                         if response.clicked() {
@@ -514,7 +523,7 @@ impl TreeView {
                         });
                     }
                     Row::Empty(text) => {
-                        let look = RowLook { icon: None, dot: None, selected: false, weak: true, indent: 0.0 };
+                        let look = RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
                         draw_row(ui, row_height, text, look);
                     }
                     Row::Folder { depth, name, path, folder, count, open } => {
@@ -523,6 +532,7 @@ impl TreeView {
                         let text = format!("{icon}  {name}  ({count})");
                         let look = RowLook {
                             icon: Some(chevron),
+                            stripe: None,
                             dot: None,
                             selected: false,
                             weak: false,
@@ -588,6 +598,32 @@ impl TreeView {
                                     })
                                     .response
                                     .on_hover_text(t!("field-persistent-hint"));
+                                    let defaults = folder.and_then(|i| folders.get(i)).map(|f| &f.defaults);
+                                    let color = defaults.and_then(|d| d.get(native_term_config::appearance::TAB_COLOR)).map(str::to_string);
+                                    ui.menu_button(t!("menu-folder-tab-color"), |ui| {
+                                        let presets = native_term_config::appearance::PRESETS.iter().map(|(n, _)| Some(n.to_string()));
+                                        for value in std::iter::once(None).chain(presets) {
+                                            let text: egui::WidgetText = match &value {
+                                                None => t!("look-none").into(),
+                                                Some(v) => crate::dialogs::color_text(v).into(),
+                                            };
+                                            if ui.radio(color == value, text).clicked() {
+                                                actions.push(TreeAction::FolderTabColor(file.clone(), value));
+                                                ui.close();
+                                            }
+                                        }
+                                    });
+                                    let scheme = defaults.and_then(|d| d.get(native_term_config::appearance::COLOR_SCHEME)).map(str::to_string);
+                                    ui.menu_button(t!("menu-folder-color-scheme"), |ui| {
+                                        let names = native_term_config::appearance::SCHEMES.iter().map(|s| Some(s.name.to_string()));
+                                        for value in std::iter::once(None).chain(names) {
+                                            let text = value.clone().unwrap_or_else(|| t!("look-terminal-default"));
+                                            if ui.radio(scheme == value, text).clicked() {
+                                                actions.push(TreeAction::FolderColorScheme(file.clone(), value));
+                                                ui.close();
+                                            }
+                                        }
+                                    });
                                     let excluded = folder.and_then(|i| folders.get(i)).is_some_and(|f| f.no_group_send());
                                     let mut on = excluded;
                                     let toggle =
@@ -615,8 +651,12 @@ impl TreeView {
                             Some(native_term_config::plink::Protocol::Serial) => icons::SERIAL,
                             Some(_) => icons::NETWORK,
                         };
+                        let stripe = native_term_config::appearance::for_host(folders[*folder], host)
+                            .tab_color
+                            .and_then(|hex| egui::Color32::from_hex(&hex).ok());
                         let look = RowLook {
                             icon: Some(icon),
+                            stripe,
                             dot: activity.get(alias).map(|a| a.color()),
                             selected,
                             weak: false,
@@ -781,6 +821,12 @@ fn hover(folder: &Folder, host: &HostEntry) -> String {
     }
     if let Some(note) = host.nt.get("note") {
         text.push_str(&format!("\n{note}"));
+    }
+    let look = native_term_config::appearance::for_host(folder, host);
+    if look.tab_color.is_some() || look.color_scheme.is_some() {
+        let color = look.tab_color.unwrap_or_else(|| t!("look-none"));
+        let scheme = look.color_scheme.unwrap_or_else(|| t!("look-terminal-default"));
+        text.push_str(&format!("\n{}", t!("host-look", color = color.as_str(), scheme = scheme.as_str())));
     }
     if let Some(p) = native_term_config::persistent::for_host(folder, host) {
         text.push_str(&format!("\n{}", t!("host-persistent", program = p.name())));

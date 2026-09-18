@@ -17,6 +17,7 @@ use crate::effective;
 use crate::folder_options;
 use crate::header;
 use crate::options;
+use crate::appearance;
 use crate::persistent;
 use crate::plink::{self, PlinkSession};
 use crate::securecrt::{self, Plan};
@@ -40,6 +41,12 @@ pub struct HostDraft {
     /// The host's own `NativeTermPersistent` (`tmux`, `screen`, `off`);
     /// `None` follows the folder.
     pub persistent: Option<String>,
+    /// The host's own `NativeTermTabColor` (a preset name, `#RRGGBB`,
+    /// `none`); `None` follows the folder.
+    pub tab_color: Option<String>,
+    /// The host's own `NativeTermColorScheme` (a scheme name, `none`);
+    /// `None` follows the folder.
+    pub color_scheme: Option<String>,
 }
 
 impl HostDraft {
@@ -54,6 +61,8 @@ impl HostDraft {
             note: host.nt.get("note").map(str::to_string),
             on_login: host.nt.get("onlogin").map(str::to_string),
             persistent: host.nt.get(persistent::KEY).map(str::to_string),
+            tab_color: host.nt.get(appearance::TAB_COLOR).map(str::to_string),
+            color_scheme: host.nt.get(appearance::COLOR_SCHEME).map(str::to_string),
         }
     }
 
@@ -83,6 +92,16 @@ impl HostDraft {
         if let Some(p) = &self.persistent {
             if !matches!(p.as_str(), "tmux" | "screen" | "off") {
                 return Err(EditError::Invalid(format!("persistent session {p:?}: tmux, screen or off")));
+            }
+        }
+        if let Some(c) = &self.tab_color {
+            if !c.eq_ignore_ascii_case("none") && appearance::tab_color(c).is_none() {
+                return Err(EditError::Invalid(format!("tab color {c:?}: a color name, #RRGGBB or none")));
+            }
+        }
+        if let Some(s) = &self.color_scheme {
+            if !s.eq_ignore_ascii_case("none") && appearance::color_scheme(s).is_none() {
+                return Err(EditError::Invalid(format!("color scheme {s:?}: a scheme name or none")));
             }
         }
         if self.port == Some(0) {
@@ -447,6 +466,23 @@ impl Editor {
         self.set_folder_value(file, "NativeTermPersistent", value)
     }
 
+    /// The tab color of a folder's hosts (a preset name or `#RRGGBB`;
+    /// `None` removes it).
+    pub fn set_folder_tab_color(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
+        if value.is_some_and(|v| appearance::tab_color(v).is_none()) {
+            return Err(EditError::Invalid(format!("tab color {value:?}: a color name or #RRGGBB")));
+        }
+        self.set_folder_value(file, "NativeTermTabColor", value)
+    }
+
+    /// The color scheme of a folder's hosts (`None` removes it).
+    pub fn set_folder_color_scheme(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
+        if value.is_some_and(|v| appearance::color_scheme(v).is_none()) {
+            return Err(EditError::Invalid(format!("color scheme {value:?}")));
+        }
+        self.set_folder_value(file, "NativeTermColorScheme", value)
+    }
+
     /// Keep a folder's sessions out of sends to several sessions
     /// (`NativeTermNoGroupSend yes`), e.g. production.
     pub fn set_folder_no_group_send(&self, file: &Path, on: bool) -> Result<(), EditError> {
@@ -538,6 +574,8 @@ impl Editor {
                 set_or_remove(doc, block, "NativeTermNote", draft.note.as_deref().filter(|n| !n.trim().is_empty()));
                 set_or_remove(doc, block, "NativeTermOnLogin", draft.on_login.as_deref().filter(|n| !n.trim().is_empty()));
                 set_or_remove(doc, block, "NativeTermPersistent", draft.persistent.as_deref());
+                set_or_remove(doc, block, "NativeTermTabColor", draft.tab_color.as_deref());
+                set_or_remove(doc, block, "NativeTermColorScheme", draft.color_scheme.as_deref());
             },
             || self.validate(&alias, Some(draft.hostname.trim())),
         )?;
@@ -1046,6 +1084,12 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
     if let Some(persistent) = &draft.persistent {
         entries.push(("NativeTermPersistent", persistent.clone()));
     }
+    if let Some(color) = &draft.tab_color {
+        entries.push(("NativeTermTabColor", color.clone()));
+    }
+    if let Some(scheme) = &draft.color_scheme {
+        entries.push(("NativeTermColorScheme", scheme.clone()));
+    }
     if let Some(id) = id {
         entries.push(("NativeTermId", id.to_string()));
     }
@@ -1408,6 +1452,28 @@ mod tests {
         assert_eq!(setting("web"), Some(Persistence::Screen), "its own value stays");
         assert!(!std::fs::read_to_string(&prod).unwrap().contains("NativeTermPersistent tmux"));
         assert!(editor.set_folder_persistent(&editor.main_config(), Some("tmux")).is_err());
+
+        // tab color and color scheme: folder default, the host's own wins
+        let look = |alias: &str| {
+            let t = tree(&editor);
+            let (f, h) = t.find(alias).unwrap();
+            crate::appearance::for_host(f, h)
+        };
+        editor.set_folder_tab_color(&prod, Some("red")).unwrap();
+        editor.set_folder_color_scheme(&prod, Some("One Half Dark")).unwrap();
+        assert_eq!(look("db").tab_color.as_deref(), Some("#C0392B"));
+        assert_eq!(look("db").color_scheme.as_deref(), Some("One Half Dark"));
+        let db = tree(&editor).find("db").unwrap().1.clone();
+        let mut own = HostDraft::from_host(&db);
+        own.tab_color = Some("none".into());
+        own.color_scheme = Some("Campbell".into());
+        editor.update_host(&db, &own).unwrap();
+        assert_eq!(look("db").tab_color, None, "none beats the folder's red");
+        assert_eq!(look("db").color_scheme.as_deref(), Some("Campbell"));
+        own.tab_color = Some("#12".into());
+        assert!(editor.update_host(&db, &own).is_err());
+        assert!(editor.set_folder_tab_color(&prod, Some("pinkish")).is_err());
+        assert!(editor.effective("db").is_ok());
 
         // "No group send" on the same folder block, next to the rest
         let folder = |e: &Editor| tree(e).folders().find(|f| f.file == prod).unwrap().clone();

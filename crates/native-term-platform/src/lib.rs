@@ -21,6 +21,8 @@ pub struct TabSpec {
     pub wait: bool,
     /// A clone: no port forwards (they would clash with the original's).
     pub no_forwards: bool,
+    /// `--tabColor` (`#RRGGBB`), from the host or its folder.
+    pub tab_color: Option<String>,
 }
 
 /// Which window new tabs go to.

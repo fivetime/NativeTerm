@@ -33,6 +33,11 @@ pub struct HostDialog {
     persistent: Option<String>,
     /// The folder's default, shown with "as the folder".
     folder_persistent: Option<String>,
+    /// The host's own tab color / color scheme (`None`: as the folder).
+    tab_color: Option<String>,
+    color_scheme: Option<String>,
+    /// The folder's, shown with "as the folder".
+    folder_look: (Option<String>, Option<String>),
     /// The account's saved password (editing a saved host only).
     password: Option<PasswordField>,
     pub error: Option<String>,
@@ -144,9 +149,18 @@ impl HostDialog {
             on_login: d.on_login.clone().unwrap_or_default(),
             persistent: d.persistent.clone(),
             folder_persistent: None,
+            tab_color: d.tab_color.clone(),
+            color_scheme: d.color_scheme.clone(),
+            folder_look: (None, None),
             password: None,
             error: None,
         }
+    }
+
+    /// The folder's tab color and color scheme, for "as the folder (…)".
+    pub fn with_folder_look(mut self, tab_color: Option<String>, color_scheme: Option<String>) -> HostDialog {
+        self.folder_look = (tab_color, color_scheme);
+        self
     }
 
     /// Offer a saved password for this account (`ssh -G`'s user, host,
@@ -179,6 +193,8 @@ impl HostDialog {
             note: opt(&self.note),
             on_login: opt(&self.on_login),
             persistent: self.persistent.clone(),
+            tab_color: self.tab_color.clone().filter(|c| c != "#"),
+            color_scheme: self.color_scheme.clone().filter(|s| !s.trim().is_empty()),
         })
     }
 
@@ -226,6 +242,12 @@ impl HostDialog {
                     ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("field-on-login-hint"));
+                    ui.label(t!("field-tab-color")).on_hover_text(t!("field-tab-color-hint"));
+                    tab_color_choice(ui, &mut self.tab_color, self.folder_look.0.as_deref());
+                    ui.end_row();
+                    ui.label(t!("field-color-scheme"));
+                    color_scheme_choice(ui, &mut self.color_scheme, self.folder_look.1.as_deref());
+                    ui.end_row();
                     ui.label(t!("field-persistent")).on_hover_text(t!("field-persistent-hint"));
                     let choices = self.persistent_choices();
                     let current = choices.iter().find(|(v, _)| *v == self.persistent).map(|(_, t)| t.clone()).unwrap_or_default();
@@ -268,6 +290,71 @@ impl HostDialog {
         }
         outcome
     }
+}
+
+/// A preset's or a hex color's swatch and name.
+pub fn color_text(value: &str) -> egui::RichText {
+    use native_term_config::appearance::{tab_color, PRESETS};
+    let name = PRESETS.iter().find(|(n, _)| n.eq_ignore_ascii_case(value)).map(|(n, _)| match *n {
+        "red" => t!("color-red"),
+        "orange" => t!("color-orange"),
+        "yellow" => t!("color-yellow"),
+        "green" => t!("color-green"),
+        "blue" => t!("color-blue"),
+        _ => t!("color-purple"),
+    });
+    let swatch = tab_color(value).and_then(|hex| egui::Color32::from_hex(&hex).ok()).unwrap_or(egui::Color32::GRAY);
+    egui::RichText::new(format!("■ {}", name.unwrap_or_else(|| value.to_string()))).color(swatch)
+}
+
+/// Tab color: as the folder, none, a preset, or a hex value typed in.
+fn tab_color_choice(ui: &mut egui::Ui, value: &mut Option<String>, folder: Option<&str>) {
+    use native_term_config::appearance::PRESETS;
+    let folder_text = folder.map(|f| color_text(f).text().to_string()).unwrap_or_else(|| t!("look-none"));
+    let custom = value.as_deref().is_some_and(|v| v.starts_with('#'));
+    let current: egui::WidgetText = match value.as_deref() {
+        None => t!("look-folder", value = folder_text.as_str()).into(),
+        Some("none") => t!("look-none").into(),
+        Some(_) if custom => t!("look-custom").into(),
+        Some(v) => color_text(v).into(),
+    };
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("host-tab-color").selected_text(current).width(180.0).show_ui(ui, |ui| {
+            ui.selectable_value(value, None, t!("look-folder", value = folder_text.as_str()));
+            ui.selectable_value(value, Some("none".into()), t!("look-none"));
+            for (name, _) in PRESETS {
+                ui.selectable_value(value, Some(name.to_string()), color_text(name));
+            }
+            if ui.selectable_label(custom, t!("look-custom")).clicked() && !custom {
+                *value = Some("#".into());
+            }
+        });
+        if let Some(v) = value.as_mut().filter(|v| v.starts_with('#')) {
+            ui.add(egui::TextEdit::singleline(v).hint_text("#C0392B").desired_width(90.0));
+            if let Some(color) = native_term_config::appearance::tab_color(v).and_then(|h| egui::Color32::from_hex(&h).ok()) {
+                ui.colored_label(color, "■");
+            }
+        }
+    });
+}
+
+/// Color scheme: as the folder, the Terminal's default, or one of the
+/// Terminal's built-in schemes (the shim applies it in the tab).
+fn color_scheme_choice(ui: &mut egui::Ui, value: &mut Option<String>, folder: Option<&str>) {
+    use native_term_config::appearance::SCHEMES;
+    let folder_text = folder.map(str::to_string).unwrap_or_else(|| t!("look-terminal-default"));
+    let current = match value.as_deref() {
+        None => t!("look-folder", value = folder_text.as_str()),
+        Some("none") => t!("look-terminal-default"),
+        Some(v) => v.to_string(),
+    };
+    egui::ComboBox::from_id_salt("host-color-scheme").selected_text(current).width(180.0).show_ui(ui, |ui| {
+        ui.selectable_value(value, None, t!("look-folder", value = folder_text.as_str()));
+        ui.selectable_value(value, Some("none".into()), t!("look-terminal-default"));
+        for s in &SCHEMES {
+            ui.selectable_value(value, Some(s.name.to_string()), s.name);
+        }
+    });
 }
 
 /// A password field keeps the input method off while it has the focus, as

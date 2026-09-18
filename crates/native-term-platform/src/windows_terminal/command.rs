@@ -26,8 +26,11 @@ pub fn new_tab(tab: &TabSpec, shim: &Path, shim_args: &[OsString]) -> Vec<OsStri
         format!("--title={}", escape_delimiters(&tab.label)).into(),
         // no effect in 1.26 (the profile does it), harmless
         "--suppressApplicationTitle".into(),
-        shim.into(),
     ];
+    if let Some(color) = &tab.tab_color {
+        args.extend(["--tabColor".into(), color.into()]);
+    }
+    args.push(shim.into());
     args.extend(shim_args.iter().cloned());
     args.extend(["--session".into(), tab.session.clone().into()]);
     if tab.wait {
@@ -137,6 +140,7 @@ mod tests {
             alias: format!("host{n}"),
             wait: false,
             no_forwards: false,
+            tab_color: None,
         }
     }
 
@@ -168,6 +172,19 @@ mod tests {
                 "host1",
             ]
         );
+    }
+
+    /// The host's tab color goes before the shim, as a `new-tab` option.
+    #[test]
+    fn tab_color() {
+        let mut t = tab(1, "db01");
+        t.tab_color = Some("#C0392B".into());
+        let args = strings(&new_tab(&t, Path::new(r"C:\nt\nativeterm-shim.exe"), &[]));
+        let shim = args.iter().position(|a| a.ends_with("nativeterm-shim.exe")).unwrap();
+        let color = args.iter().position(|a| a == "--tabColor").unwrap();
+        assert_eq!(args[color + 1], "#C0392B");
+        assert!(color < shim, "{args:?}");
+        assert!(!strings(&new_tab(&tab(2, "x"), Path::new("s.exe"), &[])).iter().any(|a| a == "--tabColor"));
     }
 
     #[test]
