@@ -90,6 +90,12 @@ impl Folder {
     pub fn nt<'a>(&'a self, host: &'a HostEntry, key: &str) -> Option<&'a str> {
         host.nt.get(key).or_else(|| self.defaults.get(key))
     }
+
+    /// `NativeTermNoGroupSend yes` on the folder: its sessions are left
+    /// out of sends to several sessions.
+    pub fn no_group_send(&self) -> bool {
+        self.defaults.get("nogroupsend").is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1"))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

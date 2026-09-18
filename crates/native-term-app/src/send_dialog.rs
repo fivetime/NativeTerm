@@ -36,8 +36,15 @@ const AMBER: egui::Color32 = egui::Color32::from_rgb(0xd0, 0x9a, 0x1a);
 const GREEN: egui::Color32 = egui::Color32::from_rgb(0x2e, 0xa0, 0x43);
 
 impl SendDialog {
-    /// `chosen`: the sessions ticked at first (all logged-in ones if empty).
-    pub fn new(core: &Core, chosen: &[String], data_dir: &std::path::Path) -> SendDialog {
+    /// `chosen`: the sessions ticked at first (all logged-in ones if empty,
+    /// except locked ones and those of folders marked "No group send",
+    /// which can still be ticked by hand).
+    pub fn new(
+        core: &Core,
+        chosen: &[String],
+        data_dir: &std::path::Path,
+        no_group_send: &std::collections::HashSet<String>,
+    ) -> SendDialog {
         let targets = core
             .sessions()
             .into_iter()
@@ -45,7 +52,8 @@ impl SendDialog {
             .map(|s| {
                 let ready = s.state == State::Connected && s.linked;
                 // a locked session only when asked for by name
-                let chosen = ready && (chosen.contains(&s.id) || (chosen.is_empty() && !s.locked));
+                let all = chosen.is_empty() && !s.locked && !no_group_send.contains(&s.alias);
+                let chosen = ready && (chosen.contains(&s.id) || all);
                 Target { id: s.id, label: s.label, state: s.state, chosen, locked: s.locked }
             })
             .collect();

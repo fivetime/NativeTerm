@@ -36,6 +36,8 @@ pub enum TreeAction {
     FolderPersistent(PathBuf, Option<String>),
     /// NativeTerm's tmux / screen sessions on this host.
     ServerSessions(String),
+    /// Keep the folder out of sends to several sessions (or not).
+    FolderNoGroupSend(PathBuf, bool),
     Reload,
 }
 
@@ -586,6 +588,14 @@ impl TreeView {
                                     })
                                     .response
                                     .on_hover_text(t!("field-persistent-hint"));
+                                    let excluded = folder.and_then(|i| folders.get(i)).is_some_and(|f| f.no_group_send());
+                                    let mut on = excluded;
+                                    let toggle =
+                                        ui.checkbox(&mut on, t!("menu-folder-no-group-send")).on_hover_text(t!("menu-folder-no-group-send-hint"));
+                                    if toggle.changed() {
+                                        actions.push(TreeAction::FolderNoGroupSend(file.clone(), on));
+                                        ui.close();
+                                    }
                                 }
                             }
                         });

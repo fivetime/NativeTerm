@@ -419,9 +419,11 @@
 - [x] Send commands to one or several logged-in sessions (shim injection,
       confirmation for several, audit log; card, list, tab menu, floating
       button); end-to-end test `send_commands`
-- [ ] Send commands (rest): input line at the bottom of the sidebar;
-      `tmux send-keys` fallback for persistent sessions; per-folder "no
-      group send"
+- [x] Send line at the bottom of the sidebar (active session or all
+      logged-in ones, confirmation for several, history) and per-folder
+      "No group send"
+- [ ] Send commands (rest): `tmux send-keys` fallback for persistent
+      sessions
 - [x] Persistent sessions via tmux or screen (`NativeTermPersistent`, per
       host or folder default, `off` per host): attach-or-create via
       `-o RemoteCommand` (hosts with their own `RemoteCommand` are

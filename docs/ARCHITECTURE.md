@@ -2409,7 +2409,12 @@ seconds.
 
 - **Confirmation for group send**: show the target list and the command
   before sending; locked sessions are excluded.
-- **Per-folder "no group send"** setting, e.g. for production.
+- **Per-folder "no group send"** setting, e.g. for production:
+  implemented as `NativeTermNoGroupSend yes` in the folder's `Host
+  __nativeterm_folder__` block, a checkbox in the folder's menu. Its
+  sessions are left out of "all" on the send line and aren't ticked at
+  first in "Send to several…" (they can be ticked by hand, like locked
+  ones); a single session can always be sent to.
 - **Audit log**: every sent command is appended locally — timestamp in
   ISO 8601 with UTC offset, machine name, session GUIDs and aliases of the
   targets, and the text — so logs from several machines line up.
@@ -2422,6 +2427,22 @@ seconds.
 Never in the terminal — the user types into NativeTerm's own UI:
 
 - **Sidebar**: a single-line input pinned to the bottom of the sidebar.
+  Implemented (`send_line.rs`): "To" picks the active session (the
+  NativeTerm tab last in front, see "Active session tracking") or "all
+  logged-in (N)", which leaves out locked sessions and folders marked
+  "No group send" ("N left out", with the reason on hover). Enter sends;
+  to more than one it first shows "Send to N sessions? Enter again, or
+  Esc" with the names on hover, and nothing is sent until then. The
+  result stays under the line ("sent to 2", not logged in / failed by
+  name); with nobody to send to, the text stays for another target.
+  ↑ / ↓ go through this run's earlier lines (100). Same path as
+  "Send…": `Core::send_text`, logged-in sessions only, the audit log.
+  Verified locally against two tabs on a container: the active one only
+  got the first line, both got the confirmed one (two audit entries), a
+  cancelled confirmation sent nothing and wrote nothing, and with the
+  folder marked "all" was 0 ("2 left out", "no logged-in session to send
+  to", nothing arrived). The line is an ordinary text field: an IME in
+  Chinese mode takes the letters, as in the terminal itself.
 - **Floating action button**: the entry point while the sidebar is hidden.
 - **Optional keyboard shortcut**, off by default: a modifier+key combo
   registered via `RegisterHotKey`. Pick a combo not already bound in

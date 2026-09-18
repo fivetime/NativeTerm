@@ -444,6 +444,18 @@ impl Editor {
         if value.is_some_and(|v| !matches!(v, "tmux" | "screen")) {
             return Err(EditError::Invalid(format!("persistent sessions {value:?}: tmux or screen")));
         }
+        self.set_folder_value(file, "NativeTermPersistent", value)
+    }
+
+    /// Keep a folder's sessions out of sends to several sessions
+    /// (`NativeTermNoGroupSend yes`), e.g. production.
+    pub fn set_folder_no_group_send(&self, file: &Path, on: bool) -> Result<(), EditError> {
+        self.set_folder_value(file, "NativeTermNoGroupSend", on.then_some("yes"))
+    }
+
+    /// A `NativeTerm*` key in a folder file's `Host __nativeterm_folder__`
+    /// block (made if needed); `None` removes it.
+    fn set_folder_value(&self, file: &Path, keyword: &str, value: Option<&str>) -> Result<(), EditError> {
         if file == self.main_config() {
             return Err(EditError::Invalid("the main config has no folder settings".into()));
         }
@@ -462,7 +474,7 @@ impl Editor {
                         block
                     }
                 };
-                set_or_remove(doc, block, "NativeTermPersistent", value);
+                set_or_remove(doc, block, keyword, value);
             },
             || self.validate(PARSE_CHECK_HOST, None),
         )?;
@@ -1396,6 +1408,16 @@ mod tests {
         assert_eq!(setting("web"), Some(Persistence::Screen), "its own value stays");
         assert!(!std::fs::read_to_string(&prod).unwrap().contains("NativeTermPersistent tmux"));
         assert!(editor.set_folder_persistent(&editor.main_config(), Some("tmux")).is_err());
+
+        // "No group send" on the same folder block, next to the rest
+        let folder = |e: &Editor| tree(e).folders().find(|f| f.file == prod).unwrap().clone();
+        assert!(!folder(&editor).no_group_send());
+        editor.set_folder_no_group_send(&prod, true).unwrap();
+        assert!(folder(&editor).no_group_send());
+        assert_eq!(folder(&editor).label(), "生产");
+        editor.set_folder_no_group_send(&prod, false).unwrap();
+        assert!(!folder(&editor).no_group_send());
+        assert!(editor.effective("web").is_ok());
     }
 
     /// A config NativeTerm didn't set up: no `IgnoreUnknown`, the user's own

@@ -18,6 +18,7 @@ use crate::options_dialog::{OptionsDialog, OptionsTarget};
 use crate::plink_dialog::PlinkDialog;
 use crate::send_dialog::SendDialog;
 use crate::server_sessions::ServerSessionsDialog;
+use crate::send_line::SendLine;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
 use crate::tab_list::TabList;
@@ -132,6 +133,7 @@ pub struct App {
     data_dir: PathBuf,
     editor: Editor,
     view: TreeView,
+    send_line: SendLine,
     dialog: Option<Dialog>,
     profile: ProfileSetup,
     show_settings: bool,
@@ -236,6 +238,7 @@ impl App {
             data_dir,
             ssh_dir: options.ssh_dir,
             view: TreeView::default(),
+            send_line: SendLine::default(),
             dialog: None,
             profile,
             show_settings: false,
@@ -311,6 +314,11 @@ impl App {
             .find(|f| f.file == file)
             .map(|f| if f.name.is_empty() { t!("tree-main-config") } else { f.label().to_string() })
             .unwrap_or_else(|| file.display().to_string())
+    }
+
+    /// Hosts in folders marked "No group send".
+    fn no_group_send(&self) -> std::collections::HashSet<String> {
+        self.tree.hosts().filter(|(f, _)| f.no_group_send()).map(|(_, h)| h.alias().to_string()).collect()
     }
 
     /// A folder's `NativeTermPersistent` default.
@@ -422,6 +430,12 @@ impl App {
                     let dialog = ServerSessionsDialog::new(&self.egui_ctx, &alias, host.label(), on_login, ssh, config);
                     self.dialog = Some(Dialog::ServerSessions(Box::new(dialog)));
                 }
+            }
+            TreeAction::FolderNoGroupSend(file, on) => {
+                if let Err(e) = self.editor.set_folder_no_group_send(&file, on) {
+                    self.notices.push(e.to_string());
+                }
+                self.reload();
             }
             TreeAction::FolderPersistent(file, value) => {
                 if let Err(e) = self.editor.set_folder_persistent(&file, value.as_deref()) {
@@ -642,7 +656,7 @@ impl App {
         match request {
             MenuRequest::Send(id) => {
                 if let Some(core) = &self.core {
-                    self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(core, &[id], &self.data_dir))));
+                    self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(core, &[id], &self.data_dir, &self.no_group_send()))));
                 }
             }
             MenuRequest::Rename(alias) => match self.tree.find(&alias) {
@@ -982,7 +996,7 @@ impl App {
             }
             let logged_in = sessions.iter().filter(|s| s.state == State::Connected).count();
             if ui.add_enabled(logged_in > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked() && self.dialog.is_none() {
-                self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[], &self.data_dir))));
+                self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[], &self.data_dir, &self.no_group_send()))));
             }
         });
         // after a restart or a Terminal restore: reconnect all, some, or none
@@ -1029,7 +1043,7 @@ impl App {
             }
         });
         if let (Some(id), None) = (send, &self.dialog) {
-            self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[id], &self.data_dir))));
+            self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[id], &self.data_dir, &self.no_group_send()))));
         }
         if let (Some(target), None) = (save, &self.dialog) {
             let draft = HostDraft {
@@ -1357,11 +1371,21 @@ impl crate::window::Ui for App {
             }
         }
         let mut actions = Vec::new();
+        let no_group_send = self.no_group_send();
         egui::Panel::left("tree")
             .resizable(true)
             .default_size(320.0)
             .size_range(220.0..=640.0)
-            .show_inside(ui, |ui| actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity));
+            .show_inside(ui, |ui| {
+                if let Some(core) = &self.core {
+                    egui::Panel::bottom("send-line").show_inside(ui, |ui| {
+                        ui.add_space(4.0);
+                        self.send_line.show(ui, core, &no_group_send);
+                        ui.add_space(2.0);
+                    });
+                }
+                actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity);
+            });
         for action in actions {
             self.handle(action);
         }
