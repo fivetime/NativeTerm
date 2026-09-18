@@ -98,7 +98,7 @@ key-hosts = On { $count } hosts: { $names }{ $more ->
         [0] {""}
        *[other] {" "}and { $more } more
     }
-key-note = Each host gets a tab, where ssh asks for its password one last time. Hosts without a POSIX shell (many network devices) can't take a key this way.
+key-note = Each host gets a tab, where ssh asks for its password one last time. Linux and other Unix hosts and Windows hosts (OpenSSH server) are supported; network devices that manage keys in their own configuration are not.
 key-install = { $count ->
         [one] Install
        *[other] Install on { $count } hosts

@@ -5,6 +5,8 @@
 //!   OpenSSH if `FAKE_SSH_LOGIN=1`, with `FAKE_SSH_ECHO=1` logs typed lines
 //!   (`input: …`) until `exit`, sleeps `FAKE_SSH_MS`, and exits with
 //!   `FAKE_SSH_CODE`. Arguments are appended to `FAKE_SSH_LOG`.
+//! - `FAKE_SSH_WINDOWS=1`: runs the remote command with `cmd.exe /c`, like
+//!   a Windows sshd.
 //! - `FAKE_SSH_INTERACTIVE=<bash>`: after the login, runs that shell
 //!   interactively (a local stand-in for the remote side).
 
@@ -35,6 +37,17 @@ fn main() {
     if let Ok(sh) = std::env::var("FAKE_SSH_SH") {
         let script = args.last().cloned().unwrap_or_default();
         let code = Command::new(sh).arg("-c").arg(script).status().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
+        std::process::exit(code);
+    }
+    // the remote command through cmd.exe, like a Windows sshd's default shell
+    if std::env::var("FAKE_SSH_WINDOWS").as_deref() == Ok("1") {
+        let command = args.last().cloned().unwrap_or_default();
+        let code = Command::new("cmd.exe")
+            .arg("/c")
+            .raw_arg(command)
+            .status()
+            .map(|s| s.code().unwrap_or(-1))
+            .unwrap_or(-1);
         std::process::exit(code);
     }
     // an interactive shell as the "remote side" (manual checks in a tab)

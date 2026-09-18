@@ -9,6 +9,7 @@ ended = [NativeTerm] Session ended (exit code { $code }).
 reconnect-or-close = [NativeTerm] Press R to reconnect, C to close this tab.
 any-key = [NativeTerm] Press any key to close.
 key-installing = [NativeTerm] Adding { $path } to { $alias }; ssh may ask for the password.
+key-windows-host = { $alias } is a Windows host: adding the key the PowerShell way (ssh may ask for the password once more).
 key-installed = [NativeTerm] Done: { $alias } now accepts the key.
 key-present = [NativeTerm] { $alias } already had the key.
 key-failed = [NativeTerm] The key was not added to { $alias } (exit code { $code }). Network devices without a POSIX shell can't take it this way.

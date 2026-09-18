@@ -254,7 +254,11 @@
       live test `auto_reconnect`)
 - [x] "Install my key" for a host or folder (shim runs ssh once with a
       POSIX script, one tab per host; key creation when there is none)
-- [ ] "Install my key" (rest): through the askpass helper; Windows hosts
+- [x] "Install my key" on Windows hosts (recognized from how cmd.exe or
+      PowerShell reject the POSIX script; PowerShell adds the key to the
+      admin or user file by Windows OpenSSH's rules)
+- [ ] "Install my key" (rest): one password for a whole batch through the
+      askpass helper
 - [x] Close Others / Close Disconnected (tab menu); "Close Tab Group"
       has no counterpart (Terminal has no tab groups)
 - [x] Close Tabs to the Right (real tab order via UIA)

@@ -1757,8 +1757,26 @@ Constraints found while verifying:
   dialog offers "Create a key…": a tab running `ssh-keygen -t ed25519`
   (`--create-key`), where the passphrase is chosen. Checked with a Git
   `sh` standing in for the host: added once, reported as present the
-  second time, no duplicate. The askpass path (saved passwords) and
-  Windows targets are not done.
+  second time, no duplicate. The askpass path (saved passwords) is not
+  done.
+- **Windows targets** (implemented): a Windows `sshd` runs the command in
+  `cmd.exe` (or PowerShell), which rejects the POSIX script — and quotes
+  it back: cmd stops at the `-qF` of `if grep -qF` ("-qF was unexpected
+  at this time", "此时不应有 -qF"), PowerShell's parse error repeats the
+  `umask` line. No POSIX shell prints either, so that is how the shim
+  knows; ssh then runs once more with
+  `powershell -NoProfile -NonInteractive -EncodedCommand <script>` (the
+  password is asked again). Following Windows OpenSSH's rules, members of
+  Administrators (`S-1-5-32-544` in `whoami /groups`) get the key in
+  `%ProgramData%\sshdministrators_authorized_keys`, which is then
+  limited to Administrators and SYSTEM; everyone else in
+  `%USERPROFILE%\.sshuthorized_keys`. Because PowerShell echoes script
+  source in its errors, both scripts assemble their success markers when
+  printing them, so a quoted line can't pass for success. Output is read
+  as bytes (a Windows shell answers in its code page, e.g. GBK). Tested
+  end to end with the fake ssh running the command through `cmd.exe`, and
+  the PowerShell script locally with the profile and ProgramData in a
+  scratch folder (admin file created and locked; second run: present).
 - **Ship `busybox.exe` alone, without applet shims or `PATH` changes.**
   The scoop package creates ~200 shims (`grep`, `ls`, `find`, `sort`, …)
   that compete with the user's own tools. NativeTerm calls

@@ -290,3 +290,62 @@ fn works_without_nativeterm() {
     assert!(text.contains("Session ended (exit code 0)"), "{text}");
     assert!(text.contains("Press R to reconnect"), "{text}");
 }
+
+/// `--install-key` against a "host" that is Git's `sh` (a POSIX shell):
+/// added once, reported as present the second time.
+#[test]
+fn install_key_posix_host() {
+    let sh = PathBuf::from(r"C:\Program Files\Git\usr\bin\sh.exe");
+    if !sh.exists() {
+        eprintln!("skipped: no Git sh");
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    let key = home.path().join("id_test.pub");
+    std::fs::write(&key, "ssh-ed25519 AAAAposixtest me@pc\n").unwrap();
+    let run = || {
+        let output = Command::new(shim_exe())
+            .args(["--install-key", key.to_str().unwrap(), "posix-host"])
+            .env("NATIVETERM_SSH", fake_ssh())
+            .env("NATIVETERM_LANG", "en")
+            .env("FAKE_SSH_SH", &sh)
+            .env("HOME", home.path())
+            .output()
+            .unwrap();
+        (output.status.code(), String::from_utf8_lossy(&output.stdout).to_string())
+    };
+    let (code, text) = run();
+    assert_eq!(code, Some(0), "{text}");
+    assert!(text.contains("now accepts the key"), "{text}");
+    let (code, text) = run();
+    assert_eq!(code, Some(0), "{text}");
+    assert!(text.contains("already"), "{text}");
+    let keys = std::fs::read_to_string(home.path().join(".ssh").join("authorized_keys")).unwrap();
+    assert_eq!(keys, "ssh-ed25519 AAAAposixtest me@pc\n");
+}
+
+/// The same against a "Windows host": the fake ssh runs the remote command
+/// with cmd.exe, which rejects the POSIX script; the shim notices and adds
+/// the key with PowerShell (profile and ProgramData in a scratch folder).
+#[test]
+fn install_key_windows_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = dir.path().join("id_test.pub");
+    std::fs::write(&key, "ssh-ed25519 AAAAwindowstest me@pc\n").unwrap();
+    let output = Command::new(shim_exe())
+        .args(["--install-key", key.to_str().unwrap(), "windows-host"])
+        .env("NATIVETERM_SSH", fake_ssh())
+        .env("NATIVETERM_LANG", "en")
+        .env("FAKE_SSH_WINDOWS", "1")
+        .env("USERPROFILE", dir.path().join("profile"))
+        .env("ProgramData", dir.path().join("programdata"))
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    assert_eq!(output.status.code(), Some(0), "{text}");
+    assert!(text.contains("is a Windows host"), "{text}");
+    assert!(text.contains("now accepts the key"), "{text}");
+    let admin = dir.path().join("programdata").join("ssh").join("administrators_authorized_keys");
+    let user = dir.path().join("profile").join(".ssh").join("authorized_keys");
+    assert!(admin.exists() || user.exists());
+}

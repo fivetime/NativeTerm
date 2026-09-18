@@ -95,7 +95,7 @@ key-hosts = 安装到 { $count } 台主机：{ $names }{ $more ->
         [0] {""}
        *[other] 等（另有 { $more } 台）
     }
-key-note = 每台主机会打开一个标签，ssh 会在那里最后一次询问它的密码。没有 POSIX shell 的主机（很多网络设备）不能用这种方式添加公钥。
+key-note = 每台主机会打开一个标签，ssh 会在那里最后一次询问它的密码。支持 Linux 等 Unix 主机和 Windows 主机（OpenSSH 服务器）；在自己的配置里管理密钥的网络设备不支持。
 key-install = { $count ->
         [one] 安装
        *[other] 安装到 { $count } 台主机

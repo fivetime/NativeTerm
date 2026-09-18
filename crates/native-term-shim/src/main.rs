@@ -363,7 +363,14 @@ fn describe(end: SessionEnd, code: i32) -> String {
     }
 }
 
+/// Keep a tool's tab open until a key is pressed, so its result can be
+/// read. Only in a tab: with output going to a pipe (tests, scripts)
+/// nobody is there to press a key.
 fn wait_for_any_key() {
+    use std::io::IsTerminal;
+    if !std::io::stdout().is_terminal() {
+        return;
+    }
     if let Ok(keys) = win::KeyReader::open() {
         println!("{}", t!("any-key"));
         while !matches!(keys.read_key(Duration::from_secs(3600)), Ok(Some(_))) {}

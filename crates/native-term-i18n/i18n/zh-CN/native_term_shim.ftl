@@ -7,6 +7,7 @@ ended = [NativeTerm] 会话已结束（退出码 { $code }）。
 reconnect-or-close = [NativeTerm] 按 R 重新连接，按 C 关闭此标签。
 any-key = [NativeTerm] 按任意键关闭。
 key-installing = [NativeTerm] 正在把 { $path } 添加到 { $alias }，ssh 可能会要求输入密码。
+key-windows-host = { $alias } 是 Windows 主机：改用 PowerShell 方式添加公钥（ssh 可能会再问一次密码）。
 key-installed = [NativeTerm] 完成：{ $alias } 已接受这把公钥。
 key-present = [NativeTerm] { $alias } 已经有这把公钥。
 key-failed = [NativeTerm] 公钥没有添加到 { $alias }（退出码 { $code }）。没有 POSIX shell 的网络设备不能用这种方式添加。
