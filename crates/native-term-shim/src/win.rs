@@ -302,10 +302,15 @@ impl Drop for CodePages {
     }
 }
 
+/// `\\.\COM12`: ports above COM9 need the device namespace.
+fn serial_device(line: &str) -> String {
+    format!(r"\\.\{line}")
+}
+
 /// Whether a serial line can be opened now: access denied (5) means
 /// another program holds it; not found (2) means there is no such port.
 pub fn serial_port_free(line: &str) -> io::Result<()> {
-    let device = HSTRING::from(format!(r"\.\{line}"));
+    let device = HSTRING::from(serial_device(line));
     let handle = unsafe {
         CreateFileW(
             &device,
@@ -377,5 +382,35 @@ pub fn terminate(pid: u32) {
         unsafe {
             let _ = TerminateProcess(handle.0, 1);
         }
+    }
+}
+
+/// A fingerprint of what the console shows around the cursor (its
+/// position and the text of its line and the one above): it changes when
+/// anything is written. `None` without a console.
+pub fn screen_fingerprint() -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    use windows::Win32::System::Console::{GetConsoleScreenBufferInfo, ReadConsoleOutputCharacterW, CONSOLE_SCREEN_BUFFER_INFO, COORD};
+    let output = open_console(w!("CONOUT$")).ok()?;
+    let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
+    unsafe { GetConsoleScreenBufferInfo(output.0, &mut info) }.ok()?;
+    let width = info.dwSize.X.max(1) as usize;
+    let cursor = info.dwCursorPosition;
+    let first = cursor.Y.saturating_sub(1);
+    let mut text = vec![0u16; width * (cursor.Y - first + 1) as usize];
+    let mut read = 0u32;
+    unsafe { ReadConsoleOutputCharacterW(output.0, &mut text, COORD { X: 0, Y: first }, &mut read) }.ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (cursor.X, cursor.Y, &text[..read as usize]).hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn serial_device_paths() {
+        assert_eq!(super::serial_device("COM30"), r"\\.\COM30");
+        let missing = super::serial_port_free("COM250").unwrap_err();
+        assert_eq!(missing.raw_os_error(), Some(2), "no such port");
     }
 }

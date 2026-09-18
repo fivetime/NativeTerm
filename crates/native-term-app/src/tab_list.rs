@@ -257,6 +257,7 @@ mod tests {
             locked: false,
             renamed_to: None,
             last_position: None,
+            quiet_since: None,
         }
     }
 

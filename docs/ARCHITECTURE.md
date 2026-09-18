@@ -965,6 +965,18 @@ Implemented (`native_term_config::plink`):
     shim may exit right after). One left by a shim that died is removed
     by the next shim (its pid no longer runs); other saved sessions are
     never touched, and an existing name is an error.
+  - **Serial silence:** a serial line has no connection to lose, so the
+    shim fingerprints what the console shows around the cursor (cursor
+    position plus its line and the one above, read with
+    `ReadConsoleOutputCharacterW`) every 300 ms. Unchanged for 30 s, it
+    sends `Quiet { since }`; the next change sends `Heard`. The card
+    shows "no data since HH:MM" (local time) until then; a reconnect or
+    an exit clears it, and the link replays it to a restarted NativeTerm.
+    Echoed typing counts as data. Verified with a virtual COM pair: data
+    shown, "no data since 12:54" after 30 s of silence, gone at the next
+    line; a second open of the same port refused by the app with the
+    owning tab named, and a shim started outside NativeTerm on the busy
+    port reporting "in use".
   - **App:** the tree shows non-SSH sessions with their own icons
     (network, serial) and protocol · target · charset on hover; their
     menu has no ssh-only items (session options, install key, forget

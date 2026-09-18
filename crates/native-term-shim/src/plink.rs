@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use native_term_config::plink::{self, PlinkSession, Protocol, PuttyValue};
 use native_term_session::protocol::ShimMessage;
 
-use crate::link::Link;
+use crate::link::{Link, LinkSender};
 use crate::{after_exit, supervise, t, win, Next, Supervised};
 
 /// The session `alias`, if it is a non-SSH one.
@@ -164,7 +164,7 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         std::thread::sleep(Duration::from_secs(2));
         drop(later.lock().map(|mut t| t.take()));
     });
-    let watch = Watch::start(child.id(), session.protocol);
+    let watch = Watch::start(child.id(), session.protocol, link.map(Link::sender));
     let supervised = supervise(&mut child, link, auth);
     watch.stop();
     drop(temporary.lock().map(|mut t| t.take()));
@@ -189,16 +189,49 @@ struct Watch {
 
 const WATCH_EVERY: Duration = Duration::from_millis(300);
 const SERIAL_SETTLE: Duration = Duration::from_secs(1);
+/// A serial line with nothing arriving for this long is reported quiet.
+const QUIET_AFTER: Duration = Duration::from_secs(30);
+
+fn quiet_after() -> Duration {
+    // tests: NATIVETERM_QUIET_SECS
+    std::env::var("NATIVETERM_QUIET_SECS").ok().and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(QUIET_AFTER)
+}
+
+fn unix_seconds(at: std::time::SystemTime) -> u64 {
+    at.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
 
 impl Watch {
-    fn start(pid: u32, protocol: Protocol) -> Watch {
+    fn start(pid: u32, protocol: Protocol, link: Option<LinkSender>) -> Watch {
         let watch = Watch { stop: Arc::default(), connected: Arc::default(), closed: Arc::default() };
         let (stop, connected, closed) = (watch.stop.clone(), watch.connected.clone(), watch.closed.clone());
         let shim = std::process::id();
         let started = Instant::now();
         std::thread::spawn(move || {
+            // serial: what the console shows, and since when it hasn't changed
+            let quiet_after = quiet_after();
+            let mut screen = win::screen_fingerprint();
+            let mut changed = std::time::SystemTime::now();
+            let mut quiet = false;
             while !stop.load(Ordering::Relaxed) {
                 std::thread::sleep(WATCH_EVERY);
+                if protocol == Protocol::Serial {
+                    let now = win::screen_fingerprint();
+                    if now != screen {
+                        screen = now;
+                        changed = std::time::SystemTime::now();
+                        if std::mem::take(&mut quiet) {
+                            if let Some(link) = &link {
+                                link.send(ShimMessage::Heard);
+                            }
+                        }
+                    } else if !quiet && changed.elapsed().unwrap_or_default() >= quiet_after {
+                        quiet = true;
+                        if let Some(link) = &link {
+                            link.send(ShimMessage::Quiet { since: unix_seconds(changed) });
+                        }
+                    }
+                }
                 let now_connected = match protocol {
                     Protocol::Serial => started.elapsed() >= SERIAL_SETTLE,
                     _ => {

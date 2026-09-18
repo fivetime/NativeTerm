@@ -320,7 +320,9 @@
       (protocol, host, serial port picker, speed and line settings,
       charset), a serial port already open in a session is refused naming
       that tab; ssh-only actions skip them
-- [ ] Non-SSH sessions (rest): "no data since …" for serial
+- [x] "No data since …" for serial sessions (the shim watches the console
+      near the cursor; quiet after 30 s, cleared by new output; replayed
+      to a restarted NativeTerm)
 - [x] Session options dialog for SSH hosts (host menu; connection,
       authentication, algorithms, host key, forwarding, environment;
       algorithm pickers from `ssh -Q`, current values from `ssh -G` shown

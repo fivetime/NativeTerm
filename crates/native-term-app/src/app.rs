@@ -1080,6 +1080,11 @@ fn session_card(
                 state.push_str(&format!(" · {}", t!("session-auto-reconnect", n = n)));
             }
             ui.colored_label(color, state);
+            if let Some(since) = s.quiet_since {
+                let time = native_term_win::local_time_of_day(since);
+                ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), t!("session-quiet", time = time))
+                    .on_hover_text(t!("session-quiet-hint"));
+            }
             if let Some(name) = &s.renamed_to {
                 ui.weak(t!("session-renamed", name = name.as_str())).on_hover_text(t!("session-renamed-hint"));
             }

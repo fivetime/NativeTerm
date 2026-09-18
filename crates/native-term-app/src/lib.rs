@@ -141,6 +141,9 @@ pub struct SessionView {
     /// Where the tab was when NativeTerm last saw it (window, tab), for
     /// sessions it hasn't found again.
     pub last_position: Option<(usize, usize)>,
+    /// A serial session that has received nothing since then (seconds
+    /// since the Unix epoch).
+    pub quiet_since: Option<u64>,
 }
 
 pub(crate) struct Session {
@@ -171,6 +174,7 @@ pub(crate) struct Session {
     locked: bool,
     /// Window number and tab index from `state.db`.
     last_position: Option<(usize, usize)>,
+    quiet_since: Option<u64>,
 }
 
 impl Session {
@@ -194,6 +198,7 @@ impl Session {
             on_login: None,
             locked: false,
             last_position: None,
+            quiet_since: None,
         }
     }
 
@@ -212,6 +217,7 @@ impl Session {
             locked: self.locked,
             renamed_to: None,
             last_position: self.last_position,
+            quiet_since: self.quiet_since.filter(|_| self.state.is_open()),
         }
     }
 
@@ -1511,6 +1517,9 @@ fn debug(shared: &Shared, text: String) {
 }
 
 fn apply(s: &mut Session, message: &ShimMessage) {
+    if !matches!(message, ShimMessage::Quiet { .. } | ShimMessage::Hello { .. }) {
+        s.quiet_since = None;
+    }
     match message {
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {
@@ -1531,7 +1540,8 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             }
         }
         ShimMessage::Closing => s.state = State::Closed,
-        ShimMessage::Hello { .. } => {}
+        ShimMessage::Quiet { since } => s.quiet_since = Some(*since),
+        ShimMessage::Heard | ShimMessage::Hello { .. } => {}
     }
 }
 

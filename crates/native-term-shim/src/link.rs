@@ -21,11 +21,14 @@ const TICK: Duration = Duration::from_millis(50);
 /// A blocked read wakes this rarely even when nothing arrives.
 const READ_WAIT: Duration = Duration::from_secs(3600);
 
-/// Replayed in this order: the current attempt, its login, its outcome.
+/// Replayed in this order: the current attempt, its login, its silence,
+/// its outcome.
 #[derive(Default)]
 struct Replay {
     connecting: Option<ShimMessage>,
     authenticated: bool,
+    /// `Quiet` while nothing arrives.
+    quiet: Option<ShimMessage>,
     /// `Exited` or `Waiting`.
     outcome: Option<ShimMessage>,
 }
@@ -101,7 +104,8 @@ impl Link {
                 let mut current = lock(&reader.current);
                 let state = lock(&reader.replay);
                 let mut ok = conn.send(&hello).is_ok();
-                for m in state.connecting.iter().chain(state.authenticated.then_some(&ShimMessage::Authenticated)) {
+                let login = state.authenticated.then_some(&ShimMessage::Authenticated);
+                for m in state.connecting.iter().chain(login).chain(state.quiet.iter()) {
                     ok = ok && conn.send(m).is_ok();
                 }
                 if let Some(m) = &state.outcome {
@@ -205,8 +209,13 @@ fn remember(replay: &Mutex<Replay>, message: &ShimMessage) {
         ShimMessage::Waiting => {
             *state = Replay { outcome: Some(message.clone()), ..Replay::default() };
         }
-        ShimMessage::Exited { .. } => state.outcome = Some(message.clone()),
+        ShimMessage::Exited { .. } => {
+            state.quiet = None;
+            state.outcome = Some(message.clone());
+        }
         ShimMessage::Authenticated => state.authenticated = true,
+        ShimMessage::Quiet { .. } => state.quiet = Some(message.clone()),
+        ShimMessage::Heard => state.quiet = None,
         _ => {}
     }
 }

@@ -46,6 +46,12 @@ pub enum ShimMessage {
     Exited { code: i32 },
     /// The tab is being closed (`CTRL_CLOSE_EVENT`).
     Closing,
+    /// Nothing arrived since `since` (seconds since the Unix epoch): a
+    /// serial line has no connection to lose, a dead device only goes
+    /// quiet.
+    Quiet { since: u64 },
+    /// Output again after `Quiet`.
+    Heard,
 }
 
 /// NativeTerm → shim.
