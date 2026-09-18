@@ -780,7 +780,11 @@ Consequences:
 - **Close → close others / close tabs after**: Windows Terminal's versions
   close every tab, including the user's own; NativeTerm's versions only
   touch its own tabs. Both coexist; tabs closed by Windows Terminal end
-  their shims, and NativeTerm marks those sessions closed.
+  their shims, and NativeTerm marks those sessions closed. A batch close
+  that would close a tab holding other panes (a split with the user's own
+  shell) asks first: the menu has no dialogs of its own, so it asks the
+  main window, which lists the sessions and marks the split ones.
+- **Rename** (tab menu): asks the main window to open the host dialog.
 - **Export text / Find**: Windows Terminal's own features, used as-is.
 
 ### Windows Terminal's own SSH profiles (1.25+)
