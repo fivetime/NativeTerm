@@ -385,7 +385,20 @@ impl Core {
                 s
             };
             match registry.open_sessions() {
-                Ok(records) => sessions.extend(records.into_iter().map(|r| to_session(r, State::Detached))),
+                Ok(records) => {
+                    for r in records {
+                        // its shim is gone (shut down, signed out, the tab closed
+                        // while NativeTerm wasn't running): so is the tab. Kept
+                        // restorable, in case Terminal restores the pane.
+                        if !shim_alive(r.shim) {
+                            if let Err(e) = registry.closed_with_window(&r.id) {
+                                notices.push(format!("state.db: {e}"));
+                            }
+                            continue;
+                        }
+                        sessions.push(to_session(r, State::Detached));
+                    }
+                }
                 Err(e) => notices.push(format!("state.db: {e}")),
             }
             match registry.restorable_sessions(RESTORABLE_FOR) {
@@ -975,6 +988,12 @@ impl Core {
     }
 }
 
+/// Whether the shim recorded for a session still runs (unknown: assumed,
+/// the tab is looked for as before).
+fn shim_alive(shim: Option<(u32, u64)>) -> bool {
+    shim.is_none_or(|(pid, started)| native_term_win::process_started(pid) == Some(started))
+}
+
 fn record_for(spec: &TabSpec) -> Record {
     Record {
         id: spec.session.clone(),
@@ -987,6 +1006,7 @@ fn record_for(spec: &TabSpec) -> Record {
         tab_index: None,
         no_forwards: spec.no_forwards,
         locked: false,
+        shim: None,
     }
 }
 
@@ -1303,6 +1323,7 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                 // unknown; the shim keeps its own command line anyway
                 no_forwards: false,
                 locked: false,
+                shim: None,
             };
             shared.db("adopt", |r| r.opened(&record));
             id
@@ -1321,6 +1342,9 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
         })
         .flatten();
     shared.db("hello", |r| r.seen_terminal_session(&id, current.as_deref()));
+    if let Some(started) = native_term_win::process_started(pid) {
+        shared.db("shim", |r| r.set_shim(&id, pid, started));
+    }
     shared.refresh_soon();
 
     loop {

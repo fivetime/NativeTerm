@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use native_term_platform::windows_terminal::install::Install;
 use native_term_platform::windows_terminal::window;
+use native_term_platform::windows_terminal::WindowsTerminal;
 
 struct Env {
     terminal: PathBuf,
@@ -193,5 +194,44 @@ fn restart_and_session_restore() {
     // nothing left to find
     let out = env.run(&["watch", "1"]);
     assert!(out.sessions().is_empty(), "{}", out.text);
+    cleanup(&env.data);
+}
+
+/// A tab closed while NativeTerm isn't running (or gone with a shutdown or
+/// sign-out): its shim no longer runs, so the next start knows the tab is
+/// gone right away, without looking for it or reporting it lost. Other
+/// Terminal windows are left alone (a new window is used).
+#[test]
+#[ignore = "needs a portable Windows Terminal, see the file header"]
+fn tab_closed_while_nativeterm_was_not_running() {
+    let env = Env::new();
+    let labels = ["nt-g a", "nt-g b"];
+    let out = env.run(&["open", "--new-window", labels[0], labels[1]]);
+    assert!(out.flag("SETTLED"), "{}", out.text);
+
+    // NativeTerm isn't running: close one tab with its close button
+    let install = Install::from_dir(&env.terminal).unwrap();
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf();
+    let terminal = WindowsTerminal::new(install, &root.join("target").join("debug").join("nativeterm-shim.exe"));
+    let snapshot = terminal.snapshot(&Default::default());
+    let (window, tab) = snapshot
+        .windows
+        .iter()
+        .find_map(|w| w.tabs.iter().find(|t| t.name == labels[0]).map(|t| (w.handle, t.clone())))
+        .expect("the tab");
+    assert!(terminal.close(window, &tab).unwrap());
+    std::thread::sleep(Duration::from_secs(2));
+
+    let started = Instant::now();
+    let out = env.run(&["watch", "1"]);
+    assert!(started.elapsed() < Duration::from_secs(10), "no 12 s wait for a lost tab: {:?}", started.elapsed());
+    assert!(out.flag("SETTLED"), "{}", out.text);
+    assert!(!out.text.contains(&format!("label={:?}", labels[0])), "known to be closed: {}", out.text);
+    let line = out.session(labels[1]);
+    assert!(line.contains("state=LoginFailed(255)") && line.contains("linked=true"), "the other one found: {line}");
+    assert!(!out.text.contains("NOTICE"), "nothing reported lost: {}", out.text);
+
+    let out = env.run(&["close-all"]);
+    assert!(out.flag("CLOSED"), "{}", out.text);
     cleanup(&env.data);
 }

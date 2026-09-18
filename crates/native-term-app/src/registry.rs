@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub type Result<T> = rusqlite::Result<T>;
 
-const SCHEMA_VERSION: i64 = 3;
+const SCHEMA_VERSION: i64 = 4;
 
 /// One session that was open when last seen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +31,9 @@ pub struct Record {
     pub no_forwards: bool,
     /// Kept out of batch closes and group sends (not changed by `opened`).
     pub locked: bool,
+    /// The shim last linked: process id and start time. If that process
+    /// is gone at the next start, so is the tab.
+    pub shim: Option<(u32, u64)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -109,6 +112,15 @@ impl Registry {
                  COMMIT;",
             )?;
         }
+        if version < 4 {
+            conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE sessions ADD COLUMN shim_pid INTEGER;
+                 ALTER TABLE sessions ADD COLUMN shim_started INTEGER;
+                 PRAGMA user_version = 4;
+                 COMMIT;",
+            )?;
+        }
         Ok(Registry { conn: Mutex::new(conn) })
     }
 
@@ -166,6 +178,17 @@ impl Registry {
         })
     }
 
+    /// The shim now linked for a session (see `Record::shim`).
+    pub fn set_shim(&self, id: &str, pid: u32, started: u64) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "UPDATE sessions SET shim_pid = ?2, shim_started = ?3 WHERE id = ?1",
+                params![id, pid, started as i64],
+            )?;
+            Ok(())
+        })
+    }
+
     pub fn moved(&self, id: &str, window_number: Option<i64>, tab_index: Option<i64>) -> Result<()> {
         self.with(|c| {
             c.execute(
@@ -211,7 +234,7 @@ impl Registry {
         self.with(|c| {
             let mut stmt = c.prepare(&format!(
                 "SELECT id, terminal_session, current_terminal_session, label, alias, opened_at, window_number, tab_index,
-                     no_forwards, locked
+                     no_forwards, locked, shim_pid, shim_started
                  FROM sessions WHERE {condition} ORDER BY window_number, tab_index, opened_at"
             ))?;
             let rows = stmt.query_map(args, |r| {
@@ -226,6 +249,10 @@ impl Registry {
                     tab_index: r.get(7)?,
                     no_forwards: r.get(8)?,
                     locked: r.get(9)?,
+                    shim: match (r.get::<_, Option<u32>>(10)?, r.get::<_, Option<i64>>(11)?) {
+                        (Some(pid), Some(started)) => Some((pid, started as u64)),
+                        _ => None,
+                    },
                 })
             })?;
             rows.collect()
@@ -284,7 +311,21 @@ mod tests {
             tab_index: None,
             no_forwards: false,
             locked: false,
+            shim: None,
         }
+    }
+
+    #[test]
+    fn shim_is_remembered() {
+        let reg = Registry::in_memory().unwrap();
+        reg.opened(&record("a", "web01")).unwrap();
+        assert_eq!(reg.open_sessions().unwrap()[0].shim, None, "not linked yet");
+        reg.set_shim("a", 4242, 133_900_000_000_000_000).unwrap();
+        assert_eq!(reg.open_sessions().unwrap()[0].shim, Some((4242, 133_900_000_000_000_000)));
+        // closed with its window: still known, and restorable
+        reg.closed_with_window("a").unwrap();
+        assert!(reg.open_sessions().unwrap().is_empty());
+        assert_eq!(reg.restorable_sessions(Duration::from_secs(3600)).unwrap()[0].id, "a");
     }
 
     #[test]

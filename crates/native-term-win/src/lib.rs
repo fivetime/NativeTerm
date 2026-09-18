@@ -44,6 +44,28 @@ fn token_information(class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<u8>> {
 }
 
 /// The current user's SID as a string (`S-1-5-21-…`).
+/// When a running process started (FILETIME ticks), or `None` if no
+/// process with that id is running. Together with the id it names one
+/// process: ids are reused, start times are not.
+pub fn process_started(pid: u32) -> Option<u64> {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    const STILL_ACTIVE: u32 = 259;
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+    let mut code = 0u32;
+    let (mut created, mut exited, mut kernel, mut user) =
+        (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+    let result = unsafe {
+        GetExitCodeProcess(handle, &mut code)
+            .and_then(|()| GetProcessTimes(handle, &mut created, &mut exited, &mut kernel, &mut user))
+    };
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    result.ok()?;
+    (code == STILL_ACTIVE).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+}
+
 pub fn user_sid() -> io::Result<String> {
     let buf = token_information(TokenUser)?;
     unsafe {
@@ -170,6 +192,17 @@ pub fn map_file_for_process(path: &Path) -> io::Result<&'static [u8]> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn process_start_times() {
+        let me = super::process_started(std::process::id()).expect("this process runs");
+        assert_eq!(super::process_started(std::process::id()), Some(me), "stable");
+        let mut child = std::process::Command::new("cmd.exe").args(["/c", "exit"]).spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        // exited: gone, or (if the id was reused already) a later start
+        assert!(super::process_started(pid).is_none_or(|t| t > me));
+    }
+
     use super::*;
 
     #[test]

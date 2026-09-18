@@ -702,6 +702,24 @@ Consequences:
       disconnected session as connected. The shim also never reported
       the login itself, so a restarted NativeTerm couldn't know it.
     - Sessions whose shim doesn't show up within 12 s are marked gone.
+    - **Tabs that can't be there any more** aren't looked for at all:
+      `state.db` keeps each session's shim (process id and start time,
+      schema 4). If that process no longer runs at the next start — the
+      tab was closed while NativeTerm wasn't running, Windows shut down
+      or signed out, Terminal crashed — the session is recorded as closed
+      with its window at once: no 12 s wait, no "lost" notice, and still
+      restorable if Terminal restores the pane (matched by its terminal
+      GUID only). A reused process id has another start time. Sessions
+      from before schema 4 (no shim recorded) are looked for as before.
+      Verified in the portable Terminal (`tab_closed_while_nativeterm_was_not_running`):
+      one of two tabs closed between two NativeTerm runs; the next run
+      found the other at once and didn't list the closed one. With the
+      check disabled the same test failed after the 12 s wait with the
+      closed one shown as gone.
+    - While NativeTerm runs, closing is followed as it happens: a tab's
+      shim reports closing (`Closed`; with its window: restorable), and a
+      shim that vanishes without a word (killed, Terminal crashed) drops
+      its pipe (`Gone`); both are written to `state.db` right away.
   - **NativeTerm exits:** by default the tabs stay and the next start takes
     them over (until then nobody answers their tab menu). Settings →
     "Close NativeTerm's tabs when NativeTerm exits" (`close_tabs_on_exit`
