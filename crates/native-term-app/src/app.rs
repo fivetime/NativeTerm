@@ -1059,6 +1059,14 @@ fn session_card(
 }
 
 impl crate::window::Ui for App {
+    fn on_exit(&mut self) {
+        if let Some(core) = &self.core {
+            if core.setting(native_term_app::CLOSE_ON_EXIT_SETTING).as_deref() == Some("1") {
+                core.close_all();
+            }
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
         if let Some(core) = &self.core {
@@ -1110,6 +1118,11 @@ impl crate::window::Ui for App {
                         let mut auto = core.auto_reconnect();
                         if ui.checkbox(&mut auto, t!("auto-reconnect-setting")).changed() {
                             core.set_auto_reconnect(auto);
+                        }
+                        let mut close = core.setting(native_term_app::CLOSE_ON_EXIT_SETTING).as_deref() == Some("1");
+                        let response = ui.checkbox(&mut close, t!("close-on-exit-setting")).on_hover_text(t!("close-on-exit-hint"));
+                        if response.changed() {
+                            core.set_setting(native_term_app::CLOSE_ON_EXIT_SETTING, if close { "1" } else { "0" });
                         }
                         language_choice(ui, core);
                         theme_choice(ui, core);

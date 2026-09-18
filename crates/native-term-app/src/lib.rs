@@ -41,6 +41,8 @@ const PACED_OVER: usize = 3;
 /// Automatic reconnects before giving up (the setting is off by default).
 const AUTO_RECONNECT_TRIES: u32 = 10;
 const AUTO_RECONNECT_SETTING: &str = "auto_reconnect";
+/// `state.db` setting: close NativeTerm's tabs when NativeTerm exits.
+pub const CLOSE_ON_EXIT_SETTING: &str = "close_tabs_on_exit";
 /// Connected at least this long: the retry count starts over.
 const STABLE_CONNECTION: Duration = Duration::from_secs(60);
 const CONFIRM: Duration = Duration::from_secs(15);
@@ -833,6 +835,19 @@ impl Core {
             self.close(id);
         }
         ended.len()
+    }
+
+    /// Close every open session's tab except locked ones (NativeTerm is
+    /// exiting): each shim is told over its pipe, so this returns at once
+    /// and the tabs close after NativeTerm is gone. Sessions without a shim
+    /// link are left alone (closing them needs the Terminal's UI).
+    pub fn close_all(&self) -> usize {
+        let links: Vec<_> = lock(&self.shared.sessions)
+            .iter()
+            .filter(|s| !s.locked && s.state.is_open())
+            .filter_map(|s| s.link.clone())
+            .collect();
+        links.iter().filter(|link| link.send(&AppMessage::Close).is_ok()).count()
     }
 
     /// Lock or unlock a session (remembered across restarts).

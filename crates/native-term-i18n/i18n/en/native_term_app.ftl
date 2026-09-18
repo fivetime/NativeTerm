@@ -12,6 +12,8 @@ theme-system = System default
 theme-light = Light
 theme-dark = Dark
 auto-reconnect-setting = Reconnect dropped sessions automatically (never after a failed login)
+close-on-exit-setting = Close NativeTerm's tabs when NativeTerm exits
+close-on-exit-hint = Off: the tabs stay, and NativeTerm takes them over again at its next start (until then their tab menu isn't available). On: every session's tab is closed, except locked ones; your own tabs are left alone, and a Terminal window with nothing else in it closes too.
 dock-pin = Pin
 dock-pin-hint = Docked at the { $edge ->
         [top] top

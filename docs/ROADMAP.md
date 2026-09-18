@@ -249,6 +249,8 @@
 - [x] Session states incl. "waiting for login" and "login failed"
       (`LocalCommand` signal)
 - [x] Reconnect in place / Disconnect / Close
+- [x] Optional: close NativeTerm's tabs when NativeTerm exits (unlocked
+      sessions only, through their shims; foreign tabs and windows untouched)
 - [x] Optional auto-reconnect that never retries login failures (setting
       in `state.db`; 3/10/30/60 s, at most 10 tries, spread per session;
       live test `auto_reconnect`)

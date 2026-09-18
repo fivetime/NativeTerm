@@ -126,3 +126,66 @@ fn open_track_reconnect_close() {
         std::thread::sleep(Duration::from_millis(200));
     }
 }
+
+/// Tab titles of a window, now.
+fn tab_names(core: &Core, window: isize) -> Vec<String> {
+    let snapshot = core.terminal().snapshot(&Default::default());
+    snapshot.windows.iter().find(|w| w.handle == window).map(|w| w.tabs.iter().map(|t| t.name.clone()).collect()).unwrap_or_default()
+}
+
+/// "Close NativeTerm's tabs when it exits": only unlocked NativeTerm
+/// sessions are told to close; a tab NativeTerm doesn't manage in the same
+/// window, and the window itself, stay.
+#[test]
+#[ignore = "needs a portable Windows Terminal"]
+fn close_all_spares_locked_and_foreign_tabs() {
+    let core = core();
+    // a tab that isn't NativeTerm's, in a window of its own
+    let dir = PathBuf::from(std::env::var("NATIVETERM_TEST_WT_DIR").unwrap());
+    let window_name = format!("nt-closeall-{}", std::process::id());
+    let foreign = format!("nt-foreign-{}", std::process::id());
+    std::process::Command::new(dir.join("wt.exe"))
+        .args(["-w", &window_name, "new-tab", "--title", &foreign, "--suppressApplicationTitle", "cmd.exe", "/k"])
+        .status()
+        .unwrap();
+    let started = Instant::now();
+    let window = loop {
+        let found = core.terminal().windows().into_iter().find(|w| tab_names(&core, w.handle).contains(&foreign));
+        if let Some(w) = found {
+            break w.handle;
+        }
+        assert!(started.elapsed() < WAIT, "the foreign tab didn't appear");
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    // two sessions in the same named window
+    let host = HostRequest::new("nativeterm-test.invalid", "nt-closeall");
+    let ids = core.open(&[host.clone(), host], Target::Named(window_name.clone()));
+    let sessions = wait_until(&core, &ids, "both failed to log in and were located", |s| {
+        s.len() == 2 && s.iter().all(|s| matches!(s.state, State::LoginFailed(255)) && s.location.is_some() && s.linked)
+    });
+    assert!(sessions.iter().all(|s| s.location.as_ref().unwrap().window == window), "in the foreign tab's window");
+    core.set_locked(&ids[1], true);
+
+    let told = core.close_all();
+    assert!(told >= 1, "{told}");
+    let started = Instant::now();
+    while tab_names(&core, window).contains(&"nt-closeall".to_string()) {
+        assert!(started.elapsed() < WAIT, "the unlocked tab is still open: {:?}", tab_names(&core, window));
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let names = tab_names(&core, window);
+    assert!(names.contains(&"nt-closeall (2)".to_string()), "the locked one stays: {names:?}");
+    assert!(names.contains(&foreign), "the foreign tab stays: {names:?}");
+    assert!(core.terminal().windows().iter().any(|w| w.handle == window), "the window stays");
+
+    // clean up: the locked session, then the foreign tab (this test's own)
+    core.set_locked(&ids[1], false);
+    core.close(&ids[1]);
+    wait_until(&core, &ids, "the locked one closed after unlocking", |s| s.iter().all(|s| !s.state.is_open()));
+    let snapshot = core.terminal().snapshot(&Default::default());
+    if let Some(w) = snapshot.windows.iter().find(|w| w.handle == window) {
+        if let Some(tab) = w.tabs.iter().find(|t| t.name == foreign) {
+            let _ = core.terminal().close(window, tab);
+        }
+    }
+}

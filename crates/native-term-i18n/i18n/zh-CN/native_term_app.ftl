@@ -9,6 +9,8 @@ theme-system = 跟随系统
 theme-light = 浅色
 theme-dark = 深色
 auto-reconnect-setting = 断线后自动重连（登录失败不会重试）
+close-on-exit-setting = 退出 NativeTerm 时关闭它管理的标签
+close-on-exit-hint = 不勾选：标签保留，NativeTerm 下次启动时重新接管（在那之前标签菜单不可用）。勾选：关闭所有会话标签，锁定的除外；你自己开的标签不受影响，没有其他标签的 Terminal 窗口也会随之关闭。
 dock-pin = 钉住
 dock-pin-hint = 已停靠在屏幕{ $edge ->
         [top] 顶部

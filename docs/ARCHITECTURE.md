@@ -702,6 +702,22 @@ Consequences:
       disconnected session as connected. The shim also never reported
       the login itself, so a restarted NativeTerm couldn't know it.
     - Sessions whose shim doesn't show up within 12 s are marked gone.
+  - **NativeTerm exits:** by default the tabs stay and the next start takes
+    them over (until then nobody answers their tab menu). Settings →
+    "Close NativeTerm's tabs when NativeTerm exits" (`close_tabs_on_exit`
+    in `state.db`, off by default) closes them instead: when the main
+    window closes, each open, unlocked session's shim is sent `Close`
+    over its own pipe and exits with 0, which closes its tab. Nothing
+    else is touched — no window messages, no Terminal UI: tabs NativeTerm
+    doesn't manage (the user's shells, other programs' tabs) stay, and so
+    does their window; a window that held only NativeTerm's tabs closes
+    by Terminal's own rule when its last tab does. Locked sessions stay
+    open. A crash or a killed process skips this (the tabs stay, as
+    without the setting). Verified in the portable Terminal: a window with
+    a foreign `cmd` tab and two sessions, one locked — only the unlocked
+    tab closed, the window stayed (`close_all_spares_locked_and_foreign_tabs`);
+    and with the real app closed by `WM_CLOSE`, its session's window
+    closed while unrelated shims and windows were untouched.
   - **A race found on the way:**
     - NativeTerm answers "local shell" and hangs up within about 40 ms.
     - The shim polled its "connected" flag every 50 ms and missed the

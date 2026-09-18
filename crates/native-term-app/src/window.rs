@@ -30,6 +30,9 @@ use crate::shell;
 /// What a window shows.
 pub trait Ui {
     fn ui(&mut self, ui: &mut egui::Ui);
+
+    /// The main window is closing and the program ends.
+    fn on_exit(&mut self) {}
 }
 
 type Factory = Box<dyn FnOnce(&egui::Context) -> Box<dyn Ui>>;
@@ -671,6 +674,9 @@ impl ApplicationHandler<UserEvent> for Runner {
             }
             WindowEvent::CloseRequested if which == Which::Main => {
                 self.save_placement();
+                if let Some(main) = self.main.as_mut() {
+                    main.ui.on_exit();
+                }
                 event_loop.exit();
             }
             WindowEvent::CloseRequested => {}
