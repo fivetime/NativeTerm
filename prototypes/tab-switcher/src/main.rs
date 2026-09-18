@@ -70,7 +70,9 @@ static HOOK_NANOS: AtomicU64 = AtomicU64::new(0);
 static HOOK_MAX_NANOS: AtomicU64 = AtomicU64::new(0);
 static FOREGROUND_CACHE: Mutex<Option<(isize, bool)>> = Mutex::new(None);
 /// (window, tab name) → thumbnail (an HBITMAP; GDI handles are process-wide).
-static THUMBS: Mutex<Option<HashMap<(isize, String), (isize, i32)>>> = Mutex::new(None);
+/// (window, tab name) → (HBITMAP, height).
+type Thumbs = HashMap<(isize, String), (isize, i32)>;
+static THUMBS: Mutex<Option<Thumbs>> = Mutex::new(None);
 static LISTED: Mutex<Option<Listed>> = Mutex::new(None);
 static WORKER: OnceLock<Mutex<mpsc::Sender<Job>>> = OnceLock::new();
 static TIMINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -575,7 +577,7 @@ fn test_terminal_window() -> Option<HWND> {
     unsafe {
         let _ = EnumWindows(Some(each), LPARAM(&mut found as *mut isize as isize));
     }
-    (found != 0).then(|| HWND(found as *mut _))
+    (found != 0).then_some(HWND(found as *mut _))
 }
 
 /// Injected keys only while the test Terminal is in front; otherwise stop
