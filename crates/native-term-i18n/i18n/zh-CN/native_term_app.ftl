@@ -391,6 +391,13 @@ sessions-send-many = 发送到多个会话…
 fab-send-hint = 输入到当前会话，回车发送
 tabmenu-send = 发送命令…
 
+folders-current = 会话文件夹：{ $path }
+folders-change = 移动会话文件夹…
+folders-move = 移动
+folders-move-note = 文件夹文件（*.conf）会复制过去，并修改 ~/.ssh/config 里的 Include 行；ssh 必须接受并看到同样的主机，否则什么都不改。原文件夹保持不变。放进同步文件夹（如 OneDrive）就能在多台电脑间共享会话。
+folders-moved = 已把 { $count } 个文件夹文件移到 { $path }，ssh 现在从那里读取。原文件夹 { $old } 保持不变。
+folders-move-failed = 没有移动会话文件夹：{ $error }
+folders-missing = 会话文件夹 { $path } 不存在（同步文件夹暂不可用？）；恢复后新建的文件夹会放在那里。
 data-dir-current = NativeTerm 数据：{ $path }（来自 { $source }）
 data-dir-fixed = 数据目录由 --data-dir 或 NATIVETERM_DATA_DIR 指定，请在那里修改。
 data-dir-change = 更改数据目录…

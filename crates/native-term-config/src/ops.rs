@@ -124,6 +124,13 @@ pub struct Editor {
     config: Option<PathBuf>,
     /// The `Include` line NativeTerm maintains in the main config.
     include: String,
+    /// Where folder files live (`config.d` unless moved).
+    folders: PathBuf,
+}
+
+/// The `Include` pattern for folder files in `dir`.
+fn include_for(dir: &Path) -> String {
+    format!("{}/*.conf", dir.to_string_lossy().replace('\\', "/"))
 }
 
 impl Editor {
@@ -135,20 +142,29 @@ impl Editor {
             ssh: ssh.to_path_buf(),
             config: None,
             include: header::DEFAULT_INCLUDE.to_string(),
+            folders: ssh_dir.join("config.d"),
         }
     }
 
     /// For another directory (tests): ssh is pointed at its config with
     /// `-F`, and the include is absolute.
     pub fn for_directory(ssh_dir: &Path, writer: Writer, ssh: &Path) -> Editor {
-        let include = format!("{}/*.conf", ssh_dir.join("config.d").to_string_lossy().replace('\\', "/"));
         Editor {
             ssh_dir: ssh_dir.to_path_buf(),
             writer,
             ssh: ssh.to_path_buf(),
             config: Some(ssh_dir.join("config")),
-            include,
+            include: include_for(&ssh_dir.join("config.d")),
+            folders: ssh_dir.join("config.d"),
         }
+    }
+
+    /// Folder files live in `dir` (a per-machine setting); the `Include`
+    /// line then names it absolutely.
+    pub fn with_folders_dir(mut self, dir: &Path) -> Editor {
+        self.include = include_for(dir);
+        self.folders = dir.to_path_buf();
+        self
     }
 
     pub fn main_config(&self) -> PathBuf {
@@ -156,7 +172,84 @@ impl Editor {
     }
 
     pub fn folders_dir(&self) -> PathBuf {
-        self.ssh_dir.join("config.d")
+        self.folders.clone()
+    }
+
+    /// Move the folder files to `new_dir` and point the main config's
+    /// `Include` at it. The files are written like any edit (owner-only
+    /// access), ssh must accept the result and see the same hosts, or
+    /// everything is undone. The old folder is left as it was; ssh no
+    /// longer reads it. Returns how many files were moved.
+    pub fn move_folders(&mut self, new_dir: &Path) -> Result<usize, EditError> {
+        let norm = |p: &Path| p.to_string_lossy().trim_end_matches(['\\', '/']).replace('/', "\\").to_lowercase();
+        if !new_dir.is_absolute() {
+            return Err(EditError::Invalid("not a full path".into()));
+        }
+        if norm(new_dir) == norm(&self.folders) {
+            return Err(EditError::Invalid("that is where the folders are".into()));
+        }
+        let conf = |dir: &Path| -> Vec<PathBuf> {
+            let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+                .map(|entries| {
+                    entries
+                        .filter_map(Result::ok)
+                        .map(|e| e.path())
+                        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("conf")))
+                        .collect()
+                })
+                .unwrap_or_default();
+            files.sort();
+            files
+        };
+        if !conf(new_dir).is_empty() {
+            return Err(EditError::Invalid(format!("{} already holds .conf files", new_dir.display())));
+        }
+        let before: std::collections::BTreeSet<String> =
+            SessionTree::load(&self.ssh_dir).hosts().map(|(_, h)| h.alias().to_lowercase()).collect();
+        std::fs::create_dir_all(new_dir)?;
+        let files = conf(&self.folders);
+        let mut written = Vec::new();
+        let undo = |written: &[PathBuf]| {
+            for f in written {
+                let _ = std::fs::remove_file(f);
+            }
+        };
+        for file in &files {
+            let target = new_dir.join(file.file_name().unwrap_or_default());
+            let copied = write::read(file).map_err(EditError::from).and_then(|(text, _)| {
+                self.writer.write(&target, &text, None, || Ok(())).map(|_| ()).map_err(EditError::from)
+            });
+            if let Err(e) = copied {
+                undo(&written);
+                return Err(e);
+            }
+            written.push(target);
+        }
+        let (old, new) = (self.include.clone(), include_for(new_dir));
+        let ssh_dir = self.ssh_dir.clone();
+        let result = edit_file(
+            &self.writer,
+            &self.main_config(),
+            |doc| {
+                header::replace_include(doc, &old, &new);
+            },
+            || {
+                self.validate(PARSE_CHECK_HOST, None)?;
+                let after: std::collections::BTreeSet<String> =
+                    SessionTree::load(&ssh_dir).hosts().map(|(_, h)| h.alias().to_lowercase()).collect();
+                if after != before {
+                    return Err(format!("{} hosts before, {} after the move", before.len(), after.len()));
+                }
+                Ok(())
+            },
+        );
+        if let Err(e) = result {
+            undo(&written);
+            return Err(e.into());
+        }
+        self.include = new;
+        self.folders = new_dir.to_path_buf();
+        Ok(files.len())
     }
 
     /// `ssh -G <alias>` must succeed; with `expect`, the host name must match.
@@ -784,6 +877,41 @@ mod tests {
 
     fn draft(label: &str, hostname: &str) -> HostDraft {
         HostDraft { label: label.into(), hostname: hostname.into(), ..HostDraft::default() }
+    }
+
+    #[test]
+    fn folders_move_elsewhere() {
+        let Some((home, mut editor)) = setup() else { return };
+        let prod = editor.create_folder("生产").unwrap();
+        editor.create_host(&tree(&editor), &prod, &draft("web", "10.0.0.1")).unwrap();
+        editor.create_folder("Lab").unwrap();
+        let old_dir = editor.folders_dir();
+        let hosts = |e: &Editor| tree(e).hosts().map(|(_, h)| h.alias().to_string()).collect::<Vec<_>>();
+        let before = hosts(&editor);
+
+        assert!(editor.move_folders(Path::new("relative")).is_err());
+        assert!(editor.move_folders(&old_dir).is_err());
+        let busy = home.path().join("busy");
+        std::fs::create_dir_all(&busy).unwrap();
+        std::fs::write(busy.join("x.conf"), "").unwrap();
+        assert!(editor.move_folders(&busy).is_err(), "a folder with .conf files");
+
+        let new_dir = home.path().join("synced folders");
+        assert_eq!(editor.move_folders(&new_dir).unwrap(), 2);
+        assert_eq!(editor.folders_dir(), new_dir);
+        assert_eq!(hosts(&editor), before);
+        let main = std::fs::read_to_string(editor.main_config()).unwrap();
+        assert!(main.contains("synced folders/*.conf\""), "{main}");
+        assert!(!main.contains("config.d/*.conf"), "{main}");
+        assert!(old_dir.join("shengchan.conf").exists(), "the old folder is left alone");
+        // editing works in the new place, and ssh sees it
+        let t = tree(&editor);
+        let file = t.folders().find(|f| f.label() == "生产").unwrap().file.clone();
+        assert!(file.starts_with(&new_dir));
+        editor.create_host(&t, &file, &draft("db", "10.0.0.2")).unwrap();
+        assert!(editor.effective("db").unwrap().iter().any(|(k, v)| k == "hostname" && v == "10.0.0.2"));
+        let lab = editor.create_folder("Ops").unwrap();
+        assert!(lab.starts_with(&new_dir));
     }
 
     #[test]

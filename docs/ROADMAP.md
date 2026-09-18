@@ -323,7 +323,12 @@
       copied, `state.db` as a `VACUUM INTO` snapshot; `nativeterm.toml` in
       portable mode, `HKCU\Software\NativeTerm\DataDir` otherwise; used from
       the next start; the old folder is kept)
-- [ ] `config.d` location setting (maintains the `Include` line)
+- [x] Session folders location (Settings → "Move session folders"): the
+      `*.conf` files are copied through the safe writer, NativeTerm's
+      `Include` line is rewritten (other patterns on it kept, quoted when
+      the path has spaces), and ssh must accept the result and list the same
+      hosts, or it is all undone; the old folder is left as it was; the
+      place is a per-machine setting, watched for changes like `~/.ssh`
 - [x] OneDrive placeholder detection with "Always keep on this device"
       guidance; visible sync-conflict notices (ssh folder, `config.d`, data
       folder; checked at start and on every reload; attributes only, so a

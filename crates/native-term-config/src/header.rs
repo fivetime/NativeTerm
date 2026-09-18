@@ -61,6 +61,34 @@ pub fn ensure(doc: &mut Document, include: &str) -> bool {
     changed
 }
 
+/// Point NativeTerm's `Include` (the one naming `old`) at `new` instead,
+/// keeping the line's other patterns; add it if there was none. Returns
+/// whether the document changed.
+pub fn replace_include(doc: &mut Document, old: &str, new: &str) -> bool {
+    let line = global_directive_lines(doc, "Include")
+        .into_iter()
+        .find(|&i| doc.lines[i].directive().is_some_and(|d| d.args.iter().any(|a| same_path(a, old))));
+    let changed = match line {
+        Some(i) => {
+            let d = doc.lines[i].directive().expect("directive");
+            let args: Vec<String> = d
+                .args
+                .iter()
+                .map(|a| if same_path(a, old) { new.to_string() } else { a.clone() })
+                .map(|a| crate::document::quote_arg(&a))
+                .collect();
+            let indent: String = doc.lines[i].text.chars().take_while(|c| c.is_whitespace()).collect();
+            let keyword = d.keyword.clone();
+            let text = format!("{indent}{keyword} {}", args.join(" "));
+            let changed = text != doc.lines[i].text;
+            doc.lines[i] = crate::document::parse_line(&text);
+            changed
+        }
+        None => false,
+    };
+    ensure(doc, new) || changed
+}
+
 fn global_directive_lines(doc: &Document, keyword: &str) -> Vec<usize> {
     let global = doc.blocks().swap_remove(0);
     doc.directives(&global).filter(|(_, d)| d.is(keyword)).map(|(i, _)| i).collect()
@@ -78,6 +106,21 @@ fn same_path(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn include_moves_elsewhere() {
+        let mut doc = Document::parse("IgnoreUnknown NativeTerm*\nInclude ~/.ssh/config.d/*.conf other/*.conf\n\nHost a\n    HostName x\n");
+        assert!(replace_include(&mut doc, DEFAULT_INCLUDE, "D:/Sync/ssh folders/*.conf"));
+        assert_eq!(
+            doc.render(),
+            "IgnoreUnknown NativeTerm*\nInclude \"D:/Sync/ssh folders/*.conf\" other/*.conf\n\nHost a\n    HostName x\n"
+        );
+        assert!(!replace_include(&mut doc, "D:/Sync/ssh folders/*.conf", "D:/Sync/ssh folders/*.conf"));
+        // no such line yet: added like the header would be
+        let mut doc = Document::parse("Host a\n    HostName x\n");
+        assert!(replace_include(&mut doc, DEFAULT_INCLUDE, "D:/x/*.conf"));
+        assert!(doc.render().starts_with("IgnoreUnknown NativeTerm*\nInclude D:/x/*.conf\n"), "{}", doc.render());
+    }
 
     #[test]
     fn adds_both_lines_after_leading_comments() {

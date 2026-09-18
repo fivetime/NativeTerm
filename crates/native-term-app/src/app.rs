@@ -49,10 +49,41 @@ enum View {
 /// modification time and size.
 type Fingerprint = Vec<(PathBuf, Option<std::time::SystemTime>, u64)>;
 
+/// `state.db` setting: where folder files live, when moved from `config.d`.
+pub const FOLDERS_SETTING: &str = "folders_dir";
+
+/// The moved folder location (from the setting), for every editor this
+/// process makes.
+static FOLDERS_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Where folder files live: the moved location, or `config.d`.
+pub(crate) fn folders_dir(ssh_dir: &Path) -> PathBuf {
+    FOLDERS_DIR.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_else(|| ssh_dir.join("config.d"))
+}
+
+fn set_folders_dir(dir: Option<PathBuf>) {
+    *FOLDERS_DIR.lock().unwrap_or_else(|e| e.into_inner()) = dir;
+}
+
+/// Watches the folder files when they live outside `~/.ssh` (that folder
+/// has its own watcher).
+fn watch_folders(ssh_dir: &Path, flag: &std::sync::Arc<std::sync::atomic::AtomicBool>, ctx: &egui::Context) -> Option<native_term_win::watch::FolderWatcher> {
+    let dir = folders_dir(ssh_dir);
+    if dir.starts_with(ssh_dir) {
+        return None;
+    }
+    let (flag, wake) = (std::sync::Arc::clone(flag), ctx.clone());
+    native_term_win::watch::FolderWatcher::start(&dir, false, move || {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        wake.request_repaint();
+    })
+    .ok()
+}
+
 fn fingerprint(ssh_dir: &Path, tree: &SessionTree) -> Fingerprint {
     let mut files: Vec<PathBuf> = vec![ssh_dir.join("config")];
     files.extend(tree.folders().map(|f| f.file.clone()));
-    if let Ok(entries) = std::fs::read_dir(ssh_dir.join("config.d")) {
+    if let Ok(entries) = std::fs::read_dir(folders_dir(ssh_dir)) {
         files.extend(entries.filter_map(Result::ok).map(|e| e.path()));
     }
     files.sort();
@@ -72,6 +103,10 @@ pub struct App {
     core: Option<Core>,
     /// Keeps the `~/.ssh` watcher alive.
     _watcher: Option<native_term_win::watch::FolderWatcher>,
+    /// And the one on the folder files, when they live elsewhere.
+    folders_watcher: Option<native_term_win::watch::FolderWatcher>,
+    /// "Move session folders": the new path being typed.
+    folders_move: Option<String>,
     ssh_changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     loaded_from: Fingerprint,
     view_right: View,
@@ -109,10 +144,16 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
     let program = native_term_session::ssh_program();
     let ssh = program.as_path();
     let home_ssh = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"));
-    if home_ssh.as_deref().is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&ssh_dir.to_string_lossy())) {
+    let editor = if home_ssh.as_deref().is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&ssh_dir.to_string_lossy())) {
         Editor::new(ssh_dir, writer, ssh)
     } else {
         Editor::for_directory(ssh_dir, writer, ssh)
+    };
+    let dir = folders_dir(ssh_dir);
+    if dir == ssh_dir.join("config.d") {
+        editor
+    } else {
+        editor.with_folders_dir(&dir)
     }
 }
 
@@ -138,6 +179,13 @@ impl App {
                 notices.push(t!("notice-tab-menu-unavailable", error = e.to_string()));
             }
         }
+        if let Some(dir) = core.as_ref().and_then(|c| c.setting(FOLDERS_SETTING)).filter(|d| !d.is_empty()) {
+            let dir = PathBuf::from(dir);
+            if !dir.is_dir() {
+                notices.push(t!("folders-missing", path = dir.display().to_string()));
+            }
+            set_folders_dir(Some(dir));
+        }
         let tree = SessionTree::load(&options.ssh_dir);
         publish_hosts(&tree, core.as_ref());
         // changes made elsewhere (an editor, a sync tool) show up by themselves
@@ -149,11 +197,14 @@ impl App {
             wake.request_repaint();
         })
         .ok();
+        let folders_watcher = watch_folders(&options.ssh_dir, &ssh_changed, ctx);
         let loaded_from = fingerprint(&options.ssh_dir, &tree);
         let first_run = core.as_ref().is_some_and(|c| c.setting(crate::wizard::DONE_SETTING).is_none());
         App {
             core,
             _watcher: watcher,
+            folders_watcher,
+            folders_move: None,
             ssh_changed,
             loaded_from,
             view_right: View::Sessions,
@@ -329,6 +380,55 @@ impl App {
                 }
                 self.reload();
             }
+        }
+    }
+
+    /// Where the folder files are, and moving them (e.g. into a synced folder).
+    fn folders_ui(&mut self, ui: &mut egui::Ui) {
+        let current = self.editor.folders_dir();
+        ui.horizontal_wrapped(|ui| {
+            ui.label(t!("folders-current", path = current.display().to_string()));
+            if ui.small_button(t!("wizard-open-folder")).clicked() {
+                let _ = std::process::Command::new("explorer.exe").arg(&current).spawn();
+            }
+        });
+        let Some(path) = self.folders_move.as_mut() else {
+            if ui.button(t!("folders-change")).clicked() {
+                self.folders_move = Some(String::new());
+            }
+            return;
+        };
+        let mut chosen = None;
+        let mut cancel = false;
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(path).hint_text(r"D:\OneDrive\ssh-folders").desired_width(320.0));
+            if ui.add_enabled(!path.trim().is_empty(), egui::Button::new(t!("folders-move"))).clicked() {
+                chosen = Some(PathBuf::from(path.trim()));
+            }
+            cancel = ui.button(t!("button-cancel")).clicked();
+        });
+        ui.weak(t!("folders-move-note"));
+        if let Some(new) = chosen {
+            match self.editor.move_folders(&new) {
+                Ok(count) => {
+                    if let Some(core) = &self.core {
+                        core.set_setting(FOLDERS_SETTING, &new.display().to_string());
+                    }
+                    set_folders_dir(Some(new.clone()));
+                    self.folders_watcher = watch_folders(&self.ssh_dir, &self.ssh_changed, &self.egui_ctx);
+                    self.notices.push(t!(
+                        "folders-moved",
+                        count = count,
+                        path = new.display().to_string(),
+                        old = current.display().to_string()
+                    ));
+                    self.folders_move = None;
+                    self.reload();
+                }
+                Err(e) => self.notices.push(t!("folders-move-failed", error = e.to_string())),
+            }
+        } else if cancel {
+            self.folders_move = None;
         }
     }
 
@@ -1020,6 +1120,7 @@ impl crate::window::Ui for App {
                         self.agent.refresh(&self.ssh_dir, ui.ctx());
                     }
                     ui.separator();
+                    self.folders_ui(ui);
                     self.data_dir_ui(ui);
                     ui.separator();
                     if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {

@@ -411,6 +411,13 @@ sessions-send-many = Send to several…
 fab-send-hint = Type into the active session, Enter sends
 tabmenu-send = Send Command…
 
+folders-current = Session folders: { $path }
+folders-change = Move session folders…
+folders-move = Move
+folders-move-note = The folder files (*.conf) are copied there and the Include line in ~/.ssh/config is changed; ssh must accept it and see the same hosts, or nothing changes. The old folder stays as it is. A synced folder (OneDrive) shares your sessions between PCs.
+folders-moved = Moved { $count } folder files to { $path }; ssh reads them from there now. { $old } is left as it was.
+folders-move-failed = The session folders weren't moved: { $error }
+folders-missing = The session folders { $path } aren't there (a sync folder not available?); new folders go there when it is back.
 data-dir-current = NativeTerm data: { $path } (from { $source })
 data-dir-fixed = Chosen with --data-dir or NATIVETERM_DATA_DIR; change it there.
 data-dir-change = Change data folder…

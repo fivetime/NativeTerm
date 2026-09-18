@@ -70,7 +70,8 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Look at the ssh folder, its `config.d`, and the data folder.
+/// Look at the ssh folder, the folder files (`config.d` or where they were
+/// moved), and the data folder.
 pub fn check(ssh_dir: &Path, data_dir: &Path) -> Health {
     let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
     let mut health = Health::default();
@@ -81,7 +82,7 @@ pub fn check(ssh_dir: &Path, data_dir: &Path) -> Health {
             name.starts_with("config") || name.starts_with("known_hosts")
         })
         .collect();
-    files.extend(files_in(&ssh_dir.join("config.d")));
+    files.extend(files_in(&crate::app::folders_dir(ssh_dir)));
     files.extend(files_in(data_dir));
     for file in files {
         let name = file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();

@@ -2840,6 +2840,14 @@ in ssh's own config — but `config.d` can also live anywhere: the main
 `~/.ssh/config`'s `Include` line accepts an absolute path, and NativeTerm
 maintains that line. Putting sessions on OneDrive is the same kind of
 setting.
+Implemented: Settings → "Move session folders" copies the folder files
+(`*.conf`) to the new place through the safe writer (owner-only access),
+points NativeTerm's `Include` at it (the line's other patterns are kept;
+a path with spaces is quoted), and checks that `ssh -G` accepts the
+config and that the same hosts are listed — otherwise the copies and the
+edit are undone. The old folder stays as it was (ssh no longer reads it).
+The place is a per-machine `state.db` setting; every editor, the change
+detection, the storage check and a second folder watcher follow it.
 
 ### What stays outside the data directory, by design
 
