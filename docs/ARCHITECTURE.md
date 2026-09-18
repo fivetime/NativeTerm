@@ -965,6 +965,25 @@ Implemented (`native_term_config::plink`):
     shim may exit right after). One left by a shim that died is removed
     by the next shim (its pid no longer runs); other saved sessions are
     never touched, and an existing name is an error.
+  - **App:** the tree shows non-SSH sessions with their own icons
+    (network, serial) and protocol · target · charset on hover; their
+    menu has no ssh-only items (session options, install key, forget
+    host key), and "Install my key" on a folder or selection and the
+    agent-forwarding notice skip them. A folder's menu has "New Telnet /
+    Serial Session…": name, protocol, host / port / login name, or for
+    serial the port (ports present now, from
+    `HKLM\HARDWARE\DEVICEMAP\SERIALCOMM`, or typed), speed (common rates
+    or typed), data bits, parity, stop bits and flow control; charset
+    (common ones or any known name / code page); note and a command typed
+    once connected. The alias is made from the name like an ssh host's
+    (pinyin for Chinese). Editing keeps what the dialog doesn't show (id,
+    favorite, source, PuTTY options). Opening a serial session whose port
+    an open session already uses is refused with a notice naming that
+    session's tab. Verified in the app (`--ssh-dir` on a test folder):
+    created from the folder menu, connected ("connected", then
+    "disconnected (255)" when the test server closed), edited to GBK and
+    reconnected from the card — the same server's GBK text then showed
+    correctly.
   - Verified with the real plink in the portable Terminal against local
     test servers: Telnet connected, a GBK banner shown correctly, the
     server's close shown as "disconnected"; raw closed by the server

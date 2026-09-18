@@ -315,9 +315,11 @@
       (UTF-8 default, GBK etc.), temporary `-load` session for options
       without a command-line flag, Telnet exit 0 = disconnected, raw
       `CLOSE_WAIT` watch, serial "port busy" check, `--ssh-dir` for tabs
-- [ ] Non-SSH sessions (rest): tree icons and the new / edit dialog
-      (protocol, host, serial port picker, charset), "port busy" naming
-      the owning tab, "no data since …" for serial
+- [x] Non-SSH sessions in the app: tree icons and menu, new / edit dialog
+      (protocol, host, serial port picker, speed and line settings,
+      charset), a serial port already open in a session is refused naming
+      that tab; ssh-only actions skip them
+- [ ] Non-SSH sessions (rest): "no data since …" for serial
 - [x] Session options dialog for SSH hosts (host menu; connection,
       authentication, algorithms, host key, forwarding, environment;
       algorithm pickers from `ssh -Q`, current values from `ssh -G` shown

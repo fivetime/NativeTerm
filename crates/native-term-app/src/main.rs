@@ -18,6 +18,7 @@ mod fab;
 mod icons;
 mod key_dialog;
 mod options_dialog;
+mod plink_dialog;
 mod shell;
 mod storage;
 mod tab_list;

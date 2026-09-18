@@ -11,6 +11,9 @@ pub const FOLDER_OPEN: char = '\u{E838}';
 pub const CHEVRON_RIGHT: char = '\u{E76C}';
 pub const CHEVRON_DOWN: char = '\u{E70D}';
 pub const HOST: char = '\u{E756}';
+/// Non-SSH sessions: Telnet, raw, … (Ethernet) and serial (USB).
+pub const NETWORK: char = '\u{E839}';
+pub const SERIAL: char = '\u{E88E}';
 pub const PIN: char = '\u{E718}';
 pub const CLEAR: char = '\u{E711}';
 pub const SEARCH: char = '\u{E721}';

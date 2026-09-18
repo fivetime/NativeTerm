@@ -38,8 +38,12 @@ fn check(status: WIN32_ERROR) -> io::Result<()> {
 }
 
 fn open(subkey: &str) -> io::Result<Option<Key>> {
+    open_in(HKEY_CURRENT_USER, subkey)
+}
+
+fn open_in(root: HKEY, subkey: &str) -> io::Result<Option<Key>> {
     let mut key = HKEY::default();
-    let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, &HSTRING::from(subkey), None, KEY_READ, &mut key) };
+    let status = unsafe { RegOpenKeyExW(root, &HSTRING::from(subkey), None, KEY_READ, &mut key) };
     if status == ERROR_FILE_NOT_FOUND {
         return Ok(None);
     }
@@ -68,6 +72,31 @@ pub fn user_subkeys(subkey: &str) -> io::Result<Vec<String>> {
 /// A key's values; empty if the key doesn't exist.
 pub fn user_values(subkey: &str) -> io::Result<Vec<(String, RegValue)>> {
     let Some(key) = open(subkey)? else { return Ok(Vec::new()) };
+    values(&key)
+}
+
+/// The serial ports present now (`COM3`, …), sorted by number.
+pub fn serial_ports() -> Vec<String> {
+    use windows::Win32::System::Registry::HKEY_LOCAL_MACHINE;
+    let key = match open_in(HKEY_LOCAL_MACHINE, r"HARDWARE\DEVICEMAP\SERIALCOMM") {
+        Ok(Some(key)) => key,
+        _ => return Vec::new(),
+    };
+    let mut ports: Vec<String> = values(&key)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(_, v)| match v {
+            RegValue::Str(port) => Some(port),
+            _ => None,
+        })
+        .collect();
+    let number = |p: &String| p.trim_start_matches(|c: char| !c.is_ascii_digit()).parse::<u32>().unwrap_or(u32::MAX);
+    ports.sort_by_key(|p| (number(p), p.clone()));
+    ports.dedup();
+    ports
+}
+
+fn values(key: &Key) -> io::Result<Vec<(String, RegValue)>> {
     let mut out = Vec::new();
     for index in 0.. {
         let mut name = vec![0u16; 16384];

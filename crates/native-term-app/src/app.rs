@@ -13,6 +13,7 @@ use crate::dialogs::{ConfirmCloseMixed, ConfirmDelete, ConfirmForget, FolderDial
 use crate::import_dialog::ImportDialog;
 use crate::key_dialog::KeyDialog;
 use crate::options_dialog::{OptionsDialog, OptionsTarget};
+use crate::plink_dialog::PlinkDialog;
 use crate::send_dialog::SendDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
@@ -25,6 +26,7 @@ const PINNED_SETTING: &str = "dock_pinned";
 
 enum Dialog {
     Host(HostDialog),
+    Plink(Box<PlinkDialog>),
     Folder(FolderDialog),
     Delete(ConfirmDelete),
     Forget(ConfirmForget),
@@ -266,6 +268,36 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// A serial line can be held by one session only: requests for a line
+    /// an open session already uses are dropped with a notice naming it.
+    fn without_taken_ports(&mut self, hosts: Vec<native_term_app::HostRequest>) -> Vec<native_term_app::HostRequest> {
+        let line_of = |tree: &SessionTree, alias: &str| {
+            let (_, host) = tree.find(alias)?;
+            let serial = host.plink.as_ref()?.serial.as_ref()?;
+            Some(serial.line.to_uppercase())
+        };
+        let open: Vec<SessionView> =
+            self.core.as_ref().map(|c| c.sessions().into_iter().filter(|s| s.state.is_open()).collect()).unwrap_or_default();
+        let mut taken: HashMap<String, String> = open
+            .iter()
+            .filter_map(|s| line_of(&self.tree, &s.alias).map(|line| (line, s.label.clone())))
+            .collect();
+        let mut kept = Vec::new();
+        for request in hosts {
+            match line_of(&self.tree, &request.alias) {
+                Some(line) => match taken.get(&line) {
+                    Some(owner) => self.notices.push(t!("notice-port-taken", line = line.as_str(), label = owner.as_str())),
+                    None => {
+                        taken.insert(line, request.label.clone());
+                        kept.push(request);
+                    }
+                },
+                None => kept.push(request),
+            }
+        }
+        kept
+    }
+
     fn folder_label(&self, file: &Path) -> String {
         self.tree
             .folders()
@@ -277,10 +309,17 @@ impl App {
     fn handle(&mut self, action: TreeAction) {
         match action {
             TreeAction::Open(hosts, target) => {
+                let hosts = self.without_taken_ports(hosts);
                 if let (Some(core), false) = (&self.core, hosts.is_empty()) {
                     core.open(&hosts, target);
-                    if hosts.len() >= AGENT_NOTICE_MIN {
-                        let aliases: Vec<String> = hosts.iter().map(|h| h.alias.clone()).collect();
+                    // only ssh hosts can forward the agent
+                    let ssh: Vec<String> = hosts
+                        .iter()
+                        .filter(|h| self.tree.find(&h.alias).is_none_or(|(_, e)| e.plink.is_none()))
+                        .map(|h| h.alias.clone())
+                        .collect();
+                    if ssh.len() >= AGENT_NOTICE_MIN {
+                        let aliases = ssh;
                         let (checker, core) = (self.editor.checker(), core.clone());
                         std::thread::spawn(move || {
                             let forwarding = checker.forwarding_agent(&aliases);
@@ -308,9 +347,16 @@ impl App {
                 let label = self.folder_label(&file);
                 self.dialog = Some(Dialog::Host(HostDialog::new_host(file, &label)));
             }
+            TreeAction::NewPlink(file) => {
+                let label = self.folder_label(&file);
+                self.dialog = Some(Dialog::Plink(Box::new(PlinkDialog::new_session(file, &label))));
+            }
             TreeAction::Edit(alias) => {
                 if let Some((_, host)) = self.tree.find(&alias) {
-                    self.dialog = Some(Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))));
+                    self.dialog = Some(match &host.plink {
+                        Some(session) => Dialog::Plink(Box::new(PlinkDialog::edit(session))),
+                        None => Dialog::Host(HostDialog::edit(&alias, &HostDraft::from_host(host))),
+                    });
                 }
             }
             TreeAction::Options(alias) => {
@@ -334,7 +380,11 @@ impl App {
                 match self.editor.folder_options(&file) {
                     Ok(values) => {
                         // what the folder's hosts get now, from its first host
-                        let first = self.tree.folders().find(|f| f.file == file).and_then(|f| f.hosts.first());
+                        let first = self
+                            .tree
+                            .folders()
+                            .find(|f| f.file == file)
+                            .and_then(|f| f.hosts.iter().find(|h| h.plink.is_none()));
                         let effective = first.and_then(|h| self.editor.effective(h.alias()).ok()).unwrap_or_default();
                         let label = self.folder_label(&file);
                         let target = OptionsTarget::Folder(file);
@@ -355,6 +405,11 @@ impl App {
                 self.reload();
             }
             TreeAction::InstallKey(hosts) => {
+                // keys are for ssh hosts only
+                let hosts: Vec<(String, String)> = hosts
+                    .into_iter()
+                    .filter(|(alias, _)| self.tree.find(alias).is_none_or(|(_, h)| h.plink.is_none()))
+                    .collect();
                 if !hosts.is_empty() {
                     self.dialog = Some(Dialog::Key(Box::new(KeyDialog::new(hosts, &self.ssh_dir))));
                 }
@@ -586,8 +641,12 @@ impl App {
                     }
                 }
                 WizardAction::InstallKeys => {
-                    let hosts: Vec<(String, String)> =
-                        self.tree.hosts().map(|(_, h)| (h.alias().to_string(), h.label().to_string())).collect();
+                    let hosts: Vec<(String, String)> = self
+                        .tree
+                        .hosts()
+                        .filter(|(_, h)| h.plink.is_none())
+                        .map(|(_, h)| (h.alias().to_string(), h.label().to_string()))
+                        .collect();
                     if !hosts.is_empty() {
                         self.dialog = Some(Dialog::Key(Box::new(KeyDialog::new(hosts, &self.ssh_dir))));
                     }
@@ -621,6 +680,36 @@ impl App {
                             None => Err(t!("error-host-gone", alias = alias.as_str())),
                         },
                         (None, Some(file)) => self.editor.create_host(&self.tree, file, &draft).map(|_| ()).map_err(|e| e.to_string()),
+                        (None, None) => Ok(()),
+                    };
+                    match result {
+                        Ok(()) => true,
+                        Err(e) => {
+                            d.error = Some(e);
+                            false
+                        }
+                    }
+                }
+            },
+            Dialog::Plink(d) => match d.show(ctx) {
+                Outcome::Open => false,
+                Outcome::Cancel => true,
+                Outcome::Submit(()) => {
+                    let result = match (d.alias.clone(), d.file.clone()) {
+                        (Some(alias), _) => match self.tree.find(&alias) {
+                            Some((_, host)) => {
+                                d.session(&alias).and_then(|s| self.editor.update_plink(host, &s).map_err(|e| e.to_string()))
+                            }
+                            None => Err(t!("error-host-gone", alias = alias.as_str())),
+                        },
+                        (None, Some(file)) => {
+                            let folder = self.tree.folders().find(|f| f.file == file).map(|f| f.name.clone()).unwrap_or_default();
+                            let name = native_term_config::alias::unique(&d.name_base(), &folder, &self.tree.taken_aliases());
+                            d.session(&name).and_then(|mut s| {
+                                s.id = Some(native_term_config::new_id());
+                                self.editor.add_plink(&file, &s).map_err(|e| e.to_string())
+                            })
+                        }
                         (None, None) => Ok(()),
                     };
                     match result {

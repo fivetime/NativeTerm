@@ -19,6 +19,8 @@ use crate::icons;
 pub enum TreeAction {
     Open(Vec<HostRequest>, Target),
     NewHost(PathBuf),
+    /// A non-SSH session in this folder file.
+    NewPlink(PathBuf),
     Edit(String),
     Options(String),
     Delete(String),
@@ -547,6 +549,10 @@ impl TreeView {
                                     actions.push(TreeAction::NewHost(file.clone()));
                                     ui.close();
                                 }
+                                if ui.button(t!("menu-new-plink")).clicked() {
+                                    actions.push(TreeAction::NewPlink(file.clone()));
+                                    ui.close();
+                                }
                                 if ui.add_enabled(!is_main, egui::Button::new(t!("menu-rename-folder"))).clicked() {
                                     actions.push(TreeAction::RenameFolder(file.clone()));
                                     ui.close();
@@ -568,8 +574,13 @@ impl TreeView {
                         if searching {
                             text.push_str(&format!("   · {}", folder_title(folders[*folder])));
                         }
+                        let icon = match host.plink.as_ref().map(|p| p.protocol) {
+                            None => icons::HOST,
+                            Some(native_term_config::plink::Protocol::Serial) => icons::SERIAL,
+                            Some(_) => icons::NETWORK,
+                        };
                         let look = RowLook {
-                            icon: Some(icons::HOST),
+                            icon: Some(icon),
                             dot: activity.get(alias).map(|a| a.color()),
                             selected,
                             weak: false,
@@ -625,7 +636,8 @@ impl TreeView {
                                 actions.push(TreeAction::Edit(alias.to_string()));
                                 ui.close();
                             }
-                            if ui.button(t!("menu-options")).clicked() {
+                            let ssh = host.plink.is_none();
+                            if ssh && ui.button(t!("menu-options")).clicked() {
                                 actions.push(TreeAction::Options(alias.to_string()));
                                 ui.close();
                             }
@@ -648,11 +660,11 @@ impl TreeView {
                                 actions.push(TreeAction::Favorite(alias.to_string(), on));
                                 ui.close();
                             }
-                            if ui.button(t!("menu-install-key")).clicked() {
+                            if ssh && ui.button(t!("menu-install-key")).clicked() {
                                 actions.push(TreeAction::InstallKey(vec![(alias.to_string(), host.label().to_string())]));
                                 ui.close();
                             }
-                            if ui.button(t!("menu-forget-key")).clicked() {
+                            if ssh && ui.button(t!("menu-forget-key")).clicked() {
                                 actions.push(TreeAction::ForgetKey(alias.to_string()));
                                 ui.close();
                             }
@@ -707,6 +719,17 @@ impl TreeView {
 }
 
 fn hover(host: &HostEntry) -> String {
+    if let Some(session) = &host.plink {
+        let mut text = format!("{} · {}", crate::plink_dialog::protocol_text(session.protocol), session.target());
+        if let Some(charset) = &session.charset {
+            text.push_str(&format!(" · {charset}"));
+        }
+        if let Some(note) = &session.note {
+            text.push_str(&format!("\n{note}"));
+        }
+        text.push_str(&format!("\n{}", t!("host-alias", alias = host.alias())));
+        return text;
+    }
     let mut text = format!(
         "{}{}{}",
         host.user.as_deref().map(|u| format!("{u}@")).unwrap_or_default(),
