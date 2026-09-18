@@ -922,9 +922,11 @@ when ntplink isn't there:
 
 - **License and trust:** MIT license, and official builds are signed by
   Simon Tatham.
-- **Where it comes from:** NativeTerm ships it in `tools\`, or uses an
-  installed PuTTY the user points to (this machine: `C:\Program
-  Files\PuTTY\plink.exe`, 0.84).
+- **Where it comes from:** NativeTerm's package ships `ntplink.exe` in
+  `tools\` (decided: added when the package is built, see
+  "Distribution"). plink is only a fallback for a copy without it: an
+  installed PuTTY (this machine: `C:\Program Files\PuTTY\plink.exe`,
+  0.84) or a `plink.exe` placed next to NativeTerm.
 - **Why plink and not `putty.exe`:** `putty.exe` is a GUI terminal with
   its own window, so it can't live in a Terminal tab.
 
@@ -3088,6 +3090,13 @@ Implemented (English, Simplified Chinese):
   `ssh-copy-id` script ship as separate programs next to NativeTerm (MIT).
   The release includes their license texts and a pointer to the exact
   busybox-w32 source used, as GPLv2 requires.
+- **ntplink**: packaging puts `ntplink.exe` in `tools\` and PuTTY's
+  licence (MIT) in `licenses\PuTTY.txt`, taken from a pinned release of
+  the PuTTY fork: `tools\get-ntplink.ps1 -Tag <tag> -Package <folder>`
+  (checked against the release's `SHA256SUMS`; `-Arch` per package
+  architecture). The fork is private, so a CI job that packages needs a
+  token with read access to it for `gh`. The package's notes name the
+  fork release it carries.
 - **Updates**: NativeTerm checks GitHub Releases and offers updates;
   downloaded packages are verified against their signature before being
   applied. Portable copies replace files inside their own folder;
@@ -3163,7 +3172,7 @@ NativeTerm\                  program folder
 ├── nativeterm.exe
 ├── nativeterm-shim.exe
 ├── nativeterm.toml          optional pointer: data_dir = "..."
-├── tools\                   busybox-w32, ssh-copy-id,
+├── tools\                   ntplink.exe, busybox-w32, ssh-copy-id,
 │                            optional WindowsTerminal\ (portable fallback)
 ├── licenses\                third-party license texts
 └── data\                    default data directory in portable mode

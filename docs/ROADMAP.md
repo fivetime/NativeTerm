@@ -354,8 +354,10 @@
       Break" in the tab menu), clear exit codes. The shim prefers it and
       falls back to plink with the old workarounds
 - [ ] Serial Break on a real device (the virtual COM driver doesn't pass
-      Break on); include `ntplink.exe` in NativeTerm's own packages (from
-      the fork's release; needs the fork public, or the binary vendored)
+      Break on)
+- [ ] Packaging: `ntplink.exe` into `tools\` and PuTTY's licence into
+      `licenses\` (`tools\get-ntplink.ps1 -Tag … -Package …`, ready; the
+      packaging CI needs a token that can read the private fork)
 - [ ] Output logging for non-SSH sessions (possible now in ntplink)
 - [x] "No data since …" for serial sessions (the shim watches the console
       near the cursor; quiet after 30 s, cleared by new output; replayed

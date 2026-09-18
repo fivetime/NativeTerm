@@ -5,13 +5,19 @@
 # that exist). Uses the GitHub CLI (`gh`), signed in: the fork is private.
 #
 #   powershell -File tools\get-ntplink.ps1 [-Tag <release tag>] [-Arch x86_64|aarch64|i686]
+#                                          [-Package <package folder>]
+#
+# -Package: for NativeTerm's release package instead: ntplink.exe goes to
+# <folder>\tools and PuTTY's licence to <folder>\licenses\PuTTY.txt (pass
+# -Tag there, so a package is reproducible).
 #
 # To build it from source instead: tools\build-ntplink.cmd.
 param(
     [string]$Tag = "",
     [ValidateSet("x86_64", "aarch64", "i686")]
     [string]$Arch = $(if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "aarch64" } else { "x86_64" }),
-    [string]$Repo = "fivetime/putty"
+    [string]$Repo = "fivetime/putty",
+    [string]$Package = ""
 )
 $ErrorActionPreference = "Stop"
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw "the GitHub CLI (gh) is needed: https://cli.github.com" }
@@ -37,6 +43,15 @@ Remove-Item $unpacked -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive $zip.FullName -DestinationPath $work -Force
 $exe = Get-ChildItem $unpacked -Recurse -Filter ntplink.exe | Select-Object -First 1
 if (-not $exe) { throw "$($zip.Name) has no ntplink.exe" }
+if ($Package) {
+    $licence = Join-Path $exe.DirectoryName "LICENCE"
+    if (-not (Test-Path $licence)) { throw "$($zip.Name) has no LICENCE" }
+    New-Item -ItemType Directory -Force (Join-Path $Package "tools"), (Join-Path $Package "licenses") | Out-Null
+    Copy-Item $exe.FullName (Join-Path $Package "tools") -Force
+    Copy-Item $licence (Join-Path $Package "licenses\PuTTY.txt") -Force
+    "ntplink.exe ($Tag, $Arch) -> $Package\tools, licence -> $Package\licenses\PuTTY.txt"
+    return
+}
 foreach ($profile in "debug", "release") {
     $dir = Join-Path $root "target\$profile"
     if (Test-Path $dir) {
