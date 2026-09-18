@@ -624,6 +624,11 @@ impl Editor {
         &self.ssh
     }
 
+    /// `-F` for ssh when the folder isn't `~/.ssh`.
+    pub fn config(&self) -> Option<&Path> {
+        self.config.as_deref()
+    }
+
     /// For asking ssh about many hosts off the UI thread.
     pub fn checker(&self) -> effective::Checker {
         effective::Checker { ssh: self.ssh.clone(), config: self.config.clone() }

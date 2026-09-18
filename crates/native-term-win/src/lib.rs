@@ -66,8 +66,23 @@ pub fn process_started(pid: u32) -> Option<u64> {
     (code == STILL_ACTIVE).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 
+/// `YYYY-MM-DD HH:MM` in local time for seconds since the Unix epoch.
+pub fn local_date_time(unix: u64) -> String {
+    match local_time(unix) {
+        Some(t) => format!("{:04}-{:02}-{:02} {:02}:{:02}", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute),
+        None => String::new(),
+    }
+}
+
 /// `HH:MM` in local time for seconds since the Unix epoch.
 pub fn local_time_of_day(unix: u64) -> String {
+    match local_time(unix) {
+        Some(t) => format!("{:02}:{:02}", t.wHour, t.wMinute),
+        None => String::new(),
+    }
+}
+
+fn local_time(unix: u64) -> Option<windows::Win32::Foundation::SYSTEMTIME> {
     use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
     use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
     // FILETIME: 100 ns steps since 1601
@@ -75,10 +90,7 @@ pub fn local_time_of_day(unix: u64) -> String {
     let file = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
     let (mut utc, mut local) = (SYSTEMTIME::default(), SYSTEMTIME::default());
     let ok = unsafe { FileTimeToSystemTime(&file, &mut utc).is_ok() && SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).is_ok() };
-    if !ok {
-        return String::new();
-    }
-    format!("{:02}:{:02}", local.wHour, local.wMinute)
+    ok.then_some(local)
 }
 
 pub fn user_sid() -> io::Result<String> {

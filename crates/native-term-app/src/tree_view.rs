@@ -34,6 +34,8 @@ pub enum TreeAction {
     FolderOptions(PathBuf),
     /// The folder's persistent-session default (`tmux`, `screen`, none).
     FolderPersistent(PathBuf, Option<String>),
+    /// NativeTerm's tmux / screen sessions on this host.
+    ServerSessions(String),
     Reload,
 }
 
@@ -663,6 +665,10 @@ impl TreeView {
                             let ssh = host.plink.is_none();
                             if ssh && ui.button(t!("menu-options")).clicked() {
                                 actions.push(TreeAction::Options(alias.to_string()));
+                                ui.close();
+                            }
+                            if ssh && ui.button(t!("menu-server-sessions")).on_hover_text(t!("menu-server-sessions-hint")).clicked() {
+                                actions.push(TreeAction::ServerSessions(alias.to_string()));
                                 ui.close();
                             }
                             ui.menu_button(t!("menu-move-to"), |ui| {

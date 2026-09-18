@@ -14,6 +14,7 @@ mod app;
 mod dialogs;
 mod dock;
 mod send_dialog;
+mod server_sessions;
 mod fab;
 mod icons;
 mod key_dialog;

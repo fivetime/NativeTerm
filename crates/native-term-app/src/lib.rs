@@ -391,11 +391,14 @@ pub struct HostRequest {
     pub no_forwards: bool,
     /// Typed after every login (`NativeTermOnLogin`).
     pub on_login: Option<String>,
+    /// The tab's session id, when it matters (reopening a persistent
+    /// session: the server-side name comes from it); a new one otherwise.
+    pub session: Option<String>,
 }
 
 impl HostRequest {
     pub fn new(alias: impl Into<String>, label: impl Into<String>) -> HostRequest {
-        HostRequest { alias: alias.into(), label: label.into(), no_forwards: false, on_login: None }
+        HostRequest { alias: alias.into(), label: label.into(), no_forwards: false, on_login: None, session: None }
     }
 }
 
@@ -634,7 +637,7 @@ impl Core {
                 let spec = TabSpec {
                     terminal_session: native_term_config::new_id(),
                     label: label.clone(),
-                    session: native_term_config::new_id(),
+                    session: host.session.clone().unwrap_or_else(native_term_config::new_id),
                     alias: host.alias.clone(),
                     wait: paced,
                     no_forwards: host.no_forwards,

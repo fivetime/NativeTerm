@@ -430,9 +430,10 @@
       against a temporary Ubuntu container from Windows 11 and Windows 10
       (tmux and screen: disconnect / killed ssh, reconnect, same shell;
       fallback without tmux)
-- [ ] Persistent sessions (rest): list / reopen / kill remote `nt-*`
-      sessions per host and folder (a closed tab's session stays on the
-      server; opening the host again starts a new one), optional hidden
+- [x] Sessions on the server (a host's menu): list NativeTerm's tmux /
+      screen sessions there, show the tab that has one, reopen a closed
+      tab's session in a new tab (same shell), end one (asked twice)
+- [ ] Persistent sessions (rest): the list per folder, optional hidden
       status bar
 - [ ] Optional saved passwords (Windows Credential Manager + per-process
       `SSH_ASKPASS=force`, shim as helper): answers only the session's own

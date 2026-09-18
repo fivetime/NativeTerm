@@ -2242,10 +2242,25 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
   rolled back), because only "new host" added `IgnoreUnknown
   NativeTerm*`; every write of a `NativeTerm*` key now does
   (`header::ensure_ignore`, without touching the user's `Include` lines).
-- **Not yet**: listing / reopening / killing detached `nt-*` sessions
-  (today a closed tab's session stays on the server, and opening the host
-  again starts a new one), hiding tmux's status bar, `tmux send-keys`
-  group send, previews.
+- **Sessions on the server** (a host's menu): NativeTerm asks the host
+  in the background with `ssh -o BatchMode=yes -o RequestTTY=no -o
+  ClearAllForwardings=yes -o PermitLocalCommand=no -o RemoteCommand=…`
+  (keys or the agent only; a host needing a password gets an explanation;
+  the command goes in `RemoteCommand` so a host's own one can't clash),
+  running `tmux ls -F …` and `screen -ls`. The dialog lists the `nt-*`
+  sessions with program, creation time (tmux) and state: "in tab …"
+  when an open tab of this NativeTerm has it (its session id gives the
+  same name) with "Show tab", else attached elsewhere / detached with
+  "Open". "Open" starts a tab whose session id begins with the name's 8
+  hex digits, so the shim attaches to that session, and keeps doing so on
+  reconnects. "End…" asks once more, then runs `tmux kill-session -t
+  =<name>` / `screen -S <name> -X quit` and lists again. Verified
+  locally (portable Terminal 1.26, daas container): the open tab's
+  session shown "in tab", the tab closed from NativeTerm left it
+  "detached", "Open" brought a tab back into the same shell (its history
+  and variables there).
+- **Not yet**: the same list per folder, hiding tmux's status bar,
+  `tmux send-keys` group send, previews.
 
 ## Active session tracking
 

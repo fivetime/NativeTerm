@@ -17,6 +17,7 @@ use crate::key_dialog::KeyDialog;
 use crate::options_dialog::{OptionsDialog, OptionsTarget};
 use crate::plink_dialog::PlinkDialog;
 use crate::send_dialog::SendDialog;
+use crate::server_sessions::ServerSessionsDialog;
 use crate::terminal_profile::ProfileSetup;
 use crate::icons;
 use crate::tab_list::TabList;
@@ -37,6 +38,7 @@ enum Dialog {
     Options(Box<OptionsDialog>),
     Import(Box<ImportDialog>),
     Send(Box<SendDialog>),
+    ServerSessions(Box<ServerSessionsDialog>),
 }
 
 /// Opening at least this many hosts that forward the ssh-agent is pointed out.
@@ -407,6 +409,15 @@ impl App {
                         self.dialog = Some(Dialog::Options(Box::new(dialog)));
                     }
                     Err(e) => self.notices.push(e.to_string()),
+                }
+            }
+            TreeAction::ServerSessions(alias) => {
+                if let Some((folder, host)) = self.tree.find(&alias) {
+                    let on_login = folder.nt(host, "onlogin").map(str::to_string);
+                    let ssh = self.editor.ssh().to_path_buf();
+                    let config = self.editor.config().map(Path::to_path_buf);
+                    let dialog = ServerSessionsDialog::new(&self.egui_ctx, &alias, host.label(), on_login, ssh, config);
+                    self.dialog = Some(Dialog::ServerSessions(Box::new(dialog)));
                 }
             }
             TreeAction::FolderPersistent(file, value) => {
@@ -817,6 +828,16 @@ impl App {
                 }
                 Outcome::Submit(()) => true,
             },
+            Dialog::ServerSessions(d) => {
+                let Some(core) = self.core.clone() else {
+                    self.dialog = None;
+                    return;
+                };
+                if let Outcome::Cancel = d.show(ctx, &core) {
+                    self.dialog = None;
+                }
+                return;
+            }
             Dialog::Send(d) => {
                 let Some(core) = self.core.clone() else {
                     self.dialog = None;
