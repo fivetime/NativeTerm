@@ -405,6 +405,19 @@ pub fn screen_fingerprint() -> Option<u64> {
     Some(hasher.finish())
 }
 
+/// The tab's size in columns and rows (the console's visible window),
+/// `None` without a console.
+pub fn console_size() -> Option<(u32, u32)> {
+    use windows::Win32::System::Console::{GetConsoleScreenBufferInfo, CONSOLE_SCREEN_BUFFER_INFO};
+    let output = open_console(w!("CONOUT$")).ok()?;
+    let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
+    unsafe { GetConsoleScreenBufferInfo(output.0, &mut info) }.ok()?;
+    let window = info.srWindow;
+    let columns = (window.Right - window.Left + 1).max(1) as u32;
+    let rows = (window.Bottom - window.Top + 1).max(1) as u32;
+    Some((columns, rows))
+}
+
 /// Ctrl+C as a key (^C for the remote side) rather than a signal: takes
 /// "processed input" off the console while it reads key by key. Line
 /// input keeps it (Backspace and Enter are handled through it there).

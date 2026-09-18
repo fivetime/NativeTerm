@@ -439,7 +439,9 @@ fn plink_session_with_putty_options() {
     assert!(keys.contains(&temporary), "{keys:?}");
     assert!(!keys.iter().any(|k| k == "NativeTerm-4000000000-1"), "stale: {keys:?}");
     let values = registry::user_values(&format!(r"{base}\{temporary}")).unwrap();
-    assert_eq!(values, [("PassiveTelnet".to_string(), RegValue::Dword(1))]);
+    assert_eq!(values[0], ("PassiveTelnet".to_string(), RegValue::Dword(1)));
+    let rest: Vec<&str> = values[1..].iter().map(|(n, _)| n.as_str()).collect();
+    assert!(rest.is_empty() || rest == ["TermWidth", "TermHeight"], "the tab's size, if any: {values:?}");
 
     assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
     let args = std::fs::read_to_string(&log).unwrap();
@@ -452,5 +454,56 @@ fn plink_session_with_putty_options() {
     let text = String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string();
     assert!(text.contains("Connecting to 10.9.9.9:2300 (telnet) with plink"), "{text}");
     assert!(text.contains("Could not connect"), "never connected: {text}");
+    registry::delete_user_tree(&base).unwrap();
+}
+
+/// Without PuTTY options a session still gets a temporary saved session:
+/// plink would otherwise start from PuTTY's "Default Settings". It holds
+/// only the tab's size (when there is a console), and it is gone after.
+#[test]
+fn plink_always_loads_its_own_session() {
+    use native_term_win::registry::{self, RegValue};
+    let base = format!(r"Software\NativeTerm-Tests-plink-load-{}", std::process::id());
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join(".ssh");
+    std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+    std::fs::write(ssh.join("config"), "Include config.d/*.conf\n").unwrap();
+    std::fs::write(ssh.join("config.d").join("lab.conf"), "").unwrap();
+    std::fs::write(ssh.join("config.d").join("lab.nt.toml"), "[[session]]\nname = \"sw\"\nhost = \"10.9.9.9\"\n").unwrap();
+    let log = dir.path().join("plink.log");
+
+    let name = pipe_name("plink-load");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let plink = fake_ssh();
+    let mut shim = spawn_shim(
+        &name,
+        &["--ssh-dir", ssh.to_str().unwrap(), "--session", "s-l", "sw"],
+        &[
+            ("NATIVETERM_PLINK", plink.to_str().unwrap()),
+            ("NATIVETERM_PUTTY_KEY", &base),
+            ("FAKE_SSH_LOG", log.to_str().unwrap()),
+            ("FAKE_SSH_MS", "1500"),
+        ],
+    );
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    std::thread::sleep(Duration::from_millis(500));
+    let temporary = format!("NativeTerm-{}-1", shim.id());
+    assert!(registry::user_subkeys(&base).unwrap().contains(&temporary));
+    let values = registry::user_values(&format!(r"{base}\{temporary}")).unwrap();
+    let names: Vec<&str> = values.iter().map(|(n, _)| n.as_str()).collect();
+    assert!(names.is_empty() || names == ["TermWidth", "TermHeight"], "only the size: {values:?}");
+    if let Some((_, RegValue::Dword(width))) = values.first() {
+        assert!(*width > 0);
+    }
+
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    let args = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(args.trim(), format!("-load | {temporary} | -telnet | 10.9.9.9"));
+    assert!(registry::user_subkeys(&base).unwrap().is_empty(), "deleted");
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
     registry::delete_user_tree(&base).unwrap();
 }

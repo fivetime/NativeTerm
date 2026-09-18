@@ -1104,7 +1104,8 @@ RSA / ECDSA keys from `ssh-keygen`.
 - SUPDUP.
 
 For these, the shim writes a **temporary** saved session
-`NativeTerm-<session id>` under the PuTTY key just before starting plink
+`NativeTerm-<shim pid>-<attempt>` under the PuTTY key just before starting
+plink (for every connection, see "What PuTTY's source says": defaults)
 and deletes it once plink has read it. Verified: a session with
 `PassiveTelnet=1` took effect (plink sent no option negotiation until the
 server did), and deleting the key 2 s after start didn't affect the
@@ -1175,11 +1176,15 @@ Measured against a local test server:
 - **Defaults:** without `-load`, plink starts from PuTTY's own "Default
   Settings" in the registry (`do_defaults(NULL)`); with `-load`, missing
   values are PuTTY's built-in defaults. So a session without PuTTY
-  options inherits the user's PuTTY defaults (proxy, keepalive, terminal
-  type, echo), one with options doesn't. Open decision (ROADMAP).
+  options would inherit the user's PuTTY defaults (proxy, keepalive,
+  terminal type, echo) and one with options wouldn't. Decided (by the
+  user): plink always loads NativeTerm's temporary session, so a session
+  behaves as its `.nt.toml` says whatever the user's PuTTY defaults are.
+  It also carries the tab's size at connect time (`TermWidth`,
+  `TermHeight`), which Telnet reports as the window size.
 - **Window size:** plink never calls `backend_size`, so Telnet's NAWS
-  reports `TermWidth` × `TermHeight` (80 × 24 unless the defaults say
-  otherwise) and never the tab's real size or its changes.
+  reports `TermWidth` × `TermHeight` and never a change: the size the tab
+  had when connecting (see above), not a later resize.
 - **Not reachable through plink:** serial Break (`SS_BRK` exists in the
   serial backend, plink has no way to send specials), session logging of
   the output (`-sessionlog` exists, but session output is logged by

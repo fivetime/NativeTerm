@@ -340,10 +340,12 @@
       (it ended plink), socket errors (`INT_MAX`) count as a dropped
       connection, the ineffective `TelnetKey` removed, local echo / line
       editing offered, the keepalive imported as minutes plus seconds
-- [ ] Non-SSH sessions: PuTTY's "Default Settings" apply to sessions
-      without options but not to ones with options (decide: always
-      `-load`, or inherit); window size (NAWS) fixed at 80 × 24; no serial
-      Break — see "What PuTTY's source says"
+- [x] Non-SSH sessions no longer depend on PuTTY's "Default Settings":
+      plink always loads NativeTerm's temporary session, which also
+      carries the tab's size at connect time (Telnet window size)
+- [ ] Non-SSH sessions through plink can't follow a tab resize (NAWS),
+      send a serial Break or log output — see "What PuTTY's source says";
+      a native Telnet / raw / serial client in the shim is being weighed
 - [x] "No data since …" for serial sessions (the shim watches the console
       near the cursor; quiet after 30 s, cleared by new output; replayed
       to a restarted NativeTerm)

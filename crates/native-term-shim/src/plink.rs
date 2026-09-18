@@ -9,8 +9,10 @@
 //!   connection closed by the server only shows as `CLOSE_WAIT` (plink
 //!   notices at the next keystroke), so the watcher ends plink then. Both,
 //!   and plink's own error exit 1, are reported as connection-level (255).
-//! - Options plink only reads from a saved session go into a temporary
-//!   one, `NativeTerm-<pid>-<attempt>`, deleted once plink has read it.
+//! - plink always loads a temporary saved session,
+//!   `NativeTerm-<pid>-<attempt>`, deleted once plink has read it: the
+//!   options plink only takes from a saved session, and the tab's size.
+//!   Without it plink would start from PuTTY's "Default Settings".
 //! - The console code pages follow the session's charset while plink runs.
 
 use std::path::PathBuf;
@@ -291,11 +293,13 @@ struct TemporarySession {
 }
 
 impl TemporarySession {
+    /// Always one, even without options: without `-load`, plink would
+    /// start from PuTTY's own "Default Settings" (proxy, keepalive,
+    /// terminal type, …), so a session's behaviour would depend on the
+    /// user's PuTTY. With it, what isn't in the session is PuTTY's built-in
+    /// default. The tab's size goes in too, for Telnet's window size.
     fn create(session: &PlinkSession, attempt: u32) -> std::io::Result<Option<TemporarySession>> {
         use native_term_win::registry::{self, RegValue};
-        if session.putty.is_empty() {
-            return Ok(None);
-        }
         let base = native_term_config::putty::sessions_key();
         remove_stale(&base);
         let name = format!("{PREFIX}{}-{attempt}", std::process::id());
@@ -303,7 +307,7 @@ impl TemporarySession {
             // never overwrite a session that isn't ours
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, format!("{base}\\{name} exists")));
         }
-        let values: Vec<(&str, RegValue)> = session
+        let mut values: Vec<(&str, RegValue)> = session
             .putty
             .iter()
             .map(|(k, v)| {
@@ -314,6 +318,10 @@ impl TemporarySession {
                 (k.as_str(), value)
             })
             .collect();
+        if let Some((columns, rows)) = win::console_size() {
+            values.push(("TermWidth", RegValue::Dword(columns)));
+            values.push(("TermHeight", RegValue::Dword(rows)));
+        }
         let key = format!("{base}\\{name}");
         registry::write_user_values(&key, &values)?;
         Ok(Some(TemporarySession { name, key }))
