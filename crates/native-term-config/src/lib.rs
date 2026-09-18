@@ -27,6 +27,7 @@ pub mod keys;
 pub mod known_hosts;
 pub mod ops;
 pub mod options;
+pub mod password;
 pub mod persistent;
 pub mod plink;
 #[cfg(windows)]

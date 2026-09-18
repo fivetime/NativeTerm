@@ -435,11 +435,12 @@
       tab's session in a new tab (same shell), end one (asked twice)
 - [ ] Persistent sessions (rest): the list per folder, optional hidden
       status bar
-- [ ] Optional saved passwords (Windows Credential Manager + per-process
+- [x] Optional saved passwords (Windows Credential Manager + per-process
       `SSH_ASKPASS=force`, shim as helper): answers only the session's own
       password prompt and handles every other prompt in the console, one
-      attempt then mark invalid, risk warning in the UI; helper checks its
-      caller chain (shim → ssh → helper)
+      attempt then mark refused, risk warning in the UI; helper checks its
+      caller chain (shim → ssh → helper). Verified live against a password
+      container; password fields turn the IME off
 - [x] Tab switcher, first version: all tabs in all windows (the user's own
       too) with live titles, grouped by window, search, Enter / click
       switches (Ctrl+T)

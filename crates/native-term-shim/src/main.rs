@@ -24,6 +24,7 @@ mod debug;
 mod link;
 mod persistent;
 mod plink;
+mod saved;
 mod ssh;
 mod win;
 
@@ -223,7 +224,7 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
             native_term_config::effective::effective_with(&ssh_path, config.as_deref(), alias).unwrap_or_default();
         // read again on every attempt: an edit applies at the next connect
         let remote = persistent::remote_command(alias, session, &effective);
-        let arguments =
+        let mut arguments =
             ssh::arguments(alias, &shim_exe, pid, &effective, flags.no_forwards, config.as_deref(), remote.as_deref());
         if let Some(event) = &auth {
             event.reset();
@@ -233,7 +234,10 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         // without "processed output" (line breaks shown as ♪◙)
         let modes = win::ConsoleModes::save();
         let direct = ssh::is_direct(&effective);
-        let mut child = match Command::new(&ssh_path).args(&arguments).spawn() {
+        let mut command = Command::new(&ssh_path);
+        // a saved password: the shim answers ssh's password prompt
+        let saved = saved::Attempt::find(&effective).filter(|s| s.configure(&mut command, &mut arguments));
+        let mut child = match command.args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {
                 println!("{}", t!("ssh-not-started", path = ssh_path.display().to_string(), error = e.to_string()));
@@ -246,6 +250,9 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         };
 
         let reached = direct.then(|| ssh::Reached::watch(child.id()));
+        if let Some(saved) = &saved {
+            saved.started(child.id());
+        }
         let code = match supervise(&mut child, link, auth.as_ref(), None) {
             Supervised::Exited(code) => code,
             Supervised::Close => return 0,
@@ -255,12 +262,21 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         let end = classify_exit(code, authenticated);
         // only a direct connection shows whether the server was reached
         let unreachable = end == SessionEnd::LoginFailed && reached.is_some_and(|r| !r.stop());
+        // the saved password was given and the login failed anyway
+        let refused = saved.as_ref().is_some_and(|s| s.finish()) && end == SessionEnd::LoginFailed && !unreachable;
+        if let (true, Some(saved)) = (refused, &saved) {
+            saved.refused();
+            send(ShimMessage::PasswordRefused);
+        }
         if unreachable {
             send(ShimMessage::Unreachable);
         }
         send(ShimMessage::Exited { code });
         let text = if unreachable { t!("unreachable", code = code) } else { describe(end, code) };
         println!("\r\n{text}");
+        if refused {
+            println!("{}", t!("saved-password-refused"));
+        }
         match after_exit(link) {
             Next::Reconnect => continue,
             Next::Close => return 0,

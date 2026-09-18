@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use native_term_app::t;
 use native_term_config::ops::HostDraft;
+use native_term_config::password::{Target, REFUSED};
+use native_term_win::credentials::{self, Saved};
 
 pub enum Outcome<T> {
     Open,
@@ -31,7 +33,81 @@ pub struct HostDialog {
     persistent: Option<String>,
     /// The folder's default, shown with "as the folder".
     folder_persistent: Option<String>,
+    /// The account's saved password (editing a saved host only).
+    password: Option<PasswordField>,
     pub error: Option<String>,
+}
+
+/// The optional saved password of the host's account: written to and
+/// removed from Credential Manager right away, never kept here.
+struct PasswordField {
+    target: Target,
+    state: PasswordState,
+    typed: String,
+    message: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PasswordState {
+    None,
+    Saved,
+    Refused,
+}
+
+impl PasswordField {
+    fn new(target: Target) -> PasswordField {
+        let state = match credentials::read(&target.name) {
+            Ok(Some(saved)) if saved.comment == REFUSED => PasswordState::Refused,
+            Ok(Some(_)) => PasswordState::Saved,
+            _ => PasswordState::None,
+        };
+        PasswordField { target, state, typed: String::new(), message: None }
+    }
+
+    fn show(&mut self, ui: &mut egui::Ui) {
+        ui.separator();
+        ui.label(egui::RichText::new(t!("password-title")).strong());
+        let (text, color) = match self.state {
+            PasswordState::None => (t!("password-none"), None),
+            PasswordState::Saved => (t!("password-saved", target = self.target.name.as_str()), None),
+            PasswordState::Refused => (t!("password-refused"), Some(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a))),
+        };
+        match color {
+            Some(c) => ui.colored_label(c, text),
+            None => ui.weak(text),
+        };
+        ui.horizontal(|ui| {
+            let account = format!("{}@{}", self.target.user, self.target.host);
+            let hint = t!("password-hint", account = account.as_str());
+            let field = ui.add(egui::TextEdit::singleline(&mut self.typed).password(true).hint_text(hint).desired_width(200.0));
+            no_ime(&field);
+            if ui.add_enabled(!self.typed.is_empty(), egui::Button::new(t!("password-save"))).clicked() {
+                let saved = Saved { user: self.target.user.clone(), secret: std::mem::take(&mut self.typed), comment: String::new() };
+                let result = credentials::write(&self.target.name, &saved);
+                drop(saved);
+                self.message = Some(match result {
+                    Ok(()) => {
+                        self.state = PasswordState::Saved;
+                        t!("password-stored")
+                    }
+                    Err(e) => e.to_string(),
+                });
+            }
+            if self.state != PasswordState::None && ui.button(t!("password-remove")).clicked() {
+                self.message = Some(match credentials::delete(&self.target.name) {
+                    Ok(_) => {
+                        self.state = PasswordState::None;
+                        t!("password-removed")
+                    }
+                    Err(e) => e.to_string(),
+                });
+            }
+        });
+        if let Some(message) = &self.message {
+            ui.weak(message);
+        }
+        ui.weak(t!("password-warning"));
+    }
 }
 
 fn opt(text: &str) -> Option<String> {
@@ -68,8 +144,16 @@ impl HostDialog {
             on_login: d.on_login.clone().unwrap_or_default(),
             persistent: d.persistent.clone(),
             folder_persistent: None,
+            password: None,
             error: None,
         }
+    }
+
+    /// Offer a saved password for this account (`ssh -G`'s user, host,
+    /// port); a new host has none yet.
+    pub fn with_password(mut self, target: Option<Target>) -> HostDialog {
+        self.password = target.map(PasswordField::new);
+        self
     }
 
     /// The folder's `NativeTermPersistent`, for "as the folder (…)".
@@ -155,6 +239,14 @@ impl HostDialog {
                 if let Some(alias) = &self.alias {
                     ui.weak(t!("host-alias-kept", alias = alias.as_str()));
                 }
+                match &mut self.password {
+                    Some(field) => field.show(ui),
+                    None if self.alias.is_none() => {
+                        ui.separator();
+                        ui.weak(t!("password-after-save"));
+                    }
+                    None => {}
+                }
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
                 }
@@ -175,6 +267,16 @@ impl HostDialog {
             outcome = Outcome::Cancel;
         }
         outcome
+    }
+}
+
+/// A password field keeps the input method off while it has the focus, as
+/// Windows' own password boxes do: an IME in Chinese mode would otherwise
+/// turn the typed letters into candidates (seen with Sogou pinyin).
+/// eframe allows the IME exactly when the frame's output asks for it.
+pub fn no_ime(field: &egui::Response) {
+    if field.has_focus() {
+        field.ctx.output_mut(|o| o.ime = None);
     }
 }
 

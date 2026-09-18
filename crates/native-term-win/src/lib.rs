@@ -4,6 +4,7 @@
 #![cfg(windows)]
 
 pub mod cloud;
+pub mod credentials;
 pub mod desktop;
 pub mod dock;
 pub mod registry;
@@ -64,6 +65,29 @@ pub fn process_started(pid: u32) -> Option<u64> {
     }
     result.ok()?;
     (code == STILL_ACTIVE).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+}
+
+/// The process that started `pid` (its parent id as Windows recorded it;
+/// the parent may have exited since).
+pub fn parent_pid(pid: u32) -> Option<u32> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    };
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
+        let mut entry = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let mut found = None;
+        let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+        while more {
+            if entry.th32ProcessID == pid {
+                found = Some(entry.th32ParentProcessID);
+                break;
+            }
+            more = Process32NextW(snapshot, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snapshot);
+        found
+    }
 }
 
 /// `YYYY-MM-DD HH:MM` in local time for seconds since the Unix epoch.

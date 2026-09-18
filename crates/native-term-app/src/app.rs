@@ -371,7 +371,10 @@ impl App {
                         Some(session) => Dialog::Plink(Box::new(PlinkDialog::edit(session))),
                         None => {
                             let folder = self.folder_persistent(&host.file);
-                            Dialog::Host(Box::new(HostDialog::edit(&alias, &HostDraft::from_host(host)).with_folder_default(folder)))
+                            let account = self.editor.effective(&alias).ok().and_then(|e| native_term_config::password::target(&e));
+                            let dialog =
+                                HostDialog::edit(&alias, &HostDraft::from_host(host)).with_folder_default(folder).with_password(account);
+                            Dialog::Host(Box::new(dialog))
                         }
                     });
                 }

@@ -2,7 +2,8 @@
 //!
 //! - `-G …`: prints nothing (no user keepalive settings), exit 0; with
 //!   `FAKE_SSH_DIRECT=1` a host name, so the shim takes the connection for
-//!   a direct one (and, as the fake never connects, for unreachable).
+//!   a direct one (and, as the fake never connects, for unreachable);
+//!   with `FAKE_SSH_G=<k v;k v…>` those lines instead.
 //! - Otherwise: runs the `LocalCommand` through `cmd.exe /c` like Windows
 //!   OpenSSH if `FAKE_SSH_LOGIN=1`, with `FAKE_SSH_ECHO=1` logs typed lines
 //!   (`input: …`) until `exit`, sleeps `FAKE_SSH_MS`, and exits with
@@ -31,8 +32,12 @@ fn main() {
             let _ = writeln!(f, "{}", args.join(" | "));
         }
     }
-    if args.first().map(String::as_str) == Some("-G") {
-        if std::env::var("FAKE_SSH_DIRECT").as_deref() == Ok("1") {
+    if args.iter().any(|a| a == "-G") {
+        if let Ok(lines) = std::env::var("FAKE_SSH_G") {
+            for line in lines.split(';') {
+                println!("{line}");
+            }
+        } else if std::env::var("FAKE_SSH_DIRECT").as_deref() == Ok("1") {
             println!("hostname {}", args.last().cloned().unwrap_or_default());
         }
         return;

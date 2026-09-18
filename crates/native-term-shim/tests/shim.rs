@@ -208,6 +208,78 @@ fn persistent_hosts_run_inside_tmux() {
     assert!(!lines.contains("RemoteCommand"), "{lines}");
 }
 
+/// A saved password (a test entry in Credential Manager): the shim's
+/// helper answers the account's password prompt, ssh tries it once; a
+/// refused one is marked and not used again.
+#[test]
+fn saved_passwords_are_given_once_and_marked_when_refused() {
+    use native_term_win::credentials::{self, Saved};
+    let prefix = format!("NativeTerm-Tests-shim-{}", std::process::id());
+    let target = format!("{prefix}:tester@web01:22");
+    let g = "user tester;hostname web01;port 22;proxyjump bastion";
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("ssh.log");
+    let run = |password: &str, attempts: usize| {
+        let name = pipe_name("saved");
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let mut shim = spawn_shim(
+            &name,
+            &["--session", "s-pw", "web01"],
+            &[
+                ("NATIVETERM_CRED_PREFIX", &prefix),
+                ("FAKE_SSH_G", g),
+                ("FAKE_SSH_PASSWORD", password),
+                ("FAKE_SSH_LOG", log.to_str().unwrap()),
+            ],
+        );
+        let conn = listener.accept().unwrap();
+        assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+        let mut seen = Vec::new();
+        for attempt in 1..=attempts {
+            if attempt > 1 {
+                conn.send(&AppMessage::Connect).unwrap();
+            }
+            loop {
+                let m = expect(&conn);
+                let done = matches!(m, ShimMessage::Exited { .. });
+                seen.push(m);
+                if done {
+                    break;
+                }
+            }
+        }
+        conn.send(&AppMessage::Close).unwrap();
+        assert_eq!(wait_exit(&mut shim), 0);
+        (seen, String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string())
+    };
+
+    credentials::write(&target, &Saved { user: "tester".into(), secret: "s3cret".into(), comment: String::new() }).unwrap();
+    let (seen, text) = run("s3cret", 1);
+    assert_eq!(seen, [ShimMessage::Connecting { attempt: 1 }, ShimMessage::Exited { code: 0 }], "{text}");
+    let lines = std::fs::read_to_string(&log).unwrap();
+    assert!(lines.contains("-o | NumberOfPasswordPrompts=1"), "{lines}");
+    assert!(!text.contains("s3cret"), "the password is never shown: {text}");
+
+    // the server's password changed: refused once, marked, not used again
+    let (seen, text) = run("changed", 2);
+    assert_eq!(
+        seen,
+        [
+            ShimMessage::Connecting { attempt: 1 },
+            ShimMessage::PasswordRefused,
+            ShimMessage::Exited { code: 255 },
+            ShimMessage::Connecting { attempt: 2 },
+            ShimMessage::Exited { code: 255 },
+        ],
+        "{text}"
+    );
+    assert!(text.contains("The saved password was refused"), "{text}");
+    let saved = credentials::read(&target).unwrap().unwrap();
+    assert_eq!(saved.comment, native_term_config::password::REFUSED);
+    assert_eq!(saved.secret, "s3cret", "kept, for the user to replace");
+    credentials::delete(&target).unwrap();
+}
+
 /// A direct connection (no proxy in `ssh -G`) that never got a TCP
 /// connection up: "could not connect", not a failed login.
 #[test]

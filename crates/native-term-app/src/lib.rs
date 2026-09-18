@@ -1423,6 +1423,10 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                 if let Some((attempt, why)) = retry.flatten() {
                     schedule_reconnect(shared, &id, attempt, why);
                 }
+                if let ShimMessage::PasswordRefused = &message {
+                    let label = shared.update(&id, |s| s.label.clone()).unwrap_or_default();
+                    shared.notice(t!("notice-password-refused", label = label.as_str()));
+                }
                 if let ShimMessage::Closing = &message {
                     match window.flatten() {
                         Some(window) => check_window_closed(shared, &id, window),
@@ -1585,7 +1589,11 @@ fn debug(shared: &Shared, text: String) {
 fn apply(s: &mut Session, message: &ShimMessage) {
     if !matches!(
         message,
-        ShimMessage::Quiet { .. } | ShimMessage::Hello { .. } | ShimMessage::Specials { .. } | ShimMessage::Unreachable
+        ShimMessage::Quiet { .. }
+            | ShimMessage::Hello { .. }
+            | ShimMessage::Specials { .. }
+            | ShimMessage::Unreachable
+            | ShimMessage::PasswordRefused
     ) {
         s.quiet_since = None;
     }
@@ -1616,6 +1624,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         ShimMessage::Quiet { since } => s.quiet_since = Some(*since),
         ShimMessage::Specials { names } => s.specials = names.clone(),
         ShimMessage::Unreachable => s.unreachable = true,
+        ShimMessage::PasswordRefused => {}
         ShimMessage::Heard | ShimMessage::Hello { .. } => {}
     }
 }

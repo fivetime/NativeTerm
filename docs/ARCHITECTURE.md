@@ -2012,8 +2012,45 @@ Rules:
   workstation would get plaintext passwords for every saved host, which
   are often reused across machines. Keys plus `ssh-agent` remain the
   recommended path.
-- To verify in a prototype: the helper's own console prompting while ssh
-  waits on it.
+- Implemented (`native_term_win::credentials`, `native_term_config::password`,
+  shim `saved.rs`):
+  - **Entry**: `NativeTerm:<user>@<host>:<port>` from `ssh -G` (so all
+    aliases of one account share it), a generic credential kept on this
+    machine (`CRED_PERSIST_LOCAL_MACHINE`, not roaming), the password as
+    UTF-8. The host dialog (editing a saved host) has "Saved password
+    (optional)": the state (none / saved / refused), a password field
+    with "Save Password" and "Remove" (written to or removed from
+    Credential Manager at once, never kept in the dialog), and the
+    warning above.
+  - **Shim**: an account with a usable entry runs ssh with
+    `SSH_ASKPASS=<shim>`, `SSH_ASKPASS_REQUIRE=force`,
+    `NATIVETERM_ASKPASS=<pipe>` (per process) and `-o
+    NumberOfPasswordPrompts=1`. The pipe (one per shim, user and SYSTEM
+    only) answers only when the helper's parent is the ssh this shim
+    started (`GetNamedPipeClientProcessId`, then the parent from a
+    Toolhelp snapshot) and only ssh's own prompt for this account
+    (`<user>@<host>'s password:`, `(<user>@<host>) Password:`): not a
+    jump host's, not a bare `Password:`, not a passphrase or a code. The
+    password is read from Credential Manager when asked, never kept.
+    Every other prompt the helper asks in the console.
+  - **Refused**: when the password was given and the login failed (255
+    before login, the server reached), the entry's comment becomes
+    "refused by the server"; it is kept but no longer used, the tab says
+    so, and NativeTerm shows a notice (`ShimMessage::PasswordRefused`).
+    Saving a new password clears the mark.
+  - **Input method**: egui's password field let an IME in Chinese mode
+    turn the typed letters into candidates (Sogou pinyin: "abc1" became
+    "节能"), so a password saved that way was wrong. While a password
+    field has the focus its frame asks for no IME, so eframe turns the
+    IME off, as Windows' own password boxes do.
+  - Verified: shim test with the fake ssh (the right password logs in,
+    `NumberOfPasswordPrompts=1` passed, the password never printed; a
+    changed one refused once, marked, the next attempt not given it);
+    Credential Manager round trip under a test name; live, locally,
+    against a temporary container with password login: saved through
+    the dialog (with the Chinese IME on), connected with no prompt; the
+    server's password changed: refused, marked, notice for both tabs,
+    the next reconnect asked in the tab. Test entries were removed.
 
 ### Installing public keys (`ssh-copy-id`)
 

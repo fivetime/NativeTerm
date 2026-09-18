@@ -7,6 +7,7 @@ login-failed = [NativeTerm] Login failed or cancelled (exit code { $code }).
 persistent-session = [NativeTerm] Attaching to { $program } session { $name } on the server (kept after a disconnect).
 persistent-missing = [NativeTerm] { $program } is not installed on this host: a plain shell, not kept after a disconnect.
 persistent-own-command = [NativeTerm] { $alias } has its own RemoteCommand: the session is not kept on the server.
+saved-password-refused = [NativeTerm] The saved password was refused. It is not used again until you save a new one (Edit this host).
 unreachable = [NativeTerm] Could not connect to the server (exit code { $code }).
 disconnected = [NativeTerm] Disconnected (exit code { $code }).
 ended = [NativeTerm] Session ended (exit code { $code }).

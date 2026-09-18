@@ -56,6 +56,9 @@ pub enum ShimMessage {
     /// (a direct ssh connection that was never established), so the end
     /// is "couldn't connect", not a failed login.
     Unreachable,
+    /// Sent just before `Exited`: the account's saved password was given
+    /// and the login failed; it is marked refused and no longer used.
+    PasswordRefused,
     /// The client takes these commands (`AppMessage::Special`) for this
     /// connection, e.g. "brk" (a serial line's Break, Telnet's Break);
     /// sent after `Connecting`, none until then.
@@ -126,6 +129,7 @@ mod tests {
             ShimMessage::Closing,
             ShimMessage::Specials { names: vec!["brk".into(), "ayt".into()] },
             ShimMessage::Unreachable,
+            ShimMessage::PasswordRefused,
         ];
         for m in messages {
             let line = encode(&m);

@@ -35,14 +35,20 @@ pub fn is_password_prompt(prompt: &str) -> bool {
 
 /// Serve `password` to this batch's helpers; the pipe's name.
 pub fn serve(password: String) -> io::Result<String> {
+    serve_with(move |prompt, _| is_password_prompt(prompt).then(|| password.clone()))
+}
+
+/// Serve answers decided by `answer(prompt, the helper's process id)`
+/// (`None`: the helper asks in the console); the pipe's name.
+pub fn serve_with(answer: impl Fn(&str, u32) -> Option<String> + Send + 'static) -> io::Result<String> {
     let random = std::collections::hash_map::RandomState::new().build_hasher().finish();
     let name = format!(r"\\.\pipe\NativeTerm-askpass-{}-{random:016x}", std::process::id());
     let mut listener = pipe::PipeListener::bind(&name)?;
     std::thread::spawn(move || {
         while let Ok(conn) = listener.accept() {
             if let Ok(Some(prompt)) = conn.recv::<String>(Duration::from_secs(5)) {
-                let answer = is_password_prompt(&prompt).then(|| password.clone());
-                let _ = conn.send(&answer);
+                let pid = conn.client_pid().unwrap_or(0);
+                let _ = conn.send(&answer(&prompt, pid));
             }
         }
     });
