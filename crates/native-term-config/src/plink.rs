@@ -253,11 +253,22 @@ pub const PUTTY_CONNECTION: [PuttyOption; 4] = [
     PuttyOption::Flag { key: "TCPKeepalives", default: false },
 ];
 
-/// PuTTY's Telnet page (as far as plink uses it).
-pub const PUTTY_TELNET: [PuttyOption; 3] = [
+/// PuTTY's Telnet page, as far as plink uses it. "Keyboard sends Telnet
+/// special commands" and "Return sends Telnet New Line" live in PuTTY's
+/// line discipline, which plink's input never passes through (checked in
+/// PuTTY 0.85's source), so they aren't offered.
+pub const PUTTY_TELNET: [PuttyOption; 2] = [
     PuttyOption::Flag { key: "PassiveTelnet", default: false },
-    PuttyOption::Flag { key: "TelnetKey", default: false },
     PuttyOption::Flag { key: "RFCEnviron", default: false },
+];
+
+/// Local echo and local line editing (PuTTY's Terminal page): 0 = on,
+/// 1 = off, 2 = automatic (the protocol decides: on for raw, off for
+/// serial, negotiated for Telnet). plink applies them to the console
+/// mode, so they work in every protocol.
+pub const PUTTY_LINE: [PuttyOption; 2] = [
+    PuttyOption::Number { key: "LocalEcho", default: 2 },
+    PuttyOption::Number { key: "LocalEdit", default: 2 },
 ];
 
 /// PuTTY's SUPDUP page.
@@ -282,6 +293,14 @@ impl PlinkSession {
             self.putty.insert(option.key().to_string(), value);
         }
     }
+}
+
+/// PuTTY's keepalive in seconds: it saves `PingInterval` (minutes) and
+/// `PingIntervalSecs` (the seconds left over), so 90 s is 1 and 30.
+/// `None` when off.
+pub fn keepalive(minutes: Option<u32>, seconds: Option<u32>) -> Option<u32> {
+    let total = minutes.unwrap_or(0) * 60 + seconds.unwrap_or(0);
+    (total > 0).then_some(total)
 }
 
 /// The non-SSH sessions file beside a folder file.
@@ -562,6 +581,15 @@ serial = { line = "COM3", speed = 115200 }
         assert!(gbk.check().is_ok());
         gbk.charset = Some("klingon".into());
         assert!(gbk.check().is_err());
+    }
+
+    /// PuTTY stores the keepalive as minutes plus the remaining seconds.
+    #[test]
+    fn keepalive_seconds() {
+        assert_eq!(keepalive(Some(1), Some(30)), Some(90));
+        assert_eq!(keepalive(None, Some(45)), Some(45));
+        assert_eq!(keepalive(Some(0), Some(0)), None);
+        assert_eq!(keepalive(None, None), None);
     }
 
     #[test]

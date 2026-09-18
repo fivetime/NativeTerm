@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use native_term_app::t;
 use native_term_config::plink::{
-    Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_SUPDUP, PUTTY_TELNET,
+    Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_LINE, PUTTY_SUPDUP,
+    PUTTY_TELNET,
 };
 
 use crate::dialogs::Outcome;
@@ -91,7 +92,7 @@ impl PlinkDialog {
 
     /// The PuTTY option pages for the chosen protocol.
     fn putty_pages(&self) -> Vec<(String, Vec<PuttyOption>)> {
-        let mut pages = Vec::new();
+        let mut pages = vec![(t!("putty-page-line"), PUTTY_LINE.to_vec())];
         if self.protocol != Protocol::Serial {
             pages.push((t!("putty-page-connection"), PUTTY_CONNECTION.to_vec()));
         }
@@ -319,6 +320,21 @@ fn putty_row(ui: &mut egui::Ui, session: &mut PlinkSession, option: PuttyOption)
                 session.set_putty_value(option, PuttyValue::Number(u32::from(on)));
             }
         }
+        PuttyOption::Number { .. } if matches!(key, "LocalEcho" | "LocalEdit") => {
+            // stored 0 = on, 1 = off, 2 = automatic
+            let choices = [(2u32, t!("putty-auto")), (0, t!("putty-on")), (1, t!("putty-off"))];
+            let mut n = match value {
+                PuttyValue::Number(n) if n <= 2 => n,
+                _ => 2,
+            };
+            let shown = choices.iter().find(|(v, _)| *v == n).map(|(_, text)| text.clone()).unwrap_or_default();
+            egui::ComboBox::from_id_salt(key).selected_text(shown).show_ui(ui, |ui| {
+                for (v, text) in &choices {
+                    ui.selectable_value(&mut n, *v, text.clone());
+                }
+            });
+            session.set_putty_value(option, PuttyValue::Number(n));
+        }
         PuttyOption::Number { .. } if key == "SUPDUPCharset" => {
             let names = ["None", "ITS", "WAITS"];
             let mut n = match value {
@@ -365,7 +381,8 @@ fn option_text(key: &str) -> String {
         "TCPNoDelay" => t!("putty-tcpnodelay"),
         "TCPKeepalives" => t!("putty-tcpkeepalives"),
         "PassiveTelnet" => t!("putty-passivetelnet"),
-        "TelnetKey" => t!("putty-telnetkey"),
+        "LocalEcho" => t!("putty-localecho"),
+        "LocalEdit" => t!("putty-localedit"),
         "RFCEnviron" => t!("putty-rfcenviron"),
         "SUPDUPLocation" => t!("putty-supduplocation"),
         "SUPDUPCharset" => t!("putty-supdupcharset"),

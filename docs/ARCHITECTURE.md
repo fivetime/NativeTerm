@@ -1137,6 +1137,54 @@ Measured against a local test server:
 | 936 (Chinese Windows default) | `c4 e3 ba c3` (GBK) | 中文测试 ✔ | mojibake |
 | 65001 | `e4 bd a0 e5 a5 bd` (UTF-8) | mojibake | 中文测试 ✔ |
 
+### What PuTTY's source says (0.85, checked against our use)
+
+- **Data path:** `windows/plink.c` hands the session's bytes between the
+  network and stdin/stdout unchanged; it converts nothing. Setting the
+  console code pages (input and output) is therefore the right way to
+  give a session a charset. `-legacy-charset-handling` and
+  `-legacy-stdio-prompts` only concern plink's own prompts.
+- **Ctrl+C:** plink puts the console in "processed input" and installs no
+  handler, so a real Ctrl+C key press was a signal that ended plink
+  (reproduced in the portable Terminal: plink gone, nothing sent) instead
+  of ^C for the device. Now plink runs in its own process group (the
+  signal is ignored) and the shim takes "processed input" off while plink
+  reads key by key; with local line editing it stays (Backspace needs
+  it). Verified with a real key press: plink kept running and the server
+  received 0x03. (A key record written with `WriteConsoleInput` doesn't
+  go through ConPTY's signal handling, so it can't reproduce this.)
+- **Raw half-close:** `plink_eof` returns false on purpose ("do not
+  respond to incoming EOF with outgoing"), so a raw connection closed by
+  the server stays half open until stdin ends or the next write fails.
+  There is no option for it; the `CLOSE_WAIT` watch stays.
+- **Exit codes:** Telnet and raw return 0 for a normal close and
+  `INT_MAX` after a socket error; plink returns 1 when the connection
+  can't be opened or fails fatally; serial always `INT_MAX`. All of them
+  now mean "connection ended" (255); `INT_MAX` was missing, so a network
+  drop showed as a normal end without automatic reconnect.
+- **Line discipline:** plink sends stdin straight to the backend, past
+  PuTTY's `ldisc.c`, so "Keyboard sends Telnet special commands"
+  (`TelnetKey`) and "Return sends Telnet New Line" (`TelnetRet`) have no
+  effect (no longer offered). Local echo and local line editing
+  (`LocalEcho`, `LocalEdit`: 0 on, 1 off, 2 automatic) do: plink applies
+  them to the console mode; offered as "Echo and line editing". Raw
+  defaults to local echo and editing, serial to neither.
+- **Keepalive:** saved as `PingInterval` (minutes) plus
+  `PingIntervalSecs` (the rest): 90 s is 1 and 30. Imports used only the
+  seconds; both are added now, for SSH (`ServerAliveInterval`) too.
+- **Defaults:** without `-load`, plink starts from PuTTY's own "Default
+  Settings" in the registry (`do_defaults(NULL)`); with `-load`, missing
+  values are PuTTY's built-in defaults. So a session without PuTTY
+  options inherits the user's PuTTY defaults (proxy, keepalive, terminal
+  type, echo), one with options doesn't. Open decision (ROADMAP).
+- **Window size:** plink never calls `backend_size`, so Telnet's NAWS
+  reports `TermWidth` × `TermHeight` (80 × 24 unless the defaults say
+  otherwise) and never the tab's real size or its changes.
+- **Not reachable through plink:** serial Break (`SS_BRK` exists in the
+  serial backend, plink has no way to send specials), session logging of
+  the output (`-sessionlog` exists, but session output is logged by
+  PuTTY's terminal, which plink doesn't have).
+
 ### Differences from SSH
 
 - **No login signal:** there is no `LocalCommand`, so "logged in" isn't

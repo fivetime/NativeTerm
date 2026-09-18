@@ -172,7 +172,8 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
     if ssh && v.num("Compression") == Some(1) {
         options.push(("Compression", "yes".to_string()));
     }
-    if let Some(seconds) = v.num("PingIntervalSecs").filter(|s| ssh && *s > 0) {
+    let keepalive = crate::plink::keepalive(v.num("PingInterval"), v.num("PingIntervalSecs"));
+    if let Some(seconds) = keepalive.filter(|_| ssh) {
         options.push(("ServerAliveInterval", seconds.to_string()));
     }
     CrtSession {
@@ -234,9 +235,15 @@ fn serial_from(v: &Values, line: &str) -> crate::plink::Serial {
 /// Options plink only takes from a saved session, kept (when not PuTTY's
 /// default) for the temporary one; plus environment variables.
 fn putty_options(v: &Values) -> BTreeMap<String, crate::plink::PuttyValue> {
-    use crate::plink::{PlinkSession, PuttyValue, PUTTY_CONNECTION, PUTTY_SUPDUP, PUTTY_TELNET};
+    use crate::plink::{PlinkSession, PuttyValue, PUTTY_CONNECTION, PUTTY_LINE, PUTTY_SUPDUP, PUTTY_TELNET};
     let mut session = PlinkSession::default();
-    for option in PUTTY_CONNECTION.iter().chain(&PUTTY_TELNET).chain(&PUTTY_SUPDUP) {
+    for option in PUTTY_CONNECTION.iter().chain(&PUTTY_LINE).chain(&PUTTY_TELNET).chain(&PUTTY_SUPDUP) {
+        if option.key() == "PingIntervalSecs" {
+            // both halves, kept as seconds (PuTTY adds them up when loading)
+            let seconds = crate::plink::keepalive(v.num("PingInterval"), v.num("PingIntervalSecs")).unwrap_or(0);
+            session.set_putty_value(*option, PuttyValue::Number(seconds));
+            continue;
+        }
         let value = match (v.num(option.key()), v.str(option.key())) {
             (Some(n), _) => PuttyValue::Number(n),
             (None, Some(text)) => PuttyValue::Text(text.to_string()),
@@ -480,6 +487,7 @@ mod tests {
                 ("Protocol", s("ssh")),
                 ("PortForwardings", s("L8080=localhost:80,D1080,Lbad")),
                 ("AgentFwd", RegValue::Dword(1)),
+                ("PingInterval", RegValue::Dword(1)),
                 ("PingIntervalSecs", RegValue::Dword(30)),
                 ("ProxyMethod", RegValue::Dword(6)),
                 ("ProxyHost", s("Bastion")),
@@ -563,7 +571,7 @@ mod tests {
         let entries = control.entries("id-1");
         for wanted in [
             ("ForwardAgent", "yes"),
-            ("ServerAliveInterval", "30"),
+            ("ServerAliveInterval", "90"),
             ("LocalForward", "8080 localhost:80"),
             ("DynamicForward", "1080"),
             ("NativeTermSource", "putty:控制节点"),

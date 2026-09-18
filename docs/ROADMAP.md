@@ -336,6 +336,14 @@
       (protocol, host, serial port picker, speed and line settings,
       charset), a serial port already open in a session is refused naming
       that tab; ssh-only actions skip them
+- [x] plink checked against PuTTY 0.85's source: Ctrl+C kept as a key
+      (it ended plink), socket errors (`INT_MAX`) count as a dropped
+      connection, the ineffective `TelnetKey` removed, local echo / line
+      editing offered, the keepalive imported as minutes plus seconds
+- [ ] Non-SSH sessions: PuTTY's "Default Settings" apply to sessions
+      without options but not to ones with options (decide: always
+      `-load`, or inherit); window size (NAWS) fixed at 80 × 24; no serial
+      Break — see "What PuTTY's source says"
 - [x] "No data since …" for serial sessions (the shim watches the console
       near the cursor; quiet after 30 s, cleared by new output; replayed
       to a restarted NativeTerm)

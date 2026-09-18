@@ -123,7 +123,12 @@ putty-pingintervalsecs = Keepalive every (seconds, 0 = off)
 putty-tcpnodelay = Disable Nagle (TCP_NODELAY)
 putty-tcpkeepalives = TCP keepalives
 putty-passivetelnet = Passive negotiation
-putty-telnetkey = Keyboard sends Telnet special commands
+putty-page-line = Echo and line editing
+putty-localecho = Local echo
+putty-localedit = Local line editing
+putty-auto = Automatic
+putty-on = On
+putty-off = Off
 putty-rfcenviron = RFC 1408 environment (instead of BSD)
 putty-supduplocation = Location
 putty-supdupcharset = Extended ASCII

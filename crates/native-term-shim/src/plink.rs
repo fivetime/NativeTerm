@@ -149,7 +149,10 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         auth.reset();
     }
     let arguments = session.arguments(temporary.as_ref().map(|t| t.name.as_str()));
-    let mut child = match Command::new(&program).args(&arguments).spawn() {
+    // its own process group: Ctrl+C never ends plink (see `Watch`)
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x200;
+    let mut child = match Command::new(&program).args(&arguments).creation_flags(CREATE_NEW_PROCESS_GROUP).spawn() {
         Ok(child) => child,
         Err(e) => {
             println!("{}", t!("plink-not-started", path = program.display().to_string(), error = e.to_string()));
@@ -173,14 +176,21 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         Supervised::Close => return Attempt::Close,
     };
     let connected = auth.is_some_and(|a| a.is_set()) || watch.connected();
-    // a server's close (Telnet: 0), plink's own error (1), or the watcher
-    // ending a half-closed raw connection: the connection ended
-    let code = if matches!(code, 0 | 1) || watch.server_closed() { 255 } else { code };
+    // a server's close (Telnet and raw: 0), plink's own error (1), a
+    // socket error (Telnet and raw: INT_MAX), or the watcher ending a
+    // half-closed raw connection: the connection ended
+    let code = if matches!(code, 0 | 1 | i32::MAX) || watch.server_closed() { 255 } else { code };
     Attempt::Exited { code, connected }
 }
 
 /// Polls plink's connections: reports the connection as the login, and
-/// ends plink when a raw connection is half-closed by the server.
+/// ends plink when a raw connection is half-closed by the server. Also
+/// keeps Ctrl+C a key: plink sets the console to "processed input", where
+/// Windows turns Ctrl+C into a signal that ends it instead of sending ^C
+/// (the usual way to stop a command on a switch). While plink reads key
+/// by key (remote echo: Telnet devices, serial) that mode is taken off
+/// again; with local line editing it stays, since Backspace needs it
+/// there, and the process group plink runs in ignores the signal.
 struct Watch {
     stop: Arc<AtomicBool>,
     connected: Arc<AtomicBool>,
@@ -188,6 +198,8 @@ struct Watch {
 }
 
 const WATCH_EVERY: Duration = Duration::from_millis(300);
+/// plink sets the console mode at start and on every echo change.
+const KEY_MODE_EVERY: Duration = Duration::from_millis(50);
 const SERIAL_SETTLE: Duration = Duration::from_secs(1);
 /// A serial line with nothing arriving for this long is reported quiet.
 const QUIET_AFTER: Duration = Duration::from_secs(30);
@@ -207,6 +219,13 @@ impl Watch {
         let (stop, connected, closed) = (watch.stop.clone(), watch.connected.clone(), watch.closed.clone());
         let shim = std::process::id();
         let started = Instant::now();
+        let keys = watch.stop.clone();
+        std::thread::spawn(move || {
+            while !keys.load(Ordering::Relaxed) {
+                win::keep_ctrl_c_as_input();
+                std::thread::sleep(KEY_MODE_EVERY);
+            }
+        });
         std::thread::spawn(move || {
             // serial: what the console shows, and since when it hasn't changed
             let quiet_after = quiet_after();

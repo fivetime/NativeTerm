@@ -405,6 +405,23 @@ pub fn screen_fingerprint() -> Option<u64> {
     Some(hasher.finish())
 }
 
+/// Ctrl+C as a key (^C for the remote side) rather than a signal: takes
+/// "processed input" off the console while it reads key by key. Line
+/// input keeps it (Backspace and Enter are handled through it there).
+/// Returns whether it changed the mode.
+pub fn keep_ctrl_c_as_input() -> bool {
+    use windows::Win32::System::Console::{ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT};
+    let Ok(input) = open_console_input() else { return false };
+    let mut mode = CONSOLE_MODE::default();
+    if unsafe { GetConsoleMode(input.0, &mut mode) }.is_err() {
+        return false;
+    }
+    if !mode.contains(ENABLE_PROCESSED_INPUT) || mode.contains(ENABLE_LINE_INPUT) {
+        return false;
+    }
+    unsafe { SetConsoleMode(input.0, CONSOLE_MODE(mode.0 & !ENABLE_PROCESSED_INPUT.0)) }.is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
