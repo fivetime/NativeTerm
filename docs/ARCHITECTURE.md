@@ -1768,9 +1768,9 @@ Constraints found while verifying:
   `powershell -NoProfile -NonInteractive -EncodedCommand <script>` (the
   password is asked again). Following Windows OpenSSH's rules, members of
   Administrators (`S-1-5-32-544` in `whoami /groups`) get the key in
-  `%ProgramData%\sshdministrators_authorized_keys`, which is then
+  `%ProgramData%\ssh\administrators_authorized_keys`, which is then
   limited to Administrators and SYSTEM; everyone else in
-  `%USERPROFILE%\.sshuthorized_keys`. Because PowerShell echoes script
+  `%USERPROFILE%\.ssh\authorized_keys`. Because PowerShell echoes script
   source in its errors, both scripts assemble their success markers when
   printing them, so a quoted line can't pass for success. Output is read
   as bytes (a Windows shell answers in its code page, e.g. GBK). Tested
