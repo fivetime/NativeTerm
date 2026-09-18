@@ -49,13 +49,19 @@ pub fn set_ssh_dir(dir: PathBuf) {
     let _ = SSH_DIR.set(dir);
 }
 
+/// `--ssh-dir` or `NATIVETERM_SSH_DIR` (tests): a folder other than
+/// `~/.ssh`.
+pub fn custom_ssh_dir() -> Option<PathBuf> {
+    if let Some(dir) = SSH_DIR.get() {
+        return Some(dir.clone());
+    }
+    std::env::var_os("NATIVETERM_SSH_DIR").filter(|d| !d.is_empty()).map(PathBuf::from)
+}
+
 /// `--ssh-dir`, `NATIVETERM_SSH_DIR` (tests), or `~/.ssh`.
 fn ssh_dir() -> PathBuf {
-    if let Some(dir) = SSH_DIR.get() {
-        return dir.clone();
-    }
-    if let Some(dir) = std::env::var_os("NATIVETERM_SSH_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(dir);
+    if let Some(dir) = custom_ssh_dir() {
+        return dir;
     }
     let home = std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default();
     home.join(".ssh")

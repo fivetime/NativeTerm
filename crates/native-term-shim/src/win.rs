@@ -435,6 +435,38 @@ pub fn keep_ctrl_c_as_input() -> bool {
     unsafe { SetConsoleMode(input.0, CONSOLE_MODE(mode.0 & !ENABLE_PROCESSED_INPUT.0)) }.is_ok()
 }
 
+/// The console's input and output modes, put back when dropped: a client
+/// may leave them changed (Windows 10's OpenSSH 8.1 turns "processed
+/// output" off, so the shim's own line breaks then show as ♪◙).
+pub struct ConsoleModes {
+    saved: Vec<(OwnedHandle, CONSOLE_MODE)>,
+}
+
+impl ConsoleModes {
+    pub fn save() -> ConsoleModes {
+        let mut saved = Vec::new();
+        for name in [w!("CONIN$"), w!("CONOUT$")] {
+            if let Ok(handle) = open_console(name) {
+                let mut mode = CONSOLE_MODE::default();
+                if unsafe { GetConsoleMode(handle.0, &mut mode) }.is_ok() {
+                    saved.push((handle, mode));
+                }
+            }
+        }
+        ConsoleModes { saved }
+    }
+}
+
+impl Drop for ConsoleModes {
+    fn drop(&mut self) {
+        for (handle, mode) in &self.saved {
+            unsafe {
+                let _ = SetConsoleMode(handle.0, *mode);
+            }
+        }
+    }
+}
+
 /// NativeTerm's end of ntplink's control pipe (`-nt-control`): commands,
 /// one per line. Made before ntplink starts; a thread waits for ntplink to
 /// open it, then writes what `send` queues. Only the process named with

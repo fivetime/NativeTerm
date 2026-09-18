@@ -15,14 +15,20 @@ pub const KEEPALIVE_COUNT: u32 = 3;
 ///   signal is left out then.
 /// - Keepalives only when `effective` (from `ssh -G`) shows the user hasn't
 ///   set them; command-line options would override the config.
+/// - `config`: `-F <file>` for a folder other than `~/.ssh` (`--ssh-dir`).
 pub fn arguments(
     alias: &str,
     shim_exe: &Path,
     shim_pid: u32,
     effective: &[(String, String)],
     no_forwards: bool,
+    config: Option<&Path>,
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = Vec::new();
+    if let Some(config) = config {
+        args.push("-F".into());
+        args.push(config.into());
+    }
     let mut option = |value: String| {
         args.push("-o".into());
         args.push(value.into());
@@ -58,7 +64,7 @@ mod tests {
 
     #[test]
     fn full_command_line() {
-        let args = arguments("web01", Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe"), 77, &[], false);
+        let args = arguments("web01", Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe"), 77, &[], false, None);
         assert_eq!(
             strings(&args),
             vec![
@@ -79,21 +85,30 @@ mod tests {
     #[test]
     fn user_keepalive_is_respected() {
         let effective = vec![("serveraliveinterval".to_string(), "60".to_string())];
-        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &effective, false));
+        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &effective, false, None));
         assert!(!args.iter().any(|a| a.starts_with("ServerAlive")), "{args:?}");
     }
 
     #[test]
     fn a_clone_drops_forwards() {
-        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &[], true));
+        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &[], true, None));
         let at = args.iter().position(|a| a == "ClearAllForwardings=yes").expect("option");
         assert_eq!(args[at - 1], "-o");
         assert!(at < args.iter().position(|a| a == "--").unwrap());
     }
 
+    /// `--ssh-dir`: ssh reads that folder's config, not `~/.ssh/config`.
+    #[test]
+    fn another_folder_is_passed_with_dash_f() {
+        let config = Path::new(r"C:\nt-test\ssh\config");
+        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &[], false, Some(config)));
+        assert_eq!(args[..2], ["-F", r"C:\nt-test\ssh\config"]);
+        assert_eq!(args.last().unwrap(), "web01");
+    }
+
     #[test]
     fn percent_in_path_drops_the_login_signal() {
-        let args = strings(&arguments("web01", Path::new(r"C:\100%\nativeterm-shim.exe"), 1, &[], false));
+        let args = strings(&arguments("web01", Path::new(r"C:\100%\nativeterm-shim.exe"), 1, &[], false, None));
         assert!(!args.iter().any(|a| a.contains("LocalCommand")), "{args:?}");
         assert_eq!(args.last().unwrap(), "web01");
     }

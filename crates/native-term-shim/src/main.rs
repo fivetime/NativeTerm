@@ -214,14 +214,20 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
         }
     }
 
+    // another folder than ~/.ssh (--ssh-dir): ssh reads its config
+    let config = plink::custom_ssh_dir().map(|dir| dir.join("config"));
     loop {
         attempt += 1;
-        let effective = native_term_config::effective::effective(&ssh_path, alias).unwrap_or_default();
-        let arguments = ssh::arguments(alias, &shim_exe, pid, &effective, flags.no_forwards);
+        let effective =
+            native_term_config::effective::effective_with(&ssh_path, config.as_deref(), alias).unwrap_or_default();
+        let arguments = ssh::arguments(alias, &shim_exe, pid, &effective, flags.no_forwards, config.as_deref());
         if let Some(event) = &auth {
             event.reset();
         }
         send(ShimMessage::Connecting { attempt });
+        // put back after ssh: Windows 10's OpenSSH 8.1 leaves the console
+        // without "processed output" (line breaks shown as ♪◙)
+        let modes = win::ConsoleModes::save();
         let mut child = match Command::new(&ssh_path).args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {
@@ -238,6 +244,7 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
             Supervised::Exited(code) => code,
             Supervised::Close => return 0,
         };
+        drop(modes);
         send(ShimMessage::Exited { code });
         let authenticated = auth.as_ref().is_some_and(|e| e.is_set());
         println!("\r\n{}", describe(classify_exit(code, authenticated), code));

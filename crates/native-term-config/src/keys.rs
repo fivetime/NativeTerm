@@ -32,10 +32,17 @@ fn quiet(program: &Path) -> Command {
 }
 
 /// Whether the key needs a passphrase: `ssh-keygen -y` with an empty one
-/// succeeds only for unprotected keys. `None` if that can't be told.
+/// succeeds only for unprotected keys, and fails for protected ones with
+/// "incorrect passphrase supplied" (OpenSSH 8.1 to 9.x). `None` if that
+/// can't be told: any other failure, e.g. "bad permissions" (the key's
+/// ACL lets others read it), says nothing about a passphrase.
 pub fn has_passphrase(ssh_keygen: &Path, private_key: &Path) -> Option<bool> {
-    let status = quiet(ssh_keygen).arg("-y").arg("-P").arg("").arg("-f").arg(private_key).status().ok()?;
-    Some(!status.success())
+    let output =
+        quiet(ssh_keygen).arg("-y").arg("-P").arg("").arg("-f").arg(private_key).stderr(Stdio::piped()).output().ok()?;
+    if output.status.success() {
+        return Some(false);
+    }
+    String::from_utf8_lossy(&output.stderr).contains("passphrase").then_some(true)
 }
 
 /// What `ssh-add -l` says about the agent.

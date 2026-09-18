@@ -924,3 +924,52 @@ the official plink where it mattered.
 | Imports of the binary | KERNEL32 and ADVAPI32 only, no `Reg*` |
 | Serial (virtual COM pair) | device output shown; Break not observable (the driver doesn't pass it on, not even from .NET) |
 | Through the shim (found next to it, NativeTerm played by a test pipe server) | `-set` options passed, `specials` reported, Break and AYT from the NativeTerm side arrived at the Telnet server, the server's close shown as "disconnected" |
+
+## Windows 10 pass (2026-09-18)
+
+A temporary VM: Windows 10 Enterprise Evaluation 22H2 (19045.2006),
+English (code page 437), 150 % scaling at 3840x2160, no VC++
+redistributable (only the `vcruntime140.dll` 14.00.24215 Windows ships),
+OpenSSH 8.1p1 in the box, no Segoe Fluent Icons. Windows Terminal 1.24.11911.0
+portable ZIP (latest stable). NativeTerm's release build with
+`--ssh-dir`, `--data-dir`, `--terminal-dir` on a test folder; SSH hosts on
+the VM's own sshd (key login). The tools ran in the desktop user's RDP
+session through scheduled tasks with an interactive token, with
+screenshots, clicks and keys checked against the owning process first.
+
+| Check | Result |
+|---|---|
+| App and shim start with Windows' own VC runtime | yes |
+| Wizard: OpenSSH 8.1p1, portable Terminal found; "Install profile" | fragment at `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\NativeTerm\nativeterm.json`, picked up by the portable 1.24 |
+| SSH session, login signal (`LocalCommand`) under OpenSSH 8.1 | "connected", located as window 1 · tab 1 through UIA |
+| Tab menu on right-click | NativeTerm's menu; rounded corners and border drawn by the layered path (DWM doesn't round on Windows 10), no shadow; MDL2 icons; dark theme |
+| "Clone Session" from the menu | second tab in the same window, logged in, located as tab 2 |
+| ntplink Telnet | NAWS 120x30; the card's "Break" arrived as `IAC BRK` |
+| ntplink raw with `charset = "GBK"` | GBK banner shown correctly (中文测试) |
+| App restarted while tabs are open | all sessions linked again with their states |
+| Unreachable host | ssh's timeout, then "failed (255)" and reconnect / close |
+| Ctrl+C at ssh's password prompt, R to reconnect | works |
+
+Found and fixed:
+
+- **`--ssh-dir` didn't reach ssh**: the shim used it only for non-SSH
+  sessions, so SSH sessions read `~/.ssh/config` ("Could not resolve
+  hostname"). The shim now passes `-F <dir>\config` to ssh and `ssh -G`.
+- **OpenSSH 8.1 leaves the console without "processed output"**: after
+  ssh exited, the shim's line breaks showed as ♪◙ (CR and LF as glyphs).
+  The shim saves the console's input and output modes before ssh and puts
+  them back after.
+- **A key with bad permissions was reported as having a passphrase**:
+  any failure of `ssh-keygen -y -P ""` counted. Now only a message about
+  the passphrase does ("incorrect passphrase supplied to decrypt private
+  key" in 8.1 and 9.x); "bad permissions" says nothing either way.
+
+Not covered: the elevated launch through Explorer. The desktop user is
+the built-in Administrator, whose Explorer runs elevated as well
+(no split token), so everything there was elevated, the Terminal
+included; it needs an ordinary administrator's session. Also not
+covered: ARM64, a Windows 10 without any `vcruntime140.dll`.
+
+Seen but not Windows 10 specific: a connection timeout is reported as
+"Login failed or cancelled" (exit 255 before any login); the card's
+Break button wraps onto a second row in a narrow window.

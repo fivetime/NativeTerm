@@ -487,12 +487,18 @@
 - [ ] Supported platforms: Windows 11 and Windows 10 2004 (19041)+, x64
       and ARM64; Windows 10 pass of the UIA and shim prototypes (with the
       portable Windows Terminal ZIP if no Store/winget is available).
-      Not run yet: no Windows 10 machine or VM was available. Already
-      prepared for it: GDI presentation (no GPU requirement), Segoe MDL2
-      Assets fallback for the menu icons. Still to check there: API
-      availability on 19041: UIA events and tab rectangles, the
-      tab menu's square corners, the fragment path, the elevated launch
-      through Explorer
+      Windows 10 pass (22H2, 19045, English, Terminal 1.24 portable,
+      OpenSSH 8.1; see PROTOTYPES "Windows 10 pass"): passed — app,
+      wizard, fragment, SSH login signal, UIA tab location, tab menu
+      (self-drawn rounded layered popup, MDL2 icons), clone, ntplink
+      Telnet with NAWS and Break, GBK on code page 437, re-linking after
+      an app restart. Fixed on the way: `--ssh-dir` never reached ssh
+      (`-F`), OpenSSH 8.1 leaving the console without processed output,
+      a key with bad permissions reported as having a passphrase. Still
+      open: the elevated launch through Explorer (the VM's desktop user
+      is the built-in Administrator, whose Explorer is elevated too);
+      ARM64; the VC++ runtime (the binaries use `VCRUNTIME140.dll`; the
+      one Windows 10 ships, 14.00.24215, was enough here)
 - [x] Windows Terminal variant detection: packaged (Store, Preview) and
       unpackaged/portable by path; absolute `wt.exe` per variant; UIA
       windows filtered by process image path
