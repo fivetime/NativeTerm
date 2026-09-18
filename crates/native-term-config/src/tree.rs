@@ -38,9 +38,12 @@ pub struct HostEntry {
     pub proxy_jump: Option<String>,
     pub identity_files: Vec<String>,
     pub nt: NtKeys,
-    /// File and line of the `Host` header.
+    /// File and line of the `Host` header (a non-SSH session: its
+    /// `.nt.toml`, line 0).
     pub file: PathBuf,
     pub line: usize,
+    /// A non-SSH session, run with plink (see `plink`).
+    pub plink: Option<Box<crate::plink::PlinkSession>>,
 }
 
 impl HostEntry {
@@ -133,6 +136,7 @@ impl SessionTree {
             tree: SessionTree::default(),
             visited: HashSet::new(),
             candidates: Vec::new(),
+            plink: Vec::new(),
         };
         loader.visit(&ssh_dir.join("config"), 0, true);
         loader.classify();
@@ -174,6 +178,9 @@ struct Loader<'a> {
     tree: SessionTree,
     visited: HashSet<PathBuf>,
     candidates: Vec<Candidate>,
+    /// Non-SSH sessions per folder (as in `Candidate::folder`), added
+    /// after the folder's ssh hosts.
+    plink: Vec<(Option<usize>, HostEntry)>,
 }
 
 impl Loader<'_> {
@@ -243,6 +250,7 @@ impl Loader<'_> {
                 nt,
                 file: path.to_path_buf(),
                 line: header,
+                plink: None,
             };
             self.candidates.push(Candidate {
                 folder: folder_index,
@@ -252,6 +260,13 @@ impl Loader<'_> {
             });
         }
 
+        let sessions_file = crate::plink::sibling(path);
+        match crate::plink::read(&sessions_file) {
+            Ok(sessions) => {
+                self.plink.extend(sessions.iter().map(|s| (folder_index, s.to_entry(&sessions_file))));
+            }
+            Err(error) => self.tree.warnings.push(Warning::Unreadable { file: sessions_file, error }),
+        }
         if is_main {
             self.tree.root = Some(folder);
         } else {
@@ -291,6 +306,13 @@ impl Loader<'_> {
                 None => self.tree.root.as_mut().expect("main config visited first"),
             };
             folder.hosts.push(c.entry);
+        }
+        for (index, entry) in std::mem::take(&mut self.plink) {
+            let folder = match index {
+                Some(i) => &mut self.tree.folders[i],
+                None => self.tree.root.as_mut().expect("main config visited first"),
+            };
+            folder.hosts.push(entry);
         }
     }
 

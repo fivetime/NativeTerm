@@ -877,6 +877,7 @@ mod tests {
                 nt: Default::default(),
                 file: PathBuf::from("mine.conf"),
                 line: 1,
+                plink: None,
             }],
         });
         let plan = plan(&scan, &tree);

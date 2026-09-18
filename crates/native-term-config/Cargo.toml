@@ -8,6 +8,9 @@ license.workspace = true
 # Han characters in labels become readable aliases
 pinyin = { version = "0.11", default-features = false, features = ["plain"] }
 uuid = { version = "1", features = ["v4"] }
+# non-SSH sessions beside each folder file (`*.nt.toml`)
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 native-term-win = { path = "../native-term-win" }

@@ -27,6 +27,7 @@ pub mod keys;
 pub mod known_hosts;
 pub mod ops;
 pub mod options;
+pub mod plink;
 #[cfg(windows)]
 pub mod putty;
 pub mod securecrt;

@@ -17,6 +17,7 @@ use crate::effective;
 use crate::folder_options;
 use crate::header;
 use crate::options;
+use crate::plink::{self, PlinkSession};
 use crate::securecrt::{self, Plan};
 use crate::tree::{HostEntry, SessionTree, FOLDER_DEFAULTS_HOST};
 use crate::write::{self, edit_file, WriteError, Writer};
@@ -115,6 +116,21 @@ impl From<io::Error> for EditError {
 /// A host name that doesn't exist, for checking that a config still parses.
 const PARSE_CHECK_HOST: &str = "nativeterm-config-check.invalid";
 
+/// ssh-only operations refuse non-SSH sessions (they have their own).
+fn not_plink(host: &HostEntry) -> Result<(), EditError> {
+    match host.plink {
+        Some(_) => Err(EditError::Invalid(format!("{} is not an ssh host", host.alias()))),
+        None => Ok(()),
+    }
+}
+
+fn named<'s>(sessions: &'s mut [PlinkSession], alias: &str) -> Result<&'s mut PlinkSession, EditError> {
+    sessions
+        .iter_mut()
+        .find(|s| s.name.eq_ignore_ascii_case(alias))
+        .ok_or_else(|| EditError::NotFound(format!("session {alias}")))
+}
+
 pub struct Editor {
     ssh_dir: PathBuf,
     writer: Writer,
@@ -126,6 +142,13 @@ pub struct Editor {
     include: String,
     /// Where folder files live (`config.d` unless moved).
     folders: PathBuf,
+}
+
+/// A folder's file: its ssh hosts (`.conf`) or its non-SSH sessions
+/// (`.nt.toml`).
+fn is_folder_file(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    name.ends_with(".conf") || name.ends_with(&format!(".{}", plink::EXTENSION))
 }
 
 /// The `Include` pattern for folder files in `dir`.
@@ -194,7 +217,7 @@ impl Editor {
                     entries
                         .filter_map(Result::ok)
                         .map(|e| e.path())
-                        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("conf")))
+                        .filter(|p| p.is_file() && is_folder_file(p))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -202,7 +225,7 @@ impl Editor {
             files
         };
         if !conf(new_dir).is_empty() {
-            return Err(EditError::Invalid(format!("{} already holds .conf files", new_dir.display())));
+            return Err(EditError::Invalid(format!("{} already holds session folders", new_dir.display())));
         }
         let before: std::collections::BTreeSet<String> =
             SessionTree::load(&self.ssh_dir).hosts().map(|(_, h)| h.alias().to_lowercase()).collect();
@@ -250,6 +273,54 @@ impl Editor {
         self.include = new;
         self.folders = new_dir.to_path_buf();
         Ok(files.len())
+    }
+
+    /// Add a non-SSH session to the folder of `folder_file` (a `.conf` or
+    /// the main config); its name must be free among all sessions.
+    pub fn add_plink(&self, folder_file: &Path, session: &PlinkSession) -> Result<(), EditError> {
+        session.check().map_err(EditError::Invalid)?;
+        if SessionTree::load(&self.ssh_dir).taken_aliases().contains(&session.name.to_ascii_lowercase()) {
+            return Err(EditError::Invalid(format!("{} is taken", session.name)));
+        }
+        self.edit_plink(&plink::sibling(folder_file), |sessions| {
+            sessions.push(session.clone());
+            Ok(())
+        })
+    }
+
+    /// Replace a non-SSH session (a new name must be free).
+    pub fn update_plink(&self, host: &HostEntry, session: &PlinkSession) -> Result<(), EditError> {
+        if host.plink.is_none() {
+            return Err(EditError::Invalid(format!("{} is an ssh host", host.alias())));
+        }
+        session.check().map_err(EditError::Invalid)?;
+        let alias = host.alias().to_string();
+        if !session.name.eq_ignore_ascii_case(&alias)
+            && SessionTree::load(&self.ssh_dir).taken_aliases().contains(&session.name.to_ascii_lowercase())
+        {
+            return Err(EditError::Invalid(format!("{} is taken", session.name)));
+        }
+        self.edit_plink(&host.file, |sessions| {
+            *named(sessions, &alias)? = session.clone();
+            Ok(())
+        })
+    }
+
+    /// Change a `.nt.toml` through the writer (backup, conflict check);
+    /// every session must still be valid.
+    fn edit_plink(
+        &self,
+        file: &Path,
+        change: impl FnOnce(&mut Vec<PlinkSession>) -> Result<(), EditError>,
+    ) -> Result<(), EditError> {
+        let (text, fingerprint) = write::read(file)?;
+        let mut sessions = plink::parse(&text).map_err(|e| EditError::Invalid(format!("{}: {e}", file.display())))?;
+        change(&mut sessions)?;
+        for s in &sessions {
+            s.check().map_err(EditError::Invalid)?;
+        }
+        self.writer.write(file, &plink::render(&sessions), fingerprint, || Ok(()))?;
+        Ok(())
     }
 
     /// `ssh -G <alias>` must succeed; with `expect`, the host name must match.
@@ -341,6 +412,7 @@ impl Editor {
 
     /// Change a host's settings in place.
     pub fn update_host(&self, host: &HostEntry, draft: &HostDraft) -> Result<(), EditError> {
+        not_plink(host)?;
         draft.check()?;
         let alias = host.alias().to_string();
         let (text, _) = write::read(&host.file)?;
@@ -375,6 +447,7 @@ impl Editor {
 
     /// The session options written in a host's own block.
     pub fn host_options(&self, host: &HostEntry) -> Result<options::Values, EditError> {
+        not_plink(host)?;
         let (text, _) = write::read(&host.file)?;
         let doc = Document::parse(&text);
         match doc.find_host_block(host.alias()) {
@@ -386,6 +459,7 @@ impl Editor {
     /// Write session options into a host's block; `ssh -G` must accept
     /// them, or the file is rolled back with ssh's message.
     pub fn set_host_options(&self, host: &HostEntry, values: &options::Values) -> Result<(), EditError> {
+        not_plink(host)?;
         let values = options::normalize(values).map_err(EditError::Invalid)?;
         self.host_options(host)?;
         let alias = host.alias().to_string();
@@ -471,6 +545,12 @@ impl Editor {
     /// Mark or unmark a host as a favorite (`NativeTermFavorite yes`).
     pub fn set_favorite(&self, host: &HostEntry, on: bool) -> Result<(), EditError> {
         let alias = host.alias().to_string();
+        if host.plink.is_some() {
+            return self.edit_plink(&host.file, |sessions| {
+                named(sessions, &alias)?.favorite = on;
+                Ok(())
+            });
+        }
         edit_file(
             &self.writer,
             &host.file,
@@ -486,6 +566,13 @@ impl Editor {
 
     pub fn delete_host(&self, host: &HostEntry) -> Result<(), EditError> {
         let alias = host.alias().to_string();
+        if host.plink.is_some() {
+            return self.edit_plink(&host.file, |sessions| {
+                named(sessions, &alias)?;
+                sessions.retain(|s| !s.name.eq_ignore_ascii_case(&alias));
+                Ok(())
+            });
+        }
         let changed = edit_file(
             &self.writer,
             &host.file,
@@ -506,6 +593,31 @@ impl Editor {
     /// The copy is written first; if removing the original fails, the copy
     /// is taken out again.
     pub fn move_host(&self, host: &HostEntry, to: &Path) -> Result<(), EditError> {
+        if let Some(session) = &host.plink {
+            let target = plink::sibling(to);
+            if host.file == target {
+                return Ok(());
+            }
+            self.edit_plink(&target, |sessions| {
+                sessions.push((**session).clone());
+                Ok(())
+            })?;
+            let alias = host.alias().to_string();
+            let removed = self.edit_plink(&host.file, |sessions| {
+                named(sessions, &alias)?;
+                sessions.retain(|s| !s.name.eq_ignore_ascii_case(&alias));
+                Ok(())
+            });
+            if let Err(e) = removed {
+                // take the copy out again, so it isn't defined twice
+                let _ = self.edit_plink(&target, |sessions| {
+                    sessions.retain(|s| !s.name.eq_ignore_ascii_case(&alias));
+                    Ok(())
+                });
+                return Err(e);
+            }
+            return Ok(());
+        }
         if host.file == to {
             return Ok(());
         }
@@ -875,6 +987,52 @@ mod tests {
         SessionTree::load(&editor.ssh_dir)
     }
 
+    fn telnet(name: &str, host: &str) -> PlinkSession {
+        PlinkSession { name: name.into(), host: Some(host.into()), ..PlinkSession::default() }
+    }
+
+    /// Non-SSH sessions: added, favorited, renamed, moved and deleted in
+    /// the folders' `.nt.toml`; names are shared with ssh's aliases; ssh
+    /// operations refuse them and ssh never sees them.
+    #[test]
+    fn plink_sessions_are_edited() {
+        let Some((_home, editor)) = setup() else { return };
+        let prod = editor.create_folder("生产").unwrap();
+        let lab = editor.create_folder("Lab").unwrap();
+        editor.add_plink(&prod, &telnet("sw", "10.0.0.5")).unwrap();
+        assert!(editor.add_plink(&prod, &telnet("old", "10.0.0.6")).is_err(), "an ssh host's name");
+        assert!(editor.add_plink(&prod, &telnet("SW", "10.0.0.6")).is_err(), "taken, any case");
+        assert!(editor.add_plink(&prod, &telnet("bad name", "h")).is_err());
+        assert!(prod.with_file_name("shengchan.nt.toml").exists());
+        let conf = std::fs::read_to_string(&prod).unwrap();
+        assert!(!conf.contains("sw"), "the .conf is untouched: {conf}");
+
+        let host = |name: &str| tree(&editor).find(name).map(|(_, h)| h.clone()).unwrap();
+        editor.set_favorite(&host("sw"), true).unwrap();
+        assert!(host("sw").favorite());
+        assert!(editor.update_host(&host("sw"), &draft("x", "h")).is_err(), "not through the ssh dialog");
+        assert!(editor.host_options(&host("sw")).is_err());
+
+        let mut renamed = host("sw").plink.unwrap().as_ref().clone();
+        renamed.name = "core-sw".into();
+        renamed.label = Some("核心交换机".into());
+        assert!(editor.update_plink(&host("sw"), &PlinkSession { name: "old".into(), ..renamed.clone() }).is_err());
+        editor.update_plink(&host("sw"), &renamed).unwrap();
+        assert_eq!(host("core-sw").label(), "核心交换机");
+        assert!(host("core-sw").favorite(), "kept");
+
+        editor.move_host(&host("core-sw"), &lab).unwrap();
+        let moved = host("core-sw");
+        assert_eq!(moved.file, lab.with_file_name("lab.nt.toml"));
+        assert_eq!(tree(&editor).folders().find(|f| f.file == prod).unwrap().hosts.len(), 0);
+
+        editor.delete_host(&moved).unwrap();
+        assert!(tree(&editor).find("core-sw").is_none());
+        assert!(editor.delete_host(&moved).is_err(), "gone already");
+        // ssh itself is unaffected throughout
+        assert!(editor.effective("old").is_ok());
+    }
+
     fn draft(label: &str, hostname: &str) -> HostDraft {
         HostDraft { label: label.into(), hostname: hostname.into(), ..HostDraft::default() }
     }
@@ -884,6 +1042,7 @@ mod tests {
         let Some((home, mut editor)) = setup() else { return };
         let prod = editor.create_folder("生产").unwrap();
         editor.create_host(&tree(&editor), &prod, &draft("web", "10.0.0.1")).unwrap();
+        editor.add_plink(&prod, &telnet("sw", "10.0.0.5")).unwrap();
         editor.create_folder("Lab").unwrap();
         let old_dir = editor.folders_dir();
         let hosts = |e: &Editor| tree(e).hosts().map(|(_, h)| h.alias().to_string()).collect::<Vec<_>>();
@@ -897,9 +1056,10 @@ mod tests {
         assert!(editor.move_folders(&busy).is_err(), "a folder with .conf files");
 
         let new_dir = home.path().join("synced folders");
-        assert_eq!(editor.move_folders(&new_dir).unwrap(), 2);
+        assert_eq!(editor.move_folders(&new_dir).unwrap(), 3, "two folders, one with non-SSH sessions");
         assert_eq!(editor.folders_dir(), new_dir);
         assert_eq!(hosts(&editor), before);
+        assert!(tree(&editor).find("sw").unwrap().1.file.starts_with(&new_dir));
         let main = std::fs::read_to_string(editor.main_config()).unwrap();
         assert!(main.contains("synced folders/*.conf\""), "{main}");
         assert!(!main.contains("config.d/*.conf"), "{main}");
