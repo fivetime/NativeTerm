@@ -211,9 +211,12 @@
 - [x] SecureCRT and PuTTY import of Telnet / serial / raw / rlogin /
       SUPDUP sessions as non-SSH sessions (serial line settings, charset,
       PuTTY-only options kept for the temporary saved session)
-- [ ] SecureCRT importer (rest): preview on the author's real
-      configuration (by the author); button bar / Command Manager
-      commands into the command library
+- [ ] SecureCRT importer: preview on the author's real configuration (by
+      the author)
+- Moved to Phase 2 (listed there): SecureCRT's button bar / Command
+  Manager commands. VanDyke documents neither file and says the format
+  changes between versions (`ButtonBarV#.ini`), so it is written against
+  a real configuration, not guessed
 - [x] `ssh` used for tabs and checks: native builds only (MSYS/Cygwin
       `ssh` on `PATH` skipped), no console window for checks
 - [x] PuTTY saved-session import (read-only from the PuTTY registry key;
@@ -310,8 +313,10 @@
       both themes; GDI can't draw it anyway)
 - [x] Tab menu drawn with Direct2D/DirectWrite (font fallback, color emoji;
       a DC render target in software, so no GPU needed)
-- [ ] Tab menu: Windows 10's own rounded shape (layered window) — needs a
-      Windows 10 machine to verify
+- [x] Tab menu: its own rounded shape where DWM doesn't round popups
+      (Windows 10, build < 22000): a layered window drawn with alpha;
+      checked on Windows 11 by forcing the path (`NATIVETERM_MENU_LAYERED=1`),
+      not yet seen on a real Windows 10; no shadow on that path
 - Moved to Phase 2: a right-click on a NativeTerm tab whose rectangle is
   stale (right after a tab drag, until the rescan) still reaches
   Terminal's own menu. Handling it means swallowing the click, asking UIA

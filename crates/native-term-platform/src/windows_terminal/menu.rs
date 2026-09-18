@@ -23,12 +23,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
 use windows::Win32::Graphics::DirectWrite::IDWriteTextFormat;
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, EndPaint, GetMonitorInfoW, InvalidateRect, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-    PAINTSTRUCT,
+    BeginPaint, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, EndPaint, GetDC, GetMonitorInfoW,
+    InvalidateRect, MonitorFromPoint, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -41,7 +42,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetAncestor, GetMessageW,
     LoadCursorW, PostMessageW, PostThreadMessageW, RegisterClassW, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    UnhookWindowsHookEx, WindowFromPoint, CS_DROPSHADOW, GA_ROOT, HC_ACTION, HHOOK, IDC_ARROW, KBDLLHOOKSTRUCT,
+    UnhookWindowsHookEx, UpdateLayeredWindow, WindowFromPoint, CS_DROPSHADOW, GA_ROOT, ULW_ALPHA, WS_EX_LAYERED, HC_ACTION, HHOOK, IDC_ARROW, KBDLLHOOKSTRUCT,
     MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT, SW_SHOWNOACTIVATE, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_KEYDOWN,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
     WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WNDCLASSW, WS_EX_NOACTIVATE,
@@ -54,6 +55,9 @@ use crate::Rect;
 
 /// Window class of the popup (tests look for it).
 pub const POPUP_CLASS: PCWSTR = w!("NativeTermMenuPopup");
+/// The same popup drawing its own rounded shape (Windows 10): no system
+/// drop shadow, which is rectangular and would show at the corners.
+const LAYERED_CLASS: PCWSTR = w!("NativeTermMenuPopupLayered");
 const OWNER_CLASS: PCWSTR = w!("NativeTermMenuOwner");
 const WM_SHOW_MENU: u32 = WM_APP + 1;
 const WM_CLOSE_MENU: u32 = WM_APP + 2;
@@ -236,6 +240,9 @@ struct Menu {
     scale: f32,
     look: Look,
     size: SIZE,
+    /// Draws its own rounded shape (`UpdateLayeredWindow`) where DWM
+    /// doesn't round popups (Windows 10).
+    layered: bool,
     text_format: IDWriteTextFormat,
     icon_format: IDWriteTextFormat,
     /// (top, bottom) per entry, physical pixels.
@@ -410,6 +417,34 @@ fn painter() -> Option<Rc<Painter>> {
     })
 }
 
+/// Windows 11 (build 22000) rounds popups through DWM; Windows 10 doesn't,
+/// so the popup draws its own shape there. `NATIVETERM_MENU_LAYERED=1`
+/// forces that path (for trying it on Windows 11).
+fn draws_own_shape() -> bool {
+    if std::env::var("NATIVETERM_MENU_LAYERED").as_deref() == Ok("1") {
+        return true;
+    }
+    use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+    let mut buffer = [0u16; 32];
+    let mut size = std::mem::size_of_val(&buffer) as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
+            w!("CurrentBuildNumber"),
+            RRF_RT_REG_SZ,
+            None,
+            Some(buffer.as_mut_ptr().cast()),
+            Some(&mut size),
+        )
+    };
+    if status.is_err() {
+        return false;
+    }
+    let text = String::from_utf16_lossy(&buffer[..(size as usize / 2).saturating_sub(1)]);
+    text.trim().parse::<u32>().is_ok_and(|build| build < 22000)
+}
+
 fn icon_face() -> &'static str {
     // Windows 11 has Segoe Fluent Icons; Windows 10 the same code points in
     // Segoe MDL2 Assets
@@ -475,9 +510,11 @@ fn open_menu(tab: MenuTab, pt: POINT) {
 
         let owner = HWND(s.owner.load(Ordering::SeqCst) as *mut _);
         let instance = GetModuleHandleW(None).unwrap_or_default();
+        let layered = draws_own_shape();
+        let (class, extra) = if layered { (LAYERED_CLASS, WS_EX_LAYERED) } else { (POPUP_CLASS, Default::default()) };
         let Ok(popup) = CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
-            POPUP_CLASS,
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | extra,
+            class,
             w!("NativeTerm tab menu"),
             WS_POPUP,
             x,
@@ -491,15 +528,18 @@ fn open_menu(tab: MenuTab, pt: POINT) {
         ) else {
             return;
         };
-        let corner = DWMWCP_ROUND;
+        // the layered popup draws its own shape and border
+        let corner = if layered { DWMWCP_DONOTROUND } else { DWMWCP_ROUND };
         let _ = DwmSetWindowAttribute(
             popup,
             DWMWA_WINDOW_CORNER_PREFERENCE,
             &corner as *const _ as *const _,
             std::mem::size_of_val(&corner) as u32,
         );
-        let border = look.palette.border;
-        let _ = DwmSetWindowAttribute(popup, DWMWA_BORDER_COLOR, &border as *const _ as *const _, 4);
+        if !layered {
+            let border = look.palette.border;
+            let _ = DwmSetWindowAttribute(popup, DWMWA_BORDER_COLOR, &border as *const _ as *const _, 4);
+        }
 
         for (i, v) in [x, y, x + size.cx, y + size.cy].into_iter().enumerate() {
             s.menu_rect[i].store(v, Ordering::SeqCst);
@@ -514,11 +554,15 @@ fn open_menu(tab: MenuTab, pt: POINT) {
                 scale,
                 look,
                 size,
+                layered,
                 text_format,
                 icon_format,
                 rows,
             })
         });
+        if layered {
+            present_layered();
+        }
         s.open.store(true, Ordering::SeqCst);
         s.opened.fetch_add(1, Ordering::SeqCst);
         let _ = ShowWindow(popup, SW_SHOWNOACTIVATE);
@@ -565,12 +609,18 @@ fn set_hover(hover: Option<usize>, by_mouse: bool) {
                 if let Some(s) = shared() {
                     s.hovered.store(id, Ordering::SeqCst);
                 }
-                unsafe {
-                    let _ = InvalidateRect(Some(menu.popup), None, false);
+                if !menu.layered {
+                    unsafe {
+                        let _ = InvalidateRect(Some(menu.popup), None, false);
+                    }
                 }
             }
         }
     });
+    // a layered popup gets no WM_PAINT: it is drawn again right away
+    if MENU.with(|m| m.borrow().as_ref().is_some_and(|menu| menu.layered)) {
+        present_layered();
+    }
 }
 
 fn menu_key(vk: VIRTUAL_KEY) {
@@ -608,45 +658,116 @@ fn paint(hwnd: HWND) {
     MENU.with(|m| {
         let menu = m.borrow();
         let Some(menu) = menu.as_ref() else { return };
-        let colors = &menu.look.palette;
-        let px = |v: f32| (v * menu.scale).round() as i32;
         let (w, h) = (menu.size.cx, menu.size.cy);
         unsafe {
             let mut ps = PAINTSTRUCT::default();
             let hdc = BeginPaint(hwnd, &mut ps);
-            if let Some(painter) = painter() {
-                let _ = painter.paint(hdc, w, h, colors.background, |canvas| {
-                    for (n, (entry, (top, bottom))) in menu.entries.iter().zip(&menu.rows).enumerate() {
-                        let (top, bottom) = (*top, *bottom);
-                        match entry {
-                            Entry::Separator => {
-                                let mid = (top + bottom) / 2;
-                                canvas.fill(0, mid, w, mid + px(1.0).max(1), colors.separator);
-                            }
-                            Entry::Header(text) => {
-                                canvas.text(&menu.text_format, text, px(ICON_X), top, w, bottom, colors.dim);
-                            }
-                            Entry::Action { glyph, text, enabled, .. } => {
-                                let hovered = *enabled && menu.hover == Some(n);
-                                if hovered {
-                                    let (left, right) = (px(ROW_INSET), w - px(ROW_INSET));
-                                    canvas.fill_rounded(left, top + px(2.0), right, bottom - px(2.0), px(4.0) as f32, colors.hover);
-                                }
-                                let color = match (enabled, hovered) {
-                                    (false, _) => colors.dim,
-                                    (true, true) => colors.hover_text,
-                                    (true, false) => colors.text,
-                                };
-                                canvas.text(&menu.icon_format, &glyph.to_string(), px(ICON_X), top, px(TEXT_X), bottom, color);
-                                canvas.text(&menu.text_format, text, px(TEXT_X), top, w, bottom, color);
-                            }
-                        }
-                    }
-                });
+            if let (Some(painter), false) = (painter(), menu.layered) {
+                let _ = painter.paint(hdc, w, h, menu.look.palette.background, |canvas| draw_entries(canvas, menu));
             }
             let _ = EndPaint(hwnd, &ps);
         }
     });
+}
+
+/// Draw a layered popup: its rounded shape with a border, then the rows,
+/// into a 32-bit DIB that `UpdateLayeredWindow` shows with its alpha.
+fn present_layered() {
+    MENU.with(|m| {
+        let menu = m.borrow();
+        let Some(menu) = menu.as_ref() else { return };
+        let Some(painter) = painter() else { return };
+        let colors = &menu.look.palette;
+        let (w, h) = (menu.size.cx, menu.size.cy);
+        let radius = 8.0 * menu.scale;
+        unsafe {
+            let screen = GetDC(None);
+            let memory = CreateCompatibleDC(Some(screen));
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: w,
+                    // top-down
+                    biHeight: -h,
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB.0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let mut bits = std::ptr::null_mut();
+            if let Ok(bitmap) = CreateDIBSection(Some(memory), &info, DIB_RGB_COLORS, &mut bits, None, 0) {
+                let old = SelectObject(memory, bitmap.into());
+                let drawn = painter.paint_alpha(memory, w, h, |canvas| {
+                    canvas.fill_rounded(0, 0, w, h, radius, colors.border);
+                    canvas.fill_rounded(1, 1, w - 1, h - 1, radius - 1.0, colors.background);
+                    draw_entries(canvas, menu);
+                });
+                if drawn.is_ok() {
+                    let mut rect = windows::Win32::Foundation::RECT::default();
+                    let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowRect(menu.popup, &mut rect);
+                    let position = POINT { x: rect.left, y: rect.top };
+                    let size = SIZE { cx: w, cy: h };
+                    let source = POINT { x: 0, y: 0 };
+                    let blend = windows::Win32::Graphics::Gdi::BLENDFUNCTION {
+                        BlendOp: 0,  // AC_SRC_OVER
+                        BlendFlags: 0,
+                        SourceConstantAlpha: 255,
+                        AlphaFormat: 1, // AC_SRC_ALPHA
+                    };
+                    let _ = UpdateLayeredWindow(
+                        menu.popup,
+                        Some(screen),
+                        Some(&position),
+                        Some(&size),
+                        Some(memory),
+                        Some(&source),
+                        windows::Win32::Foundation::COLORREF(0),
+                        Some(&blend),
+                        ULW_ALPHA,
+                    );
+                }
+                SelectObject(memory, old);
+                let _ = DeleteObject(bitmap.into());
+            }
+            let _ = DeleteDC(memory);
+            ReleaseDC(None, screen);
+        }
+    });
+}
+
+/// The rows of the menu (header, items, separators).
+fn draw_entries(canvas: &super::menu_draw::Canvas, menu: &Menu) {
+    let colors = &menu.look.palette;
+    let px = |v: f32| (v * menu.scale).round() as i32;
+    let w = menu.size.cx;
+    for (n, (entry, (top, bottom))) in menu.entries.iter().zip(&menu.rows).enumerate() {
+        let (top, bottom) = (*top, *bottom);
+        match entry {
+            Entry::Separator => {
+                let mid = (top + bottom) / 2;
+                canvas.fill(0, mid, w, mid + px(1.0).max(1), colors.separator);
+            }
+            Entry::Header(text) => {
+                canvas.text(&menu.text_format, text, px(ICON_X), top, w, bottom, colors.dim);
+            }
+            Entry::Action { glyph, text, enabled, .. } => {
+                let hovered = *enabled && menu.hover == Some(n);
+                if hovered {
+                    let (left, right) = (px(ROW_INSET), w - px(ROW_INSET));
+                    canvas.fill_rounded(left, top + px(2.0), right, bottom - px(2.0), px(4.0) as f32, colors.hover);
+                }
+                let color = match (enabled, hovered) {
+                    (false, _) => colors.dim,
+                    (true, true) => colors.hover_text,
+                    (true, false) => colors.text,
+                };
+                canvas.text(&menu.icon_format, &glyph.to_string(), px(ICON_X), top, px(TEXT_X), bottom, color);
+                canvas.text(&menu.text_format, text, px(TEXT_X), top, w, bottom, color);
+            }
+        }
+    }
 }
 
 fn entry_at(y: i32) -> Option<usize> {
@@ -751,6 +872,13 @@ fn menu_thread(ready: mpsc::Sender<u32>) {
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             lpszClassName: POPUP_CLASS,
+            ..Default::default()
+        });
+        RegisterClassW(&WNDCLASSW {
+            lpfnWndProc: Some(popup_proc),
+            hInstance: instance.into(),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            lpszClassName: LAYERED_CLASS,
             ..Default::default()
         });
         let Ok(owner) = CreateWindowExW(

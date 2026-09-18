@@ -388,8 +388,16 @@ Therefore NativeTerm provides its own menus:
        was the slow part); the Windows theme, high contrast and text size
        are read on every open (registry and `SystemParametersInfo`,
        microseconds). Acrylic was decided against: Terminal's own menus
-       are solid in both themes. Windows 10's own rounded shape is
-       still open (ROADMAP).
+       are solid in both themes. Where DWM doesn't round popups
+       (Windows 10: build below 22000, from `CurrentBuildNumber`), the
+       popup is a layered window of its own class (without
+       `CS_DROPSHADOW`, whose rectangle would show at the corners): the
+       second, premultiplied-alpha Direct2D target draws the rounded
+       border and background with grayscale text into a 32-bit DIB for
+       `UpdateLayeredWindow`, redrawn directly on every highlight change
+       (a layered window gets no `WM_PAINT`). `NATIVETERM_MENU_LAYERED=1`
+       forces this path; the live menu test passes on it and a capture
+       on Windows 11 shows the shape. There is no shadow on that path.
      - Highlight: Up/Down move over enabled items only. A mouse move
        changes the highlight only over an item, and leaving the popup
        clears only a highlight the mouse set, so the keyboard highlight
