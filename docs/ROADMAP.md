@@ -304,11 +304,20 @@
       connect / disconnect / clone / close / close others / close
       disconnected / close to the right; mixed and renamed tab headers;
       live test `menu_portable`
-- [ ] Tab menu, rest: Direct2D/DirectWrite rendering (emoji, font
-      fallback), acrylic if wanted, Windows 10 rounded shape (layered
-      window), theme cached and reloaded on settings change; unlocated
-      right-click (select, rescan, else restore selection and replay to
-      Terminal)
+- [x] Tab menu: the Terminal theme from `settings.json` cached until the
+      file changes (reading it was the slow part of opening the menu)
+- [x] Tab menu: acrylic decided against (Terminal's own menus are solid in
+      both themes; GDI can't draw it anyway)
+- [ ] Tab menu, rest: Direct2D/DirectWrite rendering (color emoji, font
+      fallback)
+- [ ] Tab menu: Windows 10's own rounded shape (layered window) — needs a
+      Windows 10 machine to verify
+- Moved to Phase 2: a right-click on a NativeTerm tab whose rectangle is
+  stale (right after a tab drag, until the rescan) still reaches
+  Terminal's own menu. Handling it means swallowing the click, asking UIA
+  outside the hook and replaying it to Terminal when it isn't ours —
+  synthetic input for a window of a second; passing it through stays the
+  fail-safe choice until then
 - [x] Tab menu: rename (opens the host dialog in the main window) and a
       confirmation before a batch close would close a tab that holds other
       panes; the menu asks the main window, whose dialogs it uses

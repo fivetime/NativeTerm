@@ -379,13 +379,18 @@ Therefore NativeTerm provides its own menus:
        Segoe MDL2 Assets on Windows 10), with DWM rounded corners, border
        color and shadow on Windows 11. The theme (`theme::look`) is read
        from the owning install's settings on every open; high contrast
-       and text size apply as described above. Direct2D, acrylic and
-       Windows 10's own rounded shape are still open (ROADMAP).
+       and text size apply as described above. The Terminal theme from
+       `settings.json` is cached by the file's time and size (parsing it
+       was the slow part); the Windows theme, high contrast and text size
+       are read on every open (registry and `SystemParametersInfo`,
+       microseconds). Acrylic was decided against: Terminal's own menus
+       are solid in both themes. Direct2D and Windows 10's own rounded
+       shape are still open (ROADMAP).
      - Highlight: Up/Down move over enabled items only. A mouse move
        changes the highlight only over an item, and leaving the popup
        clears only a highlight the mouse set, so the keyboard highlight
        isn't lost when the cursor rests elsewhere.
-     - Items (English for now): Connect/Reconnect (a waiting or ended
+     - Items (localized like the rest of the app): Connect/Reconnect (a waiting or ended
        session with a shim), Disconnect (connecting or connected),
        Clone Session (same alias, base label, most recent window),
        Close (for a mixed tab: "Close This Session (keeps the other

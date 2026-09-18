@@ -113,7 +113,34 @@ pub fn terminal_application_theme(settings: &Path, windows_dark: bool) -> Option
     Some((name, app))
 }
 
-/// Read on every menu, so theme changes apply to the next one.
+/// What `settings.json` said, and the file state it was read from.
+struct Cached {
+    settings: std::path::PathBuf,
+    stamp: Option<(std::time::SystemTime, u64)>,
+    windows_dark: bool,
+    theme: Option<(String, String)>,
+}
+
+static CACHE: std::sync::Mutex<Option<Cached>> = std::sync::Mutex::new(None);
+
+/// `terminal_application_theme`, parsed again only when the file's time
+/// or size (or the Windows theme it may follow) changed: reading and
+/// parsing `settings.json` is the slow part of opening the menu.
+fn cached_application_theme(settings: &Path, windows_dark: bool) -> Option<(String, String)> {
+    let stamp = std::fs::metadata(settings).ok().and_then(|m| Some((m.modified().ok()?, m.len())));
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(c) = cache.as_ref() {
+        if c.settings == settings && c.stamp == stamp && stamp.is_some() && c.windows_dark == windows_dark {
+            return c.theme.clone();
+        }
+    }
+    let theme = terminal_application_theme(settings, windows_dark);
+    *cache = Some(Cached { settings: settings.to_path_buf(), stamp, windows_dark, theme: theme.clone() });
+    theme
+}
+
+/// Worked out for every menu, so theme changes apply to the next one;
+/// only `settings.json` is cached (until it changes).
 pub fn look(settings: &Path) -> Look {
     let text_scale = text_scale();
     if high_contrast() {
@@ -133,7 +160,7 @@ pub fn look(settings: &Path) -> Look {
         };
     }
     let windows_dark = windows_apps_dark();
-    let (dark, description) = match terminal_application_theme(settings, windows_dark) {
+    let (dark, description) = match cached_application_theme(settings, windows_dark) {
         Some((name, app)) if app == "light" => (false, format!("light (Terminal theme {name:?})")),
         Some((name, app)) if app == "dark" => (true, format!("dark (Terminal theme {name:?})")),
         Some((name, _)) => {
@@ -187,5 +214,21 @@ mod tests {
         assert_eq!(check(pair, false).as_deref(), Some("light"));
         assert_eq!(check(pair, true).as_deref(), Some("dark"));
         assert_eq!(check("not json", true), None);
+    }
+
+    /// The cache follows the file: a change of size or time is read again.
+    #[test]
+    fn cached_until_the_file_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("settings.json");
+        std::fs::write(&file, r#"{"theme": "light"}"#).unwrap();
+        assert_eq!(cached_application_theme(&file, true).map(|(_, a)| a).as_deref(), Some("light"));
+        std::fs::write(&file, r#"{"theme": "dark" }"#).unwrap();
+        assert_eq!(cached_application_theme(&file, true).map(|(_, a)| a).as_deref(), Some("dark"), "size changed");
+        let started = std::time::Instant::now();
+        for _ in 0..100 {
+            cached_application_theme(&file, true);
+        }
+        assert!(started.elapsed() < std::time::Duration::from_millis(50), "{:?} for 100", started.elapsed());
     }
 }
