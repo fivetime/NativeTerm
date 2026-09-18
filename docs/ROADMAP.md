@@ -496,7 +496,11 @@
       (`-F`), OpenSSH 8.1 leaving the console without processed output,
       a key with bad permissions reported as having a passphrase. Still
       open: the elevated launch through Explorer (the VM's desktop user
-      is the built-in Administrator, whose Explorer is elevated too);
+      is the built-in Administrator, whose Explorer is elevated too; to
+      do: sign in as an ordinary administrator such as `root`, or set
+      `FilterAdministratorToken=1` (Admin Approval Mode for the built-in
+      Administrator) and reboot, then start NativeTerm elevated and check
+      the Terminal comes up unelevated with the tab menu working);
       ARM64; the VC++ runtime (the binaries use `VCRUNTIME140.dll`; the
       one Windows 10 ships, 14.00.24215, was enough here)
 - [x] Windows Terminal variant detection: packaged (Store, Preview) and
