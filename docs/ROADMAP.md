@@ -369,6 +369,13 @@
       switches (Ctrl+T)
 - [ ] Tab switcher (rest): last-seen text (UIA `TextPattern`) or image
       snapshots; tmux text preview for persistent sessions
+- [ ] Tiled thumbnail switcher on Ctrl+Tab (off by default): the existing
+      low-level keyboard hook swallows Ctrl+Tab while a Terminal window
+      with NativeTerm tabs is in front, a non-activating grid follows
+      further Tab presses and commits when Ctrl is released; thumbnails
+      from captures taken while a tab was selected (see "Taking over
+      Ctrl+Tab" in ARCHITECTURE.md). Prototype first: hook latency while
+      typing, capture cost in Rust, and the hold-Ctrl feel
 - [x] NativeTerm SSH profile with a moderate scrollback size
       (`historySize` 5000)
 - [x] Sidebar auto-hide/pin drawer (QQ-style): docks at the top, left or

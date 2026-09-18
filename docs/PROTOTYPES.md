@@ -736,6 +736,25 @@ Cleanup: the test key line was removed from the server's
 as expected), and the credential, temporary files, and busybox were
 removed.
 
+## Capturing a Terminal window for tab thumbnails (portable 1.26, 2026-09-18)
+
+For a tiled thumbnail tab switcher (see "Taking over Ctrl+Tab" in
+ARCHITECTURE.md). Only the selected tab of a window can ever be captured,
+so the question was what a capture costs and whether the window has to be
+in front:
+
+- `PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT)` returned a correct image
+  of the Terminal window **while it was fully covered by another window**:
+  25 ms for 1752×936. So thumbnails don't need the window brought to the
+  front.
+- A GDI+ screen copy of a 1168×624 window plus a scale to 320 px wide
+  took 21 ms per capture (20 runs); the thumbnail is ~214 KB of pixels.
+  A Rust `BitBlt`/`StretchBlt` should be cheaper.
+- Windows Terminal itself has no per-tab image anywhere (no
+  `RenderTargetBitmap`, no DWM tab thumbnails), and a non-selected tab's
+  content is unparented, so nothing can be read from it — neither an
+  image nor its text.
+
 ## Clearing a tab's scrollback from inside (portable 1.26, 2026-09-18)
 
 Question: SecureCRT's "Clear Screen and Scrollback" — Terminal's own
