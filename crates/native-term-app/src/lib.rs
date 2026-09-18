@@ -145,6 +145,9 @@ pub struct SessionView {
     /// A serial session that has received nothing since then (seconds
     /// since the Unix epoch).
     pub quiet_since: Option<u64>,
+    /// The special commands its connection takes now (`AppMessage::Special`),
+    /// e.g. "brk".
+    pub specials: Vec<String>,
 }
 
 pub(crate) struct Session {
@@ -176,6 +179,7 @@ pub(crate) struct Session {
     /// Window number and tab index from `state.db`.
     last_position: Option<(usize, usize)>,
     quiet_since: Option<u64>,
+    specials: Vec<String>,
 }
 
 impl Session {
@@ -200,6 +204,7 @@ impl Session {
             locked: false,
             last_position: None,
             quiet_since: None,
+            specials: Vec::new(),
         }
     }
 
@@ -219,6 +224,7 @@ impl Session {
             renamed_to: None,
             last_position: self.last_position,
             quiet_since: self.quiet_since.filter(|_| self.state.is_open()),
+            specials: if self.state.is_open() { self.specials.clone() } else { Vec::new() },
         }
     }
 
@@ -948,6 +954,12 @@ impl Core {
         self.send(id, AppMessage::ClearScreen);
     }
 
+    /// Send one of the connection's special commands (see
+    /// `SessionView::specials`), e.g. a serial line's Break.
+    pub fn send_special(&self, id: &str, name: &str) {
+        self.send(id, AppMessage::Special { name: name.to_string() });
+    }
+
     pub fn disconnect(&self, id: &str) {
         self.send(id, AppMessage::Disconnect);
     }
@@ -1511,13 +1523,14 @@ fn debug(shared: &Shared, text: String) {
 }
 
 fn apply(s: &mut Session, message: &ShimMessage) {
-    if !matches!(message, ShimMessage::Quiet { .. } | ShimMessage::Hello { .. }) {
+    if !matches!(message, ShimMessage::Quiet { .. } | ShimMessage::Hello { .. } | ShimMessage::Specials { .. }) {
         s.quiet_since = None;
     }
     match message {
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {
             s.authenticated = false;
+            s.specials.clear();
             s.attempt = *attempt;
             s.state = State::Connecting;
         }
@@ -1527,6 +1540,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             s.connected_at = Some(Instant::now());
         }
         ShimMessage::Exited { code } => {
+            s.specials.clear();
             s.state = match classify_exit(*code, s.authenticated) {
                 SessionEnd::LoginFailed => State::LoginFailed(*code),
                 SessionEnd::Disconnected => State::Disconnected(*code),
@@ -1535,6 +1549,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         }
         ShimMessage::Closing => s.state = State::Closed,
         ShimMessage::Quiet { since } => s.quiet_since = Some(*since),
+        ShimMessage::Specials { names } => s.specials = names.clone(),
         ShimMessage::Heard | ShimMessage::Hello { .. } => {}
     }
 }

@@ -905,3 +905,22 @@ this workload — a real but not decisive advantage, and not "an order of
 magnitude". NativeTerm's case rests mainly on multi-server session
 management (which Tabby handles poorly) and on the native terminal's
 rendering and behavior, with memory as a secondary benefit.
+
+## ntplink (PuTTY 0.85 backends, own frontend; portable 1.26)
+
+`ntplink.exe` built from `putty-win-src` (static CRT), run in portable
+Terminal tabs against local Python test servers (a Telnet server that logs
+NAWS and Telnet commands, a raw server that logs EOF), and compared with
+the official plink where it mattered.
+
+| Check | Result |
+|---|---|
+| Telnet NAWS at connect, then resizing the tab | 120x30, then 59x14 and 102x25 reported |
+| Ctrl+C with a remote-echo Telnet server (key by key) | server received 0x03, ntplink kept running |
+| Control pipe `special brk`, `special ayt` | server logged `IAC BRK`, `IAC AYT` |
+| Raw: just connected | no EOF sent (first build did: empty console reads were taken for EOF; fixed with `HANDLE_FLAG_IGNOREEOF`) |
+| Raw: server closes | ntplink exited 0 at once; plink stayed half open |
+| Raw with `-set LocalEcho=0 -set LocalEdit=1`, typed `abc` Enter | shown locally, sent key by key (first build: not shown — `ldisc_create` doesn't report the starting state, fixed with `ldisc_echoedit_update`) |
+| Imports of the binary | KERNEL32 and ADVAPI32 only, no `Reg*` |
+| Serial (virtual COM pair) | device output shown; Break not observable (the driver doesn't pass it on, not even from .NET) |
+| Through the shim (found next to it, NativeTerm played by a test pipe server) | `-set` options passed, `specials` reported, Break and AYT from the NativeTerm side arrived at the Telnet server, the server's close shown as "disconnected" |

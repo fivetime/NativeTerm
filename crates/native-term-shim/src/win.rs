@@ -435,6 +435,88 @@ pub fn keep_ctrl_c_as_input() -> bool {
     unsafe { SetConsoleMode(input.0, CONSOLE_MODE(mode.0 & !ENABLE_PROCESSED_INPUT.0)) }.is_ok()
 }
 
+/// NativeTerm's end of ntplink's control pipe (`-nt-control`): commands,
+/// one per line. Made before ntplink starts; a thread waits for ntplink to
+/// open it, then writes what `send` queues. Only the process named with
+/// `started` is served.
+pub struct ControlPipe {
+    pub name: String,
+    queue: Option<std::sync::mpsc::Sender<String>>,
+    client: std::sync::Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl ControlPipe {
+    pub fn create(tag: &str) -> io::Result<ControlPipe> {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::Storage::FileSystem::{WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_OUTBOUND};
+        use windows::Win32::System::Pipes::{
+            ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+        };
+        let name = format!(r"\\.\pipe\nativeterm-control-{tag}");
+        let handle = unsafe {
+            CreateNamedPipeW(
+                &HSTRING::from(name.as_str()),
+                PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1,
+                4096,
+                0,
+                0,
+                None,
+            )
+        };
+        if handle.is_invalid() {
+            return Err(io::Error::last_os_error());
+        }
+        let pipe = OwnedHandle(handle);
+        let (queue, lines) = std::sync::mpsc::channel::<String>();
+        let client = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let expected = client.clone();
+        std::thread::spawn(move || {
+            let pipe = pipe;
+            // ERROR_PIPE_CONNECTED: the client came before this call
+            let connected = unsafe { ConnectNamedPipe(pipe.0, None) }.is_ok() || io::Error::last_os_error().raw_os_error() == Some(535);
+            let mut pid = 0u32;
+            let known = connected && unsafe { GetNamedPipeClientProcessId(pipe.0, &mut pid) }.is_ok();
+            // ntplink may open it before `started` has been called
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while expected.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if !known || pid != expected.load(Ordering::SeqCst) {
+                return;
+            }
+            for line in lines {
+                if unsafe { WriteFile(pipe.0, Some(line.as_bytes()), None, None) }.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(ControlPipe { name, queue: Some(queue), client })
+    }
+
+    /// The process that may use the pipe.
+    pub fn started(&self, pid: u32) {
+        self.client.store(pid, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn send(&self, command: &str) {
+        if let Some(queue) = &self.queue {
+            let _ = queue.send(format!("{command}\n"));
+        }
+    }
+}
+
+impl Drop for ControlPipe {
+    fn drop(&mut self) {
+        // ends the writing loop; a thread still waiting for a client (ntplink
+        // never opened the pipe) is let go by connecting to it here, as a
+        // client it refuses
+        self.queue.take();
+        let _ = std::fs::File::open(&self.name);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

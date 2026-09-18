@@ -234,7 +234,7 @@ fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
             }
         };
 
-        let code = match supervise(&mut child, link, auth.as_ref()) {
+        let code = match supervise(&mut child, link, auth.as_ref(), None) {
             Supervised::Exited(code) => code,
             Supervised::Close => return 0,
         };
@@ -257,7 +257,8 @@ enum Supervised {
 /// reported from here (the helper reports it too), so a reconnecting link
 /// can replay it. Sleeps on handles: ssh's process, the link's arrivals and
 /// the login event.
-fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEvent>) -> Supervised {
+/// `control`: where `AppMessage::Special` goes (ntplink's control pipe).
+fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEvent>, control: Option<&win::ControlPipe>) -> Supervised {
     let mut reported = false;
     let process = windows::Win32::Foundation::HANDLE(child.as_raw_handle() as _);
     loop {
@@ -298,6 +299,11 @@ fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEven
                         // a password prompt may be showing: keep the screen,
                         // and don't type into it
                         write_console(CLEAR_SCROLLBACK);
+                    }
+                }
+                AppMessage::Special { name } => {
+                    if let Some(control) = control {
+                        control.send(&format!("special {name}"));
                     }
                 }
                 _ => {}

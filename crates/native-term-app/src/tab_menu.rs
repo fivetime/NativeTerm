@@ -19,6 +19,7 @@ pub const SEND: u32 = 8;
 pub const LOCK: u32 = 9;
 pub const CLEAR: u32 = 10;
 pub const RENAME: u32 = 11;
+pub const BREAK: u32 = 12;
 
 /// What the menu asks the main window to do (its dialogs live there).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -72,6 +73,7 @@ fn command(id: u32) -> Option<SessionCommand> {
         LOCK => Some(SessionCommand::ToggleLock),
         CLEAR => Some(SessionCommand::ClearScreen),
         SEND => Some(SessionCommand::Send),
+        BREAK => Some(SessionCommand::SendBreak),
         _ => None,
     }
 }
@@ -96,6 +98,9 @@ impl Provider for Actions {
         entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), applies(DISCONNECT)));
         entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), applies(CLONE)));
         entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), applies(SEND)));
+        if SessionCommand::SendBreak.offered(this) {
+            entries.push(action(BREAK, '\u{E7BA}', &t!("tabmenu-break"), applies(BREAK)));
+        }
         entries.push(action(CLEAR, '\u{E75C}', &t!("tabmenu-clear"), applies(CLEAR)));
         entries.push(action(RENAME, '\u{E8AC}', &t!("tabmenu-rename"), true));
         if this.locked {

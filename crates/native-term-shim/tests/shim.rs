@@ -457,6 +457,71 @@ fn plink_session_with_putty_options() {
     registry::delete_user_tree(&base).unwrap();
 }
 
+/// With ntplink there: the PuTTY options go on its command line and no
+/// saved session is written, the tab learns which special commands the
+/// connection takes, a Break from NativeTerm arrives on ntplink's control
+/// pipe, and "connection lost" (3) is a connection-level end (255).
+#[test]
+fn ntplink_session_with_options_and_break() {
+    use native_term_win::registry;
+    let base = format!(r"Software\NativeTerm-Tests-ntplink-{}", std::process::id());
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join(".ssh");
+    std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+    std::fs::write(ssh.join("config"), "Include config.d/*.conf\n").unwrap();
+    std::fs::write(ssh.join("config.d").join("lab.conf"), "").unwrap();
+    std::fs::write(
+        ssh.join("config.d").join("lab.nt.toml"),
+        "[[session]]\nname = \"sw\"\nprotocol = \"telnet\"\nhost = \"10.9.9.9\"\nport = 2300\n\n[session.putty]\nPassiveTelnet = 1\nTerminalType = \"vt100\"\n",
+    )
+    .unwrap();
+    let log = dir.path().join("ntplink.log");
+
+    let name = pipe_name("ntplink");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let ntplink = fake_ssh();
+    let mut shim = spawn_shim(
+        &name,
+        &["--ssh-dir", ssh.to_str().unwrap(), "--session", "s-n", "sw"],
+        &[
+            ("NATIVETERM_NTPLINK", ntplink.to_str().unwrap()),
+            ("NATIVETERM_PUTTY_KEY", &base),
+            ("FAKE_SSH_LOG", log.to_str().unwrap()),
+            ("FAKE_SSH_MS", "1500"),
+            ("FAKE_SSH_CODE", "3"),
+        ],
+    );
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    let message = expect(&conn);
+    let ShimMessage::Specials { names } = message else {
+        conn.send(&AppMessage::Close).unwrap();
+        let text = String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string();
+        panic!("specials expected, got {message:?}: {text}")
+    };
+    assert!(names.contains(&"brk".to_string()) && names.contains(&"ayt".to_string()), "{names:?}");
+    conn.send(&AppMessage::Special { name: "brk".into() }).unwrap();
+
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    let text = std::fs::read_to_string(&log).unwrap();
+    let mut lines = text.lines();
+    let control = format!(r"\\.\pipe\nativeterm-control-{}-1", shim.id());
+    assert_eq!(
+        lines.next().unwrap(),
+        format!("-set | PassiveTelnet=1 | -set | TerminalType=vt100 | -nt-control | {control} | -telnet | -P | 2300 | 10.9.9.9")
+    );
+    assert_eq!(lines.collect::<Vec<_>>(), ["control: special brk"]);
+    assert!(registry::user_subkeys(&base).unwrap_or_default().is_empty(), "no saved session");
+
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
+    let text = String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string();
+    assert!(text.contains("Connecting to 10.9.9.9:2300 (telnet) with ntplink"), "{text}");
+    let _ = registry::delete_user_tree(&base);
+}
+
 /// Without PuTTY options a session still gets a temporary saved session:
 /// plink would otherwise start from PuTTY's "Default Settings". It holds
 /// only the tab's size (when there is a console), and it is gone after.

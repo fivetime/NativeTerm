@@ -1,19 +1,29 @@
-//! Non-SSH sessions: the shim runs PuTTY's `plink.exe` in the tab (see
+//! Non-SSH sessions: the shim runs NativeTerm's `ntplink.exe` in the tab,
+//! or PuTTY's `plink.exe` when ntplink isn't there (see
 //! `native_term_config::plink` and ARCHITECTURE.md, "Other protocols via
 //! plink").
 //!
-//! - "Connected": one of plink's TCP connections is established (serial:
-//!   plink has run for a second), reported through the same event as an
-//!   ssh login, so post-login commands and the session card work alike.
-//! - "Disconnected": plink exits 0 when a Telnet server closes, and a raw
-//!   connection closed by the server only shows as `CLOSE_WAIT` (plink
-//!   notices at the next keystroke), so the watcher ends plink then. Both,
-//!   and plink's own error exit 1, are reported as connection-level (255).
-//! - plink always loads a temporary saved session,
-//!   `NativeTerm-<pid>-<attempt>`, deleted once plink has read it: the
-//!   options plink only takes from a saved session, and the tab's size.
-//!   Without it plink would start from PuTTY's "Default Settings".
-//! - The console code pages follow the session's charset while plink runs.
+//! - "Connected": one of the client's TCP connections is established
+//!   (serial: it has run for a second), reported through the same event
+//!   as an ssh login, so post-login commands and the session card work
+//!   alike.
+//! - ntplink (built from PuTTY's source, see `tools/build-ntplink.cmd`)
+//!   takes the session's PuTTY options on its command line (`-set`), never
+//!   reads the registry, follows the tab's size, keeps Ctrl+C a key, ends
+//!   when the far end closes, and takes Break and Telnet's commands over a
+//!   control pipe. Exit codes: 0 closed by the far end, 2 couldn't
+//!   connect, 3 connection lost (all connection-level, 255), 1 a usage
+//!   error.
+//! - plink needs workarounds for all of that: it always loads a temporary
+//!   saved session, `NativeTerm-<pid>-<attempt>`, deleted once plink has
+//!   read it (the options plink only takes from a saved session, and the
+//!   tab's size; without it plink would start from PuTTY's "Default
+//!   Settings"); the watcher keeps Ctrl+C a key and ends plink when a raw
+//!   connection is half-closed by the server (`CLOSE_WAIT`: plink only
+//!   notices at the next keystroke). Its exits 0, 1 (its own error) and
+//!   INT_MAX (socket error) are all connection-level.
+//! - The console code pages follow the session's charset while the client
+//!   runs.
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -51,13 +61,45 @@ fn ssh_dir() -> PathBuf {
     home.join(".ssh")
 }
 
-/// `NATIVETERM_PLINK`, a `plink.exe` next to the shim or in its `tools`
-/// folder, on `PATH`, or PuTTY's installation.
-fn program() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("NATIVETERM_PLINK").filter(|p| !p.is_empty()) {
-        return Some(PathBuf::from(p));
+/// The program that runs the session.
+enum Client {
+    Ntplink(PathBuf),
+    Plink(PathBuf),
+}
+
+impl Client {
+    fn path(&self) -> &PathBuf {
+        match self {
+            Client::Ntplink(p) | Client::Plink(p) => p,
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        match self {
+            Client::Ntplink(_) => "ntplink",
+            Client::Plink(_) => "plink",
+        }
+    }
+}
+
+/// `NATIVETERM_NTPLINK` or `NATIVETERM_PLINK` (tests), an `ntplink.exe`
+/// next to the shim or in its `tools` folder, else PuTTY's plink.
+fn client() -> Option<Client> {
+    let var = |name: &str| std::env::var_os(name).filter(|p| !p.is_empty()).map(PathBuf::from);
+    if let Some(p) = var("NATIVETERM_NTPLINK") {
+        return Some(Client::Ntplink(p));
+    }
+    if let Some(p) = var("NATIVETERM_PLINK") {
+        return Some(Client::Plink(p));
     }
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let ntplink = [exe_dir.join("ntplink.exe"), exe_dir.join("tools").join("ntplink.exe")].into_iter().find(|p| p.is_file());
+    ntplink.map(Client::Ntplink).or_else(|| plink(&exe_dir).map(Client::Plink))
+}
+
+/// A `plink.exe` next to the shim or in its `tools` folder, on `PATH`, or
+/// PuTTY's installation.
+fn plink(exe_dir: &std::path::Path) -> Option<PathBuf> {
     let mut candidates = vec![exe_dir.join("plink.exe"), exe_dir.join("tools").join("plink.exe")];
     if let Some(path) = std::env::var_os("PATH") {
         candidates.extend(std::env::split_paths(&path).map(|d| d.join("plink.exe")));
@@ -116,7 +158,7 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         println!("{}", t!("plink-gone", alias = alias));
         return failed;
     };
-    let Some(program) = program() else {
+    let Some(client) = client() else {
         println!("{}", t!("plink-missing"));
         return failed;
     };
@@ -138,29 +180,58 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
             return failed;
         }
     }
-    let temporary = match TemporarySession::create(&session, attempt) {
-        Ok(t) => t,
-        Err(e) => {
-            println!("{}", t!("plink-load-failed", error = e.to_string()));
-            return failed;
-        }
+    let ntplink = matches!(client, Client::Ntplink(_));
+    let temporary = match ntplink {
+        true => None,
+        false => match TemporarySession::create(&session, attempt) {
+            Ok(t) => t,
+            Err(e) => {
+                println!("{}", t!("plink-load-failed", error = e.to_string()));
+                return failed;
+            }
+        },
     };
-    println!("{}", t!("plink-connecting", target = session.target(), protocol = session.protocol.name()));
+    // Break and Telnet's commands; without the pipe the session still runs
+    let control = match ntplink {
+        true => match win::ControlPipe::create(&format!("{}-{attempt}", std::process::id())) {
+            Ok(control) => Some(control),
+            Err(e) => {
+                println!("{}", t!("plink-no-control", error = e.to_string()));
+                None
+            }
+        },
+        false => None,
+    };
+    println!(
+        "{}",
+        t!("plink-connecting", target = session.target(), protocol = session.protocol.name(), client = client.name())
+    );
     let _pages = win::CodePages::set(code_page);
     if let Some(auth) = auth {
         auth.reset();
     }
-    let arguments = session.arguments(temporary.as_ref().map(|t| t.name.as_str()));
+    let arguments = match ntplink {
+        true => ntplink_arguments(&session, control.as_ref().map(|c| c.name.as_str())),
+        false => session.arguments(temporary.as_ref().map(|t| t.name.as_str())),
+    };
     // its own process group: Ctrl+C never ends plink (see `Watch`)
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x200;
-    let mut child = match Command::new(&program).args(&arguments).creation_flags(CREATE_NEW_PROCESS_GROUP).spawn() {
+    let mut child = match Command::new(client.path()).args(&arguments).creation_flags(CREATE_NEW_PROCESS_GROUP).spawn() {
         Ok(child) => child,
         Err(e) => {
-            println!("{}", t!("plink-not-started", path = program.display().to_string(), error = e.to_string()));
+            let path = client.path().display().to_string();
+            println!("{}", t!("plink-not-started", client = client.name(), path = path, error = e.to_string()));
             return failed;
         }
     };
+    if let Some(control) = &control {
+        control.started(child.id());
+        let names = specials(session.protocol);
+        if let (Some(link), false) = (link, names.is_empty()) {
+            link.send(ShimMessage::Specials { names: names.iter().map(|n| n.to_string()).collect() });
+        }
+    }
     // plink reads the saved session at start; it goes when plink is done
     // at the latest (the shim may exit right after)
     let temporary = Arc::new(Mutex::new(temporary));
@@ -169,8 +240,8 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         std::thread::sleep(Duration::from_secs(2));
         drop(later.lock().map(|mut t| t.take()));
     });
-    let watch = Watch::start(child.id(), session.protocol, link.map(Link::sender));
-    let supervised = supervise(&mut child, link, auth);
+    let watch = Watch::start(child.id(), session.protocol, !ntplink, link.map(Link::sender));
+    let supervised = supervise(&mut child, link, auth, control.as_ref());
     watch.stop();
     drop(temporary.lock().map(|mut t| t.take()));
     let code = match supervised {
@@ -178,16 +249,49 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         Supervised::Close => return Attempt::Close,
     };
     let connected = auth.is_some_and(|a| a.is_set()) || watch.connected();
-    // a server's close (Telnet and raw: 0), plink's own error (1), a
-    // socket error (Telnet and raw: INT_MAX), or the watcher ending a
-    // half-closed raw connection: the connection ended
-    let code = if matches!(code, 0 | 1 | i32::MAX) || watch.server_closed() { 255 } else { code };
-    Attempt::Exited { code, connected }
+    let ended = match ntplink {
+        // closed by the far end, couldn't connect, connection lost
+        true => matches!(code, 0 | 2 | 3),
+        // a server's close (Telnet and raw: 0), plink's own error (1), a
+        // socket error (Telnet and raw: INT_MAX), or the watcher ending a
+        // half-closed raw connection
+        false => matches!(code, 0 | 1 | i32::MAX) || watch.server_closed(),
+    };
+    Attempt::Exited { code: if ended { 255 } else { code }, connected }
 }
 
-/// Polls plink's connections: reports the connection as the login, and
-/// ends plink when a raw connection is half-closed by the server. Also
-/// keeps Ctrl+C a key: plink sets the console to "processed input", where
+/// ntplink's command line: the session's PuTTY options as `-set`, its
+/// control pipe, then what plink would get.
+fn ntplink_arguments(session: &PlinkSession, control: Option<&str>) -> Vec<String> {
+    let mut args = Vec::new();
+    for (key, value) in &session.putty {
+        let value = match value {
+            PuttyValue::Number(n) => n.to_string(),
+            PuttyValue::Text(s) => s.clone(),
+        };
+        args.extend(["-set".to_string(), format!("{key}={value}")]);
+    }
+    if let Some(control) = control {
+        args.extend(["-nt-control".to_string(), control.to_string()]);
+    }
+    args.extend(session.arguments(None));
+    args
+}
+
+/// The commands ntplink takes over the control pipe for `protocol`.
+fn specials(protocol: Protocol) -> &'static [&'static str] {
+    match protocol {
+        Protocol::Serial => &["brk"],
+        Protocol::Telnet => &["brk", "ayt", "ip", "ao", "ec", "el", "ga", "nop", "abort", "susp", "eor", "eof", "synch"],
+        _ => &[],
+    }
+}
+
+/// Polls the client's connections and reports the connection as the
+/// login; a serial line's silence is reported too. For plink
+/// (`workarounds`) it also ends plink when a raw connection is half-closed
+/// by the server, and keeps Ctrl+C a key: plink sets the console to
+/// "processed input", where
 /// Windows turns Ctrl+C into a signal that ends it instead of sending ^C
 /// (the usual way to stop a command on a switch). While plink reads key
 /// by key (remote echo: Telnet devices, serial) that mode is taken off
@@ -216,18 +320,20 @@ fn unix_seconds(at: std::time::SystemTime) -> u64 {
 }
 
 impl Watch {
-    fn start(pid: u32, protocol: Protocol, link: Option<LinkSender>) -> Watch {
+    fn start(pid: u32, protocol: Protocol, workarounds: bool, link: Option<LinkSender>) -> Watch {
         let watch = Watch { stop: Arc::default(), connected: Arc::default(), closed: Arc::default() };
         let (stop, connected, closed) = (watch.stop.clone(), watch.connected.clone(), watch.closed.clone());
         let shim = std::process::id();
         let started = Instant::now();
         let keys = watch.stop.clone();
-        std::thread::spawn(move || {
-            while !keys.load(Ordering::Relaxed) {
-                win::keep_ctrl_c_as_input();
-                std::thread::sleep(KEY_MODE_EVERY);
-            }
-        });
+        if workarounds {
+            std::thread::spawn(move || {
+                while !keys.load(Ordering::Relaxed) {
+                    win::keep_ctrl_c_as_input();
+                    std::thread::sleep(KEY_MODE_EVERY);
+                }
+            });
+        }
         std::thread::spawn(move || {
             // serial: what the console shows, and since when it hasn't changed
             let quiet_after = quiet_after();
@@ -257,7 +363,7 @@ impl Watch {
                     Protocol::Serial => started.elapsed() >= SERIAL_SETTLE,
                     _ => {
                         let states = win::tcp_states(pid);
-                        if protocol == Protocol::Raw && states.contains(&win::TCP_CLOSE_WAIT) {
+                        if workarounds && protocol == Protocol::Raw && states.contains(&win::TCP_CLOSE_WAIT) {
                             closed.store(true, Ordering::Relaxed);
                             win::terminate(pid);
                             return;

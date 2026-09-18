@@ -1192,6 +1192,11 @@ fn session_card(
             if button(ui, SessionCommand::Send, icons::with(icons::SEND, t!("session-send"))).clicked() {
                 action = Some(CardAction::Send);
             }
+            if SessionCommand::SendBreak.offered(s)
+                && button(ui, SessionCommand::SendBreak, t!("button-break")).on_hover_text(t!("session-break-hint")).clicked()
+            {
+                core.run(&s.id, SessionCommand::SendBreak);
+            }
             if let Some(target) = typed {
                 let button = egui::Button::new(icons::with(icons::SAVE, t!("quick-save"))).small();
                 if ui.add(button).on_hover_text(t!("quick-save-hint")).clicked() {

@@ -21,6 +21,8 @@ pub enum SessionCommand {
     Focus,
     /// Type commands into it (the surface opens its dialog).
     Send,
+    /// A serial line's Break, or Telnet's (non-SSH sessions run by ntplink).
+    SendBreak,
 }
 
 impl SessionCommand {
@@ -36,9 +38,28 @@ impl SessionCommand {
             SessionCommand::ClearScreen => open && s.linked,
             SessionCommand::Focus => s.location.is_some(),
             SessionCommand::Send => s.linked && s.state == State::Connected,
+            SessionCommand::SendBreak => s.linked && s.state == State::Connected && s.can_break(),
+        }
+    }
+
+    /// Surfaces leave it out entirely where it can never apply.
+    pub fn offered(self, s: &SessionView) -> bool {
+        match self {
+            SessionCommand::SendBreak => s.can_break(),
+            _ => true,
         }
     }
 }
+
+impl SessionView {
+    /// Its connection takes a Break now.
+    pub fn can_break(&self) -> bool {
+        self.specials.iter().any(|n| n == BREAK)
+    }
+}
+
+/// ntplink's name for Break.
+pub const BREAK: &str = "brk";
 
 /// The sessions a batch close takes. Locked sessions never, and only
 /// NativeTerm's own: the user's tabs between or beside them aren't
@@ -103,6 +124,7 @@ impl Core {
             SessionCommand::ToggleLock => self.set_locked(id, !s.locked),
             SessionCommand::ClearScreen => self.clear_screen(id),
             SessionCommand::Focus => self.focus(id),
+            SessionCommand::SendBreak => self.send_special(id, BREAK),
             SessionCommand::Send => {}
         }
     }
@@ -157,6 +179,7 @@ pub(crate) mod tests {
             renamed_to: None,
             last_position: None,
             quiet_since: None,
+            specials: Vec::new(),
         }
     }
 
@@ -184,6 +207,18 @@ pub(crate) mod tests {
         assert_eq!(close_set(&all, &others), ["a"], "locked sessions stay");
         assert!(close_set(&all, &right).is_empty());
         assert_eq!(close_set(&all, &CloseSet::Ended), ["b"]);
+    }
+
+    /// Break only where the connection takes one (ntplink told the shim),
+    /// and only while connected.
+    #[test]
+    fn break_is_offered_where_the_connection_takes_it() {
+        let mut s = session("a", 1, 0, State::Connected);
+        assert!(!SessionCommand::SendBreak.offered(&s) && !SessionCommand::SendBreak.applies(&s), "ssh: never");
+        s.specials = vec!["brk".into()];
+        assert!(SessionCommand::SendBreak.offered(&s) && SessionCommand::SendBreak.applies(&s));
+        s.state = State::Connecting;
+        assert!(SessionCommand::SendBreak.offered(&s) && !SessionCommand::SendBreak.applies(&s));
     }
 
     #[test]

@@ -11,6 +11,8 @@
 //!   helper answers `<p>` (`<p>-other` for hosts named `other…`).
 //! - `FAKE_SSH_INTERACTIVE=<bash>`: after the login, runs that shell
 //!   interactively (a local stand-in for the remote side).
+//! - As ntplink: with `-nt-control <pipe>`, opens that pipe and logs each
+//!   command line received (`control: …`) while it runs.
 
 use std::io::Write;
 use std::os::windows::process::CommandExt;
@@ -26,6 +28,9 @@ fn main() {
     }
     if args.first().map(String::as_str) == Some("-G") {
         return;
+    }
+    if let Some(pipe) = args.iter().position(|a| a == "-nt-control").and_then(|i| args.get(i + 1)) {
+        control_log(pipe);
     }
     let env_num = |key: &str, default: i64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
     if std::env::var("FAKE_SSH_LOGIN").as_deref() == Ok("1") {
@@ -92,6 +97,21 @@ fn main() {
     }
     std::thread::sleep(Duration::from_millis(env_num("FAKE_SSH_MS", 200) as u64));
     std::process::exit(env_num("FAKE_SSH_CODE", 0) as i32);
+}
+
+/// Like ntplink: reads NativeTerm's commands from its control pipe.
+fn control_log(pipe: &str) {
+    use std::io::BufRead;
+    let Ok(file) = std::fs::File::open(pipe) else { return };
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+            if let Ok(log) = std::env::var("FAKE_SSH_LOG") {
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+                    let _ = writeln!(f, "control: {line}");
+                }
+            }
+        }
+    });
 }
 
 fn console_lines() -> impl Iterator<Item = String> {

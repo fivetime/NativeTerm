@@ -909,14 +909,16 @@ Findings:
   removes only that entry (a list that becomes empty is removed with its
   line, so on → off restores the file byte for byte). The result must
   parse and show the requested state before anything is written; the
-  previous file is copied to `<data>ackups	erminal-settings-*.json`
+  previous file is copied to `<data>\backups\terminal-settings-*.json`
   and replaced through a temporary file.
 
 ## Other protocols via plink
 
 NativeTerm parses no protocol: the shim runs a console client in the tab.
 For SSH that client is OpenSSH. For Telnet, serial, raw TCP, rlogin, and
-SUPDUP it is **`plink.exe`** from PuTTY:
+SUPDUP it is **`ntplink.exe`**, NativeTerm's own frontend over PuTTY's
+unmodified protocol code (see "ntplink" below), or PuTTY's **`plink.exe`**
+when ntplink isn't there:
 
 - **License and trust:** MIT license, and official builds are signed by
   Simon Tatham.
@@ -962,10 +964,12 @@ Implemented (`native_term_config::plink`):
 - **Shim:** before running ssh, the shim looks the alias up in the
   session folders (`--ssh-dir <dir>` when NativeTerm runs on another
   folder than `~/.ssh`: the Terminal adapter adds it to every session
-  tab). A non-SSH session runs plink instead, found through
-  `NATIVETERM_PLINK`, next to the shim or in its `tools` folder, on
-  `PATH`, or in PuTTY's installation folder; it is read again at every
-  reconnect, so edits apply.
+  tab). A non-SSH session runs ntplink instead (`NATIVETERM_NTPLINK`,
+  or `ntplink.exe` next to the shim or in its `tools` folder), else plink
+  (`NATIVETERM_PLINK`, next to the shim or in `tools`, on `PATH`, or in
+  PuTTY's installation folder); it is read again at every reconnect, so
+  edits apply. What follows describes plink; ntplink needs none of the
+  workarounds (see "ntplink").
   - The console code pages are set to the charset while plink runs.
   - A serial line is opened exclusively first: "in use" (access denied)
     or "can't be opened" is reported before plink starts.
@@ -1189,6 +1193,54 @@ Measured against a local test server:
   serial backend, plink has no way to send specials), session logging of
   the output (`-sessionlog` exists, but session output is logged by
   PuTTY's terminal, which plink doesn't have).
+
+### ntplink: NativeTerm's own client
+
+Everything plink can't do (above) is in its frontend, not in PuTTY's
+protocol code. So NativeTerm builds its own frontend, `ntplink.exe`, over
+PuTTY 0.85's **unmodified** backends — the SSH-free set PuTTYtel uses
+(`be_list(ntplink NTPlink SERIAL OTHERBACKENDS)`): Telnet, raw, rlogin,
+SUPDUP, serial. A Rust rewrite was considered and rejected: years of device
+quirks live in `telnet.c` and `serial` handling. The source is a local git
+tree (`putty-win-src`, tag `upstream-0.85` is the download); NativeTerm's
+additions are all in its `nativeterm\` folder plus one
+`add_subdirectory` line, recorded in its `CHANGELOG.md`, so a new PuTTY
+release is taken over by replacing the upstream files.
+`tools\build-ntplink.cmd` builds it (CMake + Visual Studio's C++ tools,
+static C runtime: ~420 KB, imports only KERNEL32 and ADVAPI32) and puts it
+next to the shim.
+
+| | plink | ntplink |
+|---|---|---|
+| Settings | registry: "Default Settings", or NativeTerm's temporary `-load` session | PuTTY's built-in defaults plus `-set Keyword=Value` (any saved-session keyword); no registry code linked (`stubs/no-storage.c`) |
+| Window size | fixed at connect | sent at connect and on every resize (NAWS, rlogin, SUPDUP) |
+| Ctrl+C | ended plink (shim workaround: own process group, console mode polled) | a key: ^C for the device |
+| LocalEcho / LocalEdit | only once Telnet negotiates | from the start, every protocol |
+| Raw: server closes | half open (shim workaround: `CLOSE_WAIT` watch) | exits |
+| Break, Telnet commands | impossible | control pipe |
+| Exit codes | 0 / 1 / `INT_MAX` | 0 closed by the far end, 2 couldn't connect, 3 lost, 1 usage |
+
+The shim passes `[session.putty]` as `-set` (no registry write at all) and
+creates `\\.\pipe\nativeterm-control-<shim pid>-<attempt>` (one instance,
+local clients only, served only to the ntplink process it started) before
+starting ntplink with `-nt-control <pipe>`. It then tells NativeTerm which
+commands the connection takes (`ShimMessage::Specials`: `brk` for serial;
+Break, AYT, IP, AO, EC, EL, GA, NOP, Abort, Susp, EOR, EOF, Synch for
+Telnet). The session card gets a **Break** button and the tab menu
+**Send Break** for those sessions only, enabled while connected;
+`AppMessage::Special { name }` becomes `special <name>` on the pipe. If
+the pipe can't be made, the tab says so and the session runs without it.
+
+Verified in the portable Terminal against local test servers: the window
+size at connect (120x30) and after resizes (59x14, 102x25); Ctrl+C sent as
+0x03 without ending ntplink; raw sends no EOF on connect and ends as soon
+as the server closes; `LocalEcho=0 LocalEdit=1` on raw echoes locally and
+sends key by key; end to end through the shim (found next to it, a
+PuTTY option passed with `-set`), Break and AYT sent from the NativeTerm
+side arrived at the Telnet server as `IAC BRK` / `IAC AYT`, and the
+server's close showed "disconnected". Serial Break itself couldn't be
+observed: the virtual COM driver doesn't pass Break on (not even from
+.NET), so it waits for a real device.
 
 ### Differences from SSH
 

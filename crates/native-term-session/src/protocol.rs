@@ -52,6 +52,10 @@ pub enum ShimMessage {
     Quiet { since: u64 },
     /// Output again after `Quiet`.
     Heard,
+    /// The client takes these commands (`AppMessage::Special`) for this
+    /// connection, e.g. "brk" (a serial line's Break, Telnet's Break);
+    /// sent after `Connecting`, none until then.
+    Specials { names: Vec<String> },
 }
 
 /// NativeTerm → shim.
@@ -75,6 +79,9 @@ pub enum AppMessage {
     /// For a shim started without a host: stay, NativeTerm is replacing
     /// this tab and will close it.
     Hold,
+    /// Send one of the client's special commands (see
+    /// `ShimMessage::Specials`) over the connection.
+    Special { name: String },
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
@@ -113,6 +120,7 @@ mod tests {
             ShimMessage::Authenticated,
             ShimMessage::Exited { code: -1 },
             ShimMessage::Closing,
+            ShimMessage::Specials { names: vec!["brk".into(), "ayt".into()] },
         ];
         for m in messages {
             let line = encode(&m);
