@@ -2258,7 +2258,10 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
   locally (portable Terminal 1.26, daas container): the open tab's
   session shown "in tab", the tab closed from NativeTerm left it
   "detached", "Open" brought a tab back into the same shell (its history
-  and variables there).
+  and variables there) and the list then showed it "in tab" again; "End…"
+  → "End Now" on it ended the session on the server (`tmux ls`: no
+  server), the list said there were none, and the tab showed "ended (0)"
+  (the remote shell ended, ssh exited normally).
 - **Not yet**: the same list per folder, hiding tmux's status bar,
   `tmux send-keys` group send, previews.
 
