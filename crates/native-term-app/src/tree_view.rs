@@ -1,7 +1,9 @@
 //! The session tree panel: search, recent hosts, folders and hosts. Folder
 //! labels like `生产 / 控制节点` (an imported SecureCRT tree) are shown as
 //! nested folders. Rows are virtualized (only visible rows are laid out),
-//! so thousands of hosts cost nothing while scrolling or idle.
+//! so thousands of hosts cost nothing while scrolling or idle. Hosts can
+//! be selected together (Ctrl+click, Shift+click) and opened or given the
+//! key as a group from the context menu.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -125,7 +127,10 @@ pub struct TreeView {
     /// Folder paths the user opened or closed (the default depends on how
     /// many folders there are).
     toggled: HashMap<String, bool>,
-    selected: Option<String>,
+    /// Selected aliases, in the order they were selected.
+    selected: Vec<String>,
+    /// Where a Shift+click range starts: the last plain or Ctrl click.
+    anchor: Option<String>,
     focus_search: bool,
     /// Search results for (query, tree generation, recent list): scoring
     /// thousands of hosts every frame would be wasted while typing.
@@ -199,6 +204,23 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
 fn request(tree: &SessionTree, host: &HostEntry) -> HostRequest {
     let on_login = tree.find(host.alias()).and_then(|(folder, h)| folder.nt(h, "onlogin")).map(str::to_string);
     HostRequest { on_login, ..HostRequest::new(host.alias(), host.label()) }
+}
+
+/// The aliases from the host row with alias `anchor` nearest `to` to the
+/// row `to`, in row order, each once (a host can be listed twice: under
+/// recent and in its folder). Just `to`'s alias without such a row.
+fn span(host_rows: &[(usize, &str)], anchor: &str, to: usize) -> Vec<String> {
+    let Some(&(_, target)) = host_rows.iter().find(|(row, _)| *row == to) else { return Vec::new() };
+    let start = host_rows.iter().filter(|(_, alias)| *alias == anchor).map(|(row, _)| *row).min_by_key(|row| row.abs_diff(to));
+    let Some(start) = start else { return vec![target.to_string()] };
+    let (low, high) = (start.min(to), start.max(to));
+    let mut aliases: Vec<String> = Vec::new();
+    for (_, alias) in host_rows.iter().filter(|(row, _)| (low..=high).contains(row)) {
+        if !aliases.iter().any(|a| a == alias) {
+            aliases.push(alias.to_string());
+        }
+    }
+    aliases
 }
 
 fn quick_request(target: &QuickTarget) -> HostRequest {
@@ -449,8 +471,19 @@ impl TreeView {
         let row_height = ui.spacing().interact_size.y + 4.0;
         let searching = !self.query.trim().is_empty();
         let mut toggle = None;
+        let host_rows: Vec<(usize, &str)> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| if let Row::Host { host, .. } = r { Some((i, host.alias())) } else { None })
+            .collect();
+        let modifiers = ui.input(|i| i.modifiers);
+        let mut click = None;
+        // the selected hosts that still exist, in selection order
+        let chosen: Vec<&HostEntry> = self.selected.iter().filter_map(|a| tree.find(a).map(|(_, h)| h)).collect();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_height, rows.len(), |ui, range| {
-            for row in &rows[range] {
+            let first = range.start;
+            for (offset, row) in rows[range].iter().enumerate() {
+                let index = first + offset;
                 match row {
                     Row::Heading(text) => {
                         let look = RowLook { icon: None, dot: None, selected: false, weak: true, indent: 0.0 };
@@ -527,7 +560,7 @@ impl TreeView {
                     }
                     Row::Host { host, folder, depth } => {
                         let alias = host.alias();
-                        let selected = self.selected.as_deref() == Some(alias);
+                        let selected = self.selected.iter().any(|a| a == alias);
                         let mut text = host.label().to_string();
                         if host.favorite() {
                             text = format!("{text}  {}", icons::STAR_FILLED);
@@ -544,12 +577,41 @@ impl TreeView {
                         };
                         let response = draw_row(ui, row_height, &text, look).on_hover_text(hover(host));
                         if response.clicked() {
-                            self.selected = Some(alias.to_string());
+                            click = Some((index, alias.to_string()));
                         }
-                        if response.double_clicked() {
+                        if response.double_clicked() && !modifiers.ctrl && !modifiers.shift {
                             actions.push(TreeAction::Open(vec![request(tree, host)], Target::Recent));
                         }
+                        // right-clicking outside the selection selects that host alone
+                        if response.secondary_clicked() && !selected {
+                            self.selected = vec![alias.to_string()];
+                            self.anchor = Some(alias.to_string());
+                        }
+                        let group = selected && chosen.len() > 1;
                         response.context_menu(|ui| {
+                            if group {
+                                let requests: Vec<HostRequest> = chosen.iter().map(|h| request(tree, h)).collect();
+                                let count = requests.len();
+                                if ui.button(t!("menu-connect-selected", count = count)).clicked() {
+                                    actions.push(TreeAction::Open(requests.clone(), Target::Recent));
+                                    ui.close();
+                                }
+                                if ui.button(t!("menu-connect-selected-new-window", count = count)).clicked() {
+                                    actions.push(TreeAction::Open(requests, Target::NewWindow));
+                                    ui.close();
+                                }
+                                ui.separator();
+                                if ui.button(t!("menu-install-key-selected", count = count)).clicked() {
+                                    let list = chosen.iter().map(|h| (h.alias().to_string(), h.label().to_string())).collect();
+                                    actions.push(TreeAction::InstallKey(list));
+                                    ui.close();
+                                }
+                                if ui.button(t!("menu-clear-selection")).clicked() {
+                                    self.selected.clear();
+                                    ui.close();
+                                }
+                                return;
+                            }
                             if ui.button(t!("menu-connect")).clicked() {
                                 actions.push(TreeAction::Open(vec![request(tree, host)], Target::Recent));
                                 ui.close();
@@ -606,7 +668,41 @@ impl TreeView {
         if let Some((path, open)) = toggle {
             self.toggled.insert(path, open);
         }
+        if let Some((index, alias)) = click {
+            self.click(&host_rows, index, alias, modifiers);
+        }
         actions
+    }
+
+    /// A left click on a host row: alone, Ctrl toggles, Shift selects the
+    /// range from the anchor (Ctrl+Shift adds the range).
+    fn click(&mut self, host_rows: &[(usize, &str)], index: usize, alias: String, modifiers: egui::Modifiers) {
+        match (modifiers.ctrl, modifiers.shift) {
+            (_, true) if self.anchor.is_some() => {
+                let range = span(host_rows, self.anchor.as_deref().unwrap_or_default(), index);
+                if !modifiers.ctrl {
+                    self.selected.clear();
+                }
+                for a in range {
+                    if !self.selected.contains(&a) {
+                        self.selected.push(a);
+                    }
+                }
+            }
+            (true, _) => {
+                match self.selected.iter().position(|a| *a == alias) {
+                    Some(at) => {
+                        self.selected.remove(at);
+                    }
+                    None => self.selected.push(alias.clone()),
+                }
+                self.anchor = Some(alias);
+            }
+            _ => {
+                self.selected = vec![alias.clone()];
+                self.anchor = Some(alias);
+            }
+        }
     }
 }
 
@@ -676,6 +772,38 @@ mod tests {
         }
         view.query = "web".into();
         assert_eq!(view.search(&tree, 1, &[]).len(), 1);
+    }
+
+    #[test]
+    fn shift_click_ranges() {
+        // rows: 0 heading, 1 recent b, 2 heading, 3 folder, 4 a, 5 b, 6 c, 7 d
+        let rows = [(1, "b"), (4, "a"), (5, "b"), (6, "c"), (7, "d")];
+        assert_eq!(span(&rows, "a", 6), ["a", "b", "c"]);
+        assert_eq!(span(&rows, "d", 4), ["a", "b", "c", "d"], "upwards, in row order");
+        // the anchor's nearest row: b under recent (1) is farther from 7 than b at 5
+        assert_eq!(span(&rows, "b", 7), ["b", "c", "d"]);
+        assert_eq!(span(&rows, "b", 4), ["a", "b"], "b at 5 is nearer to row 4 than recent b at 1");
+        assert_eq!(span(&rows, "gone", 6), ["c"]);
+        assert!(span(&rows, "a", 3).is_empty(), "not a host row");
+    }
+
+    #[test]
+    fn clicks_select() {
+        let rows = [(0, "a"), (1, "b"), (2, "c"), (3, "d")];
+        let none = egui::Modifiers::NONE;
+        let ctrl = egui::Modifiers { ctrl: true, ..none };
+        let shift = egui::Modifiers { shift: true, ..none };
+        let mut view = TreeView::default();
+        view.click(&rows, 1, "b".into(), none);
+        assert_eq!(view.selected, ["b"]);
+        view.click(&rows, 3, "d".into(), shift);
+        assert_eq!(view.selected, ["b", "c", "d"]);
+        view.click(&rows, 2, "c".into(), ctrl);
+        assert_eq!(view.selected, ["b", "d"]);
+        view.click(&rows, 0, "a".into(), shift);
+        assert_eq!(view.selected, ["a", "b", "c"], "the anchor moved to c");
+        view.click(&rows, 3, "d".into(), none);
+        assert_eq!(view.selected, ["d"]);
     }
 
     #[test]

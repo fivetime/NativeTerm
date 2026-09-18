@@ -267,6 +267,8 @@
 - [x] Clone: port forwards cleared (shim `--no-forwards` →
       `-o ClearAllForwardings=yes`, kept across restores)
 - [x] Open a whole folder (batched `wt` calls)
+- [x] Multi-select in the session tree (Ctrl+click, Shift+click): connect
+      the selection (also in a new window), install the key on it
 - [x] Open a whole folder (rest): rate-limited connections (more than 3
       hosts: tabs wait, the queue connects them, at most 4 logging in, 200 ms
       apart), the batch's first tab selected at the end; "Connect all" and

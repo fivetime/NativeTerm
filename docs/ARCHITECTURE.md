@@ -2621,7 +2621,13 @@ app-level command layer.
     open; with more, only the top level (up to 60) or nothing. A group's
     "Connect All" opens every host below it. A host with open sessions
     has a dot: green connected, amber connecting or waiting, red failed
-    or dropped (the best state of its sessions).
+    or dropped (the best state of its sessions). Several hosts can be
+    selected like in Explorer: Ctrl+click toggles one, Shift+click takes
+    the rows from the last click (across folders and search results;
+    Ctrl+Shift adds them); right-clicking a selected host then offers
+    "Connect These N" (through the connection queue), in a new window,
+    and "Install My Key on These N"; right-clicking outside the
+    selection selects that host alone.
 - **Windows 11 materials**: Mica/Acrylic backdrops via the
   `window-vibrancy` crate on a transparent window; rounded corners for
   borderless windows (drawer, FAB) via `DwmSetWindowAttribute`
