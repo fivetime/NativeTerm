@@ -720,12 +720,16 @@ Consequences:
       shim reports closing (`Closed`; with its window: restorable), and a
       shim that vanishes without a word (killed, Terminal crashed) drops
       its pipe (`Gone`); both are written to `state.db` right away.
-  - **NativeTerm exits:** by default the tabs stay and the next start takes
-    them over (until then nobody answers their tab menu). Settings →
-    "Close NativeTerm's tabs when NativeTerm exits" (`close_tabs_on_exit`
-    in `state.db`, off by default) closes them instead: when the main
-    window closes, each open, unlocked session's shim is sent `Close`
-    over its own pipe and exits with 0, which closes its tab. Nothing
+  - **NativeTerm exits:** Settings → "Close NativeTerm's tabs when
+    NativeTerm exits" (`close_tabs_on_exit` in `state.db`, **on unless
+    turned off**: a tab left behind has nobody to answer its tab menu).
+    When the main window closes, each open, unlocked session's shim is
+    sent `Close` over its own pipe and exits with 0, which closes its tab,
+    and every such session (also one whose tab was never found) is
+    recorded as closed in `state.db` at that moment — the shims' own
+    reports arrive after NativeTerm is gone, so without this the next
+    start looked for the closed tabs (found by the user). Turned off, the
+    tabs stay and the next start takes them over. Nothing
     else is touched — no window messages, no Terminal UI: tabs NativeTerm
     doesn't manage (the user's shells, other programs' tabs) stay, and so
     does their window; a window that held only NativeTerm's tabs closes

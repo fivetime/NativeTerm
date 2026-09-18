@@ -852,15 +852,29 @@ impl Core {
 
     /// Close every open session's tab except locked ones (NativeTerm is
     /// exiting): each shim is told over its pipe, so this returns at once
-    /// and the tabs close after NativeTerm is gone. Sessions without a shim
-    /// link are left alone (closing them needs the Terminal's UI).
+    /// and the tabs close after NativeTerm is gone; all of them are
+    /// recorded as closed in `state.db` right away, so the next start
+    /// doesn't look for them.
     pub fn close_all(&self) -> usize {
-        let links: Vec<_> = lock(&self.shared.sessions)
+        let open: Vec<_> = lock(&self.shared.sessions)
             .iter()
             .filter(|s| !s.locked && s.state.is_open())
-            .filter_map(|s| s.link.clone())
+            .map(|s| (s.id.clone(), s.link.clone()))
             .collect();
-        links.iter().filter(|link| link.send(&AppMessage::Close).is_ok()).count()
+        for (id, link) in &open {
+            if let Some(link) = link {
+                let _ = link.send(&AppMessage::Close);
+            }
+            // recorded now: the shims' own reports come after NativeTerm is
+            // gone, and one never found (no link) is given up as well
+            self.shared.update(id, |s| s.state = State::Closed);
+        }
+        open.len()
+    }
+
+    /// Whether NativeTerm closes its tabs when it exits (on unless turned off).
+    pub fn close_on_exit(&self) -> bool {
+        self.setting(CLOSE_ON_EXIT_SETTING).as_deref() != Some("0")
     }
 
     /// Lock or unlock a session (remembered across restarts).

@@ -6,10 +6,11 @@
 //! ```text
 //! set NATIVETERM_TEST_WT_DIR=C:\…\terminal-1.26.2581.0
 //! cargo build -p native-term-shim -p native-term-app --examples
-//! cargo test -p native-term-app --test restore_portable -- --ignored --nocapture
+//! cargo test -p native-term-app --test restore_portable -- --ignored --nocapture --test-threads=1
 //! ```
 //!
-//! Every step is a separate `core_probe` process, i.e. a NativeTerm run.
+//! Every step is a separate `core_probe` process, i.e. a NativeTerm run;
+//! the tests share NativeTerm's pipe, so they run one at a time.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -233,5 +234,40 @@ fn tab_closed_while_nativeterm_was_not_running() {
 
     let out = env.run(&["close-all"]);
     assert!(out.flag("CLOSED"), "{}", out.text);
+    cleanup(&env.data);
+}
+
+/// NativeTerm exits with "close tabs on exit" (the default): the tabs
+/// close after it's gone, and the next start neither looks for them nor
+/// reports them lost.
+#[test]
+#[ignore = "needs a portable Windows Terminal, see the file header"]
+fn tabs_closed_on_exit_are_not_looked_for() {
+    let env = Env::new();
+    let labels = ["nt-x a", "nt-x b"];
+    let out = env.run(&["open", "--new-window", labels[0], labels[1]]);
+    assert!(out.flag("SETTLED"), "{}", out.text);
+    let window = out.windows().into_iter().find(|(_, tabs)| tabs.contains("nt-x a")).map(|(w, _)| w);
+
+    let out = env.run(&["exit-closing"]);
+    assert!(out.text.contains("TOLD 2"), "{}", out.text);
+    // recorded as closed on the way out (not left to the next start's
+    // check), and not restorable: they were closed on purpose
+    let registry = native_term_app::registry::Registry::open(&env.data.join("state.db")).unwrap();
+    assert!(registry.open_sessions().unwrap().is_empty());
+    assert!(registry.restorable_sessions(Duration::from_secs(3600)).unwrap().is_empty());
+    drop(registry);
+    // only its own window goes: the tabs close by themselves
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while window.is_some_and(|w| env.terminal_windows().contains(&w)) {
+        assert!(Instant::now() < deadline, "the tabs' window is still open");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    let started = Instant::now();
+    let out = env.run(&["watch", "1"]);
+    assert!(started.elapsed() < Duration::from_secs(10), "nothing looked for: {:?}", started.elapsed());
+    assert!(out.sessions().is_empty(), "{}", out.text);
+    assert!(!out.text.contains("NOTICE"), "{}", out.text);
     cleanup(&env.data);
 }

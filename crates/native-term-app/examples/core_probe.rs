@@ -7,6 +7,8 @@
 //!   watch <secs>                    just run (restored tabs get replaced)
 //!   connect <label>                 connect a waiting/ended session
 //!   close-all                       close every session with a tab
+//!   exit-closing                    exit like NativeTerm with "close
+//!                                   tabs on exit" (on by default)
 //!   restore-terminal                start the Terminal without arguments
 
 use std::path::PathBuf;
@@ -110,6 +112,13 @@ fn main() {
             } else {
                 println!("CONNECTED false (no such linked session)");
             }
+        }
+        Some("exit-closing") => {
+            wait_until(&core, 20, settled);
+            println!("TOLD {}", core.close_all());
+            print(&core);
+            // gone at once, like the real window closing
+            std::process::exit(0);
         }
         Some("close-all") => {
             wait_until(&core, 20, settled);

@@ -251,7 +251,7 @@
 - [x] Reconnect in place / Disconnect / Close
 - [x] Sessions whose shim is gone at startup (closed while NativeTerm was
       off, shutdown, sign-out) are closed at once, not looked for
-- [x] Optional: close NativeTerm's tabs when NativeTerm exits (unlocked
+- [x] Close NativeTerm's tabs when NativeTerm exits (on by default; unlocked
       sessions only, through their shims; foreign tabs and windows untouched)
 - [x] Optional auto-reconnect that never retries login failures (setting
       in `state.db`; 3/10/30/60 s, at most 10 tries, spread per session;

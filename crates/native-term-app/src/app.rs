@@ -1061,7 +1061,7 @@ fn session_card(
 impl crate::window::Ui for App {
     fn on_exit(&mut self) {
         if let Some(core) = &self.core {
-            if core.setting(native_term_app::CLOSE_ON_EXIT_SETTING).as_deref() == Some("1") {
+            if core.close_on_exit() {
                 core.close_all();
             }
         }
@@ -1119,7 +1119,7 @@ impl crate::window::Ui for App {
                         if ui.checkbox(&mut auto, t!("auto-reconnect-setting")).changed() {
                             core.set_auto_reconnect(auto);
                         }
-                        let mut close = core.setting(native_term_app::CLOSE_ON_EXIT_SETTING).as_deref() == Some("1");
+                        let mut close = core.close_on_exit();
                         let response = ui.checkbox(&mut close, t!("close-on-exit-setting")).on_hover_text(t!("close-on-exit-hint"));
                         if response.changed() {
                             core.set_setting(native_term_app::CLOSE_ON_EXIT_SETTING, if close { "1" } else { "0" });
