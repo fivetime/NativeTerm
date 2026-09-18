@@ -1834,6 +1834,7 @@ dependencies = [
  "native-term-config",
  "native-term-i18n",
  "native-term-session",
+ "native-term-win",
  "tempfile",
  "windows 0.62.2",
 ]

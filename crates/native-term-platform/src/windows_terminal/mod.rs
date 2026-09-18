@@ -52,6 +52,8 @@ pub struct OpenReport {
 pub struct WindowsTerminal {
     install: Install,
     shim: PathBuf,
+    /// Arguments for every session tab's shim (`--ssh-dir`).
+    shim_args: Vec<std::ffi::OsString>,
     worker: Mutex<Worker>,
     claimer: Mutex<Claimer>,
 }
@@ -65,9 +67,17 @@ impl WindowsTerminal {
         WindowsTerminal {
             install,
             shim: shim.to_path_buf(),
+            shim_args: Vec::new(),
             worker: Mutex::new(Worker::new()),
             claimer: Mutex::new(Claimer::new()),
         }
+    }
+
+    /// Session tabs look sessions up in `ssh_dir` instead of `~/.ssh`
+    /// (NativeTerm started with `--ssh-dir`).
+    pub fn with_ssh_dir(mut self, ssh_dir: &Path) -> WindowsTerminal {
+        self.shim_args = vec!["--ssh-dir".into(), ssh_dir.into()];
+        self
     }
 
     pub fn install(&self) -> &Install {
@@ -127,7 +137,7 @@ impl WindowsTerminal {
             }
         }
         let mut previous: &[TabSpec] = &[];
-        for (i, (chunk, args)) in command::batches(target, tabs, &self.shim).into_iter().enumerate() {
+        for (i, (chunk, args)) in command::batches(target, tabs, &self.shim, &self.shim_args).into_iter().enumerate() {
             let new_window = *target == Target::NewWindow;
             if i > 0 {
                 // Terminal builds tabs asynchronously: a batch sent while the

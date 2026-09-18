@@ -13,8 +13,9 @@ pub const PROFILE_NAME: &str = "NativeTerm SSH";
 /// Stays well below the 32,767-character limit of a command line.
 pub const MAX_COMMAND_LINE: usize = 30_000;
 
-/// Arguments of one `new-tab` subcommand.
-pub fn new_tab(tab: &TabSpec, shim: &Path) -> Vec<OsString> {
+/// Arguments of one `new-tab` subcommand. `shim_args` go right after the
+/// shim (`--ssh-dir <dir>` when NativeTerm uses another folder).
+pub fn new_tab(tab: &TabSpec, shim: &Path, shim_args: &[OsString]) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![
         "new-tab".into(),
         "--profile".into(),
@@ -26,9 +27,9 @@ pub fn new_tab(tab: &TabSpec, shim: &Path) -> Vec<OsString> {
         // no effect in 1.26 (the profile does it), harmless
         "--suppressApplicationTitle".into(),
         shim.into(),
-        "--session".into(),
-        tab.session.clone().into(),
     ];
+    args.extend(shim_args.iter().cloned());
+    args.extend(["--session".into(), tab.session.clone().into()]);
     if tab.wait {
         args.push("--wait".into());
     }
@@ -57,7 +58,12 @@ fn window_argument(target: &Target, first: bool) -> String {
 
 /// `wt` invocations for `tabs`: as many tabs per invocation as fit.
 /// Each item is (the tabs it opens, its arguments).
-pub fn batches<'a>(target: &Target, tabs: &'a [TabSpec], shim: &Path) -> Vec<(&'a [TabSpec], Vec<OsString>)> {
+pub fn batches<'a>(
+    target: &Target,
+    tabs: &'a [TabSpec],
+    shim: &Path,
+    shim_args: &[OsString],
+) -> Vec<(&'a [TabSpec], Vec<OsString>)> {
     let mut out = Vec::new();
     let mut start = 0;
     while start < tabs.len() {
@@ -67,7 +73,7 @@ pub fn batches<'a>(target: &Target, tabs: &'a [TabSpec], shim: &Path) -> Vec<(&'
         let mut end = start;
         while end < tabs.len() {
             let mut part = if end > start { vec![OsString::from(";")] } else { Vec::new() };
-            part.extend(new_tab(&tabs[end], shim));
+            part.extend(new_tab(&tabs[end], shim, shim_args));
             let part_length: usize = part.iter().map(|a| quoted_len(a)).sum();
             if end > start && length + part_length > MAX_COMMAND_LINE {
                 break;
@@ -142,7 +148,7 @@ mod tests {
     fn one_tab() {
         let shim = Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe");
         let tabs = [tab(1, "web01; prod")];
-        let batches = batches(&Target::Recent, &tabs, shim);
+        let batches = batches(&Target::Recent, &tabs, shim, &[]);
         assert_eq!(batches.len(), 1);
         assert_eq!(
             strings(&batches[0].1),
@@ -168,7 +174,7 @@ mod tests {
     fn waiting_tab() {
         let mut t = tab(1, "a");
         t.wait = true;
-        let args = strings(&new_tab(&t, Path::new("shim")));
+        let args = strings(&new_tab(&t, Path::new("shim"), &[]));
         assert_eq!(args[args.len() - 4..], ["--session", "s-1", "--wait", "host1"]);
     }
 
@@ -177,22 +183,29 @@ mod tests {
         let mut t = tab(1, "a");
         t.wait = true;
         t.no_forwards = true;
-        let args: Vec<String> = new_tab(&t, Path::new("shim.exe")).iter().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<String> = new_tab(&t, Path::new("shim.exe"), &[]).iter().map(|a| a.to_string_lossy().to_string()).collect();
         assert_eq!(args[args.len() - 3..], ["--wait", "--no-forwards", "host1"]);
+    }
+
+    #[test]
+    fn shim_arguments_come_first() {
+        let args = strings(&new_tab(&tab(1, "a"), Path::new("shim"), &["--ssh-dir".into(), r"D:\my ssh".into()]));
+        let at = args.iter().position(|a| a == "shim").unwrap();
+        assert_eq!(args[at..], ["shim", "--ssh-dir", r"D:\my ssh", "--session", "s-1", "host1"]);
     }
 
     #[test]
     fn braces_are_not_doubled() {
         let mut t = tab(1, "a");
         t.terminal_session = "{6e7a0000-0000-4000-8000-000000000001}".into();
-        assert_eq!(strings(&new_tab(&t, Path::new("s")))[4], "{6e7a0000-0000-4000-8000-000000000001}");
+        assert_eq!(strings(&new_tab(&t, Path::new("s"), &[]))[4], "{6e7a0000-0000-4000-8000-000000000001}");
     }
 
     #[test]
     fn new_window_batches() {
         let shim = Path::new(r"C:\Users\someone\AppData\Local\Programs\NativeTerm\nativeterm-shim.exe");
         let tabs: Vec<TabSpec> = (0..250).map(|n| tab(n, &format!("中文会话名称 {n} (production cluster)"))).collect();
-        let batches = batches(&Target::NewWindow, &tabs, shim);
+        let batches = batches(&Target::NewWindow, &tabs, shim, &[]);
         assert!(batches.len() >= 3, "{}", batches.len());
         assert_eq!(batches.iter().map(|b| b.0.len()).sum::<usize>(), 250);
         assert_eq!(strings(&batches[0].1)[..2], ["-w", "new"]);
@@ -209,7 +222,7 @@ mod tests {
     #[test]
     fn named_window_everywhere() {
         let tabs = [tab(1, "a"), tab(2, "b")];
-        let batches = batches(&Target::Named("NativeTerm".into()), &tabs, Path::new("shim"));
+        let batches = batches(&Target::Named("NativeTerm".into()), &tabs, Path::new("shim"), &[]);
         assert_eq!(strings(&batches[0].1)[..2], ["-w", "NativeTerm"]);
     }
 

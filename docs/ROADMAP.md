@@ -309,12 +309,15 @@
 - [x] Tab menu: rename (opens the host dialog in the main window) and a
       confirmation before a batch close would close a tab that holds other
       panes; the menu asks the main window, whose dialogs it uses
-- [ ] Non-SSH sessions via plink: `.nt.toml` storage in the same tree,
-      plink located (bundled or installed PuTTY), shim runs plink as a
-      child with the session's code page (UTF-8 default, GBK etc.),
-      temporary `-load` session for options without a command-line flag,
-      Telnet exit 0 = disconnected, raw `CLOSE_WAIT` watch, serial port
-      picker, "port busy" with owner, "no data since …" for serial
+- [x] Non-SSH sessions via plink: `.nt.toml` storage in the same tree
+      (editor operations included), plink located (bundled or installed
+      PuTTY), shim runs plink as a child with the session's code page
+      (UTF-8 default, GBK etc.), temporary `-load` session for options
+      without a command-line flag, Telnet exit 0 = disconnected, raw
+      `CLOSE_WAIT` watch, serial "port busy" check, `--ssh-dir` for tabs
+- [ ] Non-SSH sessions (rest): tree icons and the new / edit dialog
+      (protocol, host, serial port picker, charset), "port busy" naming
+      the owning tab, "no data since …" for serial
 - [x] Session options dialog for SSH hosts (host menu; connection,
       authentication, algorithms, host key, forwarding, environment;
       algorithm pickers from `ssh -Q`, current values from `ssh -G` shown

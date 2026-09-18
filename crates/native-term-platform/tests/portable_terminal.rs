@@ -211,7 +211,7 @@ fn batches_through_the_shell() {
     // long labels force several `wt` calls; launched like an elevated NativeTerm would
     std::env::set_var(launch::VIA_SHELL_ENV, "1");
     let tabs: Vec<TabSpec> = (0..30).map(|n| spec(100 + n, &format!("nt-batch {n:02} {}", "x".repeat(900)))).collect();
-    let calls = command::batches(&Target::NewWindow, &tabs, std::path::Path::new(r"C:\x")).len();
+    let calls = command::batches(&Target::NewWindow, &tabs, std::path::Path::new(r"C:\x"), &[]).len();
     assert!(calls >= 2, "{calls}");
     let labels: HashSet<String> = tabs.iter().map(|t| t.label.clone()).collect();
     let expected: Vec<String> = tabs.iter().map(|t| t.label.clone()).collect();

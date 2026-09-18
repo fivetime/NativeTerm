@@ -22,6 +22,7 @@ mod keys;
 mod i18n;
 mod debug;
 mod link;
+mod plink;
 mod ssh;
 mod win;
 
@@ -79,7 +80,10 @@ fn main() {
             wait_for_any_key();
             std::process::exit(code);
         }
-        Mode::Shim { session, alias, flags } => {
+        Mode::Shim { session, alias, flags, ssh_dir } => {
+            if let Some(dir) = ssh_dir {
+                plink::set_ssh_dir(dir.into());
+            }
             let code = run(session, alias, flags);
             std::process::exit(code);
         }
@@ -188,6 +192,9 @@ fn start_app() -> bool {
 }
 
 fn run_host(alias: &str, link: Option<&Link>, flags: args::Flags) -> i32 {
+    if plink::lookup(alias).is_some() {
+        return plink::run(alias, link, flags);
+    }
     let send = |m: ShimMessage| {
         if let Some(link) = link {
             link.send(m);

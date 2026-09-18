@@ -1,13 +1,14 @@
-//! Command line: `nativeterm-shim [--session <id>] [--wait] [--no-forwards]
-//! [<host-alias>]` (`--wait`: don't connect until told to, for restored
-//! sessions; `--no-forwards`: a clone, which would clash with the original's
-//! port forwards), or
+//! Command line: `nativeterm-shim [--ssh-dir <dir>] [--session <id>] [--wait]
+//! [--no-forwards] [<host-alias>]` (`--ssh-dir`: where NativeTerm's session
+//! folders are, if not `~/.ssh`; `--wait`: don't connect until told to, for
+//! restored sessions; `--no-forwards`: a clone, which would clash with the
+//! original's port forwards), or
 //! `nativeterm-shim --authenticated <shim-pid>` (the `LocalCommand` login
 //! signal).
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mode {
-    Shim { session: Option<String>, alias: Option<String>, flags: Flags },
+    Shim { session: Option<String>, alias: Option<String>, flags: Flags, ssh_dir: Option<String> },
     Authenticated { shim_pid: u32 },
     /// Add the public key in `key` to the host's `authorized_keys`.
     InstallKey { key: String, alias: String },
@@ -30,6 +31,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
     let mut session = None;
     let mut alias = None;
     let mut flags = Flags::default();
+    let mut ssh_dir = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--authenticated" => {
@@ -56,6 +58,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 return Ok(Mode::CreateKey { path });
             }
             "--session" => session = Some(args.next().ok_or("--session needs a value")?),
+            "--ssh-dir" => ssh_dir = Some(args.next().ok_or("--ssh-dir needs a folder")?),
             "--wait" => flags.wait = true,
             "--no-forwards" => flags.no_forwards = true,
             flag if flag.starts_with('-') => return Err(format!("unknown option {flag:?}")),
@@ -63,7 +66,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
             _ => alias = Some(arg),
         }
     }
-    Ok(Mode::Shim { session, alias, flags })
+    Ok(Mode::Shim { session, alias, flags, ssh_dir })
 }
 
 #[cfg(test)]
@@ -77,19 +80,24 @@ mod tests {
     #[test]
     fn modes() {
         let none = Flags::default();
-        assert_eq!(p(&[]).unwrap(), Mode::Shim { session: None, alias: None, flags: none });
+        assert_eq!(p(&[]).unwrap(), Mode::Shim { session: None, alias: None, flags: none, ssh_dir: None });
         assert_eq!(
             p(&["--session", "s1", "web01"]).unwrap(),
-            Mode::Shim { session: Some("s1".into()), alias: Some("web01".into()), flags: none }
+            Mode::Shim { session: Some("s1".into()), alias: Some("web01".into()), flags: none, ssh_dir: None }
         );
-        assert_eq!(p(&["web01"]).unwrap(), Mode::Shim { session: None, alias: Some("web01".into()), flags: none });
+        assert_eq!(p(&["web01"]).unwrap(), Mode::Shim { session: None, alias: Some("web01".into()), flags: none, ssh_dir: None });
         assert_eq!(
             p(&["--session", "s1", "--wait", "--no-forwards", "web01"]).unwrap(),
             Mode::Shim {
                 session: Some("s1".into()),
                 alias: Some("web01".into()),
-                flags: Flags { wait: true, no_forwards: true }
+                flags: Flags { wait: true, no_forwards: true },
+                ssh_dir: None,
             }
+        );
+        assert_eq!(
+            p(&["--ssh-dir", r"D:\my ssh", "--session", "s1", "sw"]).unwrap(),
+            Mode::Shim { session: Some("s1".into()), alias: Some("sw".into()), flags: none, ssh_dir: Some(r"D:\my ssh".into()) }
         );
         assert_eq!(p(&["--authenticated", "4242"]).unwrap(), Mode::Authenticated { shim_pid: 4242 });
         assert_eq!(

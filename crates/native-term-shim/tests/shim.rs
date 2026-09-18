@@ -387,3 +387,70 @@ fn install_key_batch_with_one_password() {
     let keys = std::fs::read_to_string(home.path().join(".ssh").join("authorized_keys")).unwrap();
     assert_eq!(keys, "ssh-ed25519 AAAAbatchtest me@pc\n");
 }
+
+/// A non-SSH session: the shim finds it in the folder's `.nt.toml`, runs
+/// plink (here the fake) with the right arguments, passes the PuTTY-only
+/// options in a temporary saved session that is gone afterwards, removes
+/// temporary sessions left by shims that no longer run, and leaves other
+/// saved sessions alone. A plink that never connected is reported as a
+/// failed connection (255).
+#[test]
+fn plink_session_with_putty_options() {
+    use native_term_win::registry::{self, RegValue};
+    let base = format!(r"Software\NativeTerm-Tests-plink-{}", std::process::id());
+    registry::write_user_values(&format!(r"{base}\NativeTerm-4000000000-1"), &[("Left", RegValue::Dword(1))]).unwrap();
+    registry::write_user_values(&format!(r"{base}\MySwitch"), &[("HostName", RegValue::Str("10.0.0.1".into()))]).unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join(".ssh");
+    std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+    std::fs::write(ssh.join("config"), "Include config.d/*.conf\n").unwrap();
+    std::fs::write(ssh.join("config.d").join("lab.conf"), "").unwrap();
+    std::fs::write(
+        ssh.join("config.d").join("lab.nt.toml"),
+        "[[session]]\nname = \"sw\"\nprotocol = \"telnet\"\nhost = \"10.9.9.9\"\nport = 2300\n\n[session.putty]\nPassiveTelnet = 1\n",
+    )
+    .unwrap();
+    let log = dir.path().join("plink.log");
+
+    let name = pipe_name("plink");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let plink = fake_ssh();
+    let mut shim = spawn_shim(
+        &name,
+        &["--ssh-dir", ssh.to_str().unwrap(), "--session", "s-p", "sw"],
+        &[
+            ("NATIVETERM_PLINK", plink.to_str().unwrap()),
+            ("NATIVETERM_PUTTY_KEY", &base),
+            ("FAKE_SSH_LOG", log.to_str().unwrap()),
+            ("FAKE_SSH_MS", "1500"),
+            ("FAKE_SSH_CODE", "0"),
+        ],
+    );
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+
+    // while plink runs: its session exists, the stale one is gone
+    std::thread::sleep(Duration::from_millis(500));
+    let temporary = format!("NativeTerm-{}-1", shim.id());
+    let keys = registry::user_subkeys(&base).unwrap();
+    assert!(keys.contains(&temporary), "{keys:?}");
+    assert!(!keys.iter().any(|k| k == "NativeTerm-4000000000-1"), "stale: {keys:?}");
+    let values = registry::user_values(&format!(r"{base}\{temporary}")).unwrap();
+    assert_eq!(values, [("PassiveTelnet".to_string(), RegValue::Dword(1))]);
+
+    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 });
+    let args = std::fs::read_to_string(&log).unwrap();
+    assert_eq!(args.trim(), format!("-load | {temporary} | -telnet | -P | 2300 | 10.9.9.9"));
+    let keys = registry::user_subkeys(&base).unwrap();
+    assert_eq!(keys, ["MySwitch"], "only the user's own session is left");
+
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
+    let text = String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string();
+    assert!(text.contains("Connecting to 10.9.9.9:2300 (telnet) with plink"), "{text}");
+    assert!(text.contains("Could not connect"), "never connected: {text}");
+    registry::delete_user_tree(&base).unwrap();
+}

@@ -921,6 +921,58 @@ Its extension isn't matched by `Include config.d/*.conf`, so ssh ignores
 it, and it syncs, renames, and backs up together with the folder. The
 sidebar shows both kinds in one tree. Each entry has a stable id.
 
+Implemented (`native_term_config::plink`):
+
+- **File:** `<folder>.nt.toml` beside `<folder>.conf` (the main `config`
+  → `config.nt.toml`), a list of `[[session]]` tables: `name` (the alias;
+  one namespace with ssh's, duplicates are reported), `label`,
+  `protocol` (`telnet`, `rlogin`, `raw`, `serial`, `supdup`), `host`,
+  `port`, `user`, `charset`, `serial = { line, speed, data_bits, parity,
+  stop_bits, flow }` (PuTTY's defaults: 9600 8N1, XON/XOFF), `favorite`,
+  `note`, `on_login`, `source`, and `[session.putty]` for options plink
+  only takes from a saved session (`REG_DWORD` numbers, `REG_SZ` text).
+  A file that doesn't parse is reported; the folder's ssh hosts still
+  load.
+- **Tree:** each session is a `HostEntry` with `plink` set (after the
+  folder's ssh hosts), so search, favorites, recent hosts, multi-select
+  and the queue treat both kinds alike.
+- **Editing:** the editor adds, updates, favorites, moves and deletes
+  them in the `.nt.toml` through the safe writer (backup, conflict
+  check); every entry is validated (one-word name, host or serial line,
+  a port for raw, a known charset, nothing that could pass as an
+  option). ssh-only operations refuse them. "Move session folders"
+  copies the `.nt.toml` files too.
+- **Shim:** before running ssh, the shim looks the alias up in the
+  session folders (`--ssh-dir <dir>` when NativeTerm runs on another
+  folder than `~/.ssh`: the Terminal adapter adds it to every session
+  tab). A non-SSH session runs plink instead, found through
+  `NATIVETERM_PLINK`, next to the shim or in its `tools` folder, on
+  `PATH`, or in PuTTY's installation folder; it is read again at every
+  reconnect, so edits apply.
+  - The console code pages are set to the charset while plink runs.
+  - A serial line is opened exclusively first: "in use" (access denied)
+    or "can't be opened" is reported before plink starts.
+  - "Connected" is reported through the ssh login event: when one of
+    plink's TCP connections is `ESTABLISHED`, or a serial plink has run
+    for 1 s. Post-login commands and the card work as for ssh.
+  - Exit codes 0 (a Telnet server closing) and 1 (plink's own errors),
+    and a raw connection the watcher found in `CLOSE_WAIT` (it ends
+    plink), are reported as connection-level (255): "disconnected" after
+    a connection, "could not connect" before one.
+  - PuTTY-only options: the temporary saved session
+    `NativeTerm-<shim pid>-<attempt>` is written just before plink starts
+    and deleted 2 s later or when plink ends, whichever is first (the
+    shim may exit right after). One left by a shim that died is removed
+    by the next shim (its pid no longer runs); other saved sessions are
+    never touched, and an existing name is an error.
+  - Verified with the real plink in the portable Terminal against local
+    test servers: Telnet connected, a GBK banner shown correctly, the
+    server's close shown as "disconnected"; raw closed by the server
+    detected with no keystroke; a refused port as "could not connect".
+    The temporary session, its deletion and stale-session cleanup are
+    tested with a fake plink and a test registry key (the real PuTTY key
+    is never written by tests).
+
 Import: the user's existing **PuTTY saved sessions** (e.g. switches and
 serial consoles) are read, read-only, from
 `HKCU\Software\SimonTatham\PuTTY\Sessions`. They can be imported like

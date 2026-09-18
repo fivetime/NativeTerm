@@ -268,3 +268,114 @@ pub fn install_ctrl_handler(on_close: impl Fn() + Send + Sync + 'static) {
         let _ = SetConsoleCtrlHandler(Some(ctrl_handler), true);
     }
 }
+
+/// The console's input and output code pages for a while (a plink session's
+/// charset); the previous ones come back on drop.
+pub struct CodePages {
+    input: u32,
+    output: u32,
+}
+
+impl CodePages {
+    pub fn set(code_page: u32) -> CodePages {
+        use windows::Win32::System::Console::{GetConsoleCP, GetConsoleOutputCP, SetConsoleCP, SetConsoleOutputCP};
+        let saved = unsafe { CodePages { input: GetConsoleCP(), output: GetConsoleOutputCP() } };
+        unsafe {
+            let _ = SetConsoleCP(code_page);
+            let _ = SetConsoleOutputCP(code_page);
+        }
+        saved
+    }
+}
+
+impl Drop for CodePages {
+    fn drop(&mut self) {
+        use windows::Win32::System::Console::{SetConsoleCP, SetConsoleOutputCP};
+        unsafe {
+            if self.input != 0 {
+                let _ = SetConsoleCP(self.input);
+            }
+            if self.output != 0 {
+                let _ = SetConsoleOutputCP(self.output);
+            }
+        }
+    }
+}
+
+/// Whether a serial line can be opened now: access denied (5) means
+/// another program holds it; not found (2) means there is no such port.
+pub fn serial_port_free(line: &str) -> io::Result<()> {
+    let device = HSTRING::from(format!(r"\.\{line}"));
+    let handle = unsafe {
+        CreateFileW(
+            &device,
+            (GENERIC_READ | GENERIC_WRITE).0,
+            windows::Win32::Storage::FileSystem::FILE_SHARE_NONE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            None,
+        )
+    };
+    match handle {
+        Ok(handle) => {
+            drop(OwnedHandle(handle));
+            Ok(())
+        }
+        Err(e) => Err(io::Error::from_raw_os_error(e.code().0 & 0xFFFF)),
+    }
+}
+
+/// `MIB_TCP_STATE` values.
+pub const TCP_ESTABLISHED: i32 = 5;
+pub const TCP_CLOSE_WAIT: i32 = 8;
+
+/// States of all IPv4 and IPv6 TCP connections owned by `pid`.
+pub fn tcp_states(pid: u32) -> Vec<i32> {
+    use windows::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_ALL,
+    };
+    use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+    let mut states = Vec::new();
+    for af in [u32::from(AF_INET.0), u32::from(AF_INET6.0)] {
+        let mut size = 0u32;
+        unsafe {
+            let _ = GetExtendedTcpTable(None, &mut size, false, af, TCP_TABLE_OWNER_PID_ALL, 0);
+        }
+        if size == 0 {
+            continue;
+        }
+        // room for connections opened in between; u32s keep it aligned
+        let mut buffer = vec![0u32; (size as usize + 1024) / 4 + 1];
+        let mut size = (buffer.len() * 4) as u32;
+        let status = unsafe {
+            GetExtendedTcpTable(Some(buffer.as_mut_ptr().cast()), &mut size, false, af, TCP_TABLE_OWNER_PID_ALL, 0)
+        };
+        if status != 0 {
+            continue;
+        }
+        unsafe {
+            if af == u32::from(AF_INET.0) {
+                let table = &*(buffer.as_ptr() as *const MIB_TCPTABLE_OWNER_PID);
+                let rows = std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize);
+                states.extend(rows.iter().filter(|r| r.dwOwningPid == pid).map(|r| r.dwState as i32));
+            } else {
+                let table = &*(buffer.as_ptr() as *const MIB_TCP6TABLE_OWNER_PID);
+                let rows = std::slice::from_raw_parts(table.table.as_ptr(), table.dwNumEntries as usize);
+                states.extend(rows.iter().filter(|r| r.dwOwningPid == pid).map(|r| r.dwState as i32));
+            }
+        }
+    }
+    states
+}
+
+/// End a process (a half-closed plink).
+pub fn terminate(pid: u32) {
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    if let Ok(handle) = unsafe { OpenProcess(PROCESS_TERMINATE, false, pid) } {
+        let handle = OwnedHandle(handle);
+        unsafe {
+            let _ = TerminateProcess(handle.0, 1);
+        }
+    }
+}

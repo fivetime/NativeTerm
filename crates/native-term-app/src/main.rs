@@ -43,9 +43,13 @@ pub struct Options {
     from_shim: bool,
 }
 
+fn default_ssh_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"))
+}
+
 fn options() -> Result<Options, String> {
     let mut terminal_dir = std::env::var_os("NATIVETERM_TERMINAL_DIR").map(PathBuf::from);
-    let mut ssh_dir = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"));
+    let mut ssh_dir = default_ssh_dir();
     let mut data_dir = None;
     let mut from_shim = false;
     let mut args = std::env::args().skip(1);
@@ -109,7 +113,12 @@ fn setup() -> Result<Start, String> {
         notices.push(t!("notice-shim-missing", path = shim.display().to_string()));
     }
     // before the window: restored tabs may already be waiting for an answer
-    let core = match Core::start(WindowsTerminal::new(install.clone(), &shim), registry) {
+    // another ssh folder than ~/.ssh: the tabs' shims look sessions up there
+    let mut terminal = WindowsTerminal::new(install.clone(), &shim);
+    if Some(&options.ssh_dir) != default_ssh_dir().as_ref() {
+        terminal = terminal.with_ssh_dir(&options.ssh_dir);
+    }
+    let core = match Core::start(terminal, registry) {
         Ok(core) => Some(core),
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
             return Ok(Start::AlreadyRunning { quiet: options.from_shim });
