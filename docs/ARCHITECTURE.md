@@ -2540,11 +2540,22 @@ A short wizard, each step skippable:
    ("Install my key").
 4. Choose the data directory and, optionally, cloud sync.
 
-Implemented (`wizard.rs`), except cloud sync: step 4 shows where sessions
-and NativeTerm's data are, with "Open" buttons, a field to move the data
-folder (the same copy and pointer as Settings; not offered when
-`--data-dir` or the environment chose it), and advice to sync
-`~/.ssh/config.d` (never private keys) with a tool the user trusts. The wizard opens once, until finished or skipped
+Implemented (`wizard.rs`): step 4 shows where sessions and NativeTerm's
+data are, with "Open" buttons, and a field to move the data folder (the
+same copy and pointer as Settings; not offered when `--data-dir` or the
+environment chose it). "Sessions on several computers" is the zero-tool
+sync from "Cloud sync": the OneDrive (personal and work, from the
+variables its client sets) and Dropbox folders found are offered as the
+place for the session folders (`<root>\NativeTerm\ssh-folders`), moved
+there like "Move session folders"; on the next computer, where that
+folder already holds folder files, the button uses them instead
+(`Editor::adopt_folders`: only the `Include` line changes, nothing is
+copied, ssh must accept it; this computer's own folders stay where they
+were). Settings → "Move session folders" does the same for any folder
+that already holds session folders. Folders already inside a sync root
+are shown as synced. Private keys are never synced; rclone sync for
+other storage is a later item. The move and adopt paths are tested in
+scratch folders (the real OneDrive is never written by tests). The wizard opens once, until finished or skipped
 (`first_run_done` in `state.db`), and again from Settings. Its buttons
 only open the existing dialogs (import, install my key) or tabs (key
 creation); while such a dialog is open the wizard waits behind it.

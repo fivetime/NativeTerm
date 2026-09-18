@@ -234,7 +234,9 @@
       Settings; every button opens the usual dialog or tab
 - [x] First-run wizard: moving the data folder from step 4 (same copy and
       pointer as Settings)
-- [ ] First-run wizard (rest): cloud sync
+- [x] First-run wizard: sessions on several computers (OneDrive / Dropbox
+      folder found → move the session folders there; on the next
+      computer, use the ones already there — only `Include` changes)
 - [x] Unique tab titles (`web01 (2)`); foreign tabs excluded from batch
       operations (tab menu close sets contain NativeTerm sessions only)
 - [x] Rename reconciliation (a host renamed in the tree while its tab is
