@@ -279,7 +279,30 @@ pub const PUTTY_SUPDUP: [PuttyOption; 4] = [
     PuttyOption::Flag { key: "SUPDUPScrolling", default: false },
 ];
 
+/// The session log, written by ntplink (plink writes none: PuTTY logs what
+/// its terminal shows). `LogType` 0 off, 1 the text without escape
+/// sequences, 2 every byte; `LogFileName` with PuTTY's `&H` (host or
+/// serial line), `&Y` `&M` `&D`, `&T` (time of connecting), `&P` (port).
+/// An existing file is appended to.
+pub const PUTTY_LOG: [PuttyOption; 2] =
+    [PuttyOption::Number { key: "LogType", default: 0 }, PuttyOption::Text { key: "LogFileName", default: "" }];
+
+/// Where a session's log goes unless another file is chosen: `logs` in
+/// NativeTerm's data directory, a file per host and day.
+pub fn default_log_file(data_dir: &Path) -> String {
+    data_dir.join("logs").join("&H-&Y&M&D.log").display().to_string()
+}
+
 impl PlinkSession {
+    /// The log file, when the session is logged.
+    pub fn log_file(&self) -> Option<String> {
+        let on = matches!(self.putty_value(PUTTY_LOG[0]), PuttyValue::Number(1 | 2));
+        match self.putty_value(PUTTY_LOG[1]) {
+            PuttyValue::Text(file) if on && !file.trim().is_empty() => Some(file),
+            _ => None,
+        }
+    }
+
     /// An option's value: the session's, or PuTTY's default.
     pub fn putty_value(&self, option: PuttyOption) -> PuttyValue {
         self.putty.get(option.key()).cloned().unwrap_or_else(|| option.default_value())

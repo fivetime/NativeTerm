@@ -188,6 +188,22 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         }
     }
     let ntplink = matches!(client, Client::Ntplink(_));
+    if let Some(file) = session.log_file() {
+        match ntplink {
+            // PuTTY doesn't make the folder; one with `&` codes can't be
+            // made before they are filled in
+            true => {
+                let folder = std::path::Path::new(&file).parent().filter(|f| !f.as_os_str().is_empty());
+                if let Some(folder) = folder.filter(|f| !f.to_string_lossy().contains('&')) {
+                    if let Err(e) = std::fs::create_dir_all(folder) {
+                        let folder = folder.display().to_string();
+                        println!("{}", t!("plink-log-folder", folder = folder, error = e.to_string()));
+                    }
+                }
+            }
+            false => println!("{}", t!("plink-no-log")),
+        }
+    }
     let temporary = match ntplink {
         true => None,
         false => match TemporarySession::create(&session, attempt) {
@@ -420,9 +436,11 @@ impl TemporarySession {
             // never overwrite a session that isn't ours
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, format!("{base}\\{name} exists")));
         }
+        // plink writes no log; without a file it would never ask either
         let mut values: Vec<(&str, RegValue)> = session
             .putty
             .iter()
+            .filter(|(k, _)| !plink::PUTTY_LOG.iter().any(|o| o.key() == k.as_str()))
             .map(|(k, v)| {
                 let value = match v {
                     PuttyValue::Number(n) => RegValue::Dword(*n),

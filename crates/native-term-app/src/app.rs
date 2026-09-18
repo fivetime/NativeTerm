@@ -399,12 +399,13 @@ impl App {
             }
             TreeAction::NewPlink(file) => {
                 let label = self.folder_label(&file);
-                self.dialog = Some(Dialog::Plink(Box::new(PlinkDialog::new_session(file, &label))));
+                let dialog = PlinkDialog::new_session(file, &label).with_data_dir(&self.data_dir);
+                self.dialog = Some(Dialog::Plink(Box::new(dialog)));
             }
             TreeAction::Edit(alias) => {
                 if let Some((_, host)) = self.tree.find(&alias) {
                     self.dialog = Some(match &host.plink {
-                        Some(session) => Dialog::Plink(Box::new(PlinkDialog::edit(session))),
+                        Some(session) => Dialog::Plink(Box::new(PlinkDialog::edit(session).with_data_dir(&self.data_dir))),
                         None => {
                             let folder = self.folder_persistent(&host.file);
                             let account = self.editor.effective(&alias).ok().and_then(|e| native_term_config::password::target(&e));

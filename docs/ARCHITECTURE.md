@@ -448,7 +448,7 @@ Therefore NativeTerm provides its own menus:
 | Connect SFTP / Open SecureFX | Indirect | Shell out to an external tool (e.g. WinSCP) |
 | Send Commands to Active Session | Yes | See "Sending commands" |
 | Send Commands to This Group | **Yes** (source-confirmed) | Shim-based console input injection, confirmed against both the console host and Windows OpenSSH sources; an end-to-end prototype remains. `tmux send-keys` fallback for persistent sessions |
-| Session logging (record all output) | **No** (client side) | Output goes straight into the terminal; NativeTerm never sees it. Server-side logging is possible for persistent sessions (`tmux pipe-pane`); Windows Terminal's own "Export text" saves a tab's buffer manually |
+| Session logging (record all output) | **SSH: no** (client side); **other protocols: yes** | SSH output goes straight into the terminal; NativeTerm never sees it. Server-side logging is possible for persistent sessions (`tmux pipe-pane`); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
 | Telnet / serial / raw / rlogin / SUPDUP | **Yes** | The shim runs PuTTY's console client `plink.exe`; NativeTerm parses no protocol. See "Other protocols via plink" |
 | Local shells / AI coding sessions | Not managed | The user opens them with `+`; NativeTerm only lists them in the tab switcher |
 | Per-session character set (e.g. GBK) | **Yes for plink sessions**; SSH via OpenSSH: no | plink follows the console code pages the shim sets (verified both directions); see "Other protocols via plink" and "Known limitations" |
@@ -1106,7 +1106,8 @@ RSA / ECDSA keys from `ssh-keygen`.
   - terminal scrolling, `SUPDUPScrolling`;
 - session logging: **not available under plink** (verified: neither
   `LogType`/`LogFileName` in a loaded session nor `-sessionlog` on the
-  command line produced a log; only `putty.exe` writes session logs);
+  command line produced a log; only `putty.exe` writes session logs).
+  ntplink writes one (see "ntplink: NativeTerm's own client");
 - SUPDUP.
 
 For these, the shim writes a **temporary** saved session
@@ -1234,6 +1235,7 @@ build, and imports no `Reg*` functions either.
 | LocalEcho / LocalEdit | only once Telnet negotiates | from the start, every protocol |
 | Raw: server closes | half open (shim workaround: `CLOSE_WAIT` watch) | exits |
 | Break, Telnet commands | impossible | control pipe |
+| Session log | never written (PuTTY logs what its terminal shows) | `LogType` 1 (text) / 2 (every byte), `LogFileName`, appended |
 | Exit codes | 0 / 1 / `INT_MAX` | 0 closed by the far end, 2 couldn't connect, 3 lost, 1 usage |
 
 The shim passes `[session.putty]` as `-set` (no registry write at all) and
@@ -1246,6 +1248,27 @@ Telnet). The session card gets a **Break** button and the tab menu
 **Send Break** for those sessions only, enabled while connected;
 `AppMessage::Special { name }` becomes `special <name>` on the pipe. If
 the pipe can't be made, the tab says so and the session runs without it.
+
+**Session log.** The dialog's "Session log" section (every protocol) sets
+`LogType` and `LogFileName` in `[session.putty]`; they reach ntplink as
+`-set` like the other options. ntplink logs what it writes to the console
+(and what it echoes locally): type 2 every byte, type 1 the text without
+escape sequences (CSI, OSC and the other strings, two-byte ones) and
+control characters other than CR, LF and Tab; bytes from 0x80 up are
+kept, in the session's charset. The file name takes PuTTY's codes (`&H`
+host or serial line, `&Y&M&D`, `&T`, `&P`); turning the log on fills in
+`<data dir>\logs\&H-&Y&M&D.log` (a file per host and day). An existing
+file is appended to: ntplink never asks, because PuTTY's question would
+read the session's keys. PuTTY doesn't create folders, so the shim
+creates the file's folder first (when it has no `&` codes). A log turned
+on without a file isn't kept. plink can't log: the shim says so in the
+tab and leaves the two options out of its temporary session. Limitation
+from PuTTY: the codes are expanded in the ANSI code page, so a name with
+characters outside it loses them (Chinese on a Chinese system is fine).
+Verified: a raw test server sending SGR, OSC and charset escapes, UTF-8
+text and a backspace, through the shim into a folder `logs 日志` it
+created: the text log had the lines without escapes, the raw log every
+byte, a second run appended, `&H` became `127.0.0.1`.
 
 Verified in the portable Terminal against local test servers: the window
 size at connect (120x30) and after resizes (59x14, 102x25); Ctrl+C sent as

@@ -355,7 +355,10 @@
       falls back to plink with the old workarounds
 - [ ] Serial Break on a real device (the virtual COM driver doesn't pass
       Break on)
-- [ ] Output logging for non-SSH sessions (possible now in ntplink)
+- [x] Output logging for non-SSH sessions: ntplink writes PuTTY's
+      `LogType` 1 (text without escape sequences) / 2 (every byte) to
+      `LogFileName` (PuTTY's `&H` `&Y&M&D` `&T` codes, appended); "Session
+      log" in the session dialog, default `<data dir>\logs\&H-&Y&M&D.log`
 - [x] "No data since …" for serial sessions (the shim watches the console
       near the cursor; quiet after 30 s, cleared by new output; replayed
       to a restarted NativeTerm)

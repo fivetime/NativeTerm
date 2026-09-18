@@ -1,12 +1,12 @@
 //! New or edited non-SSH session (Telnet, rlogin, raw, serial, SUPDUP),
 //! kept in the folder's `.nt.toml` and run with plink.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use native_term_app::t;
 use native_term_config::plink::{
-    Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_LINE, PUTTY_SUPDUP,
-    PUTTY_TELNET,
+    self, Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_LINE, PUTTY_LOG,
+    PUTTY_SUPDUP, PUTTY_TELNET,
 };
 
 use crate::dialogs::Outcome;
@@ -43,6 +43,8 @@ pub struct PlinkDialog {
     ports: Vec<String>,
     /// The PuTTY options being edited (only `putty` is used).
     options: PlinkSession,
+    /// The log file used when logging is turned on without one.
+    default_log: String,
     pub error: Option<String>,
 }
 
@@ -86,8 +88,59 @@ impl PlinkDialog {
             on_login: s.on_login.clone().unwrap_or_default(),
             ports,
             options: s.clone(),
+            default_log: String::new(),
             error: None,
         }
+    }
+
+    /// The data directory, for the default log file.
+    pub fn with_data_dir(mut self, data_dir: &Path) -> PlinkDialog {
+        self.default_log = plink::default_log_file(data_dir);
+        self
+    }
+
+    /// Log type and file; a log turned on without a file gets the default.
+    fn log_ui(&mut self, ui: &mut egui::Ui) {
+        let on = self.options.log_file().is_some() || self.options.putty.contains_key(PUTTY_LOG[0].key());
+        egui::CollapsingHeader::new(t!("plink-log")).id_salt("plink-log").default_open(on).show(ui, |ui| {
+            egui::Grid::new("plink-log-fields").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
+                ui.label(t!("plink-log-type"));
+                let mut n = match self.options.putty_value(PUTTY_LOG[0]) {
+                    PuttyValue::Number(n) if n <= 2 => n,
+                    _ => 0,
+                };
+                let choices = [(0u32, t!("plink-log-off")), (1, t!("plink-log-text")), (2, t!("plink-log-raw"))];
+                let shown = choices.iter().find(|(v, _)| *v == n).map(|(_, text)| text.clone()).unwrap_or_default();
+                egui::ComboBox::from_id_salt("plink-log-type").selected_text(shown).show_ui(ui, |ui| {
+                    for (v, text) in &choices {
+                        ui.selectable_value(&mut n, *v, text.clone());
+                    }
+                });
+                self.options.set_putty_value(PUTTY_LOG[0], PuttyValue::Number(n));
+                ui.end_row();
+                ui.label(t!("plink-log-file"));
+                let mut file = match self.options.putty_value(PUTTY_LOG[1]) {
+                    PuttyValue::Text(t) => t,
+                    PuttyValue::Number(n) => n.to_string(),
+                };
+                if n != 0 && file.is_empty() && !self.default_log.is_empty() {
+                    file = self.default_log.clone();
+                }
+                ui.add_enabled(n != 0, egui::TextEdit::singleline(&mut file).desired_width(360.0));
+                self.options.set_putty_value(PUTTY_LOG[1], PuttyValue::Text(file.clone()));
+                ui.end_row();
+                // the folder, once there is one without codes to fill in
+                let folder = Path::new(&file).parent().filter(|f| f.is_dir()).map(Path::to_path_buf);
+                if let (true, Some(folder)) = (n != 0, folder) {
+                    ui.label("");
+                    if ui.button(t!("plink-log-open-folder")).clicked() {
+                        let _ = std::process::Command::new("explorer.exe").arg(&folder).spawn();
+                    }
+                    ui.end_row();
+                }
+            });
+            ui.weak(t!("plink-log-note"));
+        });
     }
 
     /// The PuTTY option pages for the chosen protocol.
@@ -166,8 +219,14 @@ impl PlinkDialog {
                 session.putty.remove(option.key());
             }
         }
-        for option in shown {
+        for option in shown.into_iter().chain(PUTTY_LOG) {
             session.set_putty_value(option, self.options.putty_value(option));
+        }
+        // no log without a file (none is turned on without one)
+        if session.log_file().is_none() {
+            for option in PUTTY_LOG {
+                session.putty.remove(option.key());
+            }
         }
         session.check()?;
         Ok(session)
@@ -280,6 +339,7 @@ impl PlinkDialog {
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("plink-on-login-hint"));
                 });
                 self.putty_ui(ui);
+                self.log_ui(ui);
                 ui.weak(t!("plink-note"));
                 if let Some(alias) = &self.alias {
                     ui.weak(t!("plink-alias-kept", alias = alias.as_str()));
@@ -462,6 +522,23 @@ mod tests {
         d.port = "4001".into();
         let s = d.session("sw").unwrap();
         assert_eq!(s.putty.keys().collect::<Vec<_>>(), ["PingIntervalSecs"], "the Telnet page doesn't apply to raw");
+    }
+
+    #[test]
+    fn a_log_needs_a_type_and_a_file() {
+        let mut d = PlinkDialog::new_session(PathBuf::from("lab.conf"), "Lab").with_data_dir(Path::new(r"D:\NT"));
+        d.host = "h".into();
+        assert!(d.session("sw").unwrap().putty.is_empty(), "no log by default");
+        d.options.set_putty_value(PUTTY_LOG[0], PuttyValue::Number(1));
+        assert!(d.session("sw").unwrap().putty.is_empty(), "no file: not logged");
+        d.options.set_putty_value(PUTTY_LOG[1], PuttyValue::Text(plink::default_log_file(Path::new(r"D:\NT"))));
+        let s = d.session("sw").unwrap();
+        assert_eq!(s.log_file().as_deref(), Some(r"D:\NT\logs\&H-&Y&M&D.log"));
+        d.protocol = Protocol::Serial;
+        d.line = "COM3".into();
+        assert!(d.session("console").unwrap().log_file().is_some(), "every protocol");
+        d.options.set_putty_value(PUTTY_LOG[0], PuttyValue::Number(0));
+        assert!(d.session("console").unwrap().putty.is_empty(), "off: the file goes too");
     }
 
     #[test]
