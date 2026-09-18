@@ -19,6 +19,7 @@
 pub mod acl;
 pub mod alias;
 pub mod appearance;
+pub mod button_bar;
 pub mod document;
 pub mod effective;
 pub mod folder_options;

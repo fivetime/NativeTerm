@@ -17,8 +17,9 @@ use crate::dialogs::Outcome;
 
 enum Step {
     Choose,
-    Preview { plan: Box<Plan>, lines: Vec<Line> },
-    Running { rx: Receiver<Result<ImportOutcome, String>>, done: Arc<AtomicUsize>, total: usize },
+    /// `commands`: SecureCRT's send-string buttons, for the command library.
+    Preview { plan: Box<Plan>, lines: Vec<Line>, commands: Vec<crate::commands_import::Imported> },
+    Running { rx: Receiver<(Result<ImportOutcome, String>, Option<String>)>, done: Arc<AtomicUsize>, total: usize },
     Finished { text: Vec<String>, wrote: bool },
 }
 
@@ -56,22 +57,28 @@ impl ImportDialog {
         match scanned {
             Ok(scan) => {
                 let plan = securecrt::plan(&scan, tree);
-                let lines = import::summary(&scan, &plan);
+                let mut lines = import::summary(&scan, &plan);
+                let commands = match self.origin {
+                    Origin::SecureCrt => crate::commands_import::scan(&PathBuf::from(self.path.trim()), &mut lines),
+                    Origin::Putty => Vec::new(),
+                };
                 self.error = None;
-                self.step = Step::Preview { plan: Box::new(plan), lines };
+                self.step = Step::Preview { plan: Box::new(plan), lines, commands };
             }
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    fn start(&mut self, plan: Plan, ctx: &egui::Context) {
+    fn start(&mut self, plan: Plan, commands: Vec<crate::commands_import::Imported>, ctx: &egui::Context) {
         let (tx, rx) = mpsc::channel();
         let done = Arc::new(AtomicUsize::new(0));
         let total = plan.host_count();
         let editor = crate::app::editor_for(&self.ssh_dir, &self.data_dir);
         let progress = Arc::clone(&done);
         let ctx = ctx.clone();
+        let library = native_term_app::commands::Library::path_in(&self.data_dir);
         std::thread::spawn(move || {
+            let commands = (!commands.is_empty()).then(|| crate::commands_import::add(&library, commands));
             let repaint = ctx.clone();
             let result = editor
                 .import(&plan, &move |n, _| {
@@ -79,7 +86,7 @@ impl ImportDialog {
                     repaint.request_repaint();
                 })
                 .map_err(|e| e.to_string());
-            let _ = tx.send(result);
+            let _ = tx.send((result, commands));
             ctx.request_repaint();
         });
         self.step = Step::Running { rx, done, total };
@@ -88,7 +95,7 @@ impl ImportDialog {
     /// `Submit(())` once something was written (the tree needs a reload).
     pub fn show(&mut self, ctx: &egui::Context, tree: &SessionTree) -> Outcome<()> {
         if let Step::Running { rx, .. } = &self.step {
-            if let Ok(result) = rx.try_recv() {
+            if let Ok((result, commands)) = rx.try_recv() {
                 self.step = match result {
                     Ok(o) => {
                         let mut text = vec![t!("import-done", hosts = o.hosts(), folders = o.written.len())];
@@ -101,6 +108,7 @@ impl ImportDialog {
                         text.extend(
                             o.failed.iter().map(|(label, why)| t!("import-folder-failed", folder = label.as_str(), error = why.as_str())),
                         );
+                        text.extend(commands);
                         Step::Finished { text, wrote: o.hosts() > 0 || o.keys_added > 0 }
                     }
                     Err(e) => Step::Finished { text: vec![t!("import-failed", error = e)], wrote: false },
@@ -143,6 +151,8 @@ impl ImportDialog {
                         }
                     }
                     Step::Preview { lines, .. } => {
+                        // lines: the sessions' summary, then the buttons'
+
                         egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                             for (i, l) in lines.iter().enumerate() {
                                 let text = if l.warning {
@@ -179,11 +189,16 @@ impl ImportDialog {
                         if ui.add_enabled(!self.path.trim().is_empty(), egui::Button::new(t!("import-preview"))).clicked() {
                             self.preview(tree);
                         }
-                        if let Step::Preview { plan, .. } = &self.step {
+                        if let Step::Preview { plan, commands, .. } = &self.step {
                             let n = plan.host_count();
                             let keys = !plan.host_keys.is_empty();
-                            if ui.add_enabled(n > 0 || keys, egui::Button::new(t!("import-run", count = n))).clicked() {
-                                start = Some(Plan::clone(plan));
+                            let label = if commands.is_empty() {
+                                t!("import-run", count = n)
+                            } else {
+                                t!("import-run-commands", count = n, commands = commands.len())
+                            };
+                            if ui.add_enabled(n > 0 || keys || !commands.is_empty(), egui::Button::new(label)).clicked() {
+                                start = Some((Plan::clone(plan), commands.clone()));
                             }
                         }
                         if ui.button(t!("button-cancel")).clicked() {
@@ -200,8 +215,8 @@ impl ImportDialog {
                     }
                 });
             });
-        if let Some(plan) = start {
-            self.start(plan, ctx);
+        if let Some((plan, commands)) = start {
+            self.start(plan, commands, ctx);
         }
         if !open && !running {
             outcome = match self.step {

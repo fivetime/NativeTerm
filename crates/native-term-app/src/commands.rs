@@ -90,6 +90,54 @@ impl Library {
     }
 }
 
+/// How imported commands went into the library.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Merged {
+    pub added: usize,
+    /// The same command (name, text, Enter) was there already.
+    pub present: usize,
+    /// (the name it had, the name it got): another command had its name.
+    pub renamed: Vec<(String, String)>,
+}
+
+/// Add `incoming` (e.g. SecureCRT's buttons) to `library`: one that is
+/// there already (same name and text) is left out; a different one with a
+/// taken name gets "<name> (<group>)", then a number.
+pub fn merge(library: &mut Library, incoming: Vec<Command>) -> Merged {
+    let mut out = Merged::default();
+    for command in incoming {
+        let same = |c: &Command| c.text == command.text && c.enter == command.enter;
+        if library.commands.iter().any(|c| c.name == command.name && same(c)) {
+            out.present += 1;
+            continue;
+        }
+        let mut name = command.name.clone();
+        if library.commands.iter().any(|c| c.name == name) {
+            let base = match &command.group {
+                Some(group) => format!("{} ({group})", command.name),
+                None => command.name.clone(),
+            };
+            name = base.clone();
+            let mut n = 2;
+            while let Some(existing) = library.commands.iter().find(|c| c.name == name) {
+                if same(existing) {
+                    break;
+                }
+                name = format!("{base} {n}");
+                n += 1;
+            }
+            if library.commands.iter().any(|c| c.name == name && same(c)) {
+                out.present += 1;
+                continue;
+            }
+            out.renamed.push((command.name.clone(), name.clone()));
+        }
+        library.commands.push(Command { name, ..command });
+        out.added += 1;
+    }
+    out
+}
+
 /// The lines to type, each with whether Enter follows. Blank lines in the
 /// middle are sent as a bare Enter; a trailing newline adds nothing.
 pub fn lines(text: &str, enter: bool) -> Vec<(String, bool)> {
@@ -106,6 +154,24 @@ pub fn lines(text: &str, enter: bool) -> Vec<(String, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merging_imported_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut library = Library::load(&dir.path().join("commands.toml")).unwrap();
+        let cmd = |name: &str, text: &str, group: &str| Command { name: name.into(), text: text.into(), enter: true, group: Some(group.into()) };
+        library.put(cmd("uptime", "uptime", "mine"));
+        library.put(cmd("disk", "df -h", "mine"));
+        let merged = merge(
+            &mut library,
+            vec![cmd("uptime", "uptime", "Cisco"), cmd("disk", "df -hT", "Linux"), cmd("ip br", "sh ip int br", "Cisco"), cmd("disk", "df -hT", "Linux")],
+        );
+        assert_eq!(merged.added, 2);
+        assert_eq!(merged.present, 2, "the same uptime, and the second disk once renamed");
+        assert_eq!(merged.renamed, [("disk".to_string(), "disk (Linux)".to_string())]);
+        let names: Vec<&str> = library.commands.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["uptime", "disk", "disk (Linux)", "ip br"]);
+    }
 
     #[test]
     fn round_trip() {

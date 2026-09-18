@@ -11,6 +11,7 @@
 
 mod agent;
 mod app;
+mod commands_import;
 mod dialogs;
 mod dock;
 mod send_dialog;
