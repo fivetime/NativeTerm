@@ -374,8 +374,9 @@
       with NativeTerm tabs is in front, a non-activating grid follows
       further Tab presses and commits when Ctrl is released; thumbnails
       from captures taken while a tab was selected (see "Taking over
-      Ctrl+Tab" in ARCHITECTURE.md). Prototype first: hook latency while
-      typing, capture cost in Rust, and the hold-Ctrl feel
+      Ctrl+Tab" in ARCHITECTURE.md). Prototype done
+      (`prototypes/tab-switcher`, PROTOTYPES.md): hook ~9 µs, grid in
+      70–150 ms, switch 40–60 ms after Ctrl is released
 - [x] NativeTerm SSH profile with a moderate scrollback size
       (`historySize` 5000)
 - [x] Sidebar auto-hide/pin drawer (QQ-style): docks at the top, left or

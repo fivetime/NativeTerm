@@ -11,6 +11,7 @@ members = [
     "prototypes/uia-probe",
     "prototypes/shim-probe",
     "prototypes/menu-hook",
+    "prototypes/tab-switcher",
 ]
 
 [workspace.package]

@@ -755,6 +755,36 @@ in front:
   content is unparented, so nothing can be read from it — neither an
   image nor its text.
 
+## Prototype: Ctrl+Tab thumbnail switcher (`prototypes/tab-switcher`, 2026-09-18)
+
+A low-level keyboard hook swallows Ctrl+Tab (and Ctrl+Shift+Tab) while
+the test Terminal is the foreground window, and a non-activating topmost
+window shows a grid of the window's tabs; further Tab / Shift+Tab / arrow
+presses move the choice, releasing Ctrl selects the tab through UIA, Esc
+cancels. UIA and captures run on a worker thread; the hook only posts
+messages. `tab-switcher selftest` drives it with `SendInput`, and only
+while the test Terminal is in front (checked before every key; it stops
+otherwise, so no key can land in another window).
+
+Measured on portable 1.26, a window with four tabs, debug build:
+
+| What | Result |
+|---|---|
+| Time in the keyboard hook (Tab-related calls) | 7.8–9.7 µs average, 22–27 µs max |
+| Ctrl+Tab → grid on screen | 66–154 ms: UIA tab list 23–47 ms + capture of the selected tab 23–37 ms, the rest is posting and painting |
+| Ctrl released → tab selected (UIA `Select`) | 37–63 ms |
+| One thumbnail (`PrintWindow` + `StretchBlt` to 320 px) | 23–37 ms |
+
+Behaviour: Ctrl+Tab, Tab, release went two tabs on; Ctrl+Tab, Esc
+changed nothing; Ctrl+Shift+Tab went one back. Terminal's own switcher
+never appeared (the Tab key-down and key-up are both swallowed; the Ctrl
+key-up still reaches Terminal, which saw the key-down). The grid showed
+thumbnails for tabs captured earlier and a placeholder for the others.
+
+For the real implementation: open the grid at once from NativeTerm's own
+last tab scan instead of asking UIA first (saves ~40 ms), capture after
+it is shown, and crop the tab strip out of the thumbnails.
+
 ## Clearing a tab's scrollback from inside (portable 1.26, 2026-09-18)
 
 Question: SecureCRT's "Clear Screen and Scrollback" — Terminal's own
