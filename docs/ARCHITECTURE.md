@@ -977,7 +977,16 @@ Implemented (`native_term_config::plink`):
     (common ones or any known name / code page); note and a command typed
     once connected. The alias is made from the name like an ssh host's
     (pinyin for Chinese). Editing keeps what the dialog doesn't show (id,
-    favorite, source, PuTTY options). Opening a serial session whose port
+    favorite, source, PuTTY options it doesn't list). "PuTTY options"
+    (collapsed) shows the pages of the chosen protocol: connection
+    (terminal type, keepalive seconds, `TCP_NODELAY`, TCP keepalives),
+    Telnet (passive negotiation, keyboard sends Telnet special commands,
+    RFC 1408 environment) and SUPDUP (location, extended ASCII, MORE
+    processing, scrolling). A value equal to PuTTY's default isn't
+    stored, so an untouched session needs no temporary saved session;
+    another protocol's page is dropped when the protocol changes; the
+    importer keeps options the same way. Switches carry their text, so
+    screen readers name them. Opening a serial session whose port
     an open session already uses is refused with a notice naming that
     session's tab. Verified in the app (`--ssh-dir` on a test folder):
     created from the folder menu, connected ("connected", then

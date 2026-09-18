@@ -220,6 +220,70 @@ struct SessionsFile {
     sessions: Vec<PlinkSession>,
 }
 
+/// A PuTTY option plink only takes from a saved session, with PuTTY's own
+/// default (a session doesn't store an option set to it).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PuttyOption {
+    Text { key: &'static str, default: &'static str },
+    Number { key: &'static str, default: u32 },
+    Flag { key: &'static str, default: bool },
+}
+
+impl PuttyOption {
+    pub fn key(self) -> &'static str {
+        match self {
+            PuttyOption::Text { key, .. } | PuttyOption::Number { key, .. } | PuttyOption::Flag { key, .. } => key,
+        }
+    }
+
+    pub fn default_value(self) -> PuttyValue {
+        match self {
+            PuttyOption::Text { default, .. } => PuttyValue::Text(default.into()),
+            PuttyOption::Number { default, .. } => PuttyValue::Number(default),
+            PuttyOption::Flag { default, .. } => PuttyValue::Number(u32::from(default)),
+        }
+    }
+}
+
+/// Connection options for every protocol.
+pub const PUTTY_CONNECTION: [PuttyOption; 4] = [
+    PuttyOption::Text { key: "TerminalType", default: "xterm" },
+    PuttyOption::Number { key: "PingIntervalSecs", default: 0 },
+    PuttyOption::Flag { key: "TCPNoDelay", default: true },
+    PuttyOption::Flag { key: "TCPKeepalives", default: false },
+];
+
+/// PuTTY's Telnet page (as far as plink uses it).
+pub const PUTTY_TELNET: [PuttyOption; 3] = [
+    PuttyOption::Flag { key: "PassiveTelnet", default: false },
+    PuttyOption::Flag { key: "TelnetKey", default: false },
+    PuttyOption::Flag { key: "RFCEnviron", default: false },
+];
+
+/// PuTTY's SUPDUP page.
+pub const PUTTY_SUPDUP: [PuttyOption; 4] = [
+    PuttyOption::Text { key: "SUPDUPLocation", default: "The Internet" },
+    PuttyOption::Number { key: "SUPDUPCharset", default: 0 },
+    PuttyOption::Flag { key: "SUPDUPMoreProcessing", default: false },
+    PuttyOption::Flag { key: "SUPDUPScrolling", default: false },
+];
+
+impl PlinkSession {
+    /// An option's value: the session's, or PuTTY's default.
+    pub fn putty_value(&self, option: PuttyOption) -> PuttyValue {
+        self.putty.get(option.key()).cloned().unwrap_or_else(|| option.default_value())
+    }
+
+    /// Set an option; its default removes it (nothing to pass on).
+    pub fn set_putty_value(&mut self, option: PuttyOption, value: PuttyValue) {
+        if value == option.default_value() {
+            self.putty.remove(option.key());
+        } else {
+            self.putty.insert(option.key().to_string(), value);
+        }
+    }
+}
+
 /// The non-SSH sessions file beside a folder file.
 pub fn sibling(folder_file: &Path) -> PathBuf {
     let name = folder_file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
@@ -498,6 +562,19 @@ serial = { line = "COM3", speed = 115200 }
         assert!(gbk.check().is_ok());
         gbk.charset = Some("klingon".into());
         assert!(gbk.check().is_err());
+    }
+
+    #[test]
+    fn putty_options_keep_only_changes() {
+        let mut s = telnet("sw", "h");
+        let passive = PUTTY_TELNET[0];
+        assert_eq!(s.putty_value(passive), PuttyValue::Number(0));
+        s.set_putty_value(passive, PuttyValue::Number(1));
+        s.set_putty_value(PUTTY_CONNECTION[0], PuttyValue::Text("xterm".into()));
+        assert_eq!(s.putty.len(), 1, "a default isn't stored: {:?}", s.putty);
+        s.putty.insert("SomethingElse".into(), PuttyValue::Number(7));
+        s.set_putty_value(passive, PuttyValue::Number(0));
+        assert_eq!(s.putty.keys().collect::<Vec<_>>(), ["SomethingElse"], "unknown keys stay");
     }
 
     #[test]

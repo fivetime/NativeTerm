@@ -231,34 +231,23 @@ fn serial_from(v: &Values, line: &str) -> crate::plink::Serial {
     serial
 }
 
-/// Options plink only takes from a saved session, kept for its temporary
-/// one when the session sets them.
-const PUTTY_OPTIONS: [&str; 12] = [
-    "TerminalType",
-    "PingIntervalSecs",
-    "TCPNoDelay",
-    "TCPKeepalives",
-    "PassiveTelnet",
-    "TelnetKey",
-    "RFCEnviron",
-    "Environment",
-    "SUPDUPLocation",
-    "SUPDUPCharset",
-    "SUPDUPMoreProcessing",
-    "SUPDUPScrolling",
-];
-
+/// Options plink only takes from a saved session, kept (when not PuTTY's
+/// default) for the temporary one; plus environment variables.
 fn putty_options(v: &Values) -> BTreeMap<String, crate::plink::PuttyValue> {
-    use crate::plink::PuttyValue;
-    let mut options = BTreeMap::new();
-    for name in PUTTY_OPTIONS {
-        if let Some(n) = v.num(name) {
-            options.insert(name.to_string(), PuttyValue::Number(n));
-        } else if let Some(text) = v.str(name).filter(|t| !t.is_empty()) {
-            options.insert(name.to_string(), PuttyValue::Text(text.to_string()));
-        }
+    use crate::plink::{PlinkSession, PuttyValue, PUTTY_CONNECTION, PUTTY_SUPDUP, PUTTY_TELNET};
+    let mut session = PlinkSession::default();
+    for option in PUTTY_CONNECTION.iter().chain(&PUTTY_TELNET).chain(&PUTTY_SUPDUP) {
+        let value = match (v.num(option.key()), v.str(option.key())) {
+            (Some(n), _) => PuttyValue::Number(n),
+            (None, Some(text)) => PuttyValue::Text(text.to_string()),
+            (None, None) => continue,
+        };
+        session.set_putty_value(*option, value);
     }
-    options
+    if let Some(environment) = v.str("Environment").filter(|e| !e.is_empty()) {
+        session.putty.insert("Environment".into(), PuttyValue::Text(environment.to_string()));
+    }
+    session.putty
 }
 
 /// Where the sessions are read from: PuTTY's key, or for testing the

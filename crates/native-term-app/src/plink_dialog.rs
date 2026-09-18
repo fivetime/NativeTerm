@@ -4,7 +4,9 @@
 use std::path::PathBuf;
 
 use native_term_app::t;
-use native_term_config::plink::{Flow, Parity, PlinkSession, Protocol, Serial};
+use native_term_config::plink::{
+    Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_SUPDUP, PUTTY_TELNET,
+};
 
 use crate::dialogs::Outcome;
 
@@ -38,6 +40,8 @@ pub struct PlinkDialog {
     on_login: String,
     /// Serial ports present when the dialog opened.
     ports: Vec<String>,
+    /// The PuTTY options being edited (only `putty` is used).
+    options: PlinkSession,
     pub error: Option<String>,
 }
 
@@ -80,8 +84,43 @@ impl PlinkDialog {
             note: s.note.clone().unwrap_or_default(),
             on_login: s.on_login.clone().unwrap_or_default(),
             ports,
+            options: s.clone(),
             error: None,
         }
+    }
+
+    /// The PuTTY option pages for the chosen protocol.
+    fn putty_pages(&self) -> Vec<(String, Vec<PuttyOption>)> {
+        let mut pages = Vec::new();
+        if self.protocol != Protocol::Serial {
+            pages.push((t!("putty-page-connection"), PUTTY_CONNECTION.to_vec()));
+        }
+        match self.protocol {
+            Protocol::Telnet => pages.push(("Telnet".to_string(), PUTTY_TELNET.to_vec())),
+            Protocol::Supdup => pages.push(("SUPDUP".to_string(), PUTTY_SUPDUP.to_vec())),
+            _ => {}
+        }
+        pages
+    }
+
+    fn putty_ui(&mut self, ui: &mut egui::Ui) {
+        let pages = self.putty_pages();
+        if pages.is_empty() {
+            return;
+        }
+        egui::CollapsingHeader::new(t!("putty-options")).id_salt("putty-options").show(ui, |ui| {
+            // one grid, so every page's fields line up
+            egui::Grid::new("putty-pages").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
+                for (title, options) in pages {
+                    ui.strong(title);
+                    ui.end_row();
+                    for option in options {
+                        putty_row(ui, &mut self.options, option);
+                    }
+                }
+            });
+            ui.weak(t!("putty-options-note"));
+        });
     }
 
     /// The session as entered; `name` is the alias (kept when editing,
@@ -106,7 +145,7 @@ impl PlinkDialog {
             .transpose()?;
         let network = self.protocol != Protocol::Serial;
         let charset = opt(&self.charset).filter(|c| !c.eq_ignore_ascii_case("utf-8"));
-        let session = PlinkSession {
+        let mut session = PlinkSession {
             name: name.to_string(),
             label: opt(&self.label),
             protocol: self.protocol,
@@ -119,6 +158,16 @@ impl PlinkDialog {
             on_login: opt(&self.on_login),
             ..self.base.clone()
         };
+        // options of other protocols' pages don't apply any more
+        let shown: Vec<PuttyOption> = self.putty_pages().into_iter().flat_map(|(_, options)| options).collect();
+        for option in PUTTY_TELNET.iter().chain(&PUTTY_SUPDUP) {
+            if !shown.contains(option) {
+                session.putty.remove(option.key());
+            }
+        }
+        for option in shown {
+            session.set_putty_value(option, self.options.putty_value(option));
+        }
         session.check()?;
         Ok(session)
     }
@@ -229,9 +278,10 @@ impl PlinkDialog {
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("plink-on-login-hint"));
                 });
+                self.putty_ui(ui);
                 ui.weak(t!("plink-note"));
                 if let Some(alias) = &self.alias {
-                    ui.weak(t!("host-alias-kept", alias = alias.as_str()));
+                    ui.weak(t!("plink-alias-kept", alias = alias.as_str()));
                 }
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
@@ -249,6 +299,79 @@ impl PlinkDialog {
             outcome = Outcome::Cancel;
         }
         outcome
+    }
+}
+
+/// One option: its name and an editor for its kind.
+fn putty_row(ui: &mut egui::Ui, session: &mut PlinkSession, option: PuttyOption) {
+    let key = option.key();
+    let value = session.putty_value(option);
+    // a switch carries its own text (readable by screen readers)
+    if let PuttyOption::Flag { .. } = option {
+        ui.label("");
+    } else {
+        ui.label(option_text(key));
+    }
+    match option {
+        PuttyOption::Flag { .. } => {
+            let mut on = value == PuttyValue::Number(1);
+            if ui.checkbox(&mut on, option_text(key)).changed() {
+                session.set_putty_value(option, PuttyValue::Number(u32::from(on)));
+            }
+        }
+        PuttyOption::Number { .. } if key == "SUPDUPCharset" => {
+            let names = ["None", "ITS", "WAITS"];
+            let mut n = match value {
+                PuttyValue::Number(n) => n.min(2),
+                PuttyValue::Text(_) => 0,
+            };
+            egui::ComboBox::from_id_salt(key).selected_text(names[n as usize]).show_ui(ui, |ui| {
+                for (i, name) in names.iter().enumerate() {
+                    ui.selectable_value(&mut n, i as u32, *name);
+                }
+            });
+            session.set_putty_value(option, PuttyValue::Number(n));
+        }
+        PuttyOption::Number { .. } => {
+            let mut text = match value {
+                PuttyValue::Number(n) => n.to_string(),
+                PuttyValue::Text(t) => t,
+            };
+            if ui.add(egui::TextEdit::singleline(&mut text).desired_width(80.0)).changed() {
+                if let Ok(n) = text.trim().parse::<u32>() {
+                    session.set_putty_value(option, PuttyValue::Number(n));
+                } else if text.trim().is_empty() {
+                    session.set_putty_value(option, option.default_value());
+                }
+            }
+        }
+        PuttyOption::Text { .. } => {
+            let mut text = match value {
+                PuttyValue::Text(t) => t,
+                PuttyValue::Number(n) => n.to_string(),
+            };
+            if ui.add(egui::TextEdit::singleline(&mut text).desired_width(160.0)).changed() {
+                session.set_putty_value(option, PuttyValue::Text(text));
+            }
+        }
+    }
+    ui.end_row();
+}
+
+fn option_text(key: &str) -> String {
+    match key {
+        "TerminalType" => t!("putty-terminaltype"),
+        "PingIntervalSecs" => t!("putty-pingintervalsecs"),
+        "TCPNoDelay" => t!("putty-tcpnodelay"),
+        "TCPKeepalives" => t!("putty-tcpkeepalives"),
+        "PassiveTelnet" => t!("putty-passivetelnet"),
+        "TelnetKey" => t!("putty-telnetkey"),
+        "RFCEnviron" => t!("putty-rfcenviron"),
+        "SUPDUPLocation" => t!("putty-supduplocation"),
+        "SUPDUPCharset" => t!("putty-supdupcharset"),
+        "SUPDUPMoreProcessing" => t!("putty-supdupmoreprocessing"),
+        "SUPDUPScrolling" => t!("putty-supdupscrolling"),
+        other => other.to_string(),
     }
 }
 
@@ -308,6 +431,20 @@ mod tests {
         assert!(d.session("r").is_err(), "raw needs a port");
         d.port = "4001".into();
         assert!(d.session("r").is_ok());
+    }
+
+    #[test]
+    fn putty_options_follow_the_protocol() {
+        let mut d = PlinkDialog::new_session(PathBuf::from("lab.conf"), "Lab");
+        d.host = "h".into();
+        d.options.set_putty_value(PUTTY_TELNET[0], PuttyValue::Number(1));
+        d.options.set_putty_value(PUTTY_CONNECTION[1], PuttyValue::Number(30));
+        let s = d.session("sw").unwrap();
+        assert_eq!(s.putty.len(), 2, "{:?}", s.putty);
+        d.protocol = Protocol::Raw;
+        d.port = "4001".into();
+        let s = d.session("sw").unwrap();
+        assert_eq!(s.putty.keys().collect::<Vec<_>>(), ["PingIntervalSecs"], "the Telnet page doesn't apply to raw");
     }
 
     #[test]

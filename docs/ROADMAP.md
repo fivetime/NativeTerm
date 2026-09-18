@@ -330,7 +330,9 @@
       `Tag nativeterm-<file>`, a `Match tagged` block at the end holds the
       options (plus user, port, jump host, keys); a host's own values win;
       kept last and tagged on create / import / move; OpenSSH 9.4+ only
-- [ ] Session options: plink pages for non-SSH sessions
+- [x] Session options: plink pages for non-SSH sessions ("PuTTY options" in
+      the session dialog: connection, Telnet and SUPDUP pages; only values
+      that differ from PuTTY's defaults are kept, unknown ones untouched)
 - [x] Setting "Hide Windows Terminal's own SSH profiles"
       (`disabledProfileSources`, backed-up explicit edit: a textual change
       of the top-level list only, comments and layout kept, the result
