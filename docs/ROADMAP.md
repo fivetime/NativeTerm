@@ -355,9 +355,6 @@
       falls back to plink with the old workarounds
 - [ ] Serial Break on a real device (the virtual COM driver doesn't pass
       Break on)
-- [ ] Packaging: `ntplink.exe` into `tools\` and PuTTY's licence into
-      `licenses\` (`tools\get-ntplink.ps1 -Tag … -Package …`, ready; the
-      packaging CI needs a token that can read the private fork)
 - [ ] Output logging for non-SSH sessions (possible now in ntplink)
 - [x] "No data since …" for serial sessions (the shim watches the console
       near the cursor; quiet after 30 s, cleared by new output; replayed
@@ -510,6 +507,13 @@
 - [ ] Installed mode: winget/MSI packaging (updates via the installer,
       uninstaller removes the fragment), scoop manifest with `persist`,
       per-user data directories
+- [ ] Packaging and its CI — the last step, once the product is
+      complete: first trim what the product no longer uses (plink
+      fallback and its workarounds, prototypes, probes, test hooks that
+      only served experiments), then build the packages. `ntplink.exe`
+      goes into `tools\` and PuTTY's licence into `licenses\`
+      (`tools\get-ntplink.ps1 -Tag … -Package …` exists for it; the CI
+      needs a token that can read the private PuTTY fork)
 - [ ] macOS backend — Terminal.app / iTerm2 tab scripting
 - [ ] Linux backend — investigate VTE
 
