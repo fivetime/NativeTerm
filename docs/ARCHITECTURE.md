@@ -1671,8 +1671,8 @@ The result is shown as a summary before anything is written.
   the safe writer (backup, owner-only ACL for a new file). Checked with
   `ssh-keygen -F` on the result. Not verified against a real SecureCRT
   folder yet: the preview shows how many keys were understood.
-- **Not yet:** button bar / Command Manager commands (into the command
-  library), plink sessions.
+- **Not yet:** Command Manager commands (their storage isn't documented;
+  button bars are imported, see "Command library").
 
 ## Cloud sync (optional, via rclone)
 
@@ -2787,8 +2787,28 @@ With ~800 sessions, browsing the tree is the slow path.
 - Implemented: `commands.toml` (`[[command]]` with `name`, `text`,
   optional `enter = false` and `group`), edited from the send dialog
   (pick, save as, delete). A file that can't be parsed is reported and
-  never overwritten. SecureCRT's button bar and Command Manager
-  commands aren't imported yet (their format isn't documented).
+  never overwritten.
+- **SecureCRT's button bars** (implemented, `native_term_config::button_bar`,
+  app `commands_import.rs`): "Import from SecureCRT" also reads
+  `ButtonBarV5.ini` (or `ButtonBarV4.ini`) next to `Sessions`. Its format
+  is the one VanDyke's tip "How to Import a Single Button Bar" shows: a
+  bar as `Z:"<name>"=<count in hex>`, then a line per button with a
+  leading space — function, argument, label and four more fields (read
+  from both ends, so a command may hold commas), backslashes doubled.
+  Only `SEND` buttons become commands, named after the label and grouped
+  by the bar; the send string's `\r` / `\n` end lines (a trailing one:
+  Enter after the last line, else the last line is left to finish), `\\`,
+  `\t` and octal codes are kept. Buttons using what SecureCRT fills in or
+  does itself (`\p` pause, `\u` user name, `\v` clipboard, local
+  addresses, …) and other functions (menu functions, scripts, programs)
+  are listed in the preview with the reason, not imported: an enable
+  password behind a pause isn't something to copy blindly. The merge
+  leaves out a command the library has (same name and text) and gives a
+  different one with a taken name "<label> (<bar>)". Verified with
+  VanDyke's own example and a made-up config; not yet against a real
+  SecureCRT folder. `NATIVETERM_SECURECRT_CONFIG` points the dialog at a
+  test folder. The Command Manager's storage isn't documented; it isn't
+  read.
 - **Post-login commands**: `NativeTermOnLogin <command>` on a host or
   folder is sent once, via shim injection, right after the
   "authenticated" signal. The text waits in the input buffer until `ssh`

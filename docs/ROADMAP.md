@@ -409,8 +409,10 @@
 - [x] Command library (`commands.toml`), edited from the send dialog
 - [x] Post-login commands (`NativeTermOnLogin`, host or folder default),
       typed after every login
-- [ ] Import SecureCRT's button bar and Command Manager commands (the
-      "send string" ones) into the command library
+- [x] Import SecureCRT's button bars (send-string buttons) into the command
+      library, grouped by bar; other buttons listed with the reason
+- [ ] Import SecureCRT's Command Manager commands (storage format needed:
+      one command file from the user); preview on a real button bar file
 - [ ] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
       Mac keyboards
 - [ ] Throttle snapshots, previews, and sync on battery power
