@@ -69,8 +69,7 @@ static HOOK_CALLS: AtomicU64 = AtomicU64::new(0);
 static HOOK_NANOS: AtomicU64 = AtomicU64::new(0);
 static HOOK_MAX_NANOS: AtomicU64 = AtomicU64::new(0);
 static FOREGROUND_CACHE: Mutex<Option<(isize, bool)>> = Mutex::new(None);
-/// (window, tab name) → thumbnail (an HBITMAP; GDI handles are process-wide).
-/// (window, tab name) → (HBITMAP, height).
+/// (window, tab name) → (HBITMAP, height); GDI handles are process-wide.
 type Thumbs = HashMap<(isize, String), (isize, i32)>;
 static THUMBS: Mutex<Option<Thumbs>> = Mutex::new(None);
 static LISTED: Mutex<Option<Listed>> = Mutex::new(None);
