@@ -3,7 +3,7 @@
 //! SecureCRT sessions, so the same plan and writer import them. PuTTY
 //! stores no passwords.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
 use std::path::PathBuf;
 
@@ -118,6 +118,7 @@ fn protocol_name(protocol: &str) -> String {
 fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
     let protocol = protocol_name(v.str("Protocol").unwrap_or("ssh"));
     let ssh = protocol == "SSH2";
+    let serial = protocol == "Serial";
     let mut hostname = v.str("HostName").map(str::to_string);
     let mut username = v.str("UserName").map(str::to_string);
     // `user@host` in the host field is allowed too
@@ -127,7 +128,7 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
         }
         hostname = Some(host.to_string());
     }
-    let port = v.num("PortNumber").and_then(|p| u16::try_from(p).ok()).filter(|p| *p != 0 && ssh);
+    let port = v.num("PortNumber").and_then(|p| u16::try_from(p).ok()).filter(|p| *p != 0);
     let proxy = || {
         let host = v.str("ProxyHost").unwrap_or("");
         let port = v.num("ProxyPort").unwrap_or(0);
@@ -193,7 +194,71 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
         saved_password: false,
         ppk_key: v.str("PublicKeyFile").filter(|_| ssh).map(str::to_string),
         options,
+        serial: v.str("SerialLine").filter(|_| serial).map(|line| serial_from(v, line)),
+        putty: if ssh { BTreeMap::new() } else { putty_options(v) },
     }
+}
+
+/// PuTTY's Serial page (`SerialStopHalfbits`: 2 = 1, 3 = 1.5, 4 = 2).
+fn serial_from(v: &Values, line: &str) -> crate::plink::Serial {
+    use crate::plink::{Flow, Parity, Serial};
+    let mut serial = Serial::new(line.trim());
+    if let Some(speed) = v.num("SerialSpeed").filter(|s| *s > 0) {
+        serial.speed = speed;
+    }
+    if let Some(bits) = v.num("SerialDataBits").filter(|b| (5..=8).contains(b)) {
+        serial.data_bits = bits as u8;
+    }
+    serial.parity = match v.num("SerialParity") {
+        Some(1) => Parity::Odd,
+        Some(2) => Parity::Even,
+        Some(3) => Parity::Mark,
+        Some(4) => Parity::Space,
+        _ => Parity::None,
+    };
+    serial.stop_bits = match v.num("SerialStopHalfbits") {
+        Some(3) => "1.5",
+        Some(4) => "2",
+        _ => "1",
+    }
+    .to_string();
+    serial.flow = match v.num("SerialFlowControl") {
+        Some(0) => Flow::None,
+        Some(2) => Flow::RtsCts,
+        Some(3) => Flow::DsrDtr,
+        _ => Flow::XonXoff,
+    };
+    serial
+}
+
+/// Options plink only takes from a saved session, kept for its temporary
+/// one when the session sets them.
+const PUTTY_OPTIONS: [&str; 12] = [
+    "TerminalType",
+    "PingIntervalSecs",
+    "TCPNoDelay",
+    "TCPKeepalives",
+    "PassiveTelnet",
+    "TelnetKey",
+    "RFCEnviron",
+    "Environment",
+    "SUPDUPLocation",
+    "SUPDUPCharset",
+    "SUPDUPMoreProcessing",
+    "SUPDUPScrolling",
+];
+
+fn putty_options(v: &Values) -> BTreeMap<String, crate::plink::PuttyValue> {
+    use crate::plink::PuttyValue;
+    let mut options = BTreeMap::new();
+    for name in PUTTY_OPTIONS {
+        if let Some(n) = v.num(name) {
+            options.insert(name.to_string(), PuttyValue::Number(n));
+        } else if let Some(text) = v.str(name).filter(|t| !t.is_empty()) {
+            options.insert(name.to_string(), PuttyValue::Text(text.to_string()));
+        }
+    }
+    options
 }
 
 /// Where the sessions are read from: PuTTY's key, or for testing the
@@ -456,8 +521,28 @@ mod tests {
                 ("LineCodePage", s("UTF-8")),
             ],
         );
-        session("switch", &[("HostName", s("10.1.1.1")), ("Protocol", s("telnet")), ("PortNumber", RegValue::Dword(23))]);
-        session("console", &[("Protocol", s("serial")), ("SerialLine", s("COM3"))]);
+        session(
+            "switch",
+            &[
+                ("HostName", s("10.1.1.1")),
+                ("Protocol", s("telnet")),
+                ("PortNumber", RegValue::Dword(2323)),
+                ("PassiveTelnet", RegValue::Dword(1)),
+                ("TerminalType", s("vt100")),
+                ("LineCodePage", s("CP936")),
+            ],
+        );
+        session(
+            "console",
+            &[
+                ("Protocol", s("serial")),
+                ("SerialLine", s("COM3")),
+                ("SerialSpeed", RegValue::Dword(115200)),
+                ("SerialStopHalfbits", RegValue::Dword(2)),
+                ("SerialParity", RegValue::Dword(0)),
+                ("SerialFlowControl", RegValue::Dword(0)),
+            ],
+        );
         session("empty", &[("Protocol", s("ssh"))]);
         TestKey(key)
     }
@@ -509,11 +594,16 @@ mod tests {
         assert_eq!(
             skipped,
             [
-                ("console", &Skip::PlinkLater("Serial".into())),
                 ("empty", &Skip::NoHostname),
-                ("switch", &Skip::PlinkLater("Telnet".into())),
             ]
         );
+        let plink = &plan.folders[0].plink;
+        let switch = plink.iter().find(|p| p.label() == "switch").unwrap();
+        assert_eq!(switch.arguments(None), ["-telnet", "-P", "2323", "10.1.1.1"]);
+        assert_eq!(switch.charset.as_deref(), Some("gbk"));
+        assert_eq!(switch.putty.len(), 2, "PassiveTelnet and TerminalType: {:?}", switch.putty);
+        let console = plink.iter().find(|p| p.label() == "console").unwrap();
+        assert_eq!(console.arguments(None), ["-serial", "COM3", "-sercfg", "115200,8,n,1,N"]);
     }
 
     const ED_X: &str = "0x55d0e09a2b9d34292297e08d60d0f620c513d47253187c24b12786bd777645ce";
@@ -637,14 +727,16 @@ mod tests {
         let scan = scan_key(&key.0).unwrap();
         let plan = securecrt::plan(&scan, &SessionTree::load(&dir));
         let outcome = editor.import(&plan, &|_, _| {}).unwrap();
-        assert_eq!(outcome.hosts(), 4, "{:?}", outcome.failed);
+        assert_eq!(outcome.hosts(), 6, "four ssh hosts and two non-SSH sessions: {:?}", outcome.failed);
 
         let tree = SessionTree::load(&dir);
         let (folder, host) = tree.find("via-host").unwrap();
         assert_eq!(folder.label(), "PuTTY");
         assert_eq!(host.proxy_jump.as_deref(), Some("me@gw.example.com:2200"));
+        let (_, switch) = tree.find("switch").unwrap();
+        assert!(switch.plink.is_some() && switch.file.ends_with("putty.nt.toml"), "{}", switch.file.display());
         let again = securecrt::plan(&scan, &tree);
         assert_eq!(again.host_count(), 0);
-        assert_eq!(again.skipped.iter().filter(|(_, s)| matches!(s, Skip::AlreadyImported { .. })).count(), 4);
+        assert_eq!(again.skipped.iter().filter(|(_, s)| matches!(s, Skip::AlreadyImported { .. })).count(), 6);
     }
 }

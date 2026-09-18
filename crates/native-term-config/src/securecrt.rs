@@ -263,6 +263,10 @@ pub struct CrtSession {
     pub ppk_key: Option<String>,
     /// More directives to write (`ForwardAgent yes`, …).
     pub options: Vec<(&'static str, String)>,
+    /// A serial session's line settings.
+    pub serial: Option<crate::plink::Serial>,
+    /// PuTTY options for a non-SSH session (see `PlinkSession::putty`).
+    pub putty: BTreeMap<String, crate::plink::PuttyValue>,
 }
 
 fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
@@ -320,7 +324,51 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
         saved_password,
         ppk_key: None,
         options: Vec::new(),
+        serial: ini.str("Com Port").filter(|_| protocol_is(ini, "serial")).map(|line| serial_from(ini, line)),
+        putty: BTreeMap::new(),
     }
+}
+
+fn protocol_is(ini: &Ini, name: &str) -> bool {
+    ini.str("Protocol Name").is_some_and(|p| p.eq_ignore_ascii_case(name))
+}
+
+/// SecureCRT's serial page: numbers as Windows' `DCB` has them (parity
+/// 0–4 none/odd/even/mark/space, stop bits 0/1/2 = 1/1.5/2); flow control
+/// is one of `CTS Flow` (RTS/CTS), `DSR Flow` (DSR/DTR), `XON Flow`.
+fn serial_from(ini: &Ini, line: &str) -> crate::plink::Serial {
+    use crate::plink::{Flow, Parity, Serial};
+    let mut serial = Serial::new(line.trim());
+    if let Some(speed) = ini.num("Baud Rate").filter(|s| *s > 0) {
+        serial.speed = speed;
+    }
+    if let Some(bits) = ini.num("Data Bits").filter(|b| (5..=8).contains(b)) {
+        serial.data_bits = bits as u8;
+    }
+    serial.parity = match ini.num("Parity") {
+        Some(1) => Parity::Odd,
+        Some(2) => Parity::Even,
+        Some(3) => Parity::Mark,
+        Some(4) => Parity::Space,
+        _ => Parity::None,
+    };
+    serial.stop_bits = match ini.num("Stop Bits") {
+        Some(1) => "1.5",
+        Some(2) => "2",
+        _ => "1",
+    }
+    .to_string();
+    let on = |key: &str| ini.num(key).is_some_and(|n| n != 0);
+    serial.flow = if on("CTS Flow") {
+        Flow::RtsCts
+    } else if on("DSR Flow") {
+        Flow::DsrDtr
+    } else if on("XON Flow") {
+        Flow::XonXoff
+    } else {
+        Flow::None
+    };
+    serial
 }
 
 fn normalize_path(path: &str) -> String {
@@ -412,9 +460,7 @@ fn walk(dir: &Path, folder: &mut Vec<String>, out: &mut Scan) -> io::Result<()> 
 /// Why a session isn't imported.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Skip {
-    /// Telnet, serial, raw, rlogin: plink sessions, not supported yet.
-    PlinkLater(String),
-    /// RDP, local shell, …: not something NativeTerm opens.
+    /// RDP, local shell, Telnet over TLS, …: not something NativeTerm opens.
     Protocol(String),
     NoHostname,
     /// Imported earlier (its `NativeTermSource` is in the config).
@@ -479,6 +525,15 @@ pub struct PlannedFolder {
     /// a new file.
     pub existing: Option<PathBuf>,
     pub hosts: Vec<PlannedHost>,
+    /// Telnet, serial, raw, rlogin and SUPDUP sessions, for the folder's
+    /// `.nt.toml`.
+    pub plink: Vec<crate::plink::PlinkSession>,
+}
+
+impl PlannedFolder {
+    pub fn session_count(&self) -> usize {
+        self.hosts.len() + self.plink.len()
+    }
 }
 
 /// Things the user should know before (and after) importing.
@@ -514,8 +569,9 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Sessions to write, ssh and non-SSH.
     pub fn host_count(&self) -> usize {
-        self.folders.iter().map(|f| f.hosts.len()).sum()
+        self.folders.iter().map(PlannedFolder::session_count).sum()
     }
 }
 
@@ -559,16 +615,36 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             skipped.push((s.path.clone(), Skip::AlreadyImported { alias: alias.clone() }));
             continue;
         }
-        match protocol.as_str() {
-            "ssh2" => {}
-            "telnet" | "serial" | "raw" | "rlogin" | "telnet/ssl" | "supdup" => {
-                skipped.push((s.path.clone(), Skip::PlinkLater(s.protocol.clone())));
-                continue;
-            }
+        let plink_protocol = match protocol.as_str() {
+            "ssh2" => None,
+            "telnet" => Some(crate::plink::Protocol::Telnet),
+            "serial" => Some(crate::plink::Protocol::Serial),
+            "raw" => Some(crate::plink::Protocol::Raw),
+            "rlogin" => Some(crate::plink::Protocol::Rlogin),
+            "supdup" => Some(crate::plink::Protocol::Supdup),
             _ => {
                 skipped.push((s.path.clone(), Skip::Protocol(s.protocol.clone())));
                 continue;
             }
+        };
+        if let Some(kind) = plink_protocol {
+            let label = folder_label(&s.folder, origin);
+            match plink_session(s, kind, origin, &mut taken, &mut notes) {
+                Some(session) => {
+                    let fi = *folder_index.entry(label.to_lowercase()).or_insert_with(|| {
+                        folders.push(PlannedFolder {
+                            existing: existing_folders.get(&label.to_lowercase()).cloned(),
+                            label: label.clone(),
+                            hosts: Vec::new(),
+                            plink: Vec::new(),
+                        });
+                        folders.len() - 1
+                    });
+                    folders[fi].plink.push(session);
+                }
+                None => skipped.push((s.path.clone(), Skip::NoHostname)),
+            }
+            continue;
         }
         let Some(hostname) = s.hostname.clone().filter(|h| !h.contains(char::is_whitespace)) else {
             skipped.push((s.path.clone(), Skip::NoHostname));
@@ -582,6 +658,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
                 existing: existing_folders.get(&label.to_lowercase()).cloned(),
                 label: label.clone(),
                 hosts: Vec::new(),
+                plink: Vec::new(),
             });
             folders.len() - 1
         });
@@ -662,6 +739,65 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
     Plan { folders, skipped, notes, host_keys: scan.host_keys.keys.clone() }
 }
 
+/// A Telnet / serial / raw / rlogin / SUPDUP session to import, or `None`
+/// without a host (a serial line for serial).
+fn plink_session(
+    s: &CrtSession,
+    protocol: crate::plink::Protocol,
+    origin: Origin,
+    taken: &mut HashSet<String>,
+    notes: &mut Notes,
+) -> Option<crate::plink::PlinkSession> {
+    use crate::plink::{PlinkSession, Protocol};
+    let plain = |v: &Option<String>| v.clone().map(|x| x.trim().to_string()).filter(|x| !x.is_empty() && !x.contains(char::is_whitespace));
+    let (host, serial) = match protocol {
+        Protocol::Serial => (None, Some(s.serial.clone().or_else(|| plain(&s.com_port).map(crate::plink::Serial::new))?)),
+        _ => (Some(plain(&s.hostname)?), None),
+    };
+    let charset = match s.encoding.as_deref().and_then(crate::plink::charset_from) {
+        Some(Ok(charset)) => Some(charset),
+        Some(Err(name)) => {
+            notes.encodings.push((s.path.clone(), name));
+            None
+        }
+        None => None,
+    };
+    if s.logon_actions {
+        notes.logon_actions.push(s.path.clone());
+    }
+    if s.saved_password {
+        notes.saved_passwords += 1;
+    }
+    let base = match (&host, &serial) {
+        _ if alias::sanitize(&s.name) != "host" => s.name.clone(),
+        (Some(h), _) => h.clone(),
+        (_, Some(line)) => line.line.clone(),
+        _ => s.name.clone(),
+    };
+    let prefix = if s.folder.is_empty() { origin.alias_prefix().to_string() } else { folder_stem(&s.folder.join(" ")) };
+    let name = alias::unique(&base, &prefix, taken);
+    taken.insert(name.to_lowercase());
+    let session = PlinkSession {
+        name: name.clone(),
+        label: Some(s.name.clone()).filter(|l| *l != name),
+        protocol,
+        port: s.port.filter(|p| Some(*p) != protocol.default_port() && host.is_some()),
+        host,
+        user: plain(&s.username).filter(|_| matches!(protocol, Protocol::Telnet | Protocol::Rlogin)),
+        charset,
+        serial,
+        id: Some(crate::new_id()),
+        note: Some(s.description.join(" · ")).filter(|n| !n.is_empty()),
+        source: Some(format!("{}{}", origin.source_prefix(), s.path)),
+        putty: s.putty.clone(),
+        ..PlinkSession::default()
+    };
+    if session.check().is_err() {
+        return None;
+    }
+    Some(session)
+}
+
 /// File stem for a new folder file: ASCII from the label, else `folder`.
 pub(crate) fn folder_stem(label: &str) -> String {
     let stem = alias::sanitize(label);
@@ -675,9 +811,10 @@ pub(crate) fn folder_stem(label: &str) -> String {
 /// Aliases in the plan must not collide with each other either.
 pub fn check_unique(plan: &Plan) -> Result<(), String> {
     let mut seen = HashSet::new();
-    for host in plan.folders.iter().flat_map(|f| &f.hosts) {
-        if !seen.insert(host.alias.to_lowercase()) {
-            return Err(format!("alias {} planned twice", host.alias));
+    let names = plan.folders.iter().flat_map(|f| f.hosts.iter().map(|h| &h.alias).chain(f.plink.iter().map(|p| &p.name)));
+    for name in names {
+        if !seen.insert(name.to_lowercase()) {
+            return Err(format!("alias {name} planned twice"));
         }
     }
     Ok(())
@@ -756,8 +893,32 @@ mod tests {
             "测试/dup.ini",
             &["S:\"Protocol Name\"=SSH2", "S:\"Hostname\"=10.32.16.66", "S:\"Username\"=root", "S:\"Firewall Name\"=Corp Proxy", "S:\"Output Transformer Name\"=GBK"],
         );
-        write(&s, "测试/switch.ini", &["S:\"Protocol Name\"=Telnet", "S:\"Hostname\"=10.1.1.1", "D:\"Port\"=00000017"]);
-        write(&s, "测试/console.ini", &["S:\"Protocol Name\"=Serial", "S:\"Com Port\"=COM3"]);
+        write(
+            &s,
+            "测试/switch.ini",
+            &[
+                "S:\"Protocol Name\"=Telnet",
+                "S:\"Hostname\"=10.1.1.1",
+                "D:\"Port\"=00000017",
+                "S:\"Username\"=admin",
+                "S:\"Output Transformer Name\"=GBK",
+            ],
+        );
+        write(
+            &s,
+            "测试/console.ini",
+            &[
+                "S:\"Protocol Name\"=Serial",
+                "S:\"Com Port\"=COM3",
+                "D:\"Baud Rate\"=0001c200",
+                "D:\"Parity\"=00000002",
+                "D:\"Stop Bits\"=00000002",
+                "D:\"Data Bits\"=00000007",
+                "D:\"DTR Flow Control\"=00000001",
+                "D:\"RTS Flow Control\"=00000001",
+                "D:\"CTS Flow\"=00000001",
+            ],
+        );
         write(&s, "测试/desk.ini", &["S:\"Protocol Name\"=RDP", "S:\"Hostname\"=pc1"]);
         write(&s, "测试/empty.ini", &["S:\"Protocol Name\"=SSH2", "S:\"Hostname\"="]);
         write(&s, "root-host.ini", &["S:\"Protocol Name\"=SSH2", "S:\"Hostname\"=10.0.0.1", "S:\"Firewall Name\"=Session:gone/away"]);
@@ -830,7 +991,7 @@ mod tests {
         check_unique(&plan).unwrap();
         let labels: Vec<&str> = plan.folders.iter().map(|f| f.label.as_str()).collect();
         assert_eq!(labels, ["SecureCRT", "测试", "生产", "生产 / 控制节点"]);
-        assert_eq!(plan.host_count(), 4);
+        assert_eq!(plan.host_count(), 6, "four ssh hosts, a Telnet and a serial session");
 
         let hosts: HashMap<&str, &PlannedHost> =
             plan.folders.iter().flat_map(|f| &f.hosts).map(|h| (h.label.as_str(), h)).collect();
@@ -843,8 +1004,16 @@ mod tests {
         assert!(entries.contains(&("NativeTermSource", "securecrt:生产/控制节点/10.32.16.66(osp-control1)".into())));
 
         let skipped: HashMap<&str, &Skip> = plan.skipped.iter().map(|(p, s)| (p.as_str(), s)).collect();
-        assert_eq!(skipped["测试/switch"], &Skip::PlinkLater("Telnet".into()));
-        assert_eq!(skipped["测试/console"], &Skip::PlinkLater("Serial".into()));
+        assert!(!skipped.contains_key("测试/switch") && !skipped.contains_key("测试/console"));
+        let test = plan.folders.iter().find(|f| f.label == "测试").unwrap();
+        let switch = test.plink.iter().find(|p| p.label() == "switch").unwrap();
+        assert_eq!(switch.protocol, crate::plink::Protocol::Telnet);
+        assert_eq!((switch.host.as_deref(), switch.port, switch.user.as_deref()), (Some("10.1.1.1"), None, Some("admin")));
+        assert_eq!(switch.charset.as_deref(), Some("gbk"));
+        assert_eq!(switch.source.as_deref(), Some("securecrt:测试/switch"));
+        let console = test.plink.iter().find(|p| p.label() == "console").unwrap();
+        assert_eq!(console.serial.as_ref().unwrap().sercfg(), "115200,7,e,2,R", "DTR/RTS are line states, CTS flow is RTS/CTS");
+        assert!(console.host.is_none());
         assert_eq!(skipped["测试/desk"], &Skip::Protocol("RDP".into()));
         assert_eq!(skipped["测试/empty"], &Skip::NoHostname);
 
@@ -854,7 +1023,7 @@ mod tests {
         assert_eq!(n.unresolved_jumps, [("root-host".to_string(), "gone/away".to_string())]);
         assert_eq!(n.logon_actions, ["生产/控制节点/10.32.16.66(osp-control1)"]);
         assert_eq!(n.saved_passwords, 1);
-        assert_eq!(n.encodings, [("测试/dup".to_string(), "GBK".to_string())]);
+        assert_eq!(n.encodings, [("测试/dup".to_string(), "GBK".to_string())], "a Telnet session takes its GBK along");
         assert_eq!((n.identity_files, n.forwards, n.joined_descriptions), (1, 4, 1));
     }
 

@@ -208,10 +208,12 @@
       configuration (29 s)
 - [x] SecureCRT host keys → `known_hosts` (lenient `.pub` reading,
       unknown files reported, no duplicates, backup)
+- [x] SecureCRT and PuTTY import of Telnet / serial / raw / rlogin /
+      SUPDUP sessions as non-SSH sessions (serial line settings, charset,
+      PuTTY-only options kept for the temporary saved session)
 - [ ] SecureCRT importer (rest): preview on the author's real
       configuration (by the author); button bar / Command Manager
-      commands into the command
-      library; Telnet / serial / raw / rlogin as plink sessions
+      commands into the command library
 - [x] `ssh` used for tabs and checks: native builds only (MSYS/Cygwin
       `ssh` on `PATH` skipped), no console window for checks
 - [x] PuTTY saved-session import (read-only from the PuTTY registry key;
@@ -225,7 +227,6 @@
       sessions; `NATIVETERM_PUTTY_KEY` points tests at another key)
 - [x] PuTTY host keys (`SshHostKeys`: RSA, ECDSA P-256/384/521 and Ed25519
       rebuilt from PuTTY's cached numbers; DSA / Ed448 reported) → `known_hosts`
-- [ ] PuTTY import (rest): plink sessions
 - [x] First-run wizard (environment checks: `ssh -V`, Terminal, profile
       with an install button, ssh-agent; import from SecureCRT / PuTTY;
       key creation / "Install my key" on all hosts; where sessions and data

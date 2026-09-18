@@ -271,6 +271,35 @@ pub fn code_page(charset: Option<&str>) -> Result<u32, String> {
     Ok(known)
 }
 
+/// A charset NativeTerm knows, from another program's name for it
+/// (SecureCRT's "Output Transformer Name", PuTTY's `LineCodePage`:
+/// `GBK`, `CP936`, `ISO-8859-1:1998 (Latin-1, West Europe)`, …). `None`:
+/// UTF-8 (nothing to set), or not recognized.
+pub fn charset_from(name: &str) -> Option<Result<String, String>> {
+    let lower = name.trim().to_ascii_lowercase();
+    if lower.is_empty() || lower == "default" || lower.replace('-', "").contains("utf8") {
+        return None;
+    }
+    let known = if lower.contains("gb") || lower.contains("936") {
+        "gbk"
+    } else if lower.contains("big5") || lower.contains("950") {
+        "big5"
+    } else if lower.contains("shift") || lower.contains("sjis") || lower.contains("932") {
+        "shift_jis"
+    } else if lower.contains("euc-kr") || lower.contains("949") || lower.contains("korean") {
+        "euc-kr"
+    } else if lower.contains("8859-1") || lower.contains("latin-1") || lower.contains("latin1") {
+        "iso-8859-1"
+    } else if lower.contains("1252") {
+        "windows-1252"
+    } else if code_page(Some(&lower)).is_ok() {
+        return Some(Ok(lower));
+    } else {
+        return Some(Err(name.trim().to_string()));
+    };
+    Some(Ok(known.to_string()))
+}
+
 fn plain(s: &str) -> bool {
     !s.is_empty() && !s.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | ';'))
 }
@@ -469,6 +498,17 @@ serial = { line = "COM3", speed = 115200 }
         assert!(gbk.check().is_ok());
         gbk.charset = Some("klingon".into());
         assert!(gbk.check().is_err());
+    }
+
+    #[test]
+    fn charsets_of_other_programs() {
+        assert_eq!(charset_from("GBK"), Some(Ok("gbk".into())));
+        assert_eq!(charset_from("CP936"), Some(Ok("gbk".into())));
+        assert_eq!(charset_from("ISO-8859-1:1998 (Latin-1, West Europe)"), Some(Ok("iso-8859-1".into())));
+        assert_eq!(charset_from("UTF-8"), None);
+        assert_eq!(charset_from("Default"), None);
+        assert_eq!(charset_from("KOI8-R"), Some(Ok("koi8-r".into())));
+        assert_eq!(charset_from("Klingon"), Some(Err("Klingon".into())));
     }
 
     #[test]

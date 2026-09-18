@@ -364,7 +364,6 @@ import-failed = Import failed: { $error }
 summary-found = { $sessions } sessions found in { $folders } folders; { $hosts } will be imported into { $new } new and { $existing } existing folders
 summary-skipped = Skipped, { $reason }: { $count }
 skip-already = already imported
-skip-plink-later = { $protocol }: not supported yet (planned through plink)
 skip-protocol = { $protocol }: not a terminal session NativeTerm opens
 skip-no-hostname = no host name
 summary-duplicates = Same host, port and user in several sessions: { $count } groups (all imported; review them)

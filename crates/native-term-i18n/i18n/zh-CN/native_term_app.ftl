@@ -345,7 +345,6 @@ import-failed = 导入失败：{ $error }
 summary-found = 找到 { $sessions } 个会话，分布在 { $folders } 个文件夹；将导入 { $hosts } 台主机，写入 { $new } 个新文件夹和 { $existing } 个已有文件夹
 summary-skipped = 已跳过，{ $reason }：{ $count }
 skip-already = 之前已导入
-skip-plink-later = { $protocol }：暂不支持（计划通过 plink 支持）
 skip-protocol = { $protocol }：不是 NativeTerm 打开的终端会话
 skip-no-hostname = 没有主机名
 summary-duplicates = 多个会话的主机、端口和用户相同：{ $count } 组（都会导入，请检查）

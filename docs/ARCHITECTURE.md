@@ -996,6 +996,25 @@ Import: the user's existing **PuTTY saved sessions** (e.g. switches and
 serial consoles) are read, read-only, from
 `HKCU\Software\SimonTatham\PuTTY\Sessions`. They can be imported like
 SecureCRT sessions, or referenced by name (`plink -load <name>`).
+Non-SSH sessions are imported too (both readers): Telnet, serial, raw,
+rlogin and SUPDUP become `.nt.toml` sessions of the planned folder
+(written before the folder's ssh hosts, and taken out again if those
+fail, so a retry starts clean; a folder with only such sessions still
+gets its `.conf`). Serial line settings: SecureCRT's `Baud Rate`, `Data
+Bits`, `Parity` and `Stop Bits` (Windows `DCB` numbering) and flow from
+`CTS Flow` / `DSR Flow` / `XON Flow` (`DTR Flow Control` / `RTS Flow
+Control` are line states, not flow control); PuTTY's `SerialSpeed`,
+`SerialDataBits`, `SerialParity`, `SerialStopHalfbits` and
+`SerialFlowControl`. The charset comes from SecureCRT's "Output
+Transformer Name" or PuTTY's `LineCodePage` (`GBK`, `CP936`,
+`ISO-8859-1:1998 (Latin-1, …)`, …); one not recognized is listed as
+before. PuTTY options plink only reads from a saved session (terminal
+type, keepalive, TCP options, Telnet and SUPDUP pages) are kept in
+`[session.putty]`. Telnet over TLS isn't something plink does and is
+listed as not imported. Verified with a SecureCRT fixture, a PuTTY test
+registry key, and in the app (PuTTY import of a Telnet and a serial
+session next to ssh hosts).
+
 Implemented for SSH sessions (`native_term_config::putty`): each session
 becomes the same session record the SecureCRT reader produces, so one
 planner and writer serve both; `NativeTermSource putty:<name>` marks

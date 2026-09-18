@@ -681,7 +681,7 @@ impl Editor {
 /// Result of [`Editor::import`]: each folder is written whole or not at all.
 #[derive(Debug, Default)]
 pub struct ImportOutcome {
-    /// Folder label, file, hosts written.
+    /// Folder label, file, sessions written (ssh and non-SSH).
     pub written: Vec<(String, PathBuf, usize)>,
     /// Folder label and why it wasn't written.
     pub failed: Vec<(String, String)>,
@@ -729,13 +729,13 @@ impl Editor {
         let jobs: Vec<(&securecrt::PlannedFolder, PathBuf)> = plan
             .folders
             .iter()
-            .filter(|f| !f.hosts.is_empty())
+            .filter(|f| f.session_count() > 0)
             .map(|folder| {
                 let path = folder.existing.clone().unwrap_or_else(|| {
                     let stem = securecrt::folder_stem(&folder.label);
                     (1..)
                         .map(|n| if n == 1 { dir.join(format!("{stem}.conf")) } else { dir.join(format!("{stem}-{n}.conf")) })
-                        .find(|p| !p.exists() && !used.contains(p))
+                        .find(|p| !p.exists() && !plink::sibling(p).exists() && !used.contains(p))
                         .expect("unbounded")
                 });
                 used.insert(path.clone());
@@ -750,7 +750,8 @@ impl Editor {
             let (folder, path) = &jobs[i];
             let result = self.write_folder(folder, path);
             if result.is_ok() {
-                let n = done.fetch_add(folder.hosts.len(), std::sync::atomic::Ordering::SeqCst) + folder.hosts.len();
+                let count = folder.session_count();
+                let n = done.fetch_add(count, std::sync::atomic::Ordering::SeqCst) + count;
                 progress(n, total);
             }
             results.lock().unwrap_or_else(|e| e.into_inner())[i] = Some(result);
@@ -782,7 +783,7 @@ impl Editor {
         let results = results.into_inner().unwrap_or_else(|e| e.into_inner());
         for ((folder, path), result) in jobs.iter().zip(results) {
             match result {
-                Some(Ok(())) => outcome.written.push((folder.label.clone(), path.clone(), folder.hosts.len())),
+                Some(Ok(())) => outcome.written.push((folder.label.clone(), path.clone(), folder.session_count())),
                 Some(Err(e)) => outcome.failed.push((folder.label.clone(), e)),
                 None => outcome.failed.push((folder.label.clone(), "not attempted".into())),
             }
@@ -840,9 +841,35 @@ impl Editor {
         Ok(missing.len())
     }
 
-    /// Append one planned folder's hosts to `path` (created if new) and
-    /// check each alias.
+    /// Append one planned folder's sessions: non-SSH ones to the
+    /// `.nt.toml` beside `path` first, then the ssh hosts to `path`
+    /// (created if new, even for non-SSH sessions only: it makes the
+    /// folder), each alias checked. If the hosts can't be written, the
+    /// non-SSH sessions are taken out again, so a retry starts clean.
     fn write_folder(&self, folder: &securecrt::PlannedFolder, path: &Path) -> Result<(), String> {
+        let sessions_file = plink::sibling(path);
+        if !folder.plink.is_empty() {
+            self.edit_plink(&sessions_file, |sessions| {
+                sessions.extend(folder.plink.iter().cloned());
+                Ok(())
+            })
+            .map_err(|e| e.to_string())?;
+        }
+        let written = self.write_folder_hosts(folder, path);
+        if written.is_err() && !folder.plink.is_empty() {
+            let names: std::collections::HashSet<&str> = folder.plink.iter().map(|s| s.name.as_str()).collect();
+            let _ = self.edit_plink(&sessions_file, |sessions| {
+                sessions.retain(|s| !names.contains(s.name.as_str()));
+                Ok(())
+            });
+            if folder.existing.is_none() && plink::read(&sessions_file).is_ok_and(|s| s.is_empty()) {
+                let _ = std::fs::remove_file(&sessions_file);
+            }
+        }
+        written
+    }
+
+    fn write_folder_hosts(&self, folder: &securecrt::PlannedFolder, path: &Path) -> Result<(), String> {
         let (text, fingerprint) = match &folder.existing {
             Some(_) => write::read(path).map_err(|e| e.to_string())?,
             None => {

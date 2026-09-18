@@ -31,8 +31,8 @@ fn line(text: String, warning: bool, details: Vec<String>) -> Line {
 /// What an import of `plan` would do, in words.
 pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
     let mut out = Vec::new();
-    let new_folders = plan.folders.iter().filter(|f| f.existing.is_none() && !f.hosts.is_empty()).count();
-    let existing = plan.folders.iter().filter(|f| f.existing.is_some() && !f.hosts.is_empty()).count();
+    let new_folders = plan.folders.iter().filter(|f| f.existing.is_none() && f.session_count() > 0).count();
+    let existing = plan.folders.iter().filter(|f| f.existing.is_some() && f.session_count() > 0).count();
     out.push(line(
         t!(
             "summary-found",
@@ -45,8 +45,8 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         false,
         plan.folders
             .iter()
-            .filter(|f| !f.hosts.is_empty())
-            .map(|f| format!("{} ({})", f.label, f.hosts.len()))
+            .filter(|f| f.session_count() > 0)
+            .map(|f| format!("{} ({})", f.label, f.session_count()))
             .collect(),
     ));
 
@@ -54,7 +54,6 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
     for (path, why) in &plan.skipped {
         let reason = match why {
             Skip::AlreadyImported { .. } => (false, t!("skip-already")),
-            Skip::PlinkLater(p) => (true, t!("skip-plink-later", protocol = p.as_str())),
             Skip::Protocol(p) => (true, t!("skip-protocol", protocol = p.as_str())),
             Skip::NoHostname => (true, t!("skip-no-hostname")),
         };
