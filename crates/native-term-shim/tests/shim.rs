@@ -349,3 +349,41 @@ fn install_key_windows_host() {
     let user = dir.path().join("profile").join(".ssh").join("authorized_keys");
     assert!(admin.exists() || user.exists());
 }
+
+/// `--install-key-batch`: the password is given once (here on stdin) and
+/// each ssh gets it from the shim's askpass helper; a host with another
+/// password fails alone.
+#[test]
+fn install_key_batch_with_one_password() {
+    use std::io::Write;
+    let sh = PathBuf::from(r"C:\Program Files\Git\usr\bin\sh.exe");
+    if !sh.exists() {
+        eprintln!("skipped: no Git sh");
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    let key = home.path().join("id_test.pub");
+    std::fs::write(&key, "ssh-ed25519 AAAAbatchtest me@pc\n").unwrap();
+    let mut child = Command::new(shim_exe())
+        .args(["--install-key-batch", key.to_str().unwrap(), "host-a", "host-b", "other-c"])
+        .env("NATIVETERM_SSH", fake_ssh())
+        .env("NATIVETERM_LANG", "en")
+        .env("FAKE_SSH_SH", &sh)
+        .env("FAKE_SSH_PASSWORD", "batch-test-pw")
+        .env("HOME", home.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"batch-test-pw\n").unwrap();
+    let output = child.wait_with_output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout).to_string();
+    assert_eq!(output.status.code(), Some(1), "{text}");
+    assert!(text.contains("1 added, 1 had it already, 1 failed"), "{text}");
+    assert!(text.contains("Failed: other-c"), "{text}");
+    assert!(text.contains("other-c refused the login"), "{text}");
+    assert!(!text.contains("batch-test-pw"), "the password is never shown: {text}");
+    let keys = std::fs::read_to_string(home.path().join(".ssh").join("authorized_keys")).unwrap();
+    assert_eq!(keys, "ssh-ed25519 AAAAbatchtest me@pc\n");
+}

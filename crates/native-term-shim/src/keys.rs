@@ -4,6 +4,9 @@
 //! The key goes in with a POSIX shell script; a Windows `sshd` runs the
 //! command in `cmd.exe` or PowerShell, which rejects it, and then a
 //! PowerShell script does the same the Windows way.
+//!
+//! Hosts that share a password go in one tab (`install_batch`): asked once,
+//! handed to each ssh by the shim as its askpass helper (`askpass`).
 
 use std::io::Read;
 use std::path::Path;
@@ -92,14 +95,19 @@ pub fn is_windows_shell(output: &str) -> bool {
 }
 
 /// Run ssh with a remote command; (stdout + stderr, exit code). The
-/// password prompt uses the console, not these pipes.
-fn run_ssh(ssh: &Path, alias: &str, command: &str) -> std::io::Result<(String, i32)> {
-    let mut child = Command::new(ssh)
-        .args(["-o", "ClearAllForwardings=yes", "-o", "RequestTTY=no", "--", alias])
-        .arg(command)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+/// password prompt uses the console, not these pipes, or with `askpass`
+/// (a batch's pipe) the shim as ssh's askpass helper.
+fn run_ssh(ssh: &Path, alias: &str, command: &str, askpass: Option<&str>) -> std::io::Result<(String, i32)> {
+    let mut ssh = Command::new(ssh);
+    ssh.args(["-o", "ClearAllForwardings=yes", "-o", "RequestTTY=no"]);
+    if let Some(pipe) = askpass {
+        // one try: a wrong password fails the host instead of repeating
+        ssh.args(["-o", "NumberOfPasswordPrompts=1"])
+            .env("SSH_ASKPASS", std::env::current_exe()?)
+            .env("SSH_ASKPASS_REQUIRE", "force")
+            .env(crate::askpass::PIPE_VAR, pipe);
+    }
+    let mut child = ssh.args(["--", alias]).arg(command).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()?;
     // bytes, not text: a Windows shell answers in its own code page (GBK
     // here), which read_to_string would reject and drop entirely
     let mut err_pipe = child.stderr.take();
@@ -120,47 +128,133 @@ fn run_ssh(ssh: &Path, alias: &str, command: &str) -> std::io::Result<(String, i
     Ok((output, status))
 }
 
-pub fn install(key_file: &str, alias: &str) -> i32 {
+/// How it went on one host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Outcome {
+    Installed,
+    Present,
+    Failed,
+}
+
+/// The line to add and its key blob, from a public key file (or `None`
+/// after saying why not).
+fn read_key(key_file: &str) -> Option<(String, String)> {
     let text = match std::fs::read_to_string(key_file) {
         Ok(t) => t,
         Err(e) => {
             println!("{}", t!("key-unreadable", path = key_file, error = e.to_string()));
-            return 1;
+            return None;
         }
     };
-    let Some((line, blob)) = key_line(&text) else {
+    let key = key_line(&text);
+    if key.is_none() {
         println!("{}", t!("key-unreadable", path = key_file, error = "not a public key"));
-        return 1;
-    };
-    println!("{}", t!("key-installing", alias = alias, path = key_file));
-    let ssh = native_term_session::ssh_program();
-    let (mut output, mut status) = match run_ssh(&ssh, alias, &remote_script(&line, &blob)) {
+    }
+    key
+}
+
+/// Add the key on one host, printing how it went.
+fn install_on(ssh: &Path, alias: &str, line: &str, blob: &str, askpass: Option<&str>) -> Outcome {
+    let (mut output, mut status) = match run_ssh(ssh, alias, &remote_script(line, blob), askpass) {
         Ok(result) => result,
         Err(e) => {
             println!("{}", t!("ssh-not-started", path = ssh.display().to_string(), error = e.to_string()));
-            return 1;
+            return Outcome::Failed;
         }
     };
     if is_windows_shell(&output) {
         // a Windows sshd: the same the PowerShell way (the password once more)
         println!("{}", t!("key-windows-host", alias = alias));
-        match run_ssh(&ssh, alias, &windows_command(&line, &blob)) {
+        match run_ssh(ssh, alias, &windows_command(line, blob), askpass) {
             Ok(result) => (output, status) = result,
             Err(e) => {
                 println!("{}", t!("ssh-not-started", path = ssh.display().to_string(), error = e.to_string()));
-                return 1;
+                return Outcome::Failed;
             }
         }
     }
     if output.contains(OK_MARK) {
         println!("{}", t!("key-installed", alias = alias));
-        0
+        Outcome::Installed
     } else if output.contains(PRESENT_MARK) {
         println!("{}", t!("key-present", alias = alias));
-        0
+        Outcome::Present
     } else {
         print!("{output}");
-        println!("{}", t!("key-failed", alias = alias, code = status));
+        if is_login_refused(&output, status) {
+            println!("{}", t!("key-login-refused", alias = alias));
+        } else {
+            println!("{}", t!("key-failed", alias = alias, code = status));
+        }
+        Outcome::Failed
+    }
+}
+
+/// ssh's own "user@host: Permission denied (publickey,password)." (exit
+/// 255): the login failed, the host never saw the script.
+fn is_login_refused(output: &str, status: i32) -> bool {
+    status == 255 && output.contains("Permission denied (")
+}
+
+pub fn install(key_file: &str, alias: &str) -> i32 {
+    let Some((line, blob)) = read_key(key_file) else { return 1 };
+    println!("{}", t!("key-installing", alias = alias, path = key_file));
+    let ssh = native_term_session::ssh_program();
+    match install_on(&ssh, alias, &line, &blob, None) {
+        Outcome::Failed => 1,
+        Outcome::Installed | Outcome::Present => 0,
+    }
+}
+
+/// The batch password: typed in the console without echo, or a line of
+/// stdin when that is a pipe (scripts, the tests).
+fn ask_password(prompt: &str) -> String {
+    use std::io::{BufRead, IsTerminal};
+    if std::io::stdin().is_terminal() {
+        return crate::win::read_line(prompt, false).unwrap_or_default();
+    }
+    let mut line = String::new();
+    let _ = std::io::stdin().lock().read_line(&mut line);
+    line.trim_end_matches(['\r', '\n']).to_string()
+}
+
+/// The key on several hosts, one after another in this tab. The password
+/// is asked once, kept in memory only, and given to each ssh through the
+/// askpass helper (see `askpass`); an empty answer lets every host ask.
+pub fn install_batch(key_file: &str, aliases: &[String]) -> i32 {
+    let Some((line, blob)) = read_key(key_file) else { return 1 };
+    println!("{}", t!("key-batch-intro", count = aliases.len(), path = key_file));
+    let password = ask_password(&format!("{} ", t!("key-batch-password")));
+    let askpass = if password.is_empty() {
+        println!("{}", t!("key-batch-each"));
+        None
+    } else {
+        match crate::askpass::serve(password) {
+            Ok(pipe) => Some(pipe),
+            Err(e) => {
+                println!("{}", t!("key-batch-no-helper", error = e.to_string()));
+                None
+            }
+        }
+    };
+    let ssh = native_term_session::ssh_program();
+    let mut failed = Vec::new();
+    let (mut installed, mut present) = (0, 0);
+    for alias in aliases {
+        println!();
+        println!("{}", t!("key-installing", alias = alias.as_str(), path = key_file));
+        match install_on(&ssh, alias, &line, &blob, askpass.as_deref()) {
+            Outcome::Installed => installed += 1,
+            Outcome::Present => present += 1,
+            Outcome::Failed => failed.push(alias.as_str()),
+        }
+    }
+    println!();
+    println!("{}", t!("key-batch-summary", installed = installed, present = present, failed = failed.len()));
+    if failed.is_empty() {
+        0
+    } else {
+        println!("{}", t!("key-batch-failed-hosts", hosts = failed.join(", ")));
         1
     }
 }

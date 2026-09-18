@@ -100,6 +100,9 @@ key-install = { $count ->
         [one] 安装
        *[other] 安装到 { $count } 台主机
     }
+key-one-password = 这些主机密码相同：只问一次
+key-one-password-hint = 在一个标签里依次给各台主机添加公钥；密码在那里只输一次，只保存在内存里。密码不对的主机最后会列出来。
+key-batch-tab = 公钥 → { $count } 台主机
 key-tab = 公钥 → { $label }
 menu-folder-options = 文件夹选项…
 options-folder-title = { $label } 中所有主机的选项

@@ -257,8 +257,9 @@
 - [x] "Install my key" on Windows hosts (recognized from how cmd.exe or
       PowerShell reject the POSIX script; PowerShell adds the key to the
       admin or user file by Windows OpenSSH's rules)
-- [ ] "Install my key" (rest): one password for a whole batch through the
-      askpass helper
+- [x] "Install my key" with one password for a whole batch (asked once in
+      one tab, served to each ssh through the shim as askpass helper;
+      other prompts still asked in the console)
 - [x] Close Others / Close Disconnected (tab menu); "Close Tab Group"
       has no counterpart (Terminal has no tab groups)
 - [x] Close Tabs to the Right (real tab order via UIA)

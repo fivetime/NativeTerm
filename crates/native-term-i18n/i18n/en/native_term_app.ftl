@@ -103,6 +103,9 @@ key-install = { $count ->
         [one] Install
        *[other] Install on { $count } hosts
     }
+key-one-password = Same password on all of them: ask it once
+key-one-password-hint = One tab adds the key to the hosts one after another; the password is typed once there and kept in memory only. Hosts where it is wrong are listed at the end.
+key-batch-tab = Key → { $count } hosts
 key-tab = Key → { $label }
 menu-folder-options = Folder Options…
 options-folder-title = Options for every host in { $label }

@@ -9,8 +9,9 @@ use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDL
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
 use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOTOWNER};
 use windows::Win32::System::Console::{
-    GetConsoleWindow, ReadConsoleInputW, SetConsoleCtrlHandler, WriteConsoleInputW, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
-    INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
+    GetConsoleMode, GetConsoleWindow, ReadConsoleInputW, ReadConsoleW, SetConsoleCtrlHandler, SetConsoleMode, WriteConsoleInputW,
+    WriteConsoleW, CONSOLE_MODE, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT, ENABLE_ECHO_INPUT, INPUT_RECORD, INPUT_RECORD_0,
+    KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
 };
 use windows::Win32::System::Threading::{
     CreateEventW, OpenEventW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject, EVENT_MODIFY_STATE,
@@ -119,9 +120,13 @@ pub fn signal_authenticated(shim_pid: u32) {
 }
 
 fn open_console_input() -> io::Result<OwnedHandle> {
+    open_console(w!("CONIN$"))
+}
+
+fn open_console(name: windows::core::PCWSTR) -> io::Result<OwnedHandle> {
     let handle = unsafe {
         CreateFileW(
-            w!("CONIN$"),
+            name,
             (GENERIC_READ | GENERIC_WRITE).0,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             None,
@@ -131,6 +136,50 @@ fn open_console_input() -> io::Result<OwnedHandle> {
         )?
     };
     Ok(OwnedHandle(handle))
+}
+
+/// Show `prompt` and read a line from the console itself (not stdin, which
+/// may be a pipe), without echo unless `echo`. The line is returned without
+/// its line break.
+pub fn read_line(prompt: &str, echo: bool) -> io::Result<String> {
+    const CR: u16 = 13;
+    const LF: u16 = 10;
+    let output = open_console(w!("CONOUT$"))?;
+    let input = open_console_input()?;
+    let prompt: Vec<u16> = prompt.encode_utf16().collect();
+    unsafe { WriteConsoleW(output.0, &prompt, None, None)? };
+    let mut mode = CONSOLE_MODE::default();
+    unsafe { GetConsoleMode(input.0, &mut mode)? };
+    let reading = if echo { mode | ENABLE_ECHO_INPUT } else { CONSOLE_MODE(mode.0 & !ENABLE_ECHO_INPUT.0) };
+    unsafe { SetConsoleMode(input.0, reading)? };
+    let mut units: Vec<u16> = Vec::new();
+    let result: io::Result<()> = loop {
+        let mut buffer = [0u16; 512];
+        let mut read = 0u32;
+        if let Err(e) = unsafe { ReadConsoleW(input.0, buffer.as_mut_ptr().cast(), buffer.len() as u32, &mut read, None) } {
+            break Err(e.into());
+        }
+        if read == 0 {
+            break Ok(());
+        }
+        units.extend_from_slice(&buffer[..read as usize]);
+        buffer.fill(0);
+        if units.iter().any(|&u| u == CR || u == LF) {
+            break Ok(());
+        }
+    };
+    unsafe {
+        let _ = SetConsoleMode(input.0, mode);
+        if !echo {
+            // the Enter wasn't echoed either
+            let _ = WriteConsoleW(output.0, &[CR, LF], None, None);
+        }
+    }
+    result?;
+    let end = units.iter().position(|&u| u == CR || u == LF).unwrap_or(units.len());
+    let line = String::from_utf16_lossy(&units[..end]);
+    units.fill(0);
+    Ok(line)
 }
 
 /// Type `text` into this console: one key-down record per UTF-16 unit,

@@ -11,6 +11,8 @@ pub enum Mode {
     Authenticated { shim_pid: u32 },
     /// Add the public key in `key` to the host's `authorized_keys`.
     InstallKey { key: String, alias: String },
+    /// The same on several hosts, the password asked once.
+    InstallKeys { key: String, aliases: Vec<String> },
     /// Create a key pair at `path` (ssh-keygen asks for the passphrase).
     CreateKey { path: String },
     /// Load the default keys into ssh-agent (ssh-add asks for passphrases).
@@ -39,6 +41,14 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 let key = args.next().ok_or("--install-key needs the public key file")?;
                 let alias = args.next().filter(|a| !a.starts_with('-')).ok_or("--install-key needs a host")?;
                 return Ok(Mode::InstallKey { key, alias });
+            }
+            "--install-key-batch" => {
+                let key = args.next().ok_or("--install-key-batch needs the public key file")?;
+                let aliases: Vec<String> = args.collect();
+                if aliases.is_empty() || aliases.iter().any(|a| a.starts_with('-')) {
+                    return Err("--install-key-batch needs hosts".into());
+                }
+                return Ok(Mode::InstallKeys { key, aliases });
             }
             "--add-keys" => return Ok(Mode::AddKeys),
             "--create-key" => {
@@ -87,6 +97,12 @@ mod tests {
             Mode::InstallKey { key: "k.pub".into(), alias: "web01".into() }
         );
         assert!(p(&["--install-key", "k.pub", "-oProxyCommand=x"]).is_err());
+        assert_eq!(
+            p(&["--install-key-batch", "k.pub", "web01", "web02"]).unwrap(),
+            Mode::InstallKeys { key: "k.pub".into(), aliases: vec!["web01".into(), "web02".into()] }
+        );
+        assert!(p(&["--install-key-batch", "k.pub"]).is_err());
+        assert!(p(&["--install-key-batch", "k.pub", "web01", "-oProxyCommand=x"]).is_err());
         assert_eq!(p(&["--create-key", "id"]).unwrap(), Mode::CreateKey { path: "id".into() });
     }
 

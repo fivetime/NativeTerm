@@ -1730,9 +1730,7 @@ Constraints found while verifying:
   remote; a Windows `sshd` runs it in `cmd.exe`, where it fails. The
   `-s` (sftp) mode doesn't help from a Windows client: it opens a
   ControlMaster connection (`ssh -M -S`), which Windows OpenSSH can't do.
-  Windows hosts are excluded from "Install my key" (a later version may
-  add a separate path; for administrators the key file is
-  `%ProgramData%\ssh\administrators_authorized_keys`, not the profile).
+  (Windows hosts got their own path later: see "Windows targets" below.)
 - **Always pass `-i <file>`.** busybox `expr` rejects `--`, so the
   script's check for a bare `-i` followed by another option doesn't work.
   With an explicit file the result is correct; the harmless
@@ -1753,12 +1751,41 @@ Constraints found while verifying:
   on a host, "Install My Key on All…" on a folder, 300 ms apart), so the
   user types each password where the host asks. The key comment is
   reduced to harmless characters; the key itself must be a plain OpenSSH
-  public key. Unix targets only, as above. Without any public key, the
+  public key. Without any public key, the
   dialog offers "Create a key…": a tab running `ssh-keygen -t ed25519`
   (`--create-key`), where the passphrase is chosen. Checked with a Git
   `sh` standing in for the host: added once, reported as present the
-  second time, no duplicate. The askpass path (saved passwords) is not
-  done.
+  second time, no duplicate.
+- **One password for a batch** (implemented): when several hosts share a
+  password, the dialog's "Same password on all of them" (on by default
+  for more than one host) opens one tab running
+  `--install-key-batch <pub> <alias…>` instead of a tab per host. The
+  shim asks for the password once (console, no echo; a line of stdin when
+  stdin is a pipe, for scripts and tests) and keeps it in memory only —
+  never in an argument, the environment, a file or the log. It serves it
+  on a pipe with a random name that only the user and SYSTEM may open,
+  and runs each host's ssh with `SSH_ASKPASS=<the shim>`,
+  `SSH_ASKPASS_REQUIRE=force` (Windows OpenSSH 9.5 honours it: verified),
+  `NATIVETERM_ASKPASS=<pipe>` and `-o NumberOfPasswordPrompts=1`, so a
+  wrong password fails that host once instead of being retried into a
+  ban. The shim in askpass mode (that variable **and** exactly one
+  argument, the prompt) asks the pipe; only password prompts are answered
+  (`user@host's password:`, keyboard-interactive `(user@host) Password:`,
+  `Password for …:`; not passphrases, new passwords or codes). Anything
+  else — a new host key, a key passphrase, a one-time code — the helper
+  asks in the tab's console, echoing only `(yes/no…)` questions. A
+  Windows host's second ssh run (PowerShell) takes the same password
+  without asking. The tab ends with a summary (added / had it / failed)
+  and lists the failed hosts; ssh's own `Permission denied (…)` is
+  reported as a refused login ("a wrong password?"). The batch is split
+  into several tabs only if the aliases would overflow a command line
+  (24 000 characters). Verified: with the fake ssh (three hosts, one with
+  another password: 1 added, 1 present, 1 failed; the password never
+  printed), and against the local Windows `sshd` in a portable Terminal
+  tab with a user that doesn't exist: the host-key question came from
+  the helper in the console, the password went through the pipe (ssh:
+  `read_passphrase: requested to askpass`), the second host asked
+  nothing, both were reported as refused logins.
 - **Windows targets** (implemented): a Windows `sshd` runs the command in
   `cmd.exe` (or PowerShell), which rejects the POSIX script — and quotes
   it back: cmd stops at the `-qF` of `if grep -qF` ("-qF was unexpected
@@ -1791,8 +1818,8 @@ Alternatives considered and rejected:
   the Windows `ssh-agent`.
 
 Usage: "Install my key" on a host or a folder opens one tab that works
-through the hosts sequentially (the user types each password there) and
-ends with a per-host summary. Network devices (routers, VyOS) manage keys
+through the hosts sequentially (the password typed once there, or each
+host asking when left empty) and ends with a per-host summary. Network devices (routers, VyOS) manage keys
 through their own configuration commands — a manually edited
 `authorized_keys` doesn't survive — so they're excluded.
 

@@ -17,6 +17,7 @@
 //! `NATIVETERM_START_APP=0` (never start NativeTerm).
 
 mod args;
+mod askpass;
 mod keys;
 mod i18n;
 mod debug;
@@ -38,6 +39,16 @@ use link::Link;
 const POLL: Duration = Duration::from_millis(100);
 
 fn main() {
+    // ssh running the shim as its askpass helper in a key batch: the prompt
+    // is the only argument
+    if let Ok(pipe) = std::env::var(askpass::PIPE_VAR) {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if let [prompt] = args.as_slice() {
+            if !prompt.starts_with("--") {
+                std::process::exit(askpass::answer(&pipe, prompt));
+            }
+        }
+    }
     let mode = match args::parse(std::env::args().skip(1)) {
         Ok(mode) => mode,
         Err(e) => {
@@ -50,6 +61,11 @@ fn main() {
         Mode::Authenticated { shim_pid } => authenticated(shim_pid),
         Mode::InstallKey { key, alias } => {
             let code = keys::install(&key, &alias);
+            wait_for_any_key();
+            std::process::exit(code);
+        }
+        Mode::InstallKeys { key, aliases } => {
+            let code = keys::install_batch(&key, &aliases);
             wait_for_any_key();
             std::process::exit(code);
         }

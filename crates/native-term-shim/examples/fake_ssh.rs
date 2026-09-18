@@ -7,6 +7,8 @@
 //!   `FAKE_SSH_CODE`. Arguments are appended to `FAKE_SSH_LOG`.
 //! - `FAKE_SSH_WINDOWS=1`: runs the remote command with `cmd.exe /c`, like
 //!   a Windows sshd.
+//! - `FAKE_SSH_PASSWORD=<p>`: logs in only if the forced `SSH_ASKPASS`
+//!   helper answers `<p>` (`<p>-other` for hosts named `other…`).
 //! - `FAKE_SSH_INTERACTIVE=<bash>`: after the login, runs that shell
 //!   interactively (a local stand-in for the remote side).
 
@@ -31,6 +33,21 @@ fn main() {
         let local = args.iter().find_map(|a| a.strip_prefix("LocalCommand="));
         if let Some(command) = local {
             let _ = Command::new("cmd.exe").arg("/c").raw_arg(command).status();
+        }
+    }
+    // like ssh with SSH_ASKPASS_REQUIRE=force: the password from the helper
+    if let Ok(expected) = std::env::var("FAKE_SSH_PASSWORD") {
+        let host = args.iter().skip_while(|a| *a != "--").nth(1).cloned().unwrap_or_default();
+        // hosts named "other…" have a different password
+        let expected = if host.starts_with("other") { format!("{expected}-other") } else { expected };
+        let forced = std::env::var("SSH_ASKPASS_REQUIRE").as_deref() == Ok("force");
+        let given = std::env::var_os("SSH_ASKPASS").filter(|_| forced).and_then(|helper| {
+            let output = Command::new(helper).arg(format!("tester@{host}'s password: ")).output().ok()?;
+            Some(String::from_utf8_lossy(&output.stdout).trim_end_matches(['\r', '\n']).to_string())
+        });
+        if given.as_deref() != Some(expected.as_str()) {
+            eprintln!("tester@{host}: Permission denied (password).");
+            std::process::exit(255);
         }
     }
     // run the remote command with a local POSIX shell (key installation)
