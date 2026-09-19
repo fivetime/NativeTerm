@@ -65,3 +65,22 @@ proxy-password-refused = This proxy password was refused before and isn't sent a
 proxy-no-password = No password is saved for the proxy { $proxy }: save one under Proxy in the session options
 proxy-login-too-long = A SOCKS5 user name or password can't be longer than 255 bytes
 proxy-schemes = The proxy only takes these logins: { $schemes }; NativeTerm supports Basic only for now
+
+## rz / sz (--zmodem)
+zmodem-pick-folder = The server is sending files (sz): choose a folder to save them in…
+zmodem-folder-title = Choose a folder for the downloaded files (sz)
+zmodem-pick-files = The server is waiting for files (rz): choose the files to upload…
+zmodem-files-title = Choose files to upload (rz)
+zmodem-receiving = Receiving into { $folder } (Esc or Ctrl+C cancels)
+zmodem-sending = Uploading { $count } files (Esc or Ctrl+C cancels)
+zmodem-progress = { $name }  { $done } / { $size }  { $speed }/s
+zmodem-resume = { $name }: going on from { $from }
+zmodem-done = Done: { $files } files, { $size }
+zmodem-cancelled = Cancelled
+zmodem-cancelled-enter = Cancelled (the server stopped sending; press Enter for the prompt)
+zmodem-failed = The transfer failed: { $error }
+zmodem-gone = The connection broke
+zmodem-aborted = The other side cancelled
+zmodem-timeout = The other side stopped answering
+zmodem-too-big = { $name } is over 4 GB, which ZMODEM can't carry: left out (use Files (SFTP))
+zmodem-short = The file got shorter while it was sent

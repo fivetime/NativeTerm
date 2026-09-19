@@ -1,6 +1,6 @@
 # rz / sz (ZMODEM) in every session
 
-Decisions and findings so far (2026-09-19). Nothing of this is built yet.
+Built and verified live on 2026-09-20 (Windows; the fork's `nativeterm` branch plus the shim).
 
 ## What is wanted
 
@@ -78,6 +78,99 @@ Tested against real lrzsz 0.12.21rc (Ubuntu 24.04 container) over
   12,000,256 (`set_manual_file_accept` + `accept_file_at`) and finished
   with the right SHA-256;
 - to watch: after aborting, ssh and the remote `sz` took ~30 s to exit.
+
+## How it works (built)
+
+**ssh (fork, `nativeterm/nt_zmodem.c`, registered in `clientloop.c`)** —
+only when `NATIVETERM_ZMODEM` names the helper (the shim sets it for the
+ssh it starts; any other ssh ignores it):
+
+- the session channel's output filter looks for a ZMODEM hex header,
+  ZDLE `B` `00` (ZRQINIT: the server's `sz`, a download) or `01` (ZRINIT:
+  its `rz`, an upload); text before it goes to the terminal; a header cut
+  off at the end of a write is held back for the rest;
+- there it starts `nativeterm-shim --zmodem download|upload` (posix_spawn,
+  its stdin / stdout pipes) and swaps the channel's rfd / wfd to them: the
+  server's data goes to the helper, the helper's to the server, and the
+  keyboard isn't read meanwhile; the helper keeps the console (stderr for
+  progress, CONIN$ for Esc / Ctrl+C);
+- the helper ends by writing raw XOFF (`\x13\x13\x13\x13`), which never
+  appears raw in ZMODEM data (XOFF is always ZDLE-escaped): the input
+  filter forwards what comes before it and gives the terminal back. The
+  write end of the helper's stdout stays open in ssh, so a helper that
+  dies without the marker never reads as the keyboard's end (which would
+  close the session's input); the next server data finds it gone;
+- the `~` escape filter is kept (wrapped, with its own context) and
+  bypassed during a transfer (binary data could contain `\r~.`);
+- cosmetic: sz's `rz\r` before the header is not shown (held back at the
+  end of a write, blanked when it is a write of its own); the sender's
+  closing `OO` within a second after a download is blanked (NUL, which
+  terminals ignore; the write length can't change);
+- Windows: ssh's console reader thread is already waiting for a key when
+  the helper starts, so it would take the first key (the user's Esc). A
+  stand-in key (`WriteConsoleInputW`) satisfies it; keyboard data read in
+  the 0.3 s after the terminal gets the session back is dropped (the
+  stand-in, keys pressed during the transfer).
+
+**The helper (shim `zmodem.rs`, crate `zmodem2`)**:
+
+- download: a folder picker (last folder remembered in
+  `HKCU\Software\NativeTerm\Zmodem`, first time Downloads), or
+  `NATIVETERM_ZMODEM_DIR`; each file goes to `<name>.ntpart` and gets its
+  name when complete (`name (2).ext` when taken); a `.ntpart` left by a
+  cancelled or broken transfer is continued (`accept_file_at`); names:
+  the last path component, characters Windows refuses as `_`;
+- upload: a multi-file picker, or `NATIVETERM_ZMODEM_FILES` (`|`-separated);
+  files over 4 GB are left out with a note (use Files (SFTP));
+  `set_streaming_window(usize::MAX)`;
+- the pickers (`native_term_win::picker`) are owned by a hidden topmost
+  window of the helper's own process: never a Terminal window (a picker
+  owned by one disables it, and a killed picker left it disabled — why an
+  earlier picker was removed), and it comes up in front;
+- progress on the console, a line per file (`12.3 / 50.0 MB  1.3 MB/s`);
+- Esc or Ctrl+C cancels: through ConPTY the key arrives as its character
+  only (`vk=0, ch=0x1b`), so both are checked; `NATIVETERM_ZMODEM_DEBUG=<file>`
+  logs the console's key events;
+- workarounds for zmodem2 0.7.2 (to report upstream):
+  - `abort()` sends nothing to the other side: the helper sends the
+    cancel itself (ten CAN, ten backspaces, as lrzsz), then takes in what
+    the sender still streams until it is quiet for 0.5 s (at most 15 s),
+    so it isn't shown as garbage (whose escape sequences made the terminal
+    answer into the shell); the shell's prompt can go with it, so the
+    note says to press Enter;
+  - the ZFILE subpacket carries only "name\0size\0": rz then sets a
+    garbage time and mode 0600 (a file dated 2486). The helper puts
+    "\0size mtime(octal) 100644" into the name it hands zmodem2
+    (`zfile_name`), which lrzsz reads; the name alone when it wouldn't fit
+    zmodem2's 256 bytes;
+  - on SessionCompleted the closing ZFIN may still be queued: flushed
+    before returning (else sz waits and times out).
+
+`native_term_session::ssh_program()` prefers `openssh\ssh.exe` next to the
+program (NativeTerm's own build, to ship with it) after `NATIVETERM_SSH`.
+
+**Verified live** (portable Terminal, a NativeTerm tab to an Ubuntu 24.04
+container through the fork's ssh; lrzsz installed from the tab with
+`apt-get install lrzsz`, then used right away):
+
+- `sz big.bin *.txt` (20 MB random + a Chinese name): both arrived with the
+  server's SHA-256, 1.3 MB/s (the link's rate), the terminal given back at
+  the prompt, no `rz` line, no `OO`;
+- `rz` with two files (30 MB + a Chinese name): SHA-256 equal on the
+  server, `-rw-r--r--` and the local modification time;
+- `rz` with the picker: it came up in front of the Terminal (owned by the
+  shim); closing it cancelled rz on the server (`rz` exit 128) and gave
+  the prompt back; the Terminal stayed enabled;
+- `sz`, Esc once after a few seconds: cancelled at 15.9 of 20 MB, nothing
+  shown as garbage; `sz` again: "going on from 16.0 MB", completed, the
+  right SHA-256.
+- Unit tests: both ways in-process (resume from a partial file, a name
+  collision, a Chinese name, an empty file), cancelling, the ZFILE fields,
+  received-name cleaning.
+
+Not yet: shipping the fork's ssh with NativeTerm (packaging), macOS / Linux
+builds, ntplink (serial / Telnet) handing over to the same helper, and the
+zmodem2 fixes upstream.
 
 ## Build (Windows)
 

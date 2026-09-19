@@ -15,6 +15,7 @@ i18n-embed-fl = "0.10"
 native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
 native-term-win = { path = "../native-term-win" }
+zmodem2 = "0.7"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

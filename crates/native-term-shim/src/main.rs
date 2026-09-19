@@ -29,6 +29,7 @@ mod proxy;
 mod saved;
 mod ssh;
 mod win;
+mod zmodem;
 
 use std::os::windows::io::AsRawHandle;
 
@@ -82,6 +83,8 @@ fn main() {
         // ssh's ProxyCommand: stdin and stdout are ssh's connection, so
         // nothing else may be printed or waited for
         Mode::Proxy { url, host, port } => std::process::exit(proxy::run(&url, &host, &port)),
+        // rz / sz: stdin and stdout are the session's data
+        Mode::Zmodem { mode } => std::process::exit(zmodem::run(&mode)),
         Mode::CreateKey { path } => {
             let code = keys::create(&path);
             wait_for_any_key();
@@ -245,6 +248,9 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         let modes = win::ConsoleModes::save();
         let direct = ssh::is_direct(&effective);
         let mut command = Command::new(&ssh_path);
+        // NativeTerm's ssh hands rz / sz to the shim (`--zmodem`); any
+        // other ssh ignores it
+        command.env("NATIVETERM_ZMODEM", &shim_exe);
         // a saved password: the shim answers ssh's password prompt
         let set = saved::credential_set(alias);
         let saved =

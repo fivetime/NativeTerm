@@ -4,8 +4,9 @@
 //! restored sessions; `--no-forwards`: a clone, which would clash with the
 //! original's port forwards), or
 //! `nativeterm-shim --authenticated <shim-pid>` (the `LocalCommand` login
-//! signal), or `nativeterm-shim --proxy <url> <host> <port>` (the
-//! `ProxyCommand` helper).
+//! signal), `nativeterm-shim --proxy <url> <host> <port>` (the
+//! `ProxyCommand` helper), or `nativeterm-shim --zmodem download|upload`
+//! (rz / sz, run by NativeTerm's ssh).
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -39,6 +40,11 @@ pub enum Mode {
         url: String,
         host: String,
         port: String,
+    },
+    /// A ZMODEM transfer on stdin / stdout: the server ran `sz`
+    /// (`download`) or `rz` (`upload`).
+    Zmodem {
+        mode: String,
     },
 }
 
@@ -75,6 +81,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 return Ok(Mode::InstallKeys { key, aliases });
             }
             "--add-keys" => return Ok(Mode::AddKeys),
+            "--zmodem" => {
+                let mode = args.next().filter(|m| m == "download" || m == "upload");
+                let mode = mode.ok_or("--zmodem needs download or upload")?;
+                return Ok(Mode::Zmodem { mode });
+            }
             "--proxy" => {
                 let rest: Vec<String> = args.collect();
                 let [url, host, port] = rest.as_slice() else {
@@ -104,6 +115,13 @@ mod tests {
 
     fn p(args: &[&str]) -> Result<Mode, String> {
         parse(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn zmodem_helper() {
+        assert_eq!(p(&["--zmodem", "upload"]).unwrap(), Mode::Zmodem { mode: "upload".into() });
+        assert!(p(&["--zmodem", "sideways"]).is_err());
+        assert!(p(&["--zmodem"]).is_err());
     }
 
     #[test]

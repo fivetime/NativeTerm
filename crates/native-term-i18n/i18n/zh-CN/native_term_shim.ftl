@@ -63,3 +63,22 @@ proxy-password-refused = 这个代理密码之前被拒绝过，不会再发送�
 proxy-no-password = 没有保存代理 { $proxy } 的密码：请在会话选项的"代理"里保存
 proxy-login-too-long = SOCKS5 的用户名和密码各不能超过 255 字节
 proxy-schemes = 代理只接受这些登录方式：{ $schemes }；NativeTerm 目前只支持 Basic
+
+## rz / sz (--zmodem)
+zmodem-pick-folder = 服务器要发送文件（sz）：请选择保存到哪个文件夹…
+zmodem-folder-title = 选择保存下载文件的文件夹（sz）
+zmodem-pick-files = 服务器在等待接收文件（rz）：请选择要上传的文件…
+zmodem-files-title = 选择要上传的文件（rz）
+zmodem-receiving = 正在接收到 { $folder }（按 Esc 或 Ctrl+C 取消）
+zmodem-sending = 正在上传 { $count } 个文件（按 Esc 或 Ctrl+C 取消）
+zmodem-progress = { $name }  { $done } / { $size }  { $speed }/s
+zmodem-resume = { $name }：从 { $from } 处继续
+zmodem-done = 完成：{ $files } 个文件，{ $size }
+zmodem-cancelled = 已取消
+zmodem-cancelled-enter = 已取消（服务器已停止发送；按回车回到提示符）
+zmodem-failed = 传输失败：{ $error }
+zmodem-gone = 连接已中断
+zmodem-aborted = 对方取消了传输
+zmodem-timeout = 对方长时间没有回应
+zmodem-too-big = { $name } 超过 4 GB，ZMODEM 传不了，已跳过（请用"文件（SFTP）"）
+zmodem-short = 文件在传输过程中变短了

@@ -37,14 +37,19 @@ pub fn is_connection_level(code: i32) -> bool {
 }
 
 /// The `ssh` NativeTerm runs and checks configs with: `NATIVETERM_SSH`, else
-/// the first `ssh.exe` on `PATH` that is a native Windows build, else the
-/// one that comes with Windows. MSYS/Cygwin builds (Git for Windows puts
-/// one on some `PATH`s) are skipped: they read `C:/...` paths in `Include`
-/// differently, so NativeTerm's folders would be invisible to them.
+/// NativeTerm's own (its Win32-OpenSSH build with rz / sz, in `openssh\`
+/// next to the program), else the first `ssh.exe` on `PATH` that is a
+/// native Windows build, else the one that comes with Windows. MSYS/Cygwin
+/// builds (Git for Windows puts one on some `PATH`s) are skipped: they read
+/// `C:/...` paths in `Include` differently, so NativeTerm's folders would be
+/// invisible to them.
 pub fn ssh_program() -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Some(p) = std::env::var_os("NATIVETERM_SSH") {
         return PathBuf::from(p);
+    }
+    if let Some(own) = own_ssh() {
+        return own;
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
     ssh_in(std::env::split_paths(&path)).unwrap_or_else(|| {
@@ -56,6 +61,13 @@ pub fn ssh_program() -> std::path::PathBuf {
             PathBuf::from("ssh")
         }
     })
+}
+
+/// NativeTerm's own ssh: `openssh\ssh.exe` next to the running program.
+fn own_ssh() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let own = exe.parent()?.join("openssh").join("ssh.exe");
+    own.is_file().then_some(own)
 }
 
 fn ssh_in(dirs: impl Iterator<Item = std::path::PathBuf>) -> Option<std::path::PathBuf> {
