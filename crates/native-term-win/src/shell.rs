@@ -1,89 +1,18 @@
-//! The Windows shell: file and folder pickers, opening a file with its
-//! program, known folders.
+//! The Windows shell: opening a file with its program, the Recycle Bin,
+//! drives and known folders.
 //!
-//! The pickers block until the user is done, so callers run them on a
-//! thread of their own (COM is set up there); the owner window is
-//! disabled meanwhile, as with any modal dialog.
+//! (A file picker once lived here, owned by the window in front: that was
+//! sometimes a Terminal window, which Windows disables while a modal
+//! dialog it owns is open; a picker killed with its process left the
+//! Terminal disabled for good. A picker, if one comes back, is owned by
+//! a NativeTerm window only.)
 
 use std::path::PathBuf;
 
 use windows::core::{HSTRING, PCWSTR};
-use windows::Win32::Foundation::HWND;
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
-    COINIT_DISABLE_OLE1DDE,
-};
-use windows::Win32::UI::Shell::{
-    FOLDERID_Downloads, FileOpenDialog, IFileOpenDialog, IShellItem, SHGetKnownFolderPath, ShellExecuteW,
-    FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, KF_FLAG_DEFAULT, SIGDN_FILESYSPATH,
-};
+use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::UI::Shell::{FOLDERID_Downloads, SHGetKnownFolderPath, ShellExecuteW, KF_FLAG_DEFAULT};
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-/// COM for this thread while the value lives.
-struct Com;
-
-impl Com {
-    fn init() -> Option<Com> {
-        // SAFETY: no pointers; a failure (another apartment on this
-        // thread) is reported and nothing is uninitialized for it.
-        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) }.is_ok().then_some(Com)
-    }
-}
-
-impl Drop for Com {
-    fn drop(&mut self) {
-        // SAFETY: pairs the successful CoInitializeEx of `init` on this
-        // thread (`Com` is neither Send nor Sync: it stays on the thread);
-        // the COM objects made meanwhile are dropped before it.
-        unsafe { CoUninitialize() };
-    }
-}
-
-fn item_path(item: &IShellItem) -> Option<PathBuf> {
-    // SAFETY: `item` is a live COM object; the name GetDisplayName returns
-    // is a CoTaskMem string owned by us, read once and freed once.
-    unsafe {
-        let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
-        let path = name.to_string().ok();
-        CoTaskMemFree(Some(name.0 as *const _));
-        path.map(PathBuf::from)
-    }
-}
-
-/// Files to open (several may be chosen); `None` if cancelled.
-pub fn pick_files(owner: isize, title: &str) -> Option<Vec<PathBuf>> {
-    pick(owner, title, false)
-}
-
-/// A folder; `None` if cancelled.
-pub fn pick_folder(owner: isize, title: &str) -> Option<PathBuf> {
-    pick(owner, title, true).and_then(|mut v| v.pop())
-}
-
-fn pick(owner: isize, title: &str, folders: bool) -> Option<Vec<PathBuf>> {
-    let _com = Com::init()?;
-    // SAFETY: COM is initialized on this thread for the whole block (`_com`
-    // outlives the objects made here, which drop at its end); `owner` is a
-    // window handle or 0 (no owner), and a stale handle only makes Show
-    // fail; the title's HSTRING lives through the call.
-    unsafe {
-        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
-        let base = dialog.GetOptions().ok()? | FOS_FORCEFILESYSTEM;
-        let options = if folders { base | FOS_PICKFOLDERS } else { base | FOS_ALLOWMULTISELECT | FOS_FILEMUSTEXIST };
-        dialog.SetOptions(options).ok()?;
-        let _ = dialog.SetTitle(&HSTRING::from(title));
-        // cancelled: an error
-        dialog.Show(Some(HWND(owner as *mut _))).ok()?;
-        let items = dialog.GetResults().ok()?;
-        let mut paths = Vec::new();
-        for i in 0..items.GetCount().ok()? {
-            if let Some(path) = items.GetItemAt(i).ok().as_ref().and_then(item_path) {
-                paths.push(path);
-            }
-        }
-        (!paths.is_empty()).then_some(paths)
-    }
-}
 
 /// Opens a file with its program; one without a program gets Windows'
 /// "How do you want to open this file?".
@@ -148,13 +77,6 @@ pub fn drives() -> Vec<PathBuf> {
         .filter(|d| !d.is_empty())
         .map(|d| PathBuf::from(String::from_utf16_lossy(d)))
         .collect()
-}
-
-/// The window in front (the one the user just clicked in): the owner for
-/// a picker.
-pub fn foreground_window() -> isize {
-    // SAFETY: no parameters; the handle is only passed on as a number.
-    unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }.0 as isize
 }
 
 /// The user's Downloads folder.
