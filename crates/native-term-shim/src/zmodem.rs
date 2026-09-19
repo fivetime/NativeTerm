@@ -541,8 +541,29 @@ fn remember(name: &str, folder: &Path) {
     let _ = native_term_win::registry::write_user_values(REG_KEY, &[(name, value)]);
 }
 
-/// The helper: `mode` is `download` (the server ran `sz`) or `upload`
-/// (it ran `rz`). Exit code 0 when done, 1 when cancelled or failed.
+/// Asks NativeTerm (its pipe) to open the files window of this tab's
+/// session; whether it could be asked.
+fn ask_for_files() -> bool {
+    use native_term_session::pipe;
+    use native_term_session::protocol::{Role, ShimMessage};
+    let name = std::env::var("NATIVETERM_PIPE").ok().or_else(|| pipe::pipe_name().ok());
+    let Some(conn) = name.and_then(|n| pipe::connect(&n, Duration::from_millis(500)).ok()) else { return false };
+    let hello = ShimMessage::Hello {
+        protocol: native_term_session::PROTOCOL_VERSION,
+        role: Role::Request,
+        pid: std::process::id(),
+        wt_session: std::env::var("WT_SESSION").ok().filter(|s| !s.is_empty()),
+        session: None,
+        alias: None,
+        terminal_window: None,
+    };
+    conn.send(&hello).is_ok() && conn.send(&ShimMessage::OpenFiles).is_ok()
+}
+
+/// The helper: `mode` is `download` (the server ran `sz`), `upload` (it
+/// ran `rz`), or `tmux` (one of them in tmux, which changes the data both
+/// ways: it is stopped, and the files window offered instead). Exit code 0
+/// when done, 1 when cancelled or failed.
 pub fn run(mode: &str) -> i32 {
     let (tx, input) = mpsc::channel();
     std::thread::spawn(move || {
@@ -562,6 +583,15 @@ pub fn run(mode: &str) -> i32 {
     let wire = Wire { input, output: io::BufWriter::with_capacity(64 * 1024, io::stdout().lock()) };
     let cancel = Arc::new(AtomicBool::new(false));
     let mut console = Console::new();
+    if mode == "tmux" {
+        let mut wire = wire;
+        cancel_other_side(&mut wire);
+        let text = if ask_for_files() { t!("zmodem-tmux-files") } else { t!("zmodem-tmux") };
+        let mut stdout = io::stdout().lock();
+        let _ = stdout.write_all(END).and_then(|()| stdout.flush());
+        eprint!("\r\n[NativeTerm] {text}\r\n");
+        return 1;
+    }
     let outcome = match mode {
         "download" => {
             let dir = std::env::var_os("NATIVETERM_ZMODEM_DIR").map(PathBuf::from).or_else(|| {

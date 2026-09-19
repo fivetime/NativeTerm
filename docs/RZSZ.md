@@ -168,6 +168,20 @@ container through the fork's ssh; lrzsz installed from the tab with
   collision, a Chinese name, an empty file), cancelling, the ZFILE fields,
   received-name cleaning.
 
+**In tmux** (NativeTerm's persistent sessions, or any): tmux is a terminal
+emulator of its own; it drops the ZDLE from the header (the tab showed
+`**B00000000000000`) and would change the binary data both ways (and take
+Ctrl+B as its prefix), so ZMODEM can't work through it, and changing the
+server's tmux is not ours to do. ssh spots the header as tmux leaves it
+(`**B00` / `**B01` and ten more hex digits, no ZDLE) and runs the helper
+in `tmux` mode: it cancels rz / sz (the cancel passes through tmux as
+Ctrl+X keys) and takes in what follows, then asks NativeTerm (pipe, role
+`Request`, message `OpenFiles`, found by `WT_SESSION`) to open the files
+window of the tab's session, which starts at the tmux pane's folder, and
+says so in the tab. Verified live: `sz small.bin` and `rz` in a tmux tab
+both stopped on the server (no rz / sz left running) and opened the files
+window at `/srv/zt` with the file listed.
+
 Not yet: shipping the fork's ssh with NativeTerm (packaging), macOS / Linux
 builds, ntplink (serial / Telnet) handing over to the same helper, and the
 zmodem2 fixes upstream.

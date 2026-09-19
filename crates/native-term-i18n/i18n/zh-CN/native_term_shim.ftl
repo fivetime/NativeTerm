@@ -82,3 +82,5 @@ zmodem-aborted = 对方取消了传输
 zmodem-timeout = 对方长时间没有回应
 zmodem-too-big = { $name } 超过 4 GB，ZMODEM 传不了，已跳过（请用"文件（SFTP）"）
 zmodem-short = 文件在传输过程中变短了
+zmodem-tmux = tmux 会话里用不了 rz/sz（tmux 会改动传输的数据），已停止。请用"文件（SFTP）"传文件（标签页右键菜单）。
+zmodem-tmux-files = tmux 会话里用不了 rz/sz（tmux 会改动传输的数据），已停止；已打开"文件（SFTP）"窗口，定位到当前目录。按回车回到提示符。

@@ -270,6 +270,8 @@ struct Placeholder {
 }
 
 type Repaint = Box<dyn Fn() + Send + Sync>;
+/// Asks the main window for something (see `tab_menu::MenuRequest`).
+type Ask = Arc<dyn Fn(tab_menu::MenuRequest) + Send + Sync>;
 
 pub(crate) struct Shared {
     terminal: WindowsTerminal,
@@ -289,6 +291,9 @@ pub(crate) struct Shared {
     watcher: Mutex<Option<Watcher>>,
     /// NativeTerm's own tab menu, once started.
     menu: Mutex<Option<TabMenu>>,
+    /// Asks the main window (dialogs, the files window); set with the tab
+    /// menu, used by helpers' requests too.
+    ask: Mutex<Option<Ask>>,
     /// Full tab scans so far (diagnostics).
     scans: std::sync::atomic::AtomicU64,
     placeholders: Mutex<Sender<Placeholder>>,
@@ -473,6 +478,7 @@ impl Core {
             wake: Mutex::new(wake.clone()),
             watcher: Mutex::new(None),
             menu: Mutex::new(None),
+            ask: Mutex::new(None),
             scans: Default::default(),
             placeholders: Mutex::new(placeholders),
             auto_reconnect: Default::default(),
@@ -571,7 +577,9 @@ impl Core {
     /// `send` opens the send dialog for a session id.
     pub fn start_tab_menu(&self, ask: impl Fn(tab_menu::MenuRequest) + Send + Sync + 'static) -> io::Result<()> {
         let settings = self.shared.terminal.install().settings_json();
-        let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared), ask: Arc::new(ask) });
+        let ask: Ask = Arc::new(ask);
+        *lock(&self.shared.ask) = Some(Arc::clone(&ask));
+        let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared), ask });
         let menu = TabMenu::start(settings, provider)?;
         *lock(&self.shared.menu) = Some(menu);
         self.shared.refresh_soon();
@@ -1343,6 +1351,23 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     }
     let _ = conn.send(&AppMessage::Welcome { protocol: PROTOCOL_VERSION });
 
+    if role == Role::Request {
+        // a helper in a tab: one request, then it's gone
+        if let Ok(Some(ShimMessage::OpenFiles)) = conn.recv::<ShimMessage>(Duration::from_secs(5)) {
+            let found = wt_session.as_deref().and_then(|guid| {
+                lock(&shared.sessions)
+                    .iter()
+                    .find(|s| s.state.is_open() && s.matches_terminal_session(guid))
+                    .map(|s| (s.alias.clone(), s.id.clone()))
+            });
+            let ask = lock(&shared.ask).clone();
+            if let (Some((alias, session)), Some(ask)) = (found, ask) {
+                ask(tab_menu::MenuRequest::Files { alias, session });
+            }
+        }
+        return;
+    }
+
     if role == Role::AuthSignal {
         // the LocalCommand helper: one message, then it's gone
         if let Ok(Some(ShimMessage::Authenticated)) = conn.recv::<ShimMessage>(Duration::from_secs(5)) {
@@ -1660,6 +1685,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::Specials { .. }
             | ShimMessage::Unreachable
             | ShimMessage::PasswordRefused
+            | ShimMessage::OpenFiles
     ) {
         s.quiet_since = None;
     }
@@ -1691,7 +1717,9 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         ShimMessage::Specials { names } => s.specials = names.clone(),
         ShimMessage::Unreachable => s.unreachable = true,
         ShimMessage::PasswordRefused => {}
-        ShimMessage::Heard | ShimMessage::Hello { .. } => {}
+        // Hello is the connection's start; OpenFiles comes from `Request`
+        // helpers only
+        ShimMessage::Heard | ShimMessage::Hello { .. } | ShimMessage::OpenFiles => {}
     }
 }
 

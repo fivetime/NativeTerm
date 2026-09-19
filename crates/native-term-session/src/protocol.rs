@@ -12,6 +12,9 @@ pub enum Role {
     Shim,
     /// The `LocalCommand` helper: sends `Authenticated` and leaves.
     AuthSignal,
+    /// A helper in a tab (e.g. rz / sz) asking for something once
+    /// (`OpenFiles`), then leaving.
+    Request,
 }
 
 /// Shim → NativeTerm.
@@ -63,6 +66,9 @@ pub enum ShimMessage {
     /// connection, e.g. "brk" (a serial line's Break, Telnet's Break);
     /// sent after `Connecting`, none until then.
     Specials { names: Vec<String> },
+    /// From a `Request` helper: open the files window (SFTP) of the tab's
+    /// session (found by `wt_session`), at its tmux pane's folder.
+    OpenFiles,
 }
 
 /// NativeTerm → shim.

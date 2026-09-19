@@ -82,8 +82,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
             }
             "--add-keys" => return Ok(Mode::AddKeys),
             "--zmodem" => {
-                let mode = args.next().filter(|m| m == "download" || m == "upload");
-                let mode = mode.ok_or("--zmodem needs download or upload")?;
+                let mode = args.next().filter(|m| matches!(m.as_str(), "download" | "upload" | "tmux"));
+                let mode = mode.ok_or("--zmodem needs download, upload or tmux")?;
                 return Ok(Mode::Zmodem { mode });
             }
             "--proxy" => {
