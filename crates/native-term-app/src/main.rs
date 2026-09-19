@@ -27,6 +27,7 @@ mod send_dialog;
 mod send_line;
 mod server_sessions;
 mod shell;
+mod shortcut_ui;
 mod storage;
 mod tab_list;
 mod terminal_profile;

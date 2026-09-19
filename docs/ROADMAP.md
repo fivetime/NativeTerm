@@ -416,7 +416,7 @@
       library, grouped by bar; other buttons listed with the reason
 - [ ] Import SecureCRT's Command Manager commands (storage format needed:
       one command file from the user); preview on a real button bar file
-- [ ] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
+- [x] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
       Mac keyboards
 - [ ] Throttle snapshots, previews, and sync on battery power
 - [x] Active-session tracking (last Terminal window in front + its
@@ -476,7 +476,8 @@
       host search / quick connect, active session reconnect and clone, all
       tabs, close disconnected, show NativeTerm; draggable, position kept
 - [ ] Floating action button (rest): round/transparent shape, send command
-- [ ] Optional `RegisterHotKey` shortcut, off by default
+- [x] Optional global shortcuts (`RegisterHotKey`), off by default, checked
+      against Windows Terminal's bindings
 - [x] Per-host/folder tab color (`--tabColor`) and color scheme (applied by
       the shim with OSC, since `--colorScheme` had no effect in 1.26);
       tree shows the color; no per-host profile (the NativeTerm profile

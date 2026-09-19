@@ -149,6 +149,8 @@ pub struct App {
     no_group_cache: std::cell::RefCell<(u64, std::collections::HashSet<String>)>,
     /// Hosts kept in tmux on the server, per tree generation.
     tmux_cache: std::cell::RefCell<(u64, std::collections::HashSet<String>)>,
+    /// Keyboard shortcuts: in the window and global.
+    keys: crate::shortcut_ui::ShortcutUi,
     dialog: Option<Dialog>,
     profile: ProfileSetup,
     show_settings: bool,
@@ -226,6 +228,7 @@ impl App {
         let folders_watcher = watch_folders(&options.ssh_dir, &ssh_changed, ctx);
         let loaded_from = fingerprint(&options.ssh_dir, &tree);
         let first_run = core.as_ref().is_some_and(|c| c.setting(crate::wizard::DONE_SETTING).is_none());
+        let keys = crate::shortcut_ui::ShortcutUi::new(ctx, core.as_ref(), &profile.settings_json());
         App {
             core,
             _watcher: watcher,
@@ -259,6 +262,7 @@ impl App {
             open_files: std::env::var("NATIVETERM_OPEN_FILES").ok().filter(|a| !a.is_empty()),
             no_group_cache: std::cell::RefCell::new((u64::MAX, std::collections::HashSet::new())),
             tmux_cache: std::cell::RefCell::new((u64::MAX, std::collections::HashSet::new())),
+            keys,
             dialog: None,
             profile,
             show_settings: false,
@@ -347,6 +351,52 @@ impl App {
     }
 
     /// Hosts in folders marked "No group send".
+    /// A shortcut's command; `global`: pressed while another program was in
+    /// front (NativeTerm's window comes out first where the command shows
+    /// something in it).
+    fn run_shortcut(&mut self, command: native_term_app::shortcuts::Command, global: bool) {
+        use native_term_app::shortcuts::Command;
+        let active = || self.core.as_ref().and_then(Core::active_session);
+        match command {
+            Command::ShowNativeTerm | Command::SearchHosts => {
+                if global || command == Command::ShowNativeTerm {
+                    crate::shell::show_main();
+                }
+                self.view.focus_search();
+            }
+            Command::AllTabs => {
+                if global {
+                    crate::shell::show_tabs();
+                }
+                self.view_right = View::Tabs;
+                self.tab_list.focus_search();
+            }
+            Command::SendToActive | Command::SendToSeveral => {
+                let Some(core) = self.core.clone() else { return };
+                if self.dialog.is_some() {
+                    self.notices.push(t!("notice-dialog-open"));
+                    return;
+                }
+                let chosen = match command {
+                    Command::SendToActive => match active() {
+                        Some(s) => vec![s.id],
+                        None => {
+                            self.notices.push(t!("keys-no-active"));
+                            return;
+                        }
+                    },
+                    _ => Vec::new(),
+                };
+                crate::shell::show_main();
+                self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(&core, &chosen))));
+            }
+            Command::FilesForActive => match active() {
+                Some(s) => self.open_files(&s.alias, Some(&s.id)),
+                None => self.notices.push(t!("keys-no-active")),
+            },
+        }
+    }
+
     /// The send dialog, with the hosts kept in tmux (their sessions can be
     /// sent to through tmux on the server when not logged in).
     fn send_dialog(&self, core: &Core, chosen: &[String]) -> SendDialog {
@@ -1486,18 +1536,14 @@ impl crate::window::Ui for App {
         if let Some(core) = &self.core {
             self.notices.extend(core.take_notices());
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-            self.view.focus_search();
+        for (command, global) in self.keys.take(ctx) {
+            self.run_shortcut(command, global);
         }
         self.reload_if_changed();
         for request in crate::shell::take_requests() {
             self.handle_menu_request(request);
         }
         if crate::shell::take_show_tabs() {
-            self.view_right = View::Tabs;
-            self.tab_list.focus_search();
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::T)) {
             self.view_right = View::Tabs;
             self.tab_list.focus_search();
         }
@@ -1551,13 +1597,15 @@ impl crate::window::Ui for App {
                     }
                     ui.separator();
                     self.agent.settings_ui(ui, &self.ssh_dir, self.core.as_ref());
+                    if ui.small_button(t!("button-check-again")).clicked() {
+                        self.agent.refresh(&self.ssh_dir, ui.ctx());
+                    }
+                    ui.separator();
+                    self.keys.settings_ui(ui, self.core.as_ref());
                     let sets = ui.button(t!("cred-sets-button")).on_hover_text(t!("cred-sets-intro"));
                     if sets.clicked() && self.dialog.is_none() {
                         let dialog = crate::credential_sets::CredentialSetsDialog::new(&self.tree);
                         self.dialog = Some(Dialog::CredentialSets(Box::new(dialog)));
-                    }
-                    if ui.small_button(t!("button-check-again")).clicked() {
-                        self.agent.refresh(&self.ssh_dir, ui.ctx());
                     }
                     ui.separator();
                     self.folders_ui(ui);

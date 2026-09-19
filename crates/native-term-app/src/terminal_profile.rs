@@ -135,6 +135,11 @@ impl ProfileSetup {
         });
     }
 
+    /// The Terminal's own `settings.json` (its key bindings, among others).
+    pub fn settings_json(&self) -> PathBuf {
+        self.install.settings_json()
+    }
+
     pub fn settings_ui(&mut self, ui: &mut egui::Ui, notices: &mut Vec<String>) {
         ui.label(t!(
             "settings-terminal",

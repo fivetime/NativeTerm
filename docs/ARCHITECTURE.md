@@ -3256,6 +3256,45 @@ creation); while such a dialog is open the wizard waits behind it.
 - Global shortcuts (`RegisterHotKey`) are off by default and must not
   collide with Windows Terminal's own key bindings.
 
+Implemented (`native_term_app::shortcuts`, `native_term_win::hotkey`,
+`shortcut_ui.rs`):
+
+- **Commands**: show NativeTerm and search hosts, search hosts, all
+  tabs, send a command to the active session, send to several sessions,
+  files (SFTP) of the active session. Each may have a shortcut in
+  NativeTerm's window and a global one. Defaults: Ctrl+F and Ctrl+T in
+  the window, nothing global. The files window's keys (F5, F2, Delete,
+  Backspace, Enter) and text fields' (Enter, Esc) stay as they are.
+- **Combinations** are written as Windows Terminal writes them
+  (`ctrl+alt+f`, `ctrl+shift+comma`), so they compare with its bindings
+  as they are; kept in `state.db` (`shortcuts`) as the changes from the
+  defaults only, so a new default reaches whoever never changed that one.
+- **Checks**: the same combination for two commands; a global one
+  without Ctrl or Alt, or one Windows keeps (Alt+F4, Alt+Tab, Alt+Esc,
+  Alt+Space, Ctrl+Esc), isn't registered; one in the window without Ctrl
+  or Alt (F1–F24 aside) isn't caught, as it would fire while typing in a
+  field; a global one Windows Terminal uses (its default bindings, and
+  every `keys` in its `settings.json`'s `actions` and `keybindings`, both
+  formats) is registered with a warning, since it takes the key from the
+  Terminal; one another program holds is reported with Windows' reason.
+- **Global shortcuts**: `RegisterHotKey` with no window on a thread of
+  its own (`WM_HOTKEY` in its queue; no keyboard hook), `MOD_NOREPEAT`;
+  the whole set is replaced on each change. A press runs the command:
+  NativeTerm's window comes out where it shows something; "active
+  session" is the selected tab of the Terminal window last in front.
+- **Settings**: "Keyboard Shortcuts" lists each command with its two
+  shortcuts; a click records the next combination pressed (Esc cancels),
+  ✕ clears, "Restore Defaults"; problems are shown under each.
+- Verified: unit tests (combinations both ways, egui keys, the saved
+  text, Windows Terminal's bindings from a settings.json, the checks) and
+  a registration test (registered, refused while another holds it, free
+  after). Live: Ctrl+Alt+F recorded as the global shortcut of "Files of
+  the active session"; pressed while the portable Terminal was in front
+  with a tmux tab in `/srv/热键`, it opened the files window, in front,
+  at `/srv/热键`. Ctrl+Shift+D recorded as another global shortcut was
+  shown as Windows Terminal's `duplicateTab`. Ctrl+T in the window still
+  opened "All tabs" with its search focused.
+
 ## Resource budget
 
 NativeTerm and its shims must stay cheap enough to leave running all day

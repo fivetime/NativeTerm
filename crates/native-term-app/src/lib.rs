@@ -12,6 +12,7 @@ pub mod i18n;
 pub mod import;
 pub mod quick;
 pub mod registry;
+pub mod shortcuts;
 pub mod tab_menu;
 pub mod tmux_send;
 

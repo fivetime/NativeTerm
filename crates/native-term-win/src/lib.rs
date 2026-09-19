@@ -7,6 +7,7 @@ pub mod cloud;
 pub mod credentials;
 pub mod desktop;
 pub mod dock;
+pub mod hotkey;
 pub mod registry;
 pub mod service;
 pub mod shell;
