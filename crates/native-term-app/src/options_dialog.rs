@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 
 use native_term_app::t;
 use native_term_config::options::{self, Category, Kind, Names, Values};
+use native_term_config::password::REFUSED;
 use native_term_config::proxy::{self, Proxy};
+use native_term_win::credentials::{self, Saved};
 
 use crate::dialogs::Outcome;
 
@@ -28,11 +30,39 @@ enum ProxyChoice {
     Other,
 }
 
+/// The proxy login's password in Credential Manager, as last read.
+#[derive(Default)]
+struct ProxySecret {
+    /// The entry it was read for (it follows type, address and user).
+    entry: Option<String>,
+    saved: bool,
+    refused: bool,
+    typed: String,
+    message: Option<String>,
+}
+
+impl ProxySecret {
+    /// Read the state again when the entry changed.
+    fn follow(&mut self, entry: Option<String>) {
+        if self.entry == entry {
+            return;
+        }
+        let saved = entry.as_deref().and_then(|e| credentials::read(e).ok().flatten());
+        self.saved = saved.is_some();
+        self.refused = saved.is_some_and(|s| s.comment == REFUSED);
+        self.entry = entry;
+        self.message = None;
+    }
+}
+
 pub struct OptionsDialog {
     pub target: OptionsTarget,
     proxy: ProxyChoice,
     /// `host:port` for NativeTerm's proxy.
     proxy_address: String,
+    /// The login's user name (empty: none).
+    proxy_user: String,
+    proxy_secret: ProxySecret,
     /// The helper written into `ProxyCommand`.
     shim: PathBuf,
     label: String,
@@ -141,15 +171,17 @@ impl OptionsDialog {
             by_keyword.entry(k).or_default().push(v);
         }
         let written = values.get("ProxyCommand").and_then(|v| v.first()).map(String::as_str).unwrap_or("");
-        let (proxy, proxy_address) = match Proxy::from_command(written) {
-            _ if written.trim().is_empty() => (ProxyChoice::Default, String::new()),
-            Some(p) => (ProxyChoice::Kind(p.kind), p.address()),
-            None => (ProxyChoice::Other, String::new()),
+        let (proxy, proxy_address, proxy_user) = match Proxy::from_command(written) {
+            _ if written.trim().is_empty() => (ProxyChoice::Default, String::new(), String::new()),
+            Some(p) => (ProxyChoice::Kind(p.kind), p.address(), p.user.clone().unwrap_or_default()),
+            None => (ProxyChoice::Other, String::new(), String::new()),
         };
         OptionsDialog {
             target,
             proxy,
             proxy_address,
+            proxy_user,
+            proxy_secret: ProxySecret::default(),
             shim: native_term_app::default_shim_path().unwrap_or_default(),
             label: label.to_string(),
             category: Category::Connection,
@@ -165,23 +197,87 @@ impl OptionsDialog {
         let mut values: Values = self.text.iter().map(|(k, v)| (*k, v.lines().map(str::to_string).collect())).collect();
         let proxy = match self.proxy {
             ProxyChoice::Default => Vec::new(),
-            ProxyChoice::Kind(kind) => {
-                Proxy::from_address(kind, &self.proxy_address).map(|p| vec![p.command(&self.shim)]).unwrap_or_default()
-            }
+            ProxyChoice::Kind(_) => self.chosen_proxy().map(|p| vec![p.command(&self.shim)]).unwrap_or_default(),
             ProxyChoice::Other => values.get("ProxyCommand").cloned().unwrap_or_default(),
         };
         values.insert("ProxyCommand", proxy);
         values
     }
 
+    /// NativeTerm's proxy as typed: type, address and user name.
+    fn chosen_proxy(&self) -> Result<Proxy, String> {
+        match self.proxy {
+            ProxyChoice::Kind(kind) => Proxy::from_address(kind, &self.proxy_address)?.with_user(&self.proxy_user),
+            _ => Err(String::new()),
+        }
+    }
+
     /// What is wrong with the proxy's address, if a proxy is chosen.
     fn proxy_error(&self) -> Option<String> {
         match self.proxy {
-            ProxyChoice::Kind(kind) => {
-                Proxy::from_address(kind, &self.proxy_address).err().map(|e| t!("proxy-invalid", error = e))
-            }
+            ProxyChoice::Kind(_) => self.chosen_proxy().err().map(|e| t!("proxy-invalid", error = e)),
             _ => None,
         }
+    }
+
+    /// The login: a user name, and the password saved in Credential
+    /// Manager right away (never in the config).
+    fn proxy_login(&mut self, ui: &mut egui::Ui) {
+        let ProxyChoice::Kind(kind) = self.proxy else { return };
+        ui.horizontal(|ui| {
+            ui.label(t!("proxy-user"));
+            let hint = if kind == proxy::Kind::Socks4 { t!("proxy-user-id-hint") } else { t!("proxy-user-hint") };
+            let field = egui::TextEdit::singleline(&mut self.proxy_user).hint_text(hint).desired_width(200.0);
+            let field = ui.add(field);
+            crate::dialogs::no_ime(&field);
+        });
+        let chosen = self.chosen_proxy().ok();
+        self.proxy_secret.follow(chosen.as_ref().and_then(Proxy::password_entry));
+        let Some(entry) = self.proxy_secret.entry.clone() else { return };
+        let secret = &mut self.proxy_secret;
+        let red = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
+        match (secret.saved, secret.refused) {
+            (true, true) => ui.colored_label(red, t!("proxy-password-refused")),
+            (true, false) => ui.weak(t!("proxy-password-saved")),
+            (false, _) => ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), t!("proxy-password-none")),
+        };
+        ui.horizontal(|ui| {
+            let field = egui::TextEdit::singleline(&mut secret.typed)
+                .password(true)
+                .hint_text(t!("proxy-password-hint"))
+                .desired_width(200.0);
+            let field = ui.add(field);
+            crate::dialogs::no_ime(&field);
+            if ui.add_enabled(!secret.typed.is_empty(), egui::Button::new(t!("password-save"))).clicked() {
+                let user = self.proxy_user.trim().to_string();
+                let saved = Saved { user, secret: std::mem::take(&mut secret.typed), comment: String::new() };
+                let result = credentials::write(&entry, &saved);
+                drop(saved);
+                secret.message = Some(match result {
+                    Ok(()) => {
+                        (secret.saved, secret.refused) = (true, false);
+                        t!("password-stored")
+                    }
+                    Err(e) => e.to_string(),
+                });
+            }
+            if secret.saved && ui.button(t!("password-remove")).clicked() {
+                secret.message = Some(match credentials::delete(&entry) {
+                    Ok(_) => {
+                        (secret.saved, secret.refused) = (false, false);
+                        t!("password-removed")
+                    }
+                    Err(e) => e.to_string(),
+                });
+            }
+        });
+        if let Some(message) = &secret.message {
+            ui.weak(message);
+        }
+        if kind == proxy::Kind::Http {
+            ui.weak(t!("proxy-basic-note"));
+        }
+        ui.weak(t!("password-warning"));
     }
 
     /// The proxy: a type, then its address (or another command as text).
@@ -229,6 +325,7 @@ impl OptionsDialog {
             if let Some(error) = self.proxy_error().filter(|_| !self.proxy_address.trim().is_empty()) {
                 ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
             }
+            self.proxy_login(ui);
             // ssh uses whichever of the two it reads first
             let jump = self.text.get("ProxyJump").map(|v| v.trim().to_string()).unwrap_or_default();
             let jump = if jump.is_empty() { self.effective_of("ProxyJump").join(",") } else { jump };
@@ -443,6 +540,14 @@ mod tests {
         assert!(dialog.proxy_error().is_some());
         dialog.proxy = ProxyChoice::Default;
         assert!(dialog.values()["ProxyCommand"].is_empty());
+        // a login: the user name in the URL
+        dialog.proxy = ProxyChoice::Kind(proxy::Kind::Http);
+        dialog.proxy_address = "squid:3128".into();
+        dialog.proxy_user = "alice".into();
+        let command = dialog.values()["ProxyCommand"][0].clone();
+        assert!(command.ends_with(" --proxy http://alice@squid:3128 %h %p"), "{command}");
+        let dialog = OptionsDialog::new(host(), "Web", &dialog.values(), Vec::new(), Path::new("ssh"));
+        assert_eq!(dialog.proxy_user, "alice");
         // someone else's command is kept as it is
         values.insert("ProxyCommand", vec!["connect -S gw:1080 %h %p".into()]);
         let dialog = OptionsDialog::new(host(), "Web", &values, Vec::new(), Path::new("ssh"));

@@ -848,3 +848,82 @@ fn proxy_helper_passes_bytes_both_ways() {
     assert!(error.contains("host unreachable") && error.contains("target.lan:22"), "{error}");
     server.join().unwrap();
 }
+
+/// A SOCKS5 proxy wanting a login: the password comes from Credential
+/// Manager (a test entry), a refusal marks it, and a marked password is
+/// never sent again.
+#[test]
+fn proxy_login_from_credential_manager() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    use native_term_win::credentials::{self, Saved};
+
+    let prefix = format!("NativeTerm-Tests-proxy-{}", std::process::id());
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let url = format!("socks5://alice@127.0.0.1:{port}");
+    let entry = format!("{prefix}/proxy/{url}");
+    let saved = Saved { user: "alice".into(), secret: "s3cret".into(), comment: String::new() };
+    credentials::write(&entry, &saved).unwrap();
+    // accepts the right password once, then refuses
+    let server = std::thread::spawn(move || {
+        let mut logins = Vec::new();
+        for accept in [true, false] {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut offer = [0u8; 4];
+            s.read_exact(&mut offer).unwrap();
+            assert_eq!(offer, [5, 2, 0, 2]);
+            s.write_all(&[5, 2]).unwrap();
+            let mut head = [0u8; 2];
+            s.read_exact(&mut head).unwrap();
+            let mut user = vec![0u8; head[1] as usize];
+            s.read_exact(&mut user).unwrap();
+            let mut len = [0u8; 1];
+            s.read_exact(&mut len).unwrap();
+            let mut password = vec![0u8; len[0] as usize];
+            s.read_exact(&mut password).unwrap();
+            logins.push((String::from_utf8(user).unwrap(), String::from_utf8(password).unwrap()));
+            if !accept {
+                s.write_all(&[1, 1]).unwrap();
+                continue;
+            }
+            s.write_all(&[1, 0]).unwrap();
+            let mut request = [0u8; 10];
+            s.read_exact(&mut request).unwrap();
+            s.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+            let mut got = Vec::new();
+            s.read_to_end(&mut got).unwrap();
+            s.write_all(&got.to_ascii_uppercase()).unwrap();
+        }
+        logins
+    });
+    let run = |input: &[u8]| {
+        let mut child = Command::new(shim_exe())
+            .args(["--proxy", &url, "10.0.0.9", "22"])
+            .env("NATIVETERM_LANG", "en")
+            .env("NATIVETERM_CRED_PREFIX", &prefix)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        child.wait_with_output().unwrap()
+    };
+    let ok = run(b"ssh-2.0\n");
+    let refused = run(b"");
+    let again = run(b"");
+    let marked = credentials::read(&entry).unwrap().unwrap();
+    credentials::delete(&entry).unwrap();
+    assert_eq!(ok.stdout, b"SSH-2.0\n", "{}", String::from_utf8_lossy(&ok.stderr));
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("refused the user name or password"));
+    assert_eq!(marked.comment, native_term_config::password::REFUSED);
+    assert_eq!(marked.secret, "s3cret", "kept, only marked");
+    let error = String::from_utf8_lossy(&again.stderr);
+    assert!(error.contains("was refused before"), "{error}");
+    let logins = server.join().unwrap();
+    let login = ("alice".to_string(), "s3cret".to_string());
+    assert_eq!(logins, [login.clone(), login], "not sent a third time");
+}

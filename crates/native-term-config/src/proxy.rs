@@ -4,6 +4,10 @@
 //! ssh run then uses it (tabs, files, background checks, and plain `ssh`,
 //! `scp` or VS Code Remote too), and `~/.ssh` stays the only place it is
 //! kept. A `ProxyCommand` of any other form is left as it is.
+//!
+//! A proxy that wants a login has its user name in the URL
+//! (`socks5://alice@gw:1080`) and its password in Credential Manager
+//! (`NativeTerm/proxy/<url>`), never in the config.
 
 use std::path::Path;
 
@@ -52,6 +56,8 @@ pub struct Proxy {
     pub kind: Kind,
     pub host: String,
     pub port: u16,
+    /// The login's user name (SOCKS4: its user id), if the proxy wants one.
+    pub user: Option<String>,
 }
 
 impl Proxy {
@@ -66,17 +72,41 @@ impl Proxy {
             other => return Err(format!("unknown proxy type {other:?} (socks5, socks4, http)")),
         };
         let rest = rest.trim_end_matches('/');
-        if rest.contains('@') {
-            return Err("proxy user names and passwords aren't supported".into());
-        }
-        let (host, port) = parse_address(rest, kind.default_port())?;
-        Ok(Proxy { kind, host, port })
+        let (user, rest) = match rest.rsplit_once('@') {
+            Some((user, rest)) => {
+                if user.contains(':') {
+                    return Err("no password in the proxy URL: NativeTerm keeps it in Credential Manager".into());
+                }
+                (Some(user), rest)
+            }
+            None => (None, rest),
+        };
+        let mut proxy = Proxy::from_address(kind, rest)?;
+        proxy.user = user.map(check_user).transpose()?;
+        Ok(proxy)
     }
 
     /// `host:port` as typed in the dialog.
     pub fn from_address(kind: Kind, address: &str) -> Result<Proxy, String> {
         let (host, port) = parse_address(address.trim(), kind.default_port())?;
-        Ok(Proxy { kind, host, port })
+        Ok(Proxy { kind, host, port, user: None })
+    }
+
+    /// With a login's user name (none if `user` is blank).
+    pub fn with_user(mut self, user: &str) -> Result<Proxy, String> {
+        let user = user.trim();
+        self.user = (!user.is_empty()).then(|| check_user(user)).transpose()?;
+        Ok(self)
+    }
+
+    /// Whether the login has a password (SOCKS4 has a user id only).
+    pub fn takes_password(&self) -> bool {
+        self.user.is_some() && self.kind != Kind::Socks4
+    }
+
+    /// The Credential Manager entry of the login's password.
+    pub fn password_entry(&self) -> Option<String> {
+        self.takes_password().then(|| format!("{}/proxy/{}", crate::password::prefix(), self.url()))
     }
 
     pub fn address(&self) -> String {
@@ -88,7 +118,10 @@ impl Proxy {
     }
 
     pub fn url(&self) -> String {
-        format!("{}://{}", self.kind.scheme(), self.address())
+        match &self.user {
+            Some(user) => format!("{}://{user}@{}", self.kind.scheme(), self.address()),
+            None => format!("{}://{}", self.kind.scheme(), self.address()),
+        }
     }
 
     /// The `ProxyCommand` value that runs `shim` as the helper.
@@ -117,6 +150,16 @@ impl Proxy {
             _ => None,
         }
     }
+}
+
+/// A user name as written in the URL (unquoted in `ProxyCommand`): no
+/// blanks, quotes, `@ : / % #`. `DOMAIN\user` is fine.
+fn check_user(user: &str) -> Result<String, String> {
+    let bad = |c: char| c.is_whitespace() || c.is_control() || matches!(c, '"' | '@' | ':' | '/' | '%' | '#');
+    if user.is_empty() || user.len() > 256 || user.chars().any(bad) {
+        return Err(format!("not a proxy user name: {user:?}"));
+    }
+    Ok(user.to_string())
 }
 
 fn is_shim(program: &str) -> bool {
@@ -153,18 +196,31 @@ mod tests {
     #[test]
     fn urls() {
         let p = Proxy::parse("socks5://proxy.lan:1081").unwrap();
-        assert_eq!(p, Proxy { kind: Kind::Socks5, host: "proxy.lan".into(), port: 1081 });
+        assert_eq!(p, Proxy { kind: Kind::Socks5, host: "proxy.lan".into(), port: 1081, user: None });
         assert_eq!(Proxy::parse("SOCKS5H://10.0.0.1").unwrap().port, 1080);
         assert_eq!(Proxy::parse("socks4a://gw:9050").unwrap().kind, Kind::Socks4);
         assert_eq!(Proxy::parse("http://[fe80::1]:3128/").unwrap().address(), "[fe80::1]:3128");
         assert_eq!(Proxy::parse("http://squid").unwrap().url(), "http://squid:8080");
         assert!(Proxy::parse("https://squid:443").is_err());
         assert!(Proxy::parse("socks5://user:pw@gw:1080").is_err(), "no passwords in the config");
+        let login = Proxy::parse(r"http://CORP\alice@squid:3128").unwrap();
+        assert_eq!(login.user.as_deref(), Some(r"CORP\alice"));
+        assert_eq!(login.url(), r"http://CORP\alice@squid:3128");
+        assert!(Proxy::from_address(Kind::Http, "squid").unwrap().with_user("a b").is_err());
+        assert_eq!(Proxy::from_address(Kind::Http, "squid").unwrap().with_user(" ").unwrap().user, None);
         assert!(Proxy::parse("socks5://gw:0").is_err());
         assert!(Proxy::parse("socks5://gw:99999").is_err());
         assert!(Proxy::parse("gw:1080").is_err());
         assert!(Proxy::from_address(Kind::Http, "a b:80").is_err());
         assert!(Proxy::from_address(Kind::Http, "%h:80").is_err(), "no ssh tokens");
+    }
+
+    #[test]
+    fn where_the_password_is() {
+        let p = Proxy::parse("socks5://alice@gw:1080").unwrap();
+        assert!(p.password_entry().unwrap().ends_with("/proxy/socks5://alice@gw:1080"));
+        assert_eq!(Proxy::parse("socks5://gw").unwrap().password_entry(), None, "no login");
+        assert_eq!(Proxy::parse("socks4://alice@gw").unwrap().password_entry(), None, "a user id only");
     }
 
     #[test]
@@ -176,7 +232,9 @@ mod tests {
             command,
             r#""C:\Program Files\NativeTerm\nativeterm-shim.exe" --proxy socks5://127.0.0.1:1080 %h %p"#
         );
-        assert_eq!(Proxy::from_command(&command), Some(p));
+        assert_eq!(Proxy::from_command(&command), Some(p.clone()));
+        let login = p.clone().with_user("alice").unwrap();
+        assert_eq!(Proxy::from_command(&login.command(shim)), Some(login));
         // another install's shim, unquoted
         let other = r"D:\nt\nativeterm-shim.exe --proxy http://squid:3128 %h %p";
         assert_eq!(Proxy::from_command(other).unwrap().kind, Kind::Http);

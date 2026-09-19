@@ -501,13 +501,38 @@ shim `proxy.rs`).
   proxy that doesn't answer in 10 s is reported as the wrong type or
   port. Errors go to stderr in the user's language, which ssh shows in
   the tab (or a background run reports).
-- **Not yet:** proxies needing a user name and password (reported as
-  such: SOCKS5 method `0xFF`, HTTP 407); passwords would belong in
-  Credential Manager, never in the config.
+- **Logins:** the user name is part of the URL
+  (`socks5://alice@gw:1080`, `DOMAIN\user` allowed), the password is in
+  Credential Manager as `NativeTerm/proxy/<url>` — never in the config,
+  never on a command line. The options page has the user name and a
+  password field that saves (or removes) the password right away, with
+  its state: none yet, saved, or refused. SOCKS5 offers "no login" and
+  "user name / password" (RFC 1929) and sends the login only if the
+  proxy picks it; SOCKS4 sends the user name as its user id (it has no
+  password); HTTP sends `Proxy-Authorization: Basic` (the page notes that
+  Basic is encoded, not encrypted). A proxy offering only other schemes
+  (NTLM, Negotiate) is reported with their names. A refused password is
+  marked in its entry (like a refused ssh password) and not sent again
+  until a new one is saved: tabs reconnecting and background checks
+  retrying it could lock a directory account. Buffers holding the
+  password are zeroed after sending.
+- **Not yet:** NTLM / Negotiate (Kerberos) proxy logins.
 - **No crate:** the `socks` crate (sync, SOCKS4/5) last released in 2022
   and pulls in the old `winapi`; the three handshakes are a few dozen
   lines each, tested against in-memory proxies, and end to end against a
   local SOCKS5 proxy with the real shim binary.
+- Verified live (logins): microsocks (SOCKS5 login) and tinyproxy
+  (`BasicAuth`) in a throwaway container with a random password never
+  printed or stored; the test instance used `NATIVETERM_CRED_PREFIX` so
+  its entries were test ones. Before a password was saved, ssh said "no
+  password is saved for the proxy …"; the password typed into the
+  options page and saved made plain `ssh` and the files window work
+  through both. A wrong password saved for SOCKS5: the first run said
+  "the proxy refused the user name or password (marked …)", the second
+  "refused before and isn't sent again", and the options page showed it
+  in red. End-to-end test: a local SOCKS5 proxy with a login, the real
+  shim and a test Credential Manager entry (accepted, refused and
+  marked, not sent a third time).
 - Verified live: a host whose name (`inner.lab`) only resolves inside
   the test container, reached through an `ssh -D` SOCKS5 proxy and
   through tinyproxy (HTTP): plain `ssh` ran commands (`SSH_CONNECTION`

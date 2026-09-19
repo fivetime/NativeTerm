@@ -542,8 +542,10 @@
       helper (`--proxy <url> %h %p`), written as a real `ProxyCommand` so
       every ssh run uses it; set as a type and address in session /
       folder options
-- [ ] Proxies with a user name and password (password in Credential
-      Manager)
+- [x] Proxy logins: user name in the URL, password in Credential Manager
+      (`NativeTerm/proxy/<url>`); SOCKS5 RFC 1929, HTTP Basic, SOCKS4 user
+      id; a refused password is marked and not retried
+- [ ] NTLM / Negotiate proxy logins
 - [ ] Optional `trzsz ssh` per host (`NativeTermTrzsz`, user-installed)
 - [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions
 - [ ] Optional `plink -ssh` for GBK SSH hosts (host/port/user/key from
