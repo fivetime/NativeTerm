@@ -271,7 +271,9 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         Supervised::Exited(code) => code,
         Supervised::Close => return Attempt::Close,
     };
-    let connected = auth.is_some_and(|a| a.is_set()) || watch.connected();
+    // ntplink's 0 (closed by the far end) and 3 (lost) mean it was
+    // connected, even when that was too short for the watcher to see
+    let connected = auth.is_some_and(|a| a.is_set()) || watch.connected() || (ntplink && matches!(code, 0 | 3));
     let ended = match ntplink {
         // closed by the far end, couldn't connect, connection lost
         true => matches!(code, 0 | 2 | 3),
