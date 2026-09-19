@@ -43,10 +43,13 @@ pub enum Mode {
     },
     /// A ZMODEM transfer on stdin / stdout: the server ran `sz`
     /// (`download`) or `rz` (`upload`); `escape`: ask the sender to escape
-    /// every control character (`--escape-control`, for Telnet).
+    /// every control character (`--escape-control`, for Telnet); `files`:
+    /// in tmux the files window can be offered instead (`--no-files`: not
+    /// for this session, e.g. Telnet).
     Zmodem {
         mode: String,
         escape: bool,
+        files: bool,
     },
 }
 
@@ -86,8 +89,15 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
             "--zmodem" => {
                 let mode = args.next().filter(|m| matches!(m.as_str(), "download" | "upload" | "tmux"));
                 let mode = mode.ok_or("--zmodem needs download, upload or tmux")?;
-                let escape = args.next().is_some_and(|a| a == "--escape-control");
-                return Ok(Mode::Zmodem { mode, escape });
+                let (mut escape, mut files) = (false, true);
+                for flag in args {
+                    match flag.as_str() {
+                        "--escape-control" => escape = true,
+                        "--no-files" => files = false,
+                        other => return Err(format!("--zmodem: unknown option {other}")),
+                    }
+                }
+                return Ok(Mode::Zmodem { mode, escape, files });
             }
             "--proxy" => {
                 let rest: Vec<String> = args.collect();
@@ -122,9 +132,13 @@ mod tests {
 
     #[test]
     fn zmodem_helper() {
-        assert_eq!(p(&["--zmodem", "upload"]).unwrap(), Mode::Zmodem { mode: "upload".into(), escape: false });
+        let upload = Mode::Zmodem { mode: "upload".into(), escape: false, files: true };
+        assert_eq!(p(&["--zmodem", "upload"]).unwrap(), upload);
         let escaped = p(&["--zmodem", "download", "--escape-control"]).unwrap();
-        assert_eq!(escaped, Mode::Zmodem { mode: "download".into(), escape: true });
+        assert_eq!(escaped, Mode::Zmodem { mode: "download".into(), escape: true, files: true });
+        let telnet_tmux = p(&["--zmodem", "tmux", "--escape-control", "--no-files"]).unwrap();
+        assert_eq!(telnet_tmux, Mode::Zmodem { mode: "tmux".into(), escape: true, files: false });
+        assert!(p(&["--zmodem", "tmux", "--sideways"]).is_err());
         assert!(p(&["--zmodem", "sideways"]).is_err());
         assert!(p(&["--zmodem"]).is_err());
     }

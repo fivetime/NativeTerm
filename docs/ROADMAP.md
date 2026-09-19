@@ -555,7 +555,7 @@
 - [x] rz / sz in ntplink sessions (Telnet, serial, raw): the same helper,
       with flow control both ways and every control character escaped
       (Telnet changes CR / NUL / 0xFF); Esc / Ctrl+C cancel through a
-      named event. ntplink also reads the keyboard with VT input now
+      named event; in tmux the transfer is stopped with a note. ntplink also reads the keyboard with VT input now
       (arrows, Esc and F-keys were lost before)
 - [ ] rz / sz (rest): ship the fork's ssh with NativeTerm (packaging),
       macOS / Linux builds, zmodem2 fixes upstream (abort sends nothing;

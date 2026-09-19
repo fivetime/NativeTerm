@@ -207,6 +207,12 @@ that differ from ssh:
 - ntplink reads the keyboard itself (PuTTY's reader thread): during a
   transfer keys aren't sent; Esc (alone) or Ctrl+C sets the helper's named
   event `Local\NativeTermZmodemCancel-<pid>`.
+- tmux in a Telnet / serial session: ntplink spots the header tmux leaves
+  (as ssh does) and runs the helper as `--zmodem tmux --escape-control
+  --no-files`: rz / sz are stopped on the server and the tab says so; no
+  files window (these sessions have no SFTP). Verified live: `sz` and `rz`
+  in tmux over Telnet both stopped (none left running), the shell usable
+  after; `sz` outside tmux still transferred (SHA-256 equal).
 - The console is now read with VT input: before, arrows, Home, F-keys sent
   nothing, and through ConPTY Esc was lost too (so vim, shell history and
   device CLIs over Telnet / serial missed them). A console without VT

@@ -754,7 +754,7 @@ fn ask_for_files() -> bool {
 /// ran `rz`), or `tmux` (one of them in tmux, which changes the data both
 /// ways: it is stopped, and the files window offered instead). Exit code 0
 /// when done, 1 when cancelled or failed.
-pub fn run(mode: &str, escape: bool) -> i32 {
+pub fn run(mode: &str, escape: bool, files: bool) -> i32 {
     let (tx, input) = mpsc::channel();
     let tap = Tap::open();
     let tap_in = tap.clone();
@@ -780,7 +780,13 @@ pub fn run(mode: &str, escape: bool) -> i32 {
     if mode == "tmux" {
         let mut wire = wire;
         cancel_other_side(&mut wire);
-        let text = if ask_for_files() { t!("zmodem-tmux-files") } else { t!("zmodem-tmux") };
+        let text = if !files {
+            t!("zmodem-tmux-stopped")
+        } else if ask_for_files() {
+            t!("zmodem-tmux-files")
+        } else {
+            t!("zmodem-tmux")
+        };
         let mut stdout = io::stdout().lock();
         let _ = stdout.write_all(END).and_then(|()| stdout.flush());
         eprint!("\r\n[NativeTerm] {text}\r\n");
