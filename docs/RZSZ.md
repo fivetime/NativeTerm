@@ -92,8 +92,8 @@ script does instead:
 - VS 2026's default MSVC (14.51) has no Spectre libraries (MSB8040 while
   vcpkg builds LibreSSL): the script's triplet pins vcpkg to v143 (14.44),
   the toolset the OpenSSH projects use anyway;
-- the projects expect `vcpkg_installedd-customd-custom\…`: vcpkg runs
-  with `--x-install-root=vcpkg_installedd-custom`;
+- the projects expect `vcpkg_installed\x64-custom\x64-custom\…`: vcpkg runs
+  with `--x-install-root=vcpkg_installed\x64-custom`;
 - `Start-OpenSSHBuild` recognises VS 2015–2022 only (by "2022" in MSBuild's
   path) and falls to the VS 2015 branch: the script calls MSBuild itself;
 - `paths.targets` pins Windows SDK 10.0.22621; only 10.0.26100 is here:
