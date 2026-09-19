@@ -79,13 +79,30 @@ Tested against real lrzsz 0.12.21rc (Ubuntu 24.04 container) over
   with the right SHA-256;
 - to watch: after aborting, ssh and the remote `sz` took ~30 s to exit.
 
-## Build status (Windows)
+## Build (Windows)
 
-- Visual Studio 2026 (v18, toolset v145) is installed; the projects ask
-  for v143 (VS 2022).
-- `Install-VcpkgDependencies.ps1 -Bootstrap` (vcpkg cloned to
-  `C:\MyProjects\RustProjects\vcpkg`) failed building LibreSSL: MSB8040,
-  the Spectre-mitigated libraries are missing (the triplet builds with
-  `/Qspectre`). Needs the Visual Studio installer's individual components
-  "MSVC … Spectre-mitigated libs (latest)" (and v143 build tools if the
-  projects keep v143).
+Builds on this machine (VS 2026 Enterprise with the v143 build tools and
+Spectre libraries for v143 and v145 added): `nativetermuild.ps1` in the
+fork (branch `nativeterm`) → `bind\Release\ssh.exe`,
+`OpenSSH_for_Windows_10.2p1 Win32-OpenSSH-GitHub, LibreSSL 4.2.0`, 0 errors;
+it logged in to the test container and `ssh -G` resolves our configs.
+What the repo's own `Start-OpenSSHBuild` trips over here, and what the
+script does instead:
+
+- VS 2026's default MSVC (14.51) has no Spectre libraries (MSB8040 while
+  vcpkg builds LibreSSL): the script's triplet pins vcpkg to v143 (14.44),
+  the toolset the OpenSSH projects use anyway;
+- the projects expect `vcpkg_installedd-customd-custom\…`: vcpkg runs
+  with `--x-install-root=vcpkg_installedd-custom`;
+- `Start-OpenSSHBuild` recognises VS 2015–2022 only (by "2022" in MSBuild's
+  path) and falls to the VS 2015 branch: the script calls MSBuild itself;
+- `paths.targets` pins Windows SDK 10.0.22621; only 10.0.26100 is here:
+  passed as `/p:WindowsSDKVersion`;
+- `openbsd_compat` finds OpenSSL only through Visual Studio's vcpkg
+  integration: vcpkg's `vcpkg.props` / `vcpkg.targets` are imported for this
+  build only (`ForceImportBeforeCppProps` / `ForceImportAfterCppTargets`,
+  `VcpkgManifestInstall=false`), not `vcpkg integrate install` (which would
+  apply to every C++ project of the user).
+
+Warnings: 7 × C4819 (source characters outside code page 936) and 2 ×
+C4047 in `clientloop.c` / `serverloop.c`, both upstream as is.
