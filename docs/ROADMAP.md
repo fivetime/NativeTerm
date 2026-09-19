@@ -491,9 +491,11 @@
       between the sides or from Explorer; folders, rename, delete (local:
       Recycle Bin), edit in place with upload on save, any file name
       encoding, saved password or asked in the window
+- [x] SFTP folder trees beside both lists (local: Desktop, Documents,
+      Downloads, drives; server: `/`), read when opened, opened down to the
+      folder shown, drop targets
 - [ ] SFTP (rest): resume broken transfers, last folder per host, folder
-      trees beside the lists, folder compare / sync, a configured external
-      tool as an option
+      compare / sync, a configured external tool as an option
 - [ ] Shared credential sets (`NativeTermCredential`)
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)

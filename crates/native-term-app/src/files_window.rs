@@ -11,7 +11,8 @@
 //! the disk runs on a thread; the window only shows what comes back.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -145,13 +146,31 @@ struct Question {
 enum What {
     Connected(Arc<Session>, Vec<u8>),
     Failed(String),
-    Listed { path: Vec<u8>, result: Result<Vec<RemoteRow>, String> },
-    LocalListed { path: Option<PathBuf>, result: Result<Vec<LocalRow>, String> },
-    JobDone { job: u64, result: Result<(), native_term_sftp::Error> },
+    Listed {
+        path: Vec<u8>,
+        result: Result<Vec<RemoteRow>, String>,
+    },
+    LocalListed {
+        path: Option<PathBuf>,
+        result: Result<Vec<LocalRow>, String>,
+    },
+    JobDone {
+        job: u64,
+        result: Result<(), native_term_sftp::Error>,
+    },
     Notice(String, bool),
     Refresh,
     LocalRefresh,
     Ask(Question),
+    /// A folder's subfolders, for a tree.
+    RemoteTree {
+        path: Vec<u8>,
+        folders: Vec<(String, Vec<u8>)>,
+    },
+    LocalTree {
+        path: PathBuf,
+        folders: Vec<(String, PathBuf)>,
+    },
 }
 
 /// What happened, for which session.
@@ -224,11 +243,50 @@ struct Local {
     renaming: Option<(Vec<u8>, String)>,
 }
 
+/// A folder tree beside a list: each folder's subfolders once read, and
+/// which folders are open. Folders are read when opened; the folders
+/// above the one shown are opened by themselves.
+struct Tree<P> {
+    nodes: HashMap<P, Node<P>>,
+}
+
+struct Node<P> {
+    /// Name and path of each subfolder; `None` until read.
+    children: Option<Vec<(String, P)>>,
+    open: bool,
+    loading: bool,
+}
+
+impl<P> Default for Tree<P> {
+    fn default() -> Tree<P> {
+        Tree { nodes: HashMap::new() }
+    }
+}
+
+impl<P: Clone + Eq + Hash> Tree<P> {
+    fn node(&mut self, path: &P) -> &mut Node<P> {
+        self.nodes.entry(path.clone()).or_insert(Node { children: None, open: false, loading: false })
+    }
+
+    /// Opens `path`; whether its subfolders need reading.
+    fn open(&mut self, path: &P) -> bool {
+        let node = self.node(path);
+        node.open = true;
+        let read = node.children.is_none() && !node.loading;
+        if read {
+            node.loading = true;
+        }
+        read
+    }
+}
+
 struct Tab {
     id: u64,
     spec: Spec,
     remote: Remote,
     local: Local,
+    remote_tree: Tree<Vec<u8>>,
+    local_tree: Tree<PathBuf>,
     edits: Vec<Edit>,
     log: Vec<(String, String, bool)>,
 }
@@ -261,6 +319,8 @@ struct FilesWindow {
     remote_rect: Option<egui::Rect>,
     edit_dir: PathBuf,
     computer: String,
+    /// The local tree's top: Desktop, Documents, Downloads, the drives.
+    local_roots: Vec<(String, PathBuf)>,
 }
 
 impl FilesWindow {
@@ -283,6 +343,13 @@ impl FilesWindow {
             remote_rect: None,
             edit_dir: std::env::temp_dir().join("NativeTerm-edit"),
             computer: std::env::var("COMPUTERNAME").unwrap_or_default(),
+            local_roots: native_term_win::shell::user_folders()
+                .into_iter()
+                .chain(native_term_win::shell::drives())
+                .map(|p| {
+                    (p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(p.display().to_string()), p)
+                })
+                .collect(),
         }
     }
 
@@ -354,6 +421,8 @@ impl FilesWindow {
                     anchor: None,
                     renaming: None,
                 },
+                remote_tree: Tree::default(),
+                local_tree: Tree::default(),
                 edits: Vec::new(),
                 log: Vec::new(),
             });
@@ -494,6 +563,7 @@ impl FilesWindow {
             }
             What::Listed { path, result } => {
                 let mut lost = None;
+                let mut expand = None;
                 if let Some(tab) = self.tab(id) {
                     let r = &mut tab.remote;
                     r.listing = false;
@@ -505,6 +575,7 @@ impl FilesWindow {
                             r.error = None;
                             let keys: HashSet<&Vec<u8>> = r.rows.iter().map(|x| &x.entry.name).collect();
                             r.selected.retain(|n| keys.contains(n));
+                            expand = Some(r.path.clone());
                         }
                         // the connection went: say so, offer to reconnect
                         Err(e) => match r.sftp.as_ref().and_then(|s| s.closed()) {
@@ -520,20 +591,30 @@ impl FilesWindow {
                 if let Some(why) = lost {
                     self.log(id, why, true);
                 }
+                if let Some(path) = expand {
+                    self.expand_remote(id, &path);
+                }
             }
             What::LocalListed { path, result } => {
                 let computer = t!("files-computer");
+                let mut expand = None;
                 if let Some(tab) = self.tab(id) {
                     let l = &mut tab.local;
                     match result {
                         Ok(rows) => {
                             l.path_text = path.as_ref().map(|p| p.display().to_string()).unwrap_or(computer);
-                            l.path = path;
+                            l.path = path.clone();
                             l.rows = rows;
                             l.error = None;
+                            if let Some(path) = &path {
+                                expand = Some(path.clone());
+                            }
                         }
                         Err(e) => l.error = Some(e),
                     }
+                }
+                if let Some(path) = expand {
+                    self.expand_local(id, &path);
                 }
             }
             What::JobDone { job, result } => {
@@ -564,6 +645,20 @@ impl FilesWindow {
             What::Notice(text, error) => self.log(id, text, error),
             What::Refresh => self.refresh(id),
             What::LocalRefresh => self.refresh_local(id),
+            What::RemoteTree { path, folders } => {
+                if let Some(tab) = self.tab(id) {
+                    let node = tab.remote_tree.node(&path);
+                    node.children = Some(folders);
+                    node.loading = false;
+                }
+            }
+            What::LocalTree { path, folders } => {
+                if let Some(tab) = self.tab(id) {
+                    let node = tab.local_tree.node(&path);
+                    node.children = Some(folders);
+                    node.loading = false;
+                }
+            }
             What::Ask(question) => {
                 if let Some((_, old, _)) = self.question.take() {
                     let _ = old.reply.send(None);
@@ -574,6 +669,119 @@ impl FilesWindow {
                 self.question = Some((id, question, String::new()));
             }
         }
+    }
+
+    /// Opens the server's folders from `/` down to `path` in the tree.
+    fn expand_remote(&mut self, id: u64, path: &[u8]) {
+        let mut chain = vec![b"/".to_vec()];
+        let mut at = b"/".to_vec();
+        for part in path.split(|&c| c == b'/').filter(|p| !p.is_empty()) {
+            at = native_term_sftp::join(&at, part);
+            chain.push(at.clone());
+        }
+        for folder in chain {
+            self.open_remote_folder(id, folder);
+        }
+    }
+
+    fn open_remote_folder(&mut self, id: u64, folder: Vec<u8>) {
+        let Some(tab) = self.tab(id) else { return };
+        let Some(sftp) = tab.remote.sftp.clone() else { return };
+        if !tab.remote_tree.open(&folder) {
+            return;
+        }
+        let names = tab.remote.names;
+        self.spawn(id, move || {
+            let mut folders: Vec<(String, Vec<u8>)> = sftp
+                .read_dir(&folder)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|e| {
+                    e.attrs.is_dir()
+                        || (e.attrs.is_symlink()
+                            && sftp.stat(&native_term_sftp::join(&folder, &e.name)).is_ok_and(|a| a.is_dir()))
+                })
+                .map(|e| (names.decode(&e.name), native_term_sftp::join(&folder, &e.name)))
+                .collect();
+            folders.sort_by_key(|(name, _)| name.to_lowercase());
+            What::RemoteTree { path: folder, folders }
+        });
+    }
+
+    /// Opens the local folders from the drive down to `path` in the tree.
+    fn expand_local(&mut self, id: u64, path: &Path) {
+        let mut chain: Vec<PathBuf> = path.ancestors().map(Path::to_path_buf).collect();
+        chain.reverse();
+        for folder in chain {
+            self.open_local_folder(id, folder);
+        }
+    }
+
+    fn open_local_folder(&mut self, id: u64, folder: PathBuf) {
+        let Some(tab) = self.tab(id) else { return };
+        if !tab.local_tree.open(&folder) {
+            return;
+        }
+        self.spawn(id, move || {
+            let mut folders: Vec<(String, PathBuf)> = std::fs::read_dir(&folder)
+                .map(|entries| {
+                    entries
+                        .filter_map(Result::ok)
+                        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                        .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            folders.sort_by_key(|(name, _)| name.to_lowercase());
+            What::LocalTree { path: folder, folders }
+        });
+    }
+
+    /// A tree node's chevron: open (read if needed) or close.
+    fn toggle_remote(&mut self, id: u64, folder: Vec<u8>) {
+        let open = self.tab(id).is_some_and(|t| t.remote_tree.node(&folder).open);
+        match open {
+            true => {
+                if let Some(t) = self.tab(id) {
+                    t.remote_tree.node(&folder).open = false;
+                }
+            }
+            false => self.open_remote_folder(id, folder),
+        }
+    }
+
+    fn toggle_local(&mut self, id: u64, folder: PathBuf) {
+        let open = self.tab(id).is_some_and(|t| t.local_tree.node(&folder).open);
+        match open {
+            true => {
+                if let Some(t) = self.tab(id) {
+                    t.local_tree.node(&folder).open = false;
+                }
+            }
+            false => self.open_local_folder(id, folder),
+        }
+    }
+
+    /// Items dragged from the server's list, as a download needs them.
+    fn dragged_remote(&self, dragged: &Dragged) -> Vec<(Vec<u8>, Attrs)> {
+        let r = &self.tabs[self.active].remote;
+        r.rows
+            .iter()
+            .filter(|x| dragged.keys.contains(&x.entry.name))
+            .map(|x| {
+                let mut attrs = x.entry.attrs.clone();
+                if x.dir && attrs.is_symlink() {
+                    attrs.permissions = Some(0o040755);
+                }
+                (native_term_sftp::join(&r.path, &x.entry.name), attrs)
+            })
+            .collect()
+    }
+
+    /// Files dragged from the local list.
+    fn dragged_local(&self, dragged: &Dragged) -> Vec<PathBuf> {
+        let l = &self.tabs[self.active].local;
+        l.rows.iter().filter(|r| dragged.keys.contains(&local_key(r))).map(|r| r.path.clone()).collect()
     }
 
     fn remote_selection(&self, id: u64) -> Vec<(Vec<u8>, Attrs)> {
@@ -620,9 +828,14 @@ impl FilesWindow {
 
     /// Local files and folders to the server's folder shown.
     fn upload(&mut self, id: u64, files: Vec<PathBuf>) {
+        self.upload_to(id, files, None);
+    }
+
+    /// Local files and folders to a server's folder (`None`: the one shown).
+    fn upload_to(&mut self, id: u64, files: Vec<PathBuf>, into: Option<Vec<u8>>) {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
         let (Some(sftp), false) = (tab.remote.sftp.clone(), files.is_empty()) else { return };
-        let (names, into) = (tab.remote.names, tab.remote.path.clone());
+        let (names, into) = (tab.remote.names, into.unwrap_or_else(|| tab.remote.path.clone()));
         let title = describe(
             &files
                 .iter()
@@ -639,9 +852,15 @@ impl FilesWindow {
 
     /// The server's files and folders to the local folder shown.
     fn download(&mut self, id: u64, items: Vec<(Vec<u8>, Attrs)>) {
+        self.download_to(id, items, None);
+    }
+
+    /// The server's files and folders to a local folder (`None`: the one
+    /// shown).
+    fn download_to(&mut self, id: u64, items: Vec<(Vec<u8>, Attrs)>, into: Option<PathBuf>) {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
         let Some(sftp) = tab.remote.sftp.clone() else { return };
-        let Some(folder) = tab.local.path.clone() else {
+        let Some(folder) = into.or_else(|| tab.local.path.clone()) else {
             let text = t!("files-local-no-folder");
             self.log(id, text, true);
             return;
@@ -908,6 +1127,27 @@ impl FilesWindow {
         if let Some(e) = self.tabs.get(self.active).and_then(|t| t.local.error.clone()) {
             ui.colored_label(RED, e);
         }
+        // the tree
+        let roots = self.local_roots.clone();
+        let tree_out = egui::Panel::left("local-tree")
+            .resizable(true)
+            .default_size(180.0)
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..Default::default() }))
+            .show_inside(ui, |ui| {
+                let tab = &self.tabs[self.active];
+                tree(ui, "local-tree", &roots, &tab.local_tree, tab.local.path.as_ref(), false)
+            })
+            .inner;
+        if let Some(folder) = tree_out.go {
+            self.list_local(id, Some(folder));
+        }
+        if let Some(folder) = tree_out.toggle {
+            self.toggle_local(id, folder);
+        }
+        if let Some((folder, dragged)) = tree_out.dropped.filter(|(_, d)| d.tab == id) {
+            let items = self.dragged_remote(&dragged);
+            self.download_to(id, items, Some(folder));
+        }
         // the list
         let tab = &self.tabs[self.active];
         let lines: Vec<Line> = tab
@@ -943,21 +1183,7 @@ impl FilesWindow {
             out.response.dnd_set_drag_payload(Dragged { tab: id, from_remote: false, keys });
         }
         if let Some(dragged) = out.dropped.filter(|d| d.from_remote && d.tab == id) {
-            let items: Vec<(Vec<u8>, Attrs)> = {
-                let tab = &self.tabs[self.active];
-                let r = &tab.remote;
-                r.rows
-                    .iter()
-                    .filter(|x| dragged.keys.contains(&x.entry.name))
-                    .map(|x| {
-                        let mut attrs = x.entry.attrs.clone();
-                        if x.dir && attrs.is_symlink() {
-                            attrs.permissions = Some(0o040755);
-                        }
-                        (native_term_sftp::join(&r.path, &x.entry.name), attrs)
-                    })
-                    .collect()
-            };
+            let items = self.dragged_remote(&dragged);
             self.download(id, items);
         }
         match out.action {
@@ -1159,6 +1385,27 @@ impl FilesWindow {
                 ui.weak(t!("files-listing"));
             });
         }
+        let roots = [("/".to_string(), b"/".to_vec())];
+        let tree_out = egui::Panel::left("remote-tree")
+            .resizable(true)
+            .default_size(180.0)
+            .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..Default::default() }))
+            .show_inside(ui, |ui| {
+                let tab = &self.tabs[self.active];
+                tree(ui, "remote-tree", &roots, &tab.remote_tree, Some(&tab.remote.path), true)
+            })
+            .inner;
+        if let Some(folder) = tree_out.go {
+            self.go(id, folder);
+        }
+        if let Some(folder) = tree_out.toggle {
+            self.toggle_remote(id, folder);
+        }
+        if let Some((folder, dragged)) = tree_out.dropped.filter(|(_, d)| d.tab == id) {
+            let files = self.dragged_local(&dragged);
+            self.upload_to(id, files, Some(folder));
+        }
+        let tab = &self.tabs[self.active];
         let lines: Vec<Line> = tab
             .remote
             .rows
@@ -1203,13 +1450,7 @@ impl FilesWindow {
             out.response.dnd_set_drag_payload(Dragged { tab: id, from_remote: true, keys });
         }
         if let Some(dragged) = out.dropped.filter(|d| !d.from_remote && d.tab == id) {
-            let files: Vec<PathBuf> = self.tabs[self.active]
-                .local
-                .rows
-                .iter()
-                .filter(|r| dragged.keys.contains(&local_key(r)))
-                .map(|r| r.path.clone())
-                .collect();
+            let files = self.dragged_local(&dragged);
             self.upload(id, files);
         }
         match out.action {
@@ -1497,6 +1738,112 @@ impl FilesWindow {
     }
 }
 
+/// What a tree reports back.
+struct TreeOut<P> {
+    /// A folder clicked: show it.
+    go: Option<P>,
+    /// A chevron clicked.
+    toggle: Option<P>,
+    /// Files from the other side dropped on a folder.
+    dropped: Option<(P, Arc<Dragged>)>,
+}
+
+/// A folder tree: chevrons open and close, a click shows the folder, the
+/// one shown is highlighted, and files dragged from the other side can be
+/// dropped on a folder. `remote`: the server's side (it takes files from
+/// the local side, and the other way round).
+fn tree<P: Clone + Eq + Hash>(
+    ui: &mut egui::Ui,
+    salt: &str,
+    roots: &[(String, P)],
+    tree: &Tree<P>,
+    current: Option<&P>,
+    remote: bool,
+) -> TreeOut<P> {
+    let mut out = TreeOut { go: None, toggle: None, dropped: None };
+    egui::ScrollArea::both().id_salt(salt).auto_shrink([false, false]).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        for (name, path) in roots {
+            tree_node(ui, name, path, 0, tree, current, remote, &mut out);
+        }
+    });
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tree_node<P: Clone + Eq + Hash>(
+    ui: &mut egui::Ui,
+    name: &str,
+    path: &P,
+    depth: usize,
+    tree: &Tree<P>,
+    current: Option<&P>,
+    remote: bool,
+    out: &mut TreeOut<P>,
+) {
+    let node = tree.nodes.get(path);
+    let open = node.is_some_and(|n| n.open);
+    let leaf = node.and_then(|n| n.children.as_ref()).is_some_and(|c| c.is_empty());
+    let visuals = ui.visuals().clone();
+    let width = ui.available_width().max(160.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current == Some(path), name)
+    });
+    let target = response.dnd_hover_payload::<Dragged>().is_some_and(|d| d.from_remote != remote);
+    if current == Some(path) {
+        ui.painter().rect_filled(rect, 3.0, visuals.selection.bg_fill);
+    } else if target || response.hovered() {
+        ui.painter().rect_filled(rect, 3.0, visuals.widgets.hovered.weak_bg_fill);
+    }
+    if target {
+        ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.5_f32, GREEN), egui::StrokeKind::Inside);
+    }
+    let color = if current == Some(path) { visuals.selection.stroke.color } else { visuals.text_color() };
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let x = rect.left() + 4.0 + depth as f32 * 14.0;
+    let y = rect.center().y;
+    let painter = ui.painter_at(rect);
+    let chevron = egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(16.0, rect.height()));
+    if !leaf {
+        let glyph = if open { icons::CHEVRON_DOWN } else { icons::CHEVRON_RIGHT };
+        let small = egui::FontId::new(font.size * 0.7, font.family.clone());
+        painter.text(chevron.center(), egui::Align2::CENTER_CENTER, glyph, small, visuals.weak_text_color());
+    }
+    let folder = if open { icons::FOLDER_OPEN } else { icons::FOLDER };
+    painter.text(egui::pos2(x + 18.0, y), egui::Align2::LEFT_CENTER, folder, font.clone(), color);
+    painter.text(egui::pos2(x + 40.0, y), egui::Align2::LEFT_CENTER, name, font, color);
+    if response.clicked() {
+        let on_chevron = response.interact_pointer_pos().is_some_and(|p| chevron.contains(p));
+        if on_chevron && !leaf {
+            out.toggle = Some(path.clone());
+        } else {
+            out.go = Some(path.clone());
+        }
+    }
+    if response.double_clicked() && !leaf {
+        out.toggle = Some(path.clone());
+    }
+    if let Some(dragged) = response.dnd_release_payload::<Dragged>().filter(|d| d.from_remote != remote) {
+        out.dropped = Some((path.clone(), dragged));
+    }
+    if open {
+        match node.and_then(|n| n.children.as_ref()) {
+            Some(children) => {
+                for (child_name, child) in children {
+                    tree_node(ui, child_name, child, depth + 1, tree, current, remote, out);
+                }
+            }
+            None => {
+                ui.horizontal(|ui| {
+                    ui.add_space(x + 18.0 - rect.left());
+                    ui.spinner();
+                });
+            }
+        }
+    }
+}
+
 /// What a list reports back.
 struct Listed {
     response: egui::Response,
@@ -1520,7 +1867,16 @@ fn list(
     remote: bool,
 ) -> Listed {
     let visuals = ui.visuals().clone();
-    let (size_w, date_w, mode_w) = (80.0, 130.0, if remote { 104.0 } else { 0.0 });
+    // a narrow list keeps the name readable: permissions go first, then
+    // the date, then the size
+    let width = ui.available_width();
+    let mut columns = [80.0, 130.0, if remote { 104.0 } else { 0.0 }];
+    for i in [2, 1, 0] {
+        if width - columns.iter().sum::<f32>() < 180.0 {
+            columns[i] = 0.0;
+        }
+    }
+    let [size_w, date_w, mode_w] = columns;
     let area = ui.available_rect_before_wrap();
     let response = ui.interact(area, ui.id().with((salt, "drop")), egui::Sense::hover());
     let dropped = response.dnd_release_payload::<Dragged>();
@@ -1542,21 +1898,25 @@ fn list(
             font.clone(),
             color,
         );
-        painter.text(
-            egui::pos2(name_right + size_w - 8.0, y),
-            egui::Align2::RIGHT_CENTER,
-            t!("files-col-size"),
-            font.clone(),
-            color,
-        );
-        painter.text(
-            egui::pos2(name_right + size_w + 8.0, y),
-            egui::Align2::LEFT_CENTER,
-            t!("files-col-modified"),
-            font.clone(),
-            color,
-        );
-        if remote {
+        if size_w > 0.0 {
+            painter.text(
+                egui::pos2(name_right + size_w - 8.0, y),
+                egui::Align2::RIGHT_CENTER,
+                t!("files-col-size"),
+                font.clone(),
+                color,
+            );
+        }
+        if date_w > 0.0 {
+            painter.text(
+                egui::pos2(name_right + size_w + 8.0, y),
+                egui::Align2::LEFT_CENTER,
+                t!("files-col-modified"),
+                font.clone(),
+                color,
+            );
+        }
+        if mode_w > 0.0 {
             painter.text(
                 egui::pos2(name_right + size_w + date_w + 4.0, y),
                 egui::Align2::LEFT_CENTER,
@@ -1622,7 +1982,7 @@ fn list(
                         color,
                     );
                 }
-                if let Some(size) = line.size {
+                if let (Some(size), true) = (line.size, size_w > 0.0) {
                     painter.text(
                         egui::pos2(name_right + size_w - 8.0, y),
                         egui::Align2::RIGHT_CENTER,
@@ -1631,7 +1991,7 @@ fn list(
                         color,
                     );
                 }
-                if let Some(m) = line.modified {
+                if let (Some(m), true) = (line.modified, date_w > 0.0) {
                     painter.text(
                         egui::pos2(name_right + size_w + 8.0, y),
                         egui::Align2::LEFT_CENTER,
@@ -1640,7 +2000,7 @@ fn list(
                         color,
                     );
                 }
-                if let Some(mode) = &line.mode {
+                if let (Some(mode), true) = (&line.mode, mode_w > 0.0) {
                     let mono = egui::TextStyle::Monospace.resolve(ui.style());
                     painter.text(
                         egui::pos2(name_right + size_w + date_w + 4.0, y),

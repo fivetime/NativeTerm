@@ -159,10 +159,20 @@ pub fn foreground_window() -> isize {
 
 /// The user's Downloads folder.
 pub fn downloads_folder() -> Option<PathBuf> {
+    known_folder(&FOLDERID_Downloads)
+}
+
+/// The user's Desktop, Documents and Downloads folders (the ones there).
+pub fn user_folders() -> Vec<PathBuf> {
+    use windows::Win32::UI::Shell::{FOLDERID_Desktop, FOLDERID_Documents};
+    [FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads].iter().filter_map(known_folder).collect()
+}
+
+fn known_folder(id: &windows::core::GUID) -> Option<PathBuf> {
     // SAFETY: the path SHGetKnownFolderPath returns is a CoTaskMem string
     // owned by us, read once and freed once.
     unsafe {
-        let path = SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT, None).ok()?;
+        let path = SHGetKnownFolderPath(id, KF_FLAG_DEFAULT, None).ok()?;
         let text = path.to_string().ok();
         CoTaskMemFree(Some(path.0 as *const _));
         text.map(PathBuf::from)

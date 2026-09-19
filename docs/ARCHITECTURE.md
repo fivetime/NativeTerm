@@ -2433,9 +2433,17 @@ first; a session's tab closes its connection).
   New Folder, rename, name encoding; `ls -l` permissions; links to
   folders open like folders; below it the session's log (connecting,
   connected and where, each transfer's end, errors).
+- *Folder trees* beside both lists, as in SecureFX: the local one starts
+  with Desktop, Documents, Downloads and the drives, the server's with
+  `/`. A folder's subfolders are read when it is opened (a chevron, or a
+  double click); the folders above the one shown open by themselves and
+  it is highlighted; a click shows a folder in the list. A narrow list
+  drops columns (permissions, then the date, then the size) before the
+  name gets short.
 - *Across:* the buttons, dragging the selection from one side's list to
-  the other's (a green frame shows where it would go), or files dropped
-  from Explorer onto the server's side.
+  the other's list or onto a folder in the other side's tree (a green
+  frame shows where it would go), or files dropped from Explorer onto the
+  server's side.
 - Ctrl/Shift selection, right-click menus, F5, Backspace, Enter, F2,
   Delete on the side clicked last. Rows, tabs and icon buttons are named
   for screen readers and UI automation (AccessKit).
@@ -2483,11 +2491,18 @@ two-sided window: opened as from a tab whose tmux session sat in
 and Download of a server's file with the buttons (both lists refreshed,
 the queue and the log showed them); two sessions: a click on the first
 local tab selected the first server tab, a click on the second server
-tab the second local tab; both sides' rows line up. Not tried here:
-typing into the window's text fields (egui's text fields don't take UI
-Automation's SetValue), dragging between the lists, dropping files from
-Explorer, and the tab menu item itself (its handler is the one the test
-hook calls).
+tab the second local tab; both sides' rows line up. The trees: opened
+from a tab sitting in `/srv/数据`, the server's tree showed `/`, `srv`
+and `数据` open with `数据` highlighted and its subfolder read; the local
+tree opened down to the local folder. With the real mouse (SendInput,
+each point checked to be the test window, the window kept on top while
+testing): a local file dragged onto the server's list was uploaded to
+the folder shown, a server's file dragged onto the local list was
+downloaded, a local file dropped on `incoming` in the server's tree went
+to `/srv/incoming`, and a 3 MB file dragged from an Explorer window onto
+the server's list was uploaded. Not tried here: typing into the window's
+text fields (egui's text fields don't take UI Automation's SetValue), and
+the tab menu item itself (its handler is the one the test hook calls).
 
 **Not yet:** resuming a broken transfer, transfers between two servers,
 remembering the last folder per host, comparing / syncing folders.
