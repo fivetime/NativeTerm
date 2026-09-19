@@ -82,8 +82,8 @@ Tested against real lrzsz 0.12.21rc (Ubuntu 24.04 container) over
 ## Build (Windows)
 
 Builds on this machine (VS 2026 Enterprise with the v143 build tools and
-Spectre libraries for v143 and v145 added): `nativetermuild.ps1` in the
-fork (branch `nativeterm`) → `bind\Release\ssh.exe`,
+Spectre libraries for v143 and v145 added): `nativeterm\build.ps1` in the
+fork (branch `nativeterm`) → `bin\x64\Release\ssh.exe`,
 `OpenSSH_for_Windows_10.2p1 Win32-OpenSSH-GitHub, LibreSSL 4.2.0`, 0 errors;
 it logged in to the test container and `ssh -G` resolves our configs.
 What the repo's own `Start-OpenSSHBuild` trips over here, and what the
