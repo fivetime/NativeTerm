@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use native_term_app::t;
 use native_term_config::ops::HostDraft;
 use native_term_config::password::{Target, REFUSED};
+use native_term_config::persistent;
 use native_term_win::credentials::{self, Saved};
 
 pub enum Outcome<T> {
@@ -115,6 +116,15 @@ impl PasswordField {
     }
 }
 
+/// A folder's `NativeTermPersistent` in words.
+fn persistent_text(value: Option<&str>) -> String {
+    match value.map(str::to_ascii_lowercase).as_deref() {
+        Some(v) if persistent::logged(v) => t!("persistent-tmux-log"),
+        Some(p @ ("tmux" | "screen")) => p.to_string(),
+        _ => t!("persistent-off"),
+    }
+}
+
 fn opt(text: &str) -> Option<String> {
     let t = text.trim();
     (!t.is_empty()).then(|| t.to_string())
@@ -200,13 +210,11 @@ impl HostDialog {
 
     /// The choices for "keep on the server": (stored value, text).
     fn persistent_choices(&self) -> Vec<(Option<String>, String)> {
-        let folder = match self.folder_persistent.as_deref() {
-            Some(p @ ("tmux" | "screen")) => p.to_string(),
-            _ => t!("persistent-off"),
-        };
+        let folder = persistent_text(self.folder_persistent.as_deref());
         vec![
             (None, t!("persistent-folder", value = folder.as_str())),
             (Some("tmux".into()), "tmux".into()),
+            (Some(persistent::TMUX_LOG.into()), t!("persistent-tmux-log")),
             (Some("screen".into()), "screen".into()),
             (Some("off".into()), t!("persistent-off")),
         ]

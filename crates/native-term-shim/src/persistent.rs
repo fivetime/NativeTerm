@@ -15,6 +15,7 @@ pub fn remote_command(alias: &str, session: Option<&str>, effective: &[(String, 
     let tree = SessionTree::load(&plink::ssh_dir());
     let (folder, host) = tree.find(alias)?;
     let persistence = persistent::for_host(folder, host)?;
+    let log = persistence == persistent::Persistence::Tmux && persistent::logged_for_host(folder, host);
     let session = session?;
     let own = effective.iter().any(|(k, v)| k == "remotecommand" && !v.eq_ignore_ascii_case("none"));
     if own {
@@ -23,6 +24,9 @@ pub fn remote_command(alias: &str, session: Option<&str>, effective: &[(String, 
     }
     let name = persistent::session_name(alias, session);
     println!("{}", t!("persistent-session", program = persistence.name(), name = name.as_str()));
+    if log {
+        println!("{}", t!("persistent-log", file = persistent::log_file(&name)));
+    }
     let missing = t!("persistent-missing", program = persistence.name());
-    Some(persistent::remote_command(persistence, &name, &missing))
+    Some(persistent::remote_command(persistence, &name, &missing, log))
 }

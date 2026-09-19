@@ -448,7 +448,7 @@ Therefore NativeTerm provides its own menus:
 | Connect SFTP / Open SecureFX | Indirect | Shell out to an external tool (e.g. WinSCP) |
 | Send Commands to Active Session | Yes | See "Sending commands" |
 | Send Commands to This Group | **Yes** (source-confirmed) | Shim-based console input injection, confirmed against both the console host and Windows OpenSSH sources; an end-to-end prototype remains. `tmux send-keys` fallback for persistent sessions |
-| Session logging (record all output) | **SSH: no** (client side); **other protocols: yes** | SSH output goes straight into the terminal; NativeTerm never sees it. Server-side logging is possible for persistent sessions (`tmux pipe-pane`); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
+| Session logging (record all output) | **SSH: no** (client side); **other protocols: yes** | SSH output goes straight into the terminal; NativeTerm never sees it. Server-side logging for persistent sessions ("tmux, recorded on the server", see "Persistent remote sessions (tmux)"); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
 | Telnet / serial / raw / rlogin / SUPDUP | **Yes** | The shim runs PuTTY's console client `plink.exe`; NativeTerm parses no protocol. See "Other protocols via plink" |
 | Local shells / AI coding sessions | Not managed | The user opens them with `+`; NativeTerm only lists them in the tab switcher |
 | Per-session character set (e.g. GBK) | **Yes for plink sessions**; SSH via OpenSSH: no | plink follows the console code pages the shim sets (verified both directions); see "Other protocols via plink" and "Known limitations" |
@@ -536,7 +536,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | Mapped Keys (per session) | Terminal key bindings are global (fragments can't bind keys); NativeTerm command buttons instead; Backspace-as-^H for plink sessions via the shim | 🟡 |
 | Appearance / Window (font, colors, cursor, tab color) | Per-folder/host Terminal profile, `NativeTermColorScheme`, `NativeTermTabColor` | ✅ |
 | Keyword Highlighting | Not in Windows Terminal | ❌ |
-| Log File | Not client-side (neither OpenSSH nor plink); `tmux pipe-pane` for persistent sessions; Terminal's "Export text" by hand | ❌/🟡 |
+| Log File | SSH: not client-side (OpenSSH), but on the server for persistent sessions (`tmux-log`: `pipe-pane`, read / copied / deleted from "Sessions on the Server"); other protocols: ntplink's session log; Terminal's "Export text" by hand | 🟡 |
 | Printing | Not in Windows Terminal | ❌ |
 | X/Y/Zmodem | Not in Windows Terminal; optional `NativeTermTrzsz` | 🟡 |
 | **File Transfer**: FTP/SFTP | External tool / `sftp` / `scp` | 🟡 |
@@ -2238,7 +2238,32 @@ What persistence enables beyond reconnecting:
   between processes), so each is a full handshake; run in parallel.
 - **Text preview in the tab switcher**: `tmux capture-pane -p` returns the
   current screen text of a background session.
-- **Server-side session logging**: `tmux pipe-pane`.
+- **Server-side session logging** (implemented): `NativeTermPersistent
+  tmux-log` ("tmux, recorded on the server" in the host dialog and the
+  folder menu). The remote command creates the session detached with
+  `pipe-pane "cat >> $HOME/.nativeterm/logs/<name>.log"` only when it
+  doesn't exist yet (`tmux has-session -t =<name> || tmux new-session -d
+  -s <name> ";" pipe-pane …; exec tmux attach-session -t =<name>`): on
+  attaching, `pipe-pane -o` toggled the open pipe *off* (seen with tmux
+  3.4: the second connection's output was missing, `#{pane_pipe}` 0) and
+  a plain `pipe-pane` would replace it. `";"` rather than `\;`, since a
+  backslash doesn't survive ssh's option parsing. The log holds
+  everything the session's first pane shows, while no tab is attached
+  too; it grows until deleted. A session made before `tmux-log` was
+  chosen isn't recorded (the pipe is only added on creation). In
+  "Sessions on the Server", a session with a log has "Log", and the logs
+  of ended sessions stay listed ("ended, log kept"): the viewer shows the
+  last 256 KB (`tail -c`) as text (`persistent::log_text`: escape
+  sequences and control characters out, CR LF as LF, a lone CR ends a
+  line, backspace by columns, so readline's `\b\b  \b\b` for a CJK
+  character erases it), "Save a Copy" writes the whole file as it is to
+  `<data dir>\logs\server\<alias>\<name>.log` and selects it in
+  Explorer, "Delete on the Server…" asks once more. Verified against a
+  daas Ubuntu container (tmux 3.4) through the shim in the portable
+  Terminal: first connection, disconnect, reconnect, and a line sent to
+  the detached session all in the log, one `cat` running; listing,
+  reading, copying and deleting through the same functions the dialog
+  calls. The dialog's own clicks weren't tried here.
 
 Costs and caveats — why it's opt-in, not default:
 
@@ -2323,7 +2348,8 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
   server), the list said there were none, and the tab showed "ended (0)"
   (the remote shell ended, ssh exited normally).
 - **Not yet**: the same list per folder, hiding tmux's status bar,
-  `tmux send-keys` group send, previews.
+  `tmux send-keys` group send, previews, logging for screen sessions
+  (`-L -Logfile` needs screen 4.6).
 
 ## Active session tracking
 

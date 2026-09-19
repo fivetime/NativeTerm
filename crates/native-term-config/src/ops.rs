@@ -90,8 +90,8 @@ impl HostDraft {
             return Err(EditError::Invalid("the login command must be one line".into()));
         }
         if let Some(p) = &self.persistent {
-            if !matches!(p.as_str(), "tmux" | "screen" | "off") {
-                return Err(EditError::Invalid(format!("persistent session {p:?}: tmux, screen or off")));
+            if !matches!(p.as_str(), "tmux" | persistent::TMUX_LOG | "screen" | "off") {
+                return Err(EditError::Invalid(format!("persistent session {p:?}: tmux, tmux-log, screen or off")));
             }
         }
         if let Some(c) = &self.tab_color {
@@ -460,8 +460,8 @@ impl Editor {
     /// Persistent sessions for every host in a folder file that has no
     /// setting of its own (`tmux`, `screen`; `None` removes the default).
     pub fn set_folder_persistent(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
-        if value.is_some_and(|v| !matches!(v, "tmux" | "screen")) {
-            return Err(EditError::Invalid(format!("persistent sessions {value:?}: tmux or screen")));
+        if value.is_some_and(|v| !matches!(v, "tmux" | persistent::TMUX_LOG | "screen")) {
+            return Err(EditError::Invalid(format!("persistent sessions {value:?}: tmux, tmux-log or screen")));
         }
         self.set_folder_value(file, "NativeTermPersistent", value)
     }

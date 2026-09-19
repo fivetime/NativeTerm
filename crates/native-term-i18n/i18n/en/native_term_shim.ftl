@@ -5,6 +5,7 @@ restored = [NativeTerm] { $alias }: restored, not connected yet.
 ssh-not-started = [NativeTerm] Could not start ssh ({ $path }): { $error }
 login-failed = [NativeTerm] Login failed or cancelled (exit code { $code }).
 persistent-session = [NativeTerm] Attaching to { $program } session { $name } on the server (kept after a disconnect).
+persistent-log = [NativeTerm] Recorded on the server in ~/{ $file }.
 persistent-missing = [NativeTerm] { $program } is not installed on this host: a plain shell, not kept after a disconnect.
 persistent-own-command = [NativeTerm] { $alias } has its own RemoteCommand: the session is not kept on the server.
 saved-password-refused = [NativeTerm] The saved password was refused. It is not used again until you save a new one (Edit this host).

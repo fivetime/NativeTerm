@@ -492,7 +492,9 @@
 - [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions
 - [ ] Optional `plink -ssh` for GBK SSH hosts (host/port/user/key from
       `ssh -G`, `.ppk` key, Pageant)
-- [ ] Server-side session logging for persistent sessions (`tmux pipe-pane`)
+- [x] Server-side session logging for persistent sessions (`tmux-log`:
+      `pipe-pane` started with the session; "Sessions on the Server" shows
+      the log as text, saves a copy, deletes it, ended sessions' logs too)
 - [ ] Optional cloud sync via user-installed rclone: explanation and
       consent page, rclone detection/version check, `bisync` of
       `config.d` and settings, conflict UI, `known_hosts` line merge,

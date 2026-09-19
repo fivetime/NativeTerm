@@ -459,7 +459,7 @@ impl App {
                     let on_login = folder.nt(host, "onlogin").map(str::to_string);
                     let ssh = self.editor.ssh().to_path_buf();
                     let config = self.editor.config().map(Path::to_path_buf);
-                    let dialog = ServerSessionsDialog::new(&self.egui_ctx, &alias, host.label(), on_login, ssh, config);
+                    let dialog = ServerSessionsDialog::new(&self.egui_ctx, &alias, host.label(), on_login, ssh, config, self.data_dir.clone());
                     self.dialog = Some(Dialog::ServerSessions(Box::new(dialog)));
                 }
             }

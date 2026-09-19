@@ -3,6 +3,7 @@ restored = [NativeTerm] { $alias }：已恢复，尚未连接。
 ssh-not-started = [NativeTerm] 无法启动 ssh（{ $path }）：{ $error }
 login-failed = [NativeTerm] 登录失败或已取消（退出码 { $code }）。
 persistent-session = [NativeTerm] 正在接入服务器上的 { $program } 会话 { $name }（断线后仍保留）。
+persistent-log = [NativeTerm] 服务器上记录到 ~/{ $file }。
 persistent-missing = [NativeTerm] 此主机没有安装 { $program }：已改用普通 shell，断线后不会保留。
 persistent-own-command = [NativeTerm] { $alias } 已有自己的 RemoteCommand：会话不会保持在服务器上。
 saved-password-refused = [NativeTerm] 保存的密码被服务器拒绝。在你保存新密码之前不会再使用它（编辑此主机）。

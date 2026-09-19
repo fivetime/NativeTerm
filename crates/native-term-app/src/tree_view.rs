@@ -582,14 +582,19 @@ impl TreeView {
                                     ui.close();
                                 }
                                 if !is_main {
+                                    use native_term_config::persistent;
                                     let current = folder
                                         .and_then(|i| folders.get(i))
-                                        .and_then(|f| f.defaults.get(native_term_config::persistent::KEY))
-                                        .and_then(native_term_config::persistent::parse)
-                                        .map(|p| p.name().to_string());
+                                        .and_then(|f| f.defaults.get(persistent::KEY))
+                                        .filter(|v| persistent::parse(v).is_some())
+                                        .map(|v| v.to_ascii_lowercase());
                                     ui.menu_button(t!("menu-folder-persistent"), |ui| {
-                                        let choices =
-                                            [(None, t!("persistent-off")), (Some("tmux"), "tmux".into()), (Some("screen"), "screen".into())];
+                                        let choices = [
+                                            (None, t!("persistent-off")),
+                                            (Some("tmux"), "tmux".into()),
+                                            (Some(persistent::TMUX_LOG), t!("persistent-tmux-log")),
+                                            (Some("screen"), "screen".into()),
+                                        ];
                                         for (value, text) in choices {
                                             let value = value.map(str::to_string);
                                             if ui.radio(current == value, text).clicked() {
@@ -835,6 +840,9 @@ fn hover(folder: &Folder, host: &HostEntry) -> String {
     }
     if let Some(p) = native_term_config::persistent::for_host(folder, host) {
         text.push_str(&format!("\n{}", t!("host-persistent", program = p.name())));
+        if native_term_config::persistent::logged_for_host(folder, host) {
+            text.push_str(&format!(", {}", t!("host-persistent-log")));
+        }
     }
     text.push_str(&format!("\n{}", t!("host-alias", alias = host.alias())));
     text
