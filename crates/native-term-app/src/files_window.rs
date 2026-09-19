@@ -64,6 +64,9 @@ pub struct Spec {
     /// The terminal tab's tmux session (a persistent session): the
     /// server's side starts in its current folder.
     pub tmux_session: Option<String>,
+    /// Where the last folders per host are kept (`state.db`); none in a
+    /// run without one.
+    pub memory: Option<native_term_app::Core>,
 }
 
 thread_local! {
@@ -319,6 +322,9 @@ struct Tab {
     local_tree: Tree<PathBuf>,
     edits: Vec<Edit>,
     log: Vec<(String, String, bool)>,
+    /// The folders last written to `memory` (written again only when
+    /// another is shown).
+    kept: (Option<Vec<u8>>, Option<PathBuf>),
 }
 
 /// What a confirmation is about.
@@ -422,9 +428,6 @@ impl FilesWindow {
             }
             let id = self.next_id;
             self.next_id += 1;
-            let local_start = std::env::var_os("NATIVETERM_LOCAL_START")
-                .map(PathBuf::from)
-                .or_else(native_term_win::shell::downloads_folder);
             let names = spec.names;
             self.tabs.push(Tab {
                 id,
@@ -455,11 +458,55 @@ impl FilesWindow {
                 local_tree: Tree::default(),
                 edits: Vec::new(),
                 log: Vec::new(),
+                kept: (None, None),
             });
             self.active = self.tabs.len() - 1;
             self.connect(id);
-            self.list_local(id, local_start);
+            self.start_local(id);
         }
+    }
+
+    /// The local side's first folder: the one shown last for this host if
+    /// it is still there, else Downloads (`NATIVETERM_LOCAL_START`, for
+    /// tests, before both). Read and listed in the background.
+    fn start_local(&mut self, id: u64) {
+        let Some(tab) = self.tab(id) else { return };
+        let (memory, alias) = (tab.spec.memory.clone(), tab.spec.alias.clone());
+        self.spawn(id, move || {
+            let path = std::env::var_os("NATIVETERM_LOCAL_START")
+                .map(PathBuf::from)
+                .or_else(|| recall(memory.as_ref(), &local_key_for(&alias)).map(PathBuf::from).filter(|p| p.is_dir()))
+                .or_else(native_term_win::shell::downloads_folder);
+            let result = list_local(path.as_deref()).map_err(|e| e.to_string());
+            What::LocalListed { path, result }
+        });
+    }
+
+    /// Keeps the folder shown as this host's last (in the background; only
+    /// when it changed).
+    fn remember(&mut self, id: u64, remote: Option<Vec<u8>>, local: Option<PathBuf>) {
+        let Some(tab) = self.tab(id) else { return };
+        let Some(memory) = tab.spec.memory.clone() else { return };
+        let alias = tab.spec.alias.clone();
+        let mut writes = Vec::new();
+        if let Some(path) = remote.filter(|p| tab.kept.0.as_ref() != Some(p)) {
+            writes.push((remote_key_for(&alias), hex(&path)));
+            tab.kept.0 = Some(path);
+        }
+        if let Some(path) = local.filter(|p| tab.kept.1.as_ref() != Some(p)) {
+            writes.push((local_key_for(&alias), path.display().to_string()));
+            tab.kept.1 = Some(path);
+        }
+        if writes.is_empty() {
+            return;
+        }
+        std::thread::spawn(move || {
+            if let Some(registry) = memory.registry() {
+                for (key, value) in writes {
+                    let _ = registry.set_setting(&key, &value);
+                }
+            }
+        });
     }
 
     /// Connects in the background. ssh's questions come here through the
@@ -473,6 +520,7 @@ impl FilesWindow {
         let spec = &tab.spec;
         let (ssh, config, alias, shim, tmux) =
             (spec.ssh.clone(), spec.config.clone(), spec.alias.clone(), spec.shim.clone(), spec.tmux_session.clone());
+        let memory = spec.memory.clone();
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         self.log(id, t!("files-log-connecting", host = alias.as_str()), false);
         self.spawn(id, move || {
@@ -502,8 +550,17 @@ impl FilesWindow {
             });
             match connected.and_then(|sftp| sftp.realpath(b".").map(|home| (sftp, home))) {
                 Ok((sftp, home)) => {
-                    let start =
-                        tmux.and_then(|s| terminal_folder(&ssh, config.as_deref(), &alias, &s, &sftp)).unwrap_or(home);
+                    // the terminal tab's folder, else the one shown last for
+                    // this host (if it is still a folder), else home
+                    let last = || {
+                        recall(memory.as_ref(), &remote_key_for(&alias))
+                            .and_then(|h| unhex(&h))
+                            .filter(|p| sftp.stat(p).is_ok_and(|a| a.is_dir()))
+                    };
+                    let start = tmux
+                        .and_then(|s| terminal_folder(&ssh, config.as_deref(), &alias, &s, &sftp))
+                        .or_else(last)
+                        .unwrap_or(home);
                     What::Connected(Arc::new(sftp), start)
                 }
                 Err(e) => {
@@ -622,6 +679,7 @@ impl FilesWindow {
                     self.log(id, why, true);
                 }
                 if let Some(path) = expand {
+                    self.remember(id, Some(path.clone()), None);
                     self.expand_remote(id, &path);
                 }
             }
@@ -644,6 +702,7 @@ impl FilesWindow {
                     }
                 }
                 if let Some(path) = expand {
+                    self.remember(id, None, Some(path.clone()));
                     self.expand_local(id, &path);
                 }
             }
@@ -1961,6 +2020,8 @@ struct TreeOut<P> {
     toggle: Option<P>,
     /// Files from the other side dropped on a folder.
     dropped: Option<(P, Arc<Dragged>)>,
+    /// Where the tree keeps which folder it last scrolled to.
+    scrolled: egui::Id,
 }
 
 /// A folder tree: chevrons open and close, a click shows the folder, the
@@ -1975,7 +2036,7 @@ fn tree<P: Clone + Eq + Hash>(
     current: Option<&P>,
     remote: bool,
 ) -> TreeOut<P> {
-    let mut out = TreeOut { go: None, toggle: None, dropped: None };
+    let mut out = TreeOut { go: None, toggle: None, dropped: None, scrolled: egui::Id::new((salt, "scrolled")) };
     egui::ScrollArea::both().id_salt(salt).auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         for (name, path) in roots {
@@ -2000,7 +2061,13 @@ fn tree_node<P: Clone + Eq + Hash>(
     let open = node.is_some_and(|n| n.open);
     let leaf = node.and_then(|n| n.children.as_ref()).is_some_and(|c| c.is_empty());
     let visuals = ui.visuals().clone();
-    let width = ui.available_width().max(160.0);
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let color = if current == Some(path) { visuals.selection.stroke.color } else { visuals.text_color() };
+    let galley = ui.painter().layout_no_wrap(name.to_string(), font.clone(), color);
+    // as wide as the panel, or as the name where it's indented (the tree
+    // scrolls sideways to deep folders)
+    let indent = 4.0 + depth as f32 * 14.0;
+    let width = ui.available_width().max(160.0).max(indent + 40.0 + galley.size().x + 8.0);
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current == Some(path), name)
@@ -2008,15 +2075,28 @@ fn tree_node<P: Clone + Eq + Hash>(
     let target = response.dnd_hover_payload::<Dragged>().is_some_and(|d| d.from_remote != remote);
     if current == Some(path) {
         ui.painter().rect_filled(rect, 3.0, visuals.selection.bg_fill);
+        // brought into view once each time another folder is shown (and
+        // once it is drawn at all: the folders above open first)
+        let this = egui::Id::new(path);
+        let fresh = ui.data_mut(|d| {
+            let fresh = d.get_temp::<egui::Id>(out.scrolled) != Some(this);
+            d.insert_temp(out.scrolled, this);
+            fresh
+        });
+        if fresh {
+            let text = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + indent, rect.top()),
+                egui::vec2(40.0 + galley.size().x + 8.0, rect.height()),
+            );
+            ui.scroll_to_rect(text, None);
+        }
     } else if target || response.hovered() {
         ui.painter().rect_filled(rect, 3.0, visuals.widgets.hovered.weak_bg_fill);
     }
     if target {
         ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.5_f32, GREEN), egui::StrokeKind::Inside);
     }
-    let color = if current == Some(path) { visuals.selection.stroke.color } else { visuals.text_color() };
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let x = rect.left() + 4.0 + depth as f32 * 14.0;
+    let x = rect.left() + indent;
     let y = rect.center().y;
     let painter = ui.painter_at(rect);
     let chevron = egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(16.0, rect.height()));
@@ -2027,7 +2107,7 @@ fn tree_node<P: Clone + Eq + Hash>(
     }
     let folder = if open { icons::FOLDER_OPEN } else { icons::FOLDER };
     painter.text(egui::pos2(x + 18.0, y), egui::Align2::LEFT_CENTER, folder, font.clone(), color);
-    painter.text(egui::pos2(x + 40.0, y), egui::Align2::LEFT_CENTER, name, font, color);
+    painter.galley(egui::pos2(x + 40.0, y - galley.size().y / 2.0), galley, color);
     if response.clicked() {
         let on_chevron = response.interact_pointer_pos().is_some_and(|p| chevron.contains(p));
         if on_chevron && !leaf {
@@ -2442,6 +2522,31 @@ fn plan_work(sftp: &Session, work: &Work, progress: &Progress) -> native_term_sf
     }
 }
 
+fn remote_key_for(alias: &str) -> String {
+    format!("files.remote:{alias}")
+}
+
+fn local_key_for(alias: &str) -> String {
+    format!("files.local:{alias}")
+}
+
+/// A value kept in `state.db`'s settings.
+fn recall(memory: Option<&native_term_app::Core>, key: &str) -> Option<String> {
+    memory?.registry()?.setting(key).ok().flatten()
+}
+
+/// A server's path (bytes, maybe not UTF-8) as text for the settings.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn unhex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..text.len()).step_by(2).map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok()).collect()
+}
+
 fn end_tab(tab: &Tab) {
     for edit in &tab.edits {
         edit.stop.store(true, Ordering::Relaxed);
@@ -2764,6 +2869,12 @@ mod tests {
         assert_eq!(clock_text(7), "0:07");
         assert_eq!(clock_text(750), "12:30");
         assert_eq!(clock_text(3723), "1:02:03");
+        let gbk = [b'/', 0xd6, 0xd0, 0xce, 0xc4];
+        assert_eq!(hex(&gbk), "2fd6d0cec4");
+        assert_eq!(unhex(&hex(&gbk)).as_deref(), Some(&gbk[..]));
+        assert_eq!(unhex("2fz0"), None);
+        assert_eq!(unhex("2f0"), None);
+        assert_eq!(unhex(""), Some(Vec::new()));
         assert_eq!(mode_text(0o040755), "drwxr-xr-x");
         assert_eq!(mode_text(0o100600), "-rw-------");
         assert_eq!(mode_text(0o120777), "lrwxrwxrwx");

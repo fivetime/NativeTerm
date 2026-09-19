@@ -2441,7 +2441,8 @@ windows while running, each with its own egui context; sessions asked
 for reach the open window through a queue it drains each frame; closing
 the window, or a session's tab, with transfers or edits running asks
 first; a session's tab closes its connection).
-- *Local side:* starts in Downloads; folders, files, and above the top of
+- *Local side:* starts where it was last for this host (else Downloads,
+  see "Last folders"); folders, files, and above the top of
   a drive the drives ("This PC"); Open (a folder, or a file with its
   program), New Folder, rename, Delete (to the Recycle Bin, asked);
   Upload sends the selection to the server's folder shown.
@@ -2554,8 +2555,22 @@ queue. Tests (with Windows' `sftp-server.exe`): a paused download and a
 paused upload go on to the same bytes, a new plan continues an old
 partial upload, when a partial file is continued.
 
-**Not yet:** transfers between two servers, remembering the last folder
-per host, comparing / syncing folders.
+**Last folders.** Each host's last folder on both sides is kept in
+`state.db`'s per-machine settings (`files.remote:<alias>`, the server's
+path as hex since it is bytes; `files.local:<alias>`), written in the
+background whenever a listing shows another folder. A new tab's server
+side starts in the terminal tab's tmux folder if it has one, else in
+the last folder if it is still a folder there (checked on the connect
+thread), else home; the local side in the last folder if it still
+exists, else Downloads (`NATIVETERM_LOCAL_START` before both, for tests).
+The trees bring the folder shown into view, sideways too (a row is as
+wide as its indent and name), once each time it changes. Live: after
+going to `/srv/深/层` and `dl\子目录` and restarting, both sides opened
+there ("connected; folder /srv/深/层") with the local tree scrolled to
+`子目录`; with `/srv/深/层` deleted on the server, the next start went to
+`/root`.
+
+**Not yet:** transfers between two servers, comparing / syncing folders.
 
 ## Active session tracking
 

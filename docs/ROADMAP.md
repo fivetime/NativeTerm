@@ -497,8 +497,10 @@
 - [x] SFTP transfers: pause / resume / cancel each or all, resume at the
       byte (`.ntpart` partial files, also after a lost connection or a
       restart), clear finished
-- [ ] SFTP (rest): last folder per host, folder compare / sync, a
-      configured external tool as an option
+- [x] SFTP: last folder per host on both sides (`state.db`), trees scroll
+      to the folder shown
+- [ ] SFTP (rest): folder compare / sync, a configured external tool as
+      an option
 - [ ] Shared credential sets (`NativeTermCredential`)
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)

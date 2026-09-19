@@ -746,6 +746,7 @@ impl App {
             names,
             shim: native_term_app::default_shim_path().unwrap_or_default(),
             tmux_session,
+            memory: self.core.clone(),
         });
     }
 
