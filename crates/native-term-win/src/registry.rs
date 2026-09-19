@@ -187,52 +187,6 @@ pub fn delete_user_tree(subkey: &str) -> io::Result<()> {
     check(status)
 }
 
-/// `bytes` in code page `cp` as text; `None` if they aren't valid there
-/// (or the code page isn't installed).
-pub fn decode_code_page(cp: u32, bytes: &[u8]) -> Option<String> {
-    if bytes.is_empty() {
-        return Some(String::new());
-    }
-    if cp == 65001 {
-        return std::str::from_utf8(bytes).ok().map(str::to_string);
-    }
-    let flags = windows::Win32::Globalization::MB_ERR_INVALID_CHARS;
-    let len = unsafe { MultiByteToWideChar(cp, flags, bytes, None) };
-    if len <= 0 {
-        return None;
-    }
-    let mut wide = vec![0u16; len as usize];
-    let len = unsafe { MultiByteToWideChar(cp, flags, bytes, Some(&mut wide)) };
-    (len > 0).then(|| String::from_utf16_lossy(&wide[..len as usize]))
-}
-
-/// `text` in code page `cp`; `None` if a character can't be written in it
-/// (no "best fit" substitutes: a name must come back as it was).
-pub fn encode_code_page(cp: u32, text: &str) -> Option<Vec<u8>> {
-    use windows::Win32::Globalization::{WideCharToMultiByte, WC_NO_BEST_FIT_CHARS};
-    if cp == 65001 || text.is_empty() {
-        return Some(text.as_bytes().to_vec());
-    }
-    let wide: Vec<u16> = text.encode_utf16().collect();
-    // these code pages take neither the flag nor the "used default" check
-    let strict = !matches!(cp, 50220..=50229 | 52936 | 54936 | 57002..=57011 | 65000 | 42);
-    let flags = if strict { WC_NO_BEST_FIT_CHARS } else { 0 };
-    let mut used_default = windows::core::BOOL(0);
-    let used = strict.then_some(&mut used_default as *mut _);
-    let len = unsafe { WideCharToMultiByte(cp, flags, &wide, None, None, used) };
-    if len <= 0 || used_default.as_bool() {
-        return None;
-    }
-    let mut out = vec![0u8; len as usize];
-    let len = unsafe { WideCharToMultiByte(cp, flags, &wide, Some(&mut out), None, used) };
-    if len <= 0 || used_default.as_bool() {
-        return None;
-    }
-    out.truncate(len as usize);
-    // the round trip must give the text back (a code page without the check)
-    (strict || decode_code_page(cp, &out).as_deref() == Some(text)).then_some(out)
-}
-
 /// Bytes in the system's ANSI code page (e.g. GBK) as text.
 pub fn from_ansi(bytes: &[u8]) -> String {
     if bytes.is_empty() {
@@ -248,23 +202,6 @@ pub fn from_ansi(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn code_pages_both_ways() {
-        let gbk = [0xd6u8, 0xd0, 0xce, 0xc4];
-        assert_eq!(decode_code_page(936, &gbk).as_deref(), Some("中文"));
-        assert_eq!(encode_code_page(936, "中文").as_deref(), Some(&gbk[..]));
-        assert_eq!(decode_code_page(950, &encode_code_page(950, "繁體").unwrap()).as_deref(), Some("繁體"));
-        assert_eq!(decode_code_page(932, &encode_code_page(932, "日本語").unwrap()).as_deref(), Some("日本語"));
-        assert_eq!(decode_code_page(1251, &encode_code_page(1251, "Привет").unwrap()).as_deref(), Some("Привет"));
-        assert_eq!(decode_code_page(28591, &[0xe9]).as_deref(), Some("é"));
-        // not valid there / not writable there
-        assert_eq!(decode_code_page(65001, &gbk), None);
-        assert_eq!(decode_code_page(932, &[0x81]), None, "a lead byte alone");
-        assert_eq!(encode_code_page(1251, "中文"), None);
-        assert_eq!(encode_code_page(936, "Привет").map(|b| decode_code_page(936, &b)), Some(Some("Привет".into())), "GBK has Cyrillic");
-        assert_eq!(encode_code_page(1252, "ā"), None, "no best-fit 'a'");
-    }
 
     #[test]
     fn write_read_delete() {

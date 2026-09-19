@@ -104,57 +104,80 @@ impl Entry {
 /// systems. Requests always use the bytes as listed, so every file can be
 /// opened, renamed or deleted whatever its name; this only decides how a
 /// name is shown and how a new one (upload, rename, new folder) is
-/// written.
+/// written. The encodings are `encoding_rs`'s (the WHATWG Encoding
+/// Standard, Firefox's): every one a name is likely to be in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Names {
-    /// UTF-8 where a name is valid UTF-8, else code page `fallback` (the
-    /// system's ANSI code page by default); new names in UTF-8.
-    Auto { fallback: u32 },
-    /// Every name in this Windows code page (65001: UTF-8 only).
-    CodePage(u32),
+    /// UTF-8 where a name is valid UTF-8, else `fallback` (the system's
+    /// ANSI code page by default); new names in UTF-8.
+    Auto { fallback: &'static Encoding },
+    /// Every name in this encoding.
+    Fixed(&'static Encoding),
 }
+
+pub use encoding_rs::Encoding;
 
 impl Default for Names {
     fn default() -> Names {
         #[cfg(windows)]
-        let fallback = native_term_win::ansi_code_page();
+        let fallback = codepage::to_encoding(native_term_win::ansi_code_page() as u16).unwrap_or(encoding_rs::WINDOWS_1252);
         #[cfg(not(windows))]
-        let fallback = 28591;
+        let fallback = encoding_rs::WINDOWS_1252;
         Names::Auto { fallback }
     }
 }
 
 impl Names {
+    /// An encoding by one of its names (`gbk`, `big5`, `shift_jis`,
+    /// `euc-kr`, `windows-1251`, `iso-8859-2`, …) or a Windows code page
+    /// number (`936`); `auto` or empty: `Names::default()`. Encodings that
+    /// can't be written back (UTF-16, the replacement encoding) aren't
+    /// offered.
+    pub fn from_label(label: &str) -> Option<Names> {
+        let label = label.trim();
+        if label.is_empty() || label.eq_ignore_ascii_case("auto") {
+            return Some(Names::default());
+        }
+        let encoding = match label.parse::<u16>() {
+            Ok(cp) => codepage::to_encoding(cp)?,
+            Err(_) => Encoding::for_label(label.as_bytes())?,
+        };
+        (encoding.output_encoding() == encoding).then_some(Names::Fixed(encoding))
+    }
+
+    /// The setting's value: `auto`, or the encoding's name.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Names::Auto { .. } => "auto",
+            Names::Fixed(e) => e.name(),
+        }
+    }
+
     /// A name as text; bytes that are valid in neither encoding show as
     /// `\xNN`, so no name is ever hidden.
     pub fn decode(&self, bytes: &[u8]) -> String {
         let decoded = match *self {
-            Names::Auto { fallback } => std::str::from_utf8(bytes).ok().map(str::to_string).or_else(|| code_page(fallback, bytes)),
-            Names::CodePage(cp) => code_page(cp, bytes),
+            Names::Auto { fallback } => std::str::from_utf8(bytes).ok().map(str::to_string).or_else(|| strict(fallback, bytes)),
+            Names::Fixed(encoding) => strict(encoding, bytes),
         };
         decoded.unwrap_or_else(|| escaped(bytes))
     }
 
     /// A new name's bytes; `None` if a character can't be written in the
-    /// chosen code page (never a look-alike substitute).
+    /// chosen encoding (never a substitute).
     pub fn encode(&self, text: &str) -> Option<Vec<u8>> {
         match *self {
             Names::Auto { .. } => Some(text.as_bytes().to_vec()),
-            Names::CodePage(cp) => {
-                #[cfg(windows)]
-                return native_term_win::registry::encode_code_page(cp, text);
-                #[cfg(not(windows))]
-                return (cp == 65001).then(|| text.as_bytes().to_vec());
+            Names::Fixed(encoding) => {
+                let (bytes, _, unmappable) = encoding.encode(text);
+                (!unmappable).then(|| bytes.into_owned())
             }
         }
     }
 }
 
-fn code_page(cp: u32, bytes: &[u8]) -> Option<String> {
-    #[cfg(windows)]
-    return native_term_win::registry::decode_code_page(cp, bytes);
-    #[cfg(not(windows))]
-    return (cp == 65001).then(|| std::str::from_utf8(bytes).ok().map(str::to_string)).flatten();
+fn strict(encoding: &'static Encoding, bytes: &[u8]) -> Option<String> {
+    encoding.decode_without_bom_handling_and_without_replacement(bytes).map(|t| t.into_owned())
 }
 
 /// UTF-8 where it is, `\xNN` for the other bytes.
@@ -725,24 +748,42 @@ mod tests {
     #[test]
     fn names_in_any_encoding() {
         let gbk = [0xd6u8, 0xd0, 0xce, 0xc4, b'.', b't', b'x', b't'];
-        let big5 = native_term_win::registry::encode_code_page(950, "繁體.txt").unwrap();
-        let sjis = native_term_win::registry::encode_code_page(932, "日本語.txt").unwrap();
-        let cyrillic = native_term_win::registry::encode_code_page(1251, "Привет.txt").unwrap();
-        // chosen per host
-        assert_eq!(Names::CodePage(936).decode(&gbk), "中文.txt");
-        assert_eq!(Names::CodePage(950).decode(&big5), "繁體.txt");
-        assert_eq!(Names::CodePage(932).decode(&sjis), "日本語.txt");
-        assert_eq!(Names::CodePage(1251).decode(&cyrillic), "Привет.txt");
+        let names = |label: &str| Names::from_label(label).unwrap();
+        // chosen per host, by name or code page
+        assert_eq!(names("gbk").decode(&gbk), "中文.txt");
+        assert_eq!(names("936").decode(&gbk), "中文.txt");
+        for (label, text) in [
+            ("big5", "繁體.txt"),
+            ("shift_jis", "日本語.txt"),
+            ("euc-jp", "日本語.txt"),
+            ("euc-kr", "한국어.txt"),
+            ("windows-1251", "Привет.txt"),
+            ("koi8-r", "Привет.txt"),
+            ("iso-8859-2", "Łódź.txt"),
+            ("windows-1256", "مرحبا.txt"),
+            ("gb18030", "𠀀.txt"),
+        ] {
+            let bytes = names(label).encode(text).unwrap_or_else(|| panic!("{label}"));
+            assert_ne!(bytes, text.as_bytes(), "{label}: not UTF-8");
+            assert_eq!(names(label).decode(&bytes), text, "{label}");
+        }
         // automatic: UTF-8 first, then the fallback
-        let auto = Names::Auto { fallback: 936 };
+        let auto = Names::Auto { fallback: encoding_rs::GBK };
         assert_eq!(auto.decode("文件.txt".as_bytes()), "文件.txt");
         assert_eq!(auto.decode(&gbk), "中文.txt");
         // neither: every byte still shows
-        assert_eq!(Names::CodePage(65001).decode(&gbk), "\\xD6\\xD0\\xCE\\xC4.txt");
-        // new names
-        assert_eq!(Names::CodePage(936).encode("中文.txt").unwrap(), gbk);
-        assert_eq!(Names::CodePage(1251).encode("中文"), None, "can't be written in 1251");
+        assert_eq!(names("utf-8").decode(&gbk), "\\xD6\\xD0\\xCE\\xC4.txt");
+        assert_eq!(names("shift_jis").decode(&[0x81]), "\\x81", "a lead byte alone");
+        // new names: strict
+        assert_eq!(names("gbk").encode("中文.txt").unwrap(), gbk);
+        assert_eq!(names("windows-1251").encode("中文"), None, "can't be written there");
+        assert_eq!(names("windows-1252").encode("ā"), None, "no look-alike 'a'");
         assert_eq!(auto.encode("中文").unwrap(), "中文".as_bytes());
+        // what isn't offered
+        assert_eq!(Names::from_label("utf-16le"), None);
+        assert_eq!(Names::from_label("no-such"), None);
+        assert_eq!(names("GBK").label(), "GBK");
+        assert_eq!(names("auto").label(), "auto");
     }
 
     #[test]
