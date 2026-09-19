@@ -562,16 +562,18 @@ mod tests {
         let watcher = pause_at(&progress, 4 * 1024 * 1024);
         assert_eq!(upload(&sftp, &names, &items, &progress), Err(Error::Cancelled));
         watcher.join().unwrap();
-        let part = server_dir.join(format!("up.bin{PART}"));
-        let kept = std::fs::metadata(&part).unwrap().len();
+        // asked through the session: the writes still in flight when it
+        // paused are done first (the server handles requests in order)
+        let remote_file = join(&remote(&server_dir), b"up.bin");
+        let kept = sftp.stat(&remote_part(&remote_file)).unwrap().size.unwrap();
         assert!(kept > 0 && kept < data.len() as u64, "{kept}");
         assert_eq!(std::fs::read(server_dir.join("up.bin")).unwrap(), b"old");
+        let part = server_dir.join(format!("up.bin{PART}"));
 
         // a new transfer of the same file (the window closed meanwhile)
         // continues the partial file too
         let again = Progress::default();
         let items = plan_upload(&names, std::slice::from_ref(&src), &remote(&server_dir), &again).unwrap();
-        let remote_file = join(&remote(&server_dir), b"up.bin");
         assert_eq!(remote_resume(&sftp, &remote_part(&remote_file), &items[0]), kept);
         upload(&sftp, &names, &items, &again).unwrap();
         assert_eq!(std::fs::read(server_dir.join("up.bin")).unwrap(), data);

@@ -561,7 +561,19 @@ impl Session {
         let handle = self.open(remote, wire::OPEN_READ, &Attrs::default())?;
         let file = if offset == 0 { File::create(local) } else { OpenOptions::new().write(true).open(local) };
         let result = file.map_err(Error::from).and_then(|file| self.read_into(&handle, &file, offset, progress));
-        let closed = self.close(&handle);
+        self.finish(&handle, result)
+    }
+
+    /// Closes a transfer's handle. Cancelled: without waiting (replies to
+    /// the requests still in flight come first, and may take a while on a
+    /// slow link; the server handles requests in order, so whatever comes
+    /// next sees the file as they left it).
+    fn finish(&self, handle: &[u8], result: Result<u64>) -> Result<u64> {
+        if let Err(Error::Cancelled) = result {
+            drop(self.send(wire::CLOSE, Body::default().string(handle)));
+            return result;
+        }
+        let closed = self.close(handle);
         let done = result?;
         closed?;
         Ok(done)
@@ -655,10 +667,7 @@ impl Session {
         let truncate = if offset == 0 { wire::OPEN_TRUNC } else { 0 };
         let handle = self.open(remote, wire::OPEN_WRITE | wire::OPEN_CREAT | truncate, &attrs)?;
         let result = self.write_from(&handle, &mut file, offset, progress);
-        let closed = self.close(&handle);
-        let done = result?;
-        closed?;
-        Ok(done)
+        self.finish(&handle, result)
     }
 
     fn write_from(
@@ -730,11 +739,10 @@ fn wait(rx: Receiver<Result<Reply>>) -> Result<Reply> {
     }
 }
 
-/// Waits for replies nobody needs any more (so they don't pile up).
+/// Replies nobody needs any more (a stopped transfer's, reads past the end).
 fn drain(replies: impl Iterator<Item = Receiver<Result<Reply>>>) {
-    for rx in replies {
-        let _ = rx.recv();
-    }
+    // not waited for: the reader thread drops a reply nobody waits for
+    replies.for_each(drop);
 }
 
 fn unexpected(reply: Reply) -> Error {

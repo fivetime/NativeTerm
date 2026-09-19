@@ -2406,7 +2406,11 @@ the test server showed as `����.txt` and couldn't be opened
 - transfers keep 64 × 32 KB requests in flight (as OpenSSH's sftp),
   writing each chunk where it belongs (replies in any order, short reads
   asked again), progress per chunk; each can start at a byte offset
-  (`download_from` / `upload_from`: the part before it is kept);
+  (`download_from` / `upload_from`: the part before it is kept). A
+  stopped transfer doesn't wait for the replies still in flight (2 MB of
+  reads would take ~20 s at 100 KB/s): the reader drops them, the handle
+  is closed without waiting, and as the server handles requests in
+  order, whatever comes next sees the file as they left it;
 - file names are bytes end to end. `Names` decides only how they're shown
   and how new ones are written: Auto (UTF-8 where valid, else the system's
   ANSI code page) or any `encoding_rs` encoding (GBK, GB18030, Big5,
@@ -2543,7 +2547,8 @@ program killed at ~11 MB, then the same file downloaded again after a
 restart, started at that point and matched too. An upload paused at 60%
 left `大文件.bin.ntpart` on the server beside the untouched old file;
 Resume finished it and the server's SHA-256 matched. Pause All / Resume
-All; Cancel on a paused upload and a paused download removed the partial
+All; Pause shown as paused 0.19 s after the click (it had waited ~2 s
+for the reads in flight); Cancel on a paused upload and a paused download removed the partial
 file (and the list no longer showed it); ✕ and Clear Finished emptied the
 queue. Tests (with Windows' `sftp-server.exe`): a paused download and a
 paused upload go on to the same bytes, a new plan continues an old
