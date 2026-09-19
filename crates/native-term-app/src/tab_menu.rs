@@ -20,6 +20,7 @@ pub const LOCK: u32 = 9;
 pub const CLEAR: u32 = 10;
 pub const RENAME: u32 = 11;
 pub const BREAK: u32 = 12;
+pub const FILES: u32 = 13;
 
 /// What the menu asks the main window to do (its dialogs live there).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +31,8 @@ pub enum MenuRequest {
     Rename(String),
     /// Closing these sessions would close tabs that hold other panes too.
     ConfirmClose(Vec<String>),
+    /// This session's files (SFTP): alias, session id.
+    Files { alias: String, session: String },
 }
 
 pub(crate) struct Actions {
@@ -98,6 +101,8 @@ impl Provider for Actions {
         entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), applies(DISCONNECT)));
         entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), applies(CLONE)));
         entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), applies(SEND)));
+        // the main window knows the host: a non-SSH session gets a note there
+        entries.push(action(FILES, '\u{E8B7}', &t!("tabmenu-files"), true));
         if SessionCommand::SendBreak.offered(this) {
             entries.push(action(BREAK, '\u{E7BA}', &t!("tabmenu-break"), applies(BREAK)));
         }
@@ -125,6 +130,7 @@ impl Provider for Actions {
         match (id, command(id), close_item(id, &this.id)) {
             (SEND, _, _) => (self.ask)(MenuRequest::Send(this.id.clone())),
             (RENAME, _, _) => (self.ask)(MenuRequest::Rename(this.alias.clone())),
+            (FILES, _, _) => (self.ask)(MenuRequest::Files { alias: this.alias.clone(), session: this.id.clone() }),
             (_, Some(command), _) => core.run(&this.id, command),
             (_, _, Some(set)) => {
                 // a tab that holds other panes is closed only when confirmed

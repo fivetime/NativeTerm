@@ -2353,9 +2353,14 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
 
 ## File transfer (SFTP)
 
-Every SSH host has **Files (SFTP)…** in its menu: a window of its own
-(one per host) to browse the server's files, upload, download, create
-folders, rename, delete, and edit a file in place. Nothing is installed
+**Files (SFTP)…** in a host's menu or in a terminal tab's menu (the tab
+menu's "Files (SFTP)") opens the session in **one files window for all
+sessions**, laid out like SecureFX (the user's reference): local files on
+the left, the server's on the right, each side with a tab per session;
+the two tab rows move together (a click on a local tab selects the
+session on both sides, and the other way round). A host already open is
+shown instead of opened twice. Browse both sides, transfer between them,
+create folders, rename, delete, and edit a server's file in place. Nothing is installed
 on the server: the SFTP subsystem comes with OpenSSH's server (a user
 without sudo, or one who won't install lrzsz/trzsz, can still transfer
 files). Decided by the user: file transfer is built in, not only handed
@@ -2414,18 +2419,37 @@ the test server showed as `����.txt` and couldn't be opened
   no loops), recursive delete; server names become valid Windows names
   (`< > : " / \ | ? *`, trailing dots, `CON`…).
 
-**The window** (`files_window.rs`, `window::open`: the runner now opens
-windows while running, each with its own egui context; closing one with
-transfers or edits running asks first). Toolbar: up, refresh, path,
-Upload… (the system's file picker on a thread), Download (to Downloads;
-right-click: Download To…), Edit, Delete (asked, "folders with
-everything in them"), New Folder, name encoding. Files dropped from
-Explorer are uploaded to the folder shown. Rows show name, size,
-modified, `ls -l` permissions; links to folders open like folders;
-Ctrl/Shift selection; F5, Backspace, Enter, F2, Delete. Rows and icon
-buttons are named for screen readers and UI automation (AccessKit).
-Transfers show progress, speed and Cancel; a finished download has Open
-Folder.
+**The window** (`files_window.rs`; `window::open`: the runner opens
+windows while running, each with its own egui context; sessions asked
+for reach the open window through a queue it drains each frame; closing
+the window, or a session's tab, with transfers or edits running asks
+first; a session's tab closes its connection).
+- *Local side:* starts in Downloads; folders, files, and above the top of
+  a drive the drives ("This PC"); Open (a folder, or a file with its
+  program), New Folder, rename, Delete (to the Recycle Bin, asked);
+  Upload sends the selection to the server's folder shown.
+- *Server's side:* up, refresh, path, Download (the selection to the local
+  folder shown), Edit, Delete (asked, "folders with everything in them"),
+  New Folder, rename, name encoding; `ls -l` permissions; links to
+  folders open like folders; below it the session's log (connecting,
+  connected and where, each transfer's end, errors).
+- *Across:* the buttons, dragging the selection from one side's list to
+  the other's (a green frame shows where it would go), or files dropped
+  from Explorer onto the server's side.
+- Ctrl/Shift selection, right-click menus, F5, Backspace, Enter, F2,
+  Delete on the side clicked last. Rows, tabs and icon buttons are named
+  for screen readers and UI automation (AccessKit).
+- *Transfer queue* at the bottom, every session's (host, progress, size,
+  speed for transfers of a second or more, Cancel; Clear Finished), and
+  the files being edited with their state.
+- *From a terminal tab kept in tmux* (`NativeTermPersistent tmux` /
+  `tmux-log`) the server's side starts in the tab's current folder:
+  `tmux display-message -p -t =<session>: "#{pane_current_path}"` over
+  `ssh -o BatchMode=yes` (a host that needs a password falls back to the
+  home folder); asking again for a host already open moves it there.
+  Windows OpenSSH can't reuse the tab's connection, so "the same
+  session" is the same host, config and login, on a connection of its
+  own.
 
 **Editing in place.** Edit (or Enter, double-click) downloads the file
 to `%TEMP%\NativeTerm-edit\<host>\<random>\`, opens it with its program
@@ -2448,15 +2472,22 @@ listed as a link, opened as a folder; folders up and down with an empty
 folder and CJK names, progress adding up; an edited file uploaded on save
 by replacing (no temporary file left), a change on the server holding
 the upload until Overwrite. In the real window, driven through UI
-Automation in a test instance (`NATIVETERM_OPEN_FILES`,
-`NATIVETERM_DOWNLOADS`, test folders): listing, Download of the GBK file,
-Upload of two files through the picker (SHA256 equal on the server),
-Delete with confirmation; a password host with the password saved (test
-credential) connected without asking; without it the window asked
-(`root@…'s password:`), and Cancel ended the connection at once with
-ssh's message. Not tried here: typing into the window's text fields
-(egui's text fields don't take UI Automation's SetValue) and dropping
-files from Explorer.
+Automation in a test instance (`NATIVETERM_OPEN_FILES=<alias>[,…]`,
+`NATIVETERM_OPEN_FILES_SESSION`, `NATIVETERM_LOCAL_START`, test folders):
+the first single-pane version listed, downloaded the GBK file, uploaded
+two files through the picker (SHA256 equal), deleted with confirmation,
+logged in with a saved password (test credential) and asked for one
+without it (Cancel ended the connection at once with ssh's message). The
+two-sided window: opened as from a tab whose tmux session sat in
+`/tmp/终端目录`, the server's side started there; Upload of a local file
+and Download of a server's file with the buttons (both lists refreshed,
+the queue and the log showed them); two sessions: a click on the first
+local tab selected the first server tab, a click on the second server
+tab the second local tab; both sides' rows line up. Not tried here:
+typing into the window's text fields (egui's text fields don't take UI
+Automation's SetValue), dragging between the lists, dropping files from
+Explorer, and the tab menu item itself (its handler is the one the test
+hook calls).
 
 **Not yet:** resuming a broken transfer, transfers between two servers,
 remembering the last folder per host, comparing / syncing folders.

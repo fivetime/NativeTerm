@@ -137,8 +137,8 @@ pub struct App {
     /// The recent hosts, read from `state.db` at most every 2 s (the tree
     /// asks on every frame, and scrolling draws many).
     recent_cache: std::cell::RefCell<(Option<std::time::Instant>, Vec<String>)>,
-    /// Tests: `NATIVETERM_OPEN_FILES=<alias>` opens that host's files
-    /// window once the tree is there.
+    /// Tests: `NATIVETERM_OPEN_FILES=<alias>[,<alias>…]` opens those
+    /// hosts' files once the tree is there.
     open_files: Option<String>,
     /// Hosts of folders marked "No group send", per tree generation.
     no_group_cache: std::cell::RefCell<(u64, std::collections::HashSet<String>)>,
@@ -458,23 +458,7 @@ impl App {
                     Err(e) => self.notices.push(e.to_string()),
                 }
             }
-            TreeAction::Files(alias) => {
-                if let Some((folder, host)) = self.tree.find(&alias) {
-                    // `NativeTermFileEncoding` (host or folder): how the server names files
-                    let names = folder
-                        .nt(host, "fileencoding")
-                        .and_then(native_term_sftp::Names::from_label)
-                        .unwrap_or_default();
-                    crate::files_window::open(crate::files_window::Spec {
-                        alias: alias.clone(),
-                        label: host.label().to_string(),
-                        ssh: self.editor.ssh().to_path_buf(),
-                        config: self.editor.config().map(Path::to_path_buf),
-                        names,
-                        shim: native_term_app::default_shim_path().unwrap_or_default(),
-                    });
-                }
-            }
+            TreeAction::Files(alias) => self.open_files(&alias, None),
             TreeAction::ServerSessions(alias) => {
                 if let Some((folder, host)) = self.tree.find(&alias) {
                     let on_login = folder.nt(host, "onlogin").map(str::to_string);
@@ -711,9 +695,41 @@ impl App {
         }
     }
 
+    /// A host's files (SFTP) in the files window; from a terminal tab
+    /// (`session`) kept in tmux, the server's side starts in the tab's
+    /// folder.
+    fn open_files(&mut self, alias: &str, session: Option<&String>) {
+        let Some((folder, host)) = self.tree.find(alias) else {
+            self.notices.push(t!("notice-not-saved", alias = alias));
+            return;
+        };
+        if host.plink.is_some() {
+            self.notices.push(t!("notice-files-ssh-only", label = host.label()));
+            return;
+        }
+        // `NativeTermFileEncoding` (host or folder): how the server names files
+        let names = folder.nt(host, "fileencoding").and_then(native_term_sftp::Names::from_label).unwrap_or_default();
+        let tmux = native_term_config::persistent::for_host(folder, host) == Some(native_term_config::persistent::Persistence::Tmux);
+        let tmux_session = session.filter(|_| tmux).map(|id| native_term_config::persistent::session_name(alias, id));
+        crate::files_window::open(crate::files_window::Spec {
+            alias: alias.to_string(),
+            label: host.label().to_string(),
+            ssh: self.editor.ssh().to_path_buf(),
+            config: self.editor.config().map(Path::to_path_buf),
+            names,
+            shim: native_term_app::default_shim_path().unwrap_or_default(),
+            tmux_session,
+        });
+    }
+
     /// What the tab menu asked for: it has no dialogs of its own.
     fn handle_menu_request(&mut self, request: native_term_app::tab_menu::MenuRequest) {
         use native_term_app::tab_menu::MenuRequest;
+        // the files window is a window of its own: no dialog in the way
+        if let MenuRequest::Files { alias, session } = &request {
+            self.open_files(alias, Some(session));
+            return;
+        }
         if self.dialog.is_some() {
             self.notices.push(t!("notice-dialog-open"));
             return;
@@ -732,6 +748,8 @@ impl App {
                 }
                 None => self.notices.push(t!("notice-not-saved", alias = alias.as_str())),
             },
+            // handled above
+            MenuRequest::Files { .. } => {}
             MenuRequest::ConfirmClose(ids) => {
                 let labels = self
                     .core
@@ -1456,8 +1474,12 @@ impl crate::window::Ui for App {
         for action in actions {
             self.handle(action);
         }
-        if let Some(alias) = self.open_files.take_if(|a| self.tree.find(a).is_some()) {
-            self.handle(TreeAction::Files(alias));
+        if let Some(aliases) = self.open_files.take_if(|a| a.split(',').all(|a| self.tree.find(a).is_some())) {
+            // and `NATIVETERM_OPEN_FILES_SESSION=<id>`: the first as from that terminal tab's menu
+            let session = std::env::var("NATIVETERM_OPEN_FILES_SESSION").ok().filter(|s| !s.is_empty());
+            for (i, alias) in aliases.split(',').enumerate() {
+                self.open_files(alias, session.as_ref().filter(|_| i == 0));
+            }
         }
         egui::CentralPanel::default().show_inside(ui, |ui| self.right_panel(ui));
         self.show_dialog(ctx);

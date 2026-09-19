@@ -1,10 +1,16 @@
-//! A host's files over SFTP (`native_term_sftp`), in a window of its own
-//! (`window::open`, one per host): browse, upload (button or dropped from
-//! Explorer), download, new folder, rename, delete, and edit: a file is
-//! downloaded, opened with its program, and uploaded again whenever it is
-//! saved. Everything that touches the network or the disk runs on a
-//! thread; the window only shows what comes back.
+//! Files over SFTP (`native_term_sftp`), SecureFX-style: one window for
+//! every session, local files on the left and the server's on the right,
+//! each side with a tab per session; the two tab rows move together.
+//! Files go across with the buttons between them or by dragging from one
+//! side to the other (and from Explorer onto the server's side). The
+//! server's side also renames, deletes, creates folders and edits in
+//! place: a file is downloaded, opened with its program, and uploaded
+//! again whenever it is saved. A session is opened from a host's menu or
+//! a terminal tab's menu; for a tab kept in tmux the server's side starts
+//! in the tab's current folder. Everything that touches the network or
+//! the disk runs on a thread; the window only shows what comes back.
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +28,8 @@ use crate::icons;
 const RED: egui::Color32 = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
 const GREEN: egui::Color32 = egui::Color32::from_rgb(0x2e, 0xa0, 0x43);
 const ROW: f32 = 22.0;
+/// Log lines kept per session.
+const LOG_LINES: usize = 200;
 
 /// The encodings offered for file names (any `encoding_rs` label can be
 /// set in the config).
@@ -30,7 +38,7 @@ const ENCODINGS: [&str; 14] = [
     "KOI8-R", "ISO-8859-2", "windows-1256",
 ];
 
-/// What opening a host's files needs.
+/// What opening a session's files needs.
 pub struct Spec {
     pub alias: String,
     pub label: String,
@@ -40,6 +48,77 @@ pub struct Spec {
     pub names: Names,
     /// `nativeterm-shim.exe`: ssh's askpass helper.
     pub shim: PathBuf,
+    /// The terminal tab's tmux session (a persistent session): the
+    /// server's side starts in its current folder.
+    pub tmux_session: Option<String>,
+}
+
+thread_local! {
+    /// Sessions asked for since the window last looked.
+    static PENDING: RefCell<Vec<Spec>> = const { RefCell::new(Vec::new()) };
+    /// The open window's context (to wake it).
+    static WINDOW: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
+}
+
+/// Opens a session in the files window (the window too, if it isn't open;
+/// a host already there is shown).
+pub fn open(spec: Spec) {
+    PENDING.with(|p| p.borrow_mut().push(spec));
+    if let Some(ctx) = WINDOW.with(|w| w.borrow().clone()) {
+        ctx.request_repaint();
+    }
+    let viewport = egui::ViewportBuilder::default()
+        .with_title(t!("files-window-title"))
+        .with_inner_size([1200.0, 760.0])
+        .with_min_inner_size([760.0, 420.0])
+        .with_drag_and_drop(true);
+    crate::window::open("files", viewport, |ctx| Box::new(FilesWindow::new(ctx)));
+}
+
+/// A server's directory entry as shown.
+#[derive(Clone)]
+struct RemoteRow {
+    entry: Entry,
+    name: String,
+    /// A folder, or a link to one.
+    dir: bool,
+}
+
+/// A local file, folder or drive.
+#[derive(Clone)]
+struct LocalRow {
+    name: String,
+    path: PathBuf,
+    dir: bool,
+    size: Option<u64>,
+    modified: Option<u64>,
+}
+
+/// One line of a list, whichever side: `key` identifies it for selection.
+struct Line {
+    key: Vec<u8>,
+    name: String,
+    glyph: char,
+    size: Option<u64>,
+    modified: Option<u64>,
+    mode: Option<String>,
+}
+
+/// Files dragged from one side to the other.
+struct Dragged {
+    tab: u64,
+    from_remote: bool,
+    keys: Vec<Vec<u8>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Action {
+    Open,
+    Transfer,
+    Edit,
+    Rename,
+    CopyPath,
+    Delete,
 }
 
 /// A question from ssh (password, passphrase, new host key, code), for
@@ -51,38 +130,22 @@ struct Question {
     reply: Sender<Option<String>>,
 }
 
-/// Opens the host's files window (or shows the open one).
-pub fn open(spec: Spec) {
-    let title = t!("files-title", label = spec.label.as_str());
-    let viewport = egui::ViewportBuilder::default()
-        .with_title(title)
-        .with_inner_size([900.0, 620.0])
-        .with_min_inner_size([520.0, 320.0])
-        .with_drag_and_drop(true);
-    let key = format!("files:{}", spec.alias);
-    crate::window::open(key, viewport, move |ctx| Box::new(FilesWindow::new(ctx, spec)));
-}
-
-/// A directory entry as shown.
-#[derive(Clone)]
-struct Row {
-    entry: Entry,
-    name: String,
-    /// A folder, or a link to one.
-    dir: bool,
-}
-
-enum Event {
+enum What {
     Connected(Arc<Session>, Vec<u8>),
     Failed(String),
-    Listed { path: Vec<u8>, result: Result<Vec<Row>, String> },
-    JobDone { id: u64, result: Result<(), native_term_sftp::Error> },
-    /// Files picked for uploading, or a folder to download into.
-    PickedUpload(Vec<PathBuf>),
-    PickedFolder(PathBuf, Vec<(Vec<u8>, Attrs)>),
+    Listed { path: Vec<u8>, result: Result<Vec<RemoteRow>, String> },
+    LocalListed { path: Option<PathBuf>, result: Result<Vec<LocalRow>, String> },
+    JobDone { job: u64, result: Result<(), native_term_sftp::Error> },
     Notice(String, bool),
     Refresh,
+    LocalRefresh,
     Ask(Question),
+}
+
+/// What happened, for which session.
+struct Event {
+    tab: u64,
+    what: What,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -101,13 +164,14 @@ enum JobState {
 
 struct Job {
     id: u64,
+    tab: u64,
+    host: String,
     kind: Kind,
     title: String,
     progress: Arc<Progress>,
     state: JobState,
     started: Instant,
-    /// A download's folder (to show it).
-    folder: Option<PathBuf>,
+    finished: Option<Instant>,
 }
 
 /// A file being edited: uploaded again whenever its local copy changes.
@@ -122,90 +186,174 @@ struct Edit {
     overwrite: Arc<AtomicBool>,
 }
 
-struct FilesWindow {
-    spec: Spec,
-    ctx: egui::Context,
-    tx: Sender<Event>,
-    rx: Receiver<Event>,
+/// The server's side of a session.
+struct Remote {
     sftp: Option<Arc<Session>>,
     failed: Option<String>,
     path: Vec<u8>,
     path_text: String,
-    rows: Vec<Row>,
+    rows: Vec<RemoteRow>,
     listing: bool,
-    list_error: Option<String>,
+    error: Option<String>,
     selected: HashSet<Vec<u8>>,
     anchor: Option<usize>,
-    names: Names,
-    jobs: Vec<Job>,
-    next_job: u64,
-    edits: Vec<Edit>,
     renaming: Option<(Vec<u8>, String)>,
-    new_folder: Option<String>,
-    confirm_delete: Option<Vec<(Vec<u8>, Attrs)>>,
-    confirm_close: bool,
+    names: Names,
+}
+
+/// The local side of a session: a folder, or `None` for the drives.
+struct Local {
+    path: Option<PathBuf>,
+    path_text: String,
+    rows: Vec<LocalRow>,
+    error: Option<String>,
+    selected: HashSet<Vec<u8>>,
+    anchor: Option<usize>,
+    renaming: Option<(Vec<u8>, String)>,
+}
+
+struct Tab {
+    id: u64,
+    spec: Spec,
+    remote: Remote,
+    local: Local,
+    edits: Vec<Edit>,
+    log: Vec<(String, String, bool)>,
+}
+
+/// What a confirmation is about.
+enum Confirm {
+    DeleteRemote { tab: u64, items: Vec<(Vec<u8>, Attrs)>, what: String, folders: bool },
+    RecycleLocal { tab: u64, paths: Vec<PathBuf>, what: String },
+    CloseTab(u64),
+    CloseWindow,
+}
+
+struct FilesWindow {
+    ctx: egui::Context,
+    tx: Sender<Event>,
+    rx: Receiver<Event>,
+    tabs: Vec<Tab>,
+    active: usize,
+    next_id: u64,
+    jobs: Vec<Job>,
+    /// A new folder: session, server's side, name.
+    new_folder: Option<(u64, bool, String)>,
+    confirm: Option<Confirm>,
     close: bool,
-    notice: Option<(String, bool)>,
+    /// ssh's question being asked (session, question, answer typed).
+    question: Option<(u64, Question, String)>,
+    /// The side keys go to (clicked last): the server's.
+    remote_focus: bool,
+    /// Where the server's side is (for files dropped from Explorer).
+    remote_rect: Option<egui::Rect>,
     edit_dir: PathBuf,
-    /// ssh's question being asked, and the answer being typed.
-    question: Option<(Question, String)>,
+    computer: String,
 }
 
 impl FilesWindow {
-    fn new(ctx: &egui::Context, spec: Spec) -> FilesWindow {
+    fn new(ctx: &egui::Context) -> FilesWindow {
+        WINDOW.with(|w| *w.borrow_mut() = Some(ctx.clone()));
         let (tx, rx) = mpsc::channel();
-        let edit_dir = std::env::temp_dir().join("NativeTerm-edit").join(transfer::local_name(&Names::default(), spec.alias.as_bytes()));
-        let names = spec.names;
-        let mut window = FilesWindow {
-            spec,
+        FilesWindow {
             ctx: ctx.clone(),
             tx,
             rx,
-            sftp: None,
-            failed: None,
-            path: Vec::new(),
-            path_text: String::new(),
-            rows: Vec::new(),
-            listing: false,
-            list_error: None,
-            selected: HashSet::new(),
-            anchor: None,
-            names,
+            tabs: Vec::new(),
+            active: 0,
+            next_id: 1,
             jobs: Vec::new(),
-            next_job: 1,
-            edits: Vec::new(),
-            renaming: None,
             new_folder: None,
-            confirm_delete: None,
-            confirm_close: false,
+            confirm: None,
             close: false,
-            notice: None,
-            edit_dir,
             question: None,
-        };
-        window.connect();
-        window
+            remote_focus: true,
+            remote_rect: None,
+            edit_dir: std::env::temp_dir().join("NativeTerm-edit"),
+            computer: std::env::var("COMPUTERNAME").unwrap_or_default(),
+        }
+    }
+
+    fn tab(&mut self, id: u64) -> Option<&mut Tab> {
+        self.tabs.iter_mut().find(|t| t.id == id)
     }
 
     /// Runs `work` on a thread; its event comes back with a repaint.
-    fn spawn(&self, work: impl FnOnce() -> Event + Send + 'static) {
+    fn spawn(&self, tab: u64, work: impl FnOnce() -> What + Send + 'static) {
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         std::thread::spawn(move || {
-            let _ = tx.send(work());
+            let _ = tx.send(Event { tab, what: work() });
             ctx.request_repaint();
         });
+    }
+
+    fn log(&mut self, tab: u64, text: String, error: bool) {
+        if let Some(t) = self.tab(tab) {
+            let time = native_term_win::local_time_of_day(unix_now());
+            t.log.push((time, text, error));
+            if t.log.len() > LOG_LINES {
+                t.log.remove(0);
+            }
+        }
+    }
+
+    /// Sessions asked for: a new tab, or the host's tab shown (and moved
+    /// to the terminal's folder, if it says one).
+    fn take_pending(&mut self) {
+        let pending = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
+        for spec in pending {
+            if let Some(i) = self.tabs.iter().position(|t| t.spec.alias == spec.alias) {
+                self.active = i;
+                if let Some(session) = spec.tmux_session.clone() {
+                    let id = self.tabs[i].id;
+                    self.tabs[i].spec.tmux_session = Some(session);
+                    self.follow_terminal(id);
+                }
+                continue;
+            }
+            let id = self.next_id;
+            self.next_id += 1;
+            let local_start = std::env::var_os("NATIVETERM_LOCAL_START").map(PathBuf::from).or_else(native_term_win::shell::downloads_folder);
+            let names = spec.names;
+            self.tabs.push(Tab {
+                id,
+                spec,
+                remote: Remote {
+                    sftp: None,
+                    failed: None,
+                    path: Vec::new(),
+                    path_text: String::new(),
+                    rows: Vec::new(),
+                    listing: false,
+                    error: None,
+                    selected: HashSet::new(),
+                    anchor: None,
+                    renaming: None,
+                    names,
+                },
+                local: Local { path: None, path_text: String::new(), rows: Vec::new(), error: None, selected: HashSet::new(), anchor: None, renaming: None },
+                edits: Vec::new(),
+                log: Vec::new(),
+            });
+            self.active = self.tabs.len() - 1;
+            self.connect(id);
+            self.list_local(id, local_start);
+        }
     }
 
     /// Connects in the background. ssh's questions come here through the
     /// shim as askpass helper and a private pipe: the account's saved
     /// password (Credential Manager) answers its own password prompt, as in
     /// a terminal tab; everything else is asked in this window.
-    fn connect(&mut self) {
-        self.failed = None;
-        self.sftp = None;
-        let (ssh, config, alias, shim) = (self.spec.ssh.clone(), self.spec.config.clone(), self.spec.alias.clone(), self.spec.shim.clone());
+    fn connect(&mut self, id: u64) {
+        let Some(tab) = self.tab(id) else { return };
+        tab.remote.failed = None;
+        tab.remote.sftp = None;
+        let spec = &tab.spec;
+        let (ssh, config, alias, shim, tmux) = (spec.ssh.clone(), spec.config.clone(), spec.alias.clone(), spec.shim.clone(), spec.tmux_session.clone());
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
-        self.spawn(move || {
+        self.log(id, t!("files-log-connecting", host = alias.as_str()), false);
+        self.spawn(id, move || {
             let effective = native_term_config::effective::effective_with(&ssh, config.as_deref(), &alias).unwrap_or_default();
             let target = native_term_config::password::target(&effective);
             let saved = target.as_ref().is_some_and(|t| {
@@ -213,17 +361,19 @@ impl FilesWindow {
             });
             let ssh_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
             let served = Arc::new(AtomicBool::new(false));
-            let askpass = serve_questions(target.clone(), Arc::clone(&ssh_pid), Arc::clone(&served), tx, ctx).ok().filter(|_| shim.exists()).map(|pipe| {
-                native_term_sftp::Askpass {
-                    program: shim.clone(),
-                    // unanswered = cancelled: ssh's console here is hidden
-                    env: vec![("NATIVETERM_ASKPASS".to_string(), pipe), ("NATIVETERM_ASKPASS_NO_CONSOLE".to_string(), "1".to_string())],
-                    password_prompts: saved.then_some(1),
-                }
+            let pipe = serve_questions(id, target.clone(), Arc::clone(&ssh_pid), Arc::clone(&served), tx, ctx);
+            let askpass = pipe.ok().filter(|_| shim.exists()).map(|pipe| native_term_sftp::Askpass {
+                program: shim.clone(),
+                // unanswered = cancelled: ssh's console here is hidden
+                env: vec![("NATIVETERM_ASKPASS".to_string(), pipe), ("NATIVETERM_ASKPASS_NO_CONSOLE".to_string(), "1".to_string())],
+                password_prompts: saved.then_some(1),
             });
             let connected = Session::connect(&ssh, config.as_deref(), &alias, askpass.as_ref(), |pid| ssh_pid.store(pid, Ordering::SeqCst));
             match connected.and_then(|sftp| sftp.realpath(b".").map(|home| (sftp, home))) {
-                Ok((sftp, home)) => Event::Connected(Arc::new(sftp), home),
+                Ok((sftp, home)) => {
+                    let start = tmux.and_then(|s| terminal_folder(&ssh, config.as_deref(), &alias, &s, &sftp)).unwrap_or(home);
+                    What::Connected(Arc::new(sftp), start)
+                }
                 Err(e) => {
                     let text = e.to_string();
                     // the saved password was given and refused: marked, not tried again
@@ -235,151 +385,227 @@ impl FilesWindow {
                             }
                         }
                     }
-                    Event::Failed(text)
+                    What::Failed(text)
                 }
             }
         });
     }
 
-    fn list(&mut self, path: Vec<u8>) {
-        let Some(sftp) = self.sftp.clone() else { return };
-        self.listing = true;
-        let names = self.names;
-        self.spawn(move || {
-            let result = sftp.read_dir(&path).map_err(|e| e.to_string()).map(|entries| {
-                let mut rows: Vec<Row> = entries
-                    .into_iter()
-                    .map(|entry| {
-                        // a link to a folder opens like one
-                        let dir = entry.attrs.is_dir()
-                            || (entry.attrs.is_symlink()
-                                && sftp.stat(&native_term_sftp::join(&path, &entry.name)).is_ok_and(|a| a.is_dir()));
-                        Row { name: names.decode(&entry.name), dir, entry }
-                    })
-                    .collect();
-                rows.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-                rows
-            });
-            Event::Listed { path, result }
+    /// The server's side to the terminal tab's current folder.
+    fn follow_terminal(&mut self, id: u64) {
+        let Some(tab) = self.tab(id) else { return };
+        let (Some(sftp), Some(session)) = (tab.remote.sftp.clone(), tab.spec.tmux_session.clone()) else { return };
+        let (ssh, config, alias) = (tab.spec.ssh.clone(), tab.spec.config.clone(), tab.spec.alias.clone());
+        let names = tab.remote.names;
+        self.spawn(id, move || match terminal_folder(&ssh, config.as_deref(), &alias, &session, &sftp) {
+            Some(path) => list_remote(&sftp, names, path),
+            None => What::Refresh,
         });
     }
 
-    fn go(&mut self, path: Vec<u8>) {
-        self.selected.clear();
-        self.anchor = None;
-        self.renaming = None;
-        self.list(path);
+    fn list(&mut self, id: u64, path: Vec<u8>) {
+        let Some(tab) = self.tab(id) else { return };
+        let Some(sftp) = tab.remote.sftp.clone() else { return };
+        tab.remote.listing = true;
+        let names = tab.remote.names;
+        self.spawn(id, move || list_remote(&sftp, names, path));
     }
 
-    fn refresh(&mut self) {
-        let path = self.path.clone();
-        self.list(path);
+    fn go(&mut self, id: u64, path: Vec<u8>) {
+        if let Some(tab) = self.tab(id) {
+            tab.remote.selected.clear();
+            tab.remote.anchor = None;
+            tab.remote.renaming = None;
+        }
+        self.list(id, path);
+    }
+
+    fn refresh(&mut self, id: u64) {
+        let Some(path) = self.tab(id).map(|t| t.remote.path.clone()) else { return };
+        self.list(id, path);
+    }
+
+    fn list_local(&mut self, id: u64, path: Option<PathBuf>) {
+        if let Some(tab) = self.tab(id) {
+            tab.local.selected.clear();
+            tab.local.anchor = None;
+            tab.local.renaming = None;
+        }
+        self.spawn(id, move || {
+            let result = list_local(path.as_deref()).map_err(|e| e.to_string());
+            What::LocalListed { path, result }
+        });
+    }
+
+    fn refresh_local(&mut self, id: u64) {
+        let Some(path) = self.tab(id).map(|t| t.local.path.clone()) else { return };
+        self.list_local(id, path);
     }
 
     fn handle(&mut self, event: Event) {
-        match event {
-            Event::Connected(sftp, home) => {
-                self.sftp = Some(sftp);
-                self.go(home);
+        let id = event.tab;
+        match event.what {
+            What::Connected(sftp, start) => {
+                let home = self.tab(id).map(|t| t.remote.names.decode(&start)).unwrap_or_default();
+                if let Some(tab) = self.tab(id) {
+                    tab.remote.sftp = Some(sftp);
+                }
+                self.log(id, t!("files-log-connected", path = home), false);
+                self.go(id, start);
             }
-            Event::Failed(e) => self.failed = Some(e),
-            Event::Listed { path, result } => {
-                self.listing = false;
-                match result {
-                    Ok(rows) => {
-                        self.path_text = self.names.decode(&path);
-                        self.path = path;
-                        self.rows = rows;
-                        self.list_error = None;
-                        let names: HashSet<&Vec<u8>> = self.rows.iter().map(|r| &r.entry.name).collect();
-                        self.selected.retain(|n| names.contains(n));
-                    }
-                    Err(e) => {
-                        // the connection went: say so, offer to reconnect
-                        if let Some(why) = self.sftp.as_ref().and_then(|s| s.closed()) {
-                            self.failed = Some(why);
-                            self.sftp = None;
-                        } else {
-                            self.list_error = Some(e);
+            What::Failed(e) => {
+                self.log(id, e.clone(), true);
+                if let Some(tab) = self.tab(id) {
+                    tab.remote.failed = Some(e);
+                }
+            }
+            What::Listed { path, result } => {
+                let mut lost = None;
+                if let Some(tab) = self.tab(id) {
+                    let r = &mut tab.remote;
+                    r.listing = false;
+                    match result {
+                        Ok(rows) => {
+                            r.path_text = r.names.decode(&path);
+                            r.path = path;
+                            r.rows = rows;
+                            r.error = None;
+                            let keys: HashSet<&Vec<u8>> = r.rows.iter().map(|x| &x.entry.name).collect();
+                            r.selected.retain(|n| keys.contains(n));
                         }
+                        // the connection went: say so, offer to reconnect
+                        Err(e) => match r.sftp.as_ref().and_then(|s| s.closed()) {
+                            Some(why) => {
+                                r.failed = Some(why.clone());
+                                r.sftp = None;
+                                lost = Some(why);
+                            }
+                            None => r.error = Some(e),
+                        },
+                    }
+                }
+                if let Some(why) = lost {
+                    self.log(id, why, true);
+                }
+            }
+            What::LocalListed { path, result } => {
+                let computer = t!("files-computer");
+                if let Some(tab) = self.tab(id) {
+                    let l = &mut tab.local;
+                    match result {
+                        Ok(rows) => {
+                            l.path_text = path.as_ref().map(|p| p.display().to_string()).unwrap_or(computer);
+                            l.path = path;
+                            l.rows = rows;
+                            l.error = None;
+                        }
+                        Err(e) => l.error = Some(e),
                     }
                 }
             }
-            Event::JobDone { id, result } => {
-                let mut refresh = false;
-                if let Some(job) = self.jobs.iter_mut().find(|j| j.id == id) {
-                    job.state = match result {
+            What::JobDone { job, result } => {
+                let mut after = None;
+                if let Some(j) = self.jobs.iter_mut().find(|j| j.id == job) {
+                    j.finished = Some(Instant::now());
+                    j.state = match &result {
                         Ok(()) => JobState::Done,
                         Err(native_term_sftp::Error::Cancelled) => JobState::Cancelled,
                         Err(e) => JobState::Failed(e.to_string()),
                     };
-                    refresh = job.kind != Kind::Download;
+                    let line = match &j.state {
+                        JobState::Done => (t!("files-log-done", what = j.title.as_str()), false),
+                        JobState::Cancelled => (t!("files-job-cancelled", what = j.title.as_str()), false),
+                        JobState::Failed(e) => (format!("{}: {e}", j.title), true),
+                        JobState::Running => (String::new(), false),
+                    };
+                    after = Some((j.tab, j.kind, line));
                 }
-                if refresh {
-                    self.refresh();
+                if let Some((tab, kind, (text, error))) = after {
+                    self.log(tab, text, error);
+                    match kind {
+                        Kind::Download => self.refresh_local(tab),
+                        Kind::Upload | Kind::Delete => self.refresh(tab),
+                    }
                 }
             }
-            Event::PickedUpload(files) => self.upload(files),
-            Event::PickedFolder(folder, items) => self.download(items, folder),
-            Event::Notice(text, error) => self.notice = Some((text, error)),
-            Event::Refresh => self.refresh(),
-            Event::Ask(question) => {
-                if let Some((old, _)) = self.question.take() {
+            What::Notice(text, error) => self.log(id, text, error),
+            What::Refresh => self.refresh(id),
+            What::LocalRefresh => self.refresh_local(id),
+            What::Ask(question) => {
+                if let Some((_, old, _)) = self.question.take() {
                     let _ = old.reply.send(None);
                 }
-                self.question = Some((question, String::new()));
+                if let Some(i) = self.tabs.iter().position(|t| t.id == id) {
+                    self.active = i;
+                }
+                self.question = Some((id, question, String::new()));
             }
         }
     }
 
-    fn selection(&self) -> Vec<(Vec<u8>, Attrs)> {
-        self.rows
+    fn remote_selection(&self, id: u64) -> Vec<(Vec<u8>, Attrs)> {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return Vec::new() };
+        let r = &tab.remote;
+        r.rows
             .iter()
-            .filter(|r| self.selected.contains(&r.entry.name))
-            .map(|r| {
-                let mut attrs = r.entry.attrs.clone();
-                if r.dir && attrs.is_symlink() {
+            .filter(|x| r.selected.contains(&x.entry.name))
+            .map(|x| {
+                let mut attrs = x.entry.attrs.clone();
+                if x.dir && attrs.is_symlink() {
                     // a link to a folder is downloaded as that folder
                     attrs.permissions = Some(0o040755);
                 }
-                (native_term_sftp::join(&self.path, &r.entry.name), attrs)
+                (native_term_sftp::join(&r.path, &x.entry.name), attrs)
             })
             .collect()
     }
 
-    fn add_job(&mut self, kind: Kind, title: String, folder: Option<PathBuf>) -> (u64, Arc<Progress>) {
-        let id = self.next_job;
-        self.next_job += 1;
+    fn local_selection(&self, id: u64) -> Vec<PathBuf> {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return Vec::new() };
+        let l = &tab.local;
+        l.rows.iter().filter(|x| l.selected.contains(&local_key(x))).map(|x| x.path.clone()).collect()
+    }
+
+    fn add_job(&mut self, tab: u64, kind: Kind, title: String) -> (u64, Arc<Progress>) {
+        let id = self.next_id;
+        self.next_id += 1;
+        let host = self.tabs.iter().find(|t| t.id == tab).map(|t| t.spec.label.clone()).unwrap_or_default();
         let progress = Arc::new(Progress::default());
-        self.jobs.push(Job { id, kind, title, progress: Arc::clone(&progress), state: JobState::Running, started: Instant::now(), folder });
+        self.jobs.push(Job { id, tab, host, kind, title, progress: Arc::clone(&progress), state: JobState::Running, started: Instant::now(), finished: None });
         (id, progress)
     }
 
-    fn upload(&mut self, files: Vec<PathBuf>) {
-        let Some(sftp) = self.sftp.clone() else { return };
-        if files.is_empty() {
-            return;
-        }
+    /// Local files and folders to the server's folder shown.
+    fn upload(&mut self, id: u64, files: Vec<PathBuf>) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let (Some(sftp), false) = (tab.remote.sftp.clone(), files.is_empty()) else { return };
+        let (names, into) = (tab.remote.names, tab.remote.path.clone());
         let title = describe(&files.iter().map(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>());
-        let (id, progress) = self.add_job(Kind::Upload, t!("files-job-upload", what = title), None);
-        let (names, into) = (self.names, self.path.clone());
-        self.spawn(move || {
+        let (job, progress) = self.add_job(id, Kind::Upload, t!("files-job-upload", what = title));
+        self.spawn(id, move || {
             let result = transfer::plan_upload(&names, &files, &into, &progress).and_then(|items| transfer::upload(&sftp, &names, &items, &progress));
-            Event::JobDone { id, result }
+            What::JobDone { job, result }
         });
     }
 
-    fn download(&mut self, items: Vec<(Vec<u8>, Attrs)>, folder: PathBuf) {
-        let Some(sftp) = self.sftp.clone() else { return };
+    /// The server's files and folders to the local folder shown.
+    fn download(&mut self, id: u64, items: Vec<(Vec<u8>, Attrs)>) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let Some(sftp) = tab.remote.sftp.clone() else { return };
+        let Some(folder) = tab.local.path.clone() else {
+            let text = t!("files-local-no-folder");
+            self.log(id, text, true);
+            return;
+        };
         if items.is_empty() {
             return;
         }
-        let title = describe(&items.iter().map(|(p, _)| self.names.decode(last(p))).collect::<Vec<_>>());
-        let (id, progress) = self.add_job(Kind::Download, t!("files-job-download", what = title), Some(folder.clone()));
-        let names = self.names;
-        self.spawn(move || {
-            let mut result = Ok(());
+        let names = tab.remote.names;
+        let title = describe(&items.iter().map(|(p, _)| names.decode(last(p))).collect::<Vec<_>>());
+        let (job, progress) = self.add_job(id, Kind::Download, t!("files-job-download", what = title));
+        self.spawn(id, move || {
             let mut plan = Vec::new();
+            let mut result = Ok(());
             for (path, attrs) in &items {
                 match transfer::plan_download(&sftp, &names, path, attrs, &folder, &progress) {
                     Ok(p) => plan.extend(p),
@@ -390,56 +616,91 @@ impl FilesWindow {
                 }
             }
             let result = result.and_then(|()| transfer::download(&sftp, &names, &plan, &progress));
-            Event::JobDone { id, result }
+            What::JobDone { job, result }
         });
     }
 
-    fn delete(&mut self, items: Vec<(Vec<u8>, Attrs)>) {
-        let Some(sftp) = self.sftp.clone() else { return };
-        let title = describe(&items.iter().map(|(p, _)| self.names.decode(last(p))).collect::<Vec<_>>());
-        let (id, _) = self.add_job(Kind::Delete, t!("files-job-delete", what = title), None);
-        self.spawn(move || {
+    fn delete_remote(&mut self, id: u64, items: Vec<(Vec<u8>, Attrs)>, what: String) {
+        let Some(sftp) = self.tab(id).and_then(|t| t.remote.sftp.clone()) else { return };
+        let (job, _) = self.add_job(id, Kind::Delete, t!("files-job-delete", what = what));
+        self.spawn(id, move || {
             let result = items.iter().try_for_each(|(path, attrs)| transfer::remove(&sftp, path, attrs));
-            Event::JobDone { id, result }
+            What::JobDone { job, result }
         });
     }
 
-    fn rename(&mut self, old: Vec<u8>, new: String) {
-        let Some(sftp) = self.sftp.clone() else { return };
-        let Some(new_name) = self.names.encode(new.trim()).filter(|n| !n.is_empty() && !n.contains(&b'/')) else {
-            self.notice = Some((t!("files-bad-name", name = new.as_str()), true));
-            return;
-        };
-        let (from, to) = (native_term_sftp::join(&self.path, &old), native_term_sftp::join(&self.path, &new_name));
-        self.spawn(move || match sftp.rename(&from, &to, false) {
-            Ok(()) => Event::Refresh,
-            Err(e) => Event::Notice(e.to_string(), true),
+    fn recycle_local(&mut self, id: u64, paths: Vec<PathBuf>) {
+        self.spawn(id, move || match native_term_win::shell::recycle(&paths) {
+            Ok(()) => What::LocalRefresh,
+            Err(e) => What::Notice(e.to_string(), true),
         });
     }
 
-    fn mkdir(&mut self, name: String) {
-        let Some(sftp) = self.sftp.clone() else { return };
-        let Some(bytes) = self.names.encode(name.trim()).filter(|n| !n.is_empty() && !n.contains(&b'/')) else {
-            self.notice = Some((t!("files-bad-name", name = name.as_str()), true));
+    fn rename_remote(&mut self, id: u64, old: Vec<u8>, new: String) {
+        let Some(tab) = self.tab(id) else { return };
+        let Some(sftp) = tab.remote.sftp.clone() else { return };
+        let Some(new_name) = tab.remote.names.encode(new.trim()).filter(|n| !n.is_empty() && !n.contains(&b'/')) else {
+            let text = t!("files-bad-name", name = new.as_str());
+            self.log(id, text, true);
             return;
         };
-        let path = native_term_sftp::join(&self.path, &bytes);
-        self.spawn(move || match sftp.mkdir(&path) {
-            Ok(()) => Event::Refresh,
-            Err(e) => Event::Notice(e.to_string(), true),
+        let (from, to) = (native_term_sftp::join(&tab.remote.path, &old), native_term_sftp::join(&tab.remote.path, &new_name));
+        self.spawn(id, move || match sftp.rename(&from, &to, false) {
+            Ok(()) => What::Refresh,
+            Err(e) => What::Notice(e.to_string(), true),
         });
+    }
+
+    fn rename_local(&mut self, id: u64, old: PathBuf, new: String) {
+        let new = new.trim().to_string();
+        if new.is_empty() || new.contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|']) {
+            self.log(id, t!("files-bad-name", name = new.as_str()), true);
+            return;
+        }
+        let to = old.with_file_name(&new);
+        self.spawn(id, move || match std::fs::rename(&old, &to) {
+            Ok(()) => What::LocalRefresh,
+            Err(e) => What::Notice(e.to_string(), true),
+        });
+    }
+
+    fn mkdir(&mut self, id: u64, remote: bool, name: String) {
+        let Some(tab) = self.tab(id) else { return };
+        if remote {
+            let Some(sftp) = tab.remote.sftp.clone() else { return };
+            let Some(bytes) = tab.remote.names.encode(name.trim()).filter(|n| !n.is_empty() && !n.contains(&b'/')) else {
+                let text = t!("files-bad-name", name = name.as_str());
+                self.log(id, text, true);
+                return;
+            };
+            let path = native_term_sftp::join(&tab.remote.path, &bytes);
+            self.spawn(id, move || match sftp.mkdir(&path) {
+                Ok(()) => What::Refresh,
+                Err(e) => What::Notice(e.to_string(), true),
+            });
+        } else {
+            let Some(folder) = tab.local.path.clone() else { return };
+            let path = folder.join(name.trim());
+            self.spawn(id, move || match std::fs::create_dir(&path) {
+                Ok(()) => What::LocalRefresh,
+                Err(e) => What::Notice(e.to_string(), true),
+            });
+        }
     }
 
     /// Downloads a file, opens it with its program, and uploads it again
     /// whenever it's saved.
-    fn edit(&mut self, row: &Row) {
-        let Some(sftp) = self.sftp.clone() else { return };
-        let remote = native_term_sftp::join(&self.path, &row.entry.name);
-        let folder = self.edit_dir.join(format!("{:x}", unique()));
-        let local = folder.join(transfer::local_name(&self.names, &row.entry.name));
+    fn edit(&mut self, id: u64, row: &RemoteRow) {
+        let edit_dir = self.edit_dir.clone();
+        let ctx = self.ctx.clone();
+        let Some(tab) = self.tab(id) else { return };
+        let Some(sftp) = tab.remote.sftp.clone() else { return };
+        let remote = native_term_sftp::join(&tab.remote.path, &row.entry.name);
+        let folder = edit_dir.join(transfer::local_name(&Names::default(), tab.spec.alias.as_bytes())).join(format!("{:x}", unique()));
+        let local = folder.join(transfer::local_name(&tab.remote.names, &row.entry.name));
         let status = Arc::new(Mutex::new(t!("files-edit-opening")));
         let (stop, conflict, overwrite) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
-        self.edits.push(Edit {
+        tab.edits.push(Edit {
             name: row.name.clone(),
             local: local.clone(),
             status: Arc::clone(&status),
@@ -447,7 +708,6 @@ impl FilesWindow {
             conflict: Arc::clone(&conflict),
             overwrite: Arc::clone(&overwrite),
         });
-        let ctx = self.ctx.clone();
         std::thread::spawn(move || {
             let set = |text: String| {
                 *status.lock().unwrap_or_else(|e| e.into_inner()) = text;
@@ -469,321 +729,493 @@ impl FilesWindow {
         });
     }
 
-    /// The selection into the Downloads folder (`NATIVETERM_DOWNLOADS` for
-    /// tests).
-    fn download_here(&mut self) {
-        let folder = std::env::var_os("NATIVETERM_DOWNLOADS").map(PathBuf::from).or_else(native_term_win::shell::downloads_folder);
-        match folder {
-            Some(folder) => self.download(self.selection(), folder),
-            None => self.notice = Some((t!("files-no-downloads"), true)),
+    fn running(&self, tab: Option<u64>) -> usize {
+        self.jobs.iter().filter(|j| matches!(j.state, JobState::Running) && tab.is_none_or(|t| j.tab == t)).count()
+    }
+
+    fn edits(&self, tab: Option<u64>) -> usize {
+        self.tabs.iter().filter(|t| tab.is_none_or(|id| t.id == id)).map(|t| t.edits.len()).sum()
+    }
+
+    fn close_tab(&mut self, id: u64) {
+        for job in self.jobs.iter().filter(|j| j.tab == id) {
+            job.progress.cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(i) = self.tabs.iter().position(|t| t.id == id) {
+            let tab = self.tabs.remove(i);
+            end_tab(&tab);
+            if self.active >= self.tabs.len() {
+                self.active = self.tabs.len().saturating_sub(1);
+            }
         }
     }
 
-    fn pick_upload(&self) {
-        let (tx, ctx, title) = (self.tx.clone(), self.ctx.clone(), t!("files-pick-upload"));
-        let owner = native_term_win::shell::foreground_window();
-        std::thread::spawn(move || {
-            if let Some(files) = native_term_win::shell::pick_files(owner, &title) {
-                let _ = tx.send(Event::PickedUpload(files));
-                ctx.request_repaint();
-            }
-        });
-    }
-
-    fn pick_download(&self, items: Vec<(Vec<u8>, Attrs)>) {
-        let (tx, ctx, title) = (self.tx.clone(), self.ctx.clone(), t!("files-pick-folder"));
-        let owner = native_term_win::shell::foreground_window();
-        std::thread::spawn(move || {
-            if let Some(folder) = native_term_win::shell::pick_folder(owner, &title) {
-                let _ = tx.send(Event::PickedFolder(folder, items));
-                ctx.request_repaint();
-            }
-        });
-    }
-
-    fn running(&self) -> usize {
-        self.jobs.iter().filter(|j| matches!(j.state, JobState::Running)).count()
-    }
-
-    fn toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let connected = self.sftp.is_some();
-            let up = ui.add_enabled(connected && self.path != b"/", egui::Button::new(icon(icons::UP))).on_hover_text(t!("files-up"));
-            up.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, connected, t!("files-up")));
-            if up.clicked() {
-                let parent = native_term_sftp::parent(&self.path);
-                self.go(parent);
-            }
-            let refresh = ui.add_enabled(connected, egui::Button::new(icon(icons::REFRESH))).on_hover_text(t!("files-refresh"));
-            refresh.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, connected, t!("files-refresh")));
-            if refresh.clicked() {
-                self.refresh();
-            }
-            let path = ui.add_enabled(connected, egui::TextEdit::singleline(&mut self.path_text).desired_width((ui.available_width() - 600.0).max(160.0)));
-            if path.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                match self.names.encode(self.path_text.trim()) {
-                    Some(p) if !p.is_empty() => self.go(p),
-                    _ => self.notice = Some((t!("files-bad-name", name = self.path_text.as_str()), true)),
+    /// One row of session tabs; `remote`: the server's side (with close).
+    fn tab_row(&mut self, ui: &mut egui::Ui, remote: bool) {
+        let mut close = None;
+        // both rows the same height, centered (the server's has close buttons)
+        let row = egui::vec2(ui.available_width(), 28.0);
+        ui.allocate_ui_with_layout(row, egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            for (i, tab) in self.tabs.iter().enumerate() {
+                let text = if remote { tab.spec.label.clone() } else { t!("files-local-tab", computer = self.computer.as_str()) };
+                let text = if remote && tab.remote.failed.is_some() { format!("{text} ⚠") } else { text };
+                if ui.selectable_label(i == self.active, text).on_hover_text(tab.spec.alias.as_str()).clicked() {
+                    self.active = i;
+                    self.remote_focus = remote;
                 }
-            }
-            if ui.add_enabled(connected, egui::Button::new(format!("{} {}", icons::UPLOAD, t!("files-upload")))).clicked() {
-                self.pick_upload();
-            }
-            let download = egui::Button::new(format!("{} {}", icons::DOWNLOAD, t!("files-download")));
-            if ui.add_enabled(connected && !self.selected.is_empty(), download).on_hover_text(t!("files-download-hint")).clicked() {
-                self.download_here();
-            }
-            let file = self.rows.iter().find(|r| self.selected.len() == 1 && self.selected.contains(&r.entry.name) && !r.dir).cloned();
-            let edit = egui::Button::new(format!("{} {}", icons::EDIT, t!("files-edit")));
-            if ui.add_enabled(connected && file.is_some(), edit).on_hover_text(t!("files-edit-hint")).clicked() {
-                if let Some(row) = file {
-                    self.edit(&row);
-                }
-            }
-            let delete = egui::Button::new(format!("{} {}", icons::DELETE, t!("files-delete")));
-            if ui.add_enabled(connected && !self.selected.is_empty(), delete).clicked() {
-                self.confirm_delete = Some(self.selection());
-            }
-            if ui.add_enabled(connected, egui::Button::new(format!("{} {}", icons::NEW_FOLDER, t!("files-new-folder")))).clicked() {
-                self.new_folder = Some(String::new());
-            }
-            let mut names = self.names;
-            let shown = if matches!(names, Names::Auto { .. }) { t!("files-encoding-auto") } else { names.label().to_string() };
-            egui::ComboBox::from_id_salt("files-encoding").selected_text(shown).width(110.0).show_ui(ui, |ui| {
-                for label in ENCODINGS {
-                    if let Some(choice) = Names::from_label(label) {
-                        let text = if label == "auto" { t!("files-encoding-auto") } else { label.to_string() };
-                        ui.selectable_value(&mut names, choice, text);
+                if remote {
+                    let button = ui.small_button(icon(icons::CLEAR)).on_hover_text(t!("files-close-tab"));
+                    button.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t!("files-close-tab")));
+                    if button.clicked() {
+                        close = Some(tab.id);
                     }
                 }
-            })
-            .response
-            .on_hover_text(t!("files-encoding-hint"));
-            if names != self.names {
-                self.names = names;
-                for row in &mut self.rows {
-                    row.name = names.decode(&row.entry.name);
-                }
-                self.path_text = names.decode(&self.path);
+                ui.add_space(6.0);
             }
         });
+        if let Some(id) = close {
+            if self.running(Some(id)) + self.edits(Some(id)) > 0 {
+                self.confirm = Some(Confirm::CloseTab(id));
+            } else {
+                self.close_tab(id);
+            }
+        }
     }
 
-    fn table(&mut self, ui: &mut egui::Ui) {
-        let visuals = ui.visuals().clone();
-        let mut open = None;
-        let mut menu_action = None;
-        let (size_w, date_w, mode_w) = (90.0, 140.0, 116.0);
-        // header, placed like the rows' columns
-        {
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 18.0), egui::Sense::hover());
-            let (font, color, y) = (egui::TextStyle::Body.resolve(ui.style()), visuals.weak_text_color(), rect.center().y);
-            let name_right = rect.right() - size_w - date_w - mode_w;
-            let painter = ui.painter_at(rect);
-            painter.text(egui::pos2(rect.left() + 28.0, y), egui::Align2::LEFT_CENTER, t!("files-col-name"), font.clone(), color);
-            painter.text(egui::pos2(name_right + size_w - 8.0, y), egui::Align2::RIGHT_CENTER, t!("files-col-size"), font.clone(), color);
-            painter.text(egui::pos2(name_right + size_w + 8.0, y), egui::Align2::LEFT_CENTER, t!("files-col-modified"), font.clone(), color);
-            painter.text(egui::pos2(name_right + size_w + date_w + 4.0, y), egui::Align2::LEFT_CENTER, t!("files-col-mode"), font, color);
-        }
+    fn local_side(&mut self, ui: &mut egui::Ui) {
+        self.tab_row(ui, false);
         ui.separator();
-        let rows = self.rows.len();
-        let modifiers = ui.input(|i| i.modifiers);
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, ROW, rows, |ui, range| {
-            for i in range {
-                let row = self.rows[i].clone();
-                let selected = self.selected.contains(&row.entry.name);
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW), egui::Sense::click());
-                // for screen readers and UI automation: a selectable item named after the file
-                response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, selected, &row.name));
-                if selected {
-                    ui.painter().rect_filled(rect, 3.0, visuals.selection.bg_fill);
-                } else if response.hovered() {
-                    ui.painter().rect_filled(rect, 3.0, visuals.widgets.hovered.weak_bg_fill);
+        let Some(tab) = self.tabs.get(self.active) else { return };
+        let id = tab.id;
+        let (connected, selected, at_folder) = (tab.remote.sftp.is_some(), !tab.local.selected.is_empty(), tab.local.path.is_some());
+        let mut path_text = tab.local.path_text.clone();
+        let mut go_to = None;
+        let mut up = false;
+        let mut refresh = false;
+        let mut upload = false;
+        let mut delete = false;
+        let mut new_folder = false;
+        ui.horizontal(|ui| {
+            let b = ui.add_enabled(at_folder, egui::Button::new(icon(icons::UP))).on_hover_text(t!("files-up"));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, at_folder, t!("files-up")));
+            up = b.clicked();
+            let b = ui.button(icon(icons::REFRESH)).on_hover_text(t!("files-refresh"));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t!("files-refresh")));
+            refresh = b.clicked();
+            let edit = ui.add(egui::TextEdit::singleline(&mut path_text).desired_width((ui.available_width() - 290.0).max(160.0)));
+            if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                go_to = Some(path_text.clone());
+            }
+            let b = egui::Button::new(format!("{} {}", t!("files-upload-to-remote"), icons::UPLOAD));
+            upload = ui.add_enabled(connected && selected, b).on_hover_text(t!("files-upload-hint")).clicked();
+            delete = ui.add_enabled(selected && at_folder, egui::Button::new(format!("{} {}", icons::DELETE, t!("files-delete")))).clicked();
+            new_folder = ui.add_enabled(at_folder, egui::Button::new(format!("{} {}", icons::NEW_FOLDER, t!("files-new-folder")))).clicked();
+        });
+        if let Some(tab) = self.tab(id) {
+            tab.local.path_text = path_text;
+        }
+        if up {
+            let parent = self.tabs[self.active].local.path.as_ref().and_then(|p| p.parent().map(Path::to_path_buf));
+            self.list_local(id, parent);
+        }
+        if refresh {
+            self.refresh_local(id);
+        }
+        if let Some(text) = go_to {
+            let path = PathBuf::from(text.trim());
+            self.list_local(id, (!text.trim().is_empty()).then_some(path));
+        }
+        if upload {
+            let files = self.local_selection(id);
+            self.upload(id, files);
+        }
+        if delete {
+            self.ask_recycle(id);
+        }
+        if new_folder {
+            self.new_folder = Some((id, false, String::new()));
+        }
+        if let Some(e) = self.tabs.get(self.active).and_then(|t| t.local.error.clone()) {
+            ui.colored_label(RED, e);
+        }
+        // the list
+        let tab = &self.tabs[self.active];
+        let lines: Vec<Line> = tab
+            .local
+            .rows
+            .iter()
+            .map(|r| Line {
+                key: local_key(r),
+                name: r.name.clone(),
+                glyph: if r.dir { icons::FOLDER } else { icons::DOCUMENT },
+                size: (!r.dir).then_some(r.size).flatten(),
+                modified: r.modified,
+                mode: None,
+            })
+            .collect();
+        let mut local = std::mem::replace(&mut self.tabs[self.active].local, empty_local());
+        let out = list(ui, "local-list", &lines, &mut local.selected, &mut local.anchor, &mut local.renaming, false);
+        self.tabs[self.active].local = local;
+        if out.clicked {
+            self.remote_focus = false;
+        }
+        if let Some(i) = out.open {
+            self.open_local(id, i);
+        }
+        if let Some((old, new)) = out.renamed {
+            if let Some(row) = self.tabs[self.active].local.rows.iter().find(|r| local_key(r) == old) {
+                let path = row.path.clone();
+                self.rename_local(id, path, new);
+            }
+        }
+        if out.drag {
+            let keys = self.tabs[self.active].local.selected.iter().cloned().collect();
+            out.response.dnd_set_drag_payload(Dragged { tab: id, from_remote: false, keys });
+        }
+        if let Some(dragged) = out.dropped.filter(|d| d.from_remote && d.tab == id) {
+            let items: Vec<(Vec<u8>, Attrs)> = {
+                let tab = &self.tabs[self.active];
+                let r = &tab.remote;
+                r.rows
+                    .iter()
+                    .filter(|x| dragged.keys.contains(&x.entry.name))
+                    .map(|x| {
+                        let mut attrs = x.entry.attrs.clone();
+                        if x.dir && attrs.is_symlink() {
+                            attrs.permissions = Some(0o040755);
+                        }
+                        (native_term_sftp::join(&r.path, &x.entry.name), attrs)
+                    })
+                    .collect()
+            };
+            self.download(id, items);
+        }
+        match out.action {
+            Some((i, Action::Open)) => self.open_local(id, i),
+            Some((_, Action::Transfer)) => {
+                let files = self.local_selection(id);
+                self.upload(id, files);
+            }
+            Some((i, Action::Rename)) => {
+                let row = self.tabs[self.active].local.rows[i].clone();
+                self.tabs[self.active].local.renaming = Some((local_key(&row), row.name));
+            }
+            Some((_, Action::CopyPath)) => {
+                let text: Vec<String> = self.local_selection(id).iter().map(|p| p.display().to_string()).collect();
+                ui.ctx().copy_text(text.join("\n"));
+            }
+            Some((_, Action::Delete)) => self.ask_recycle(id),
+            Some((_, Action::Edit)) | None => {}
+        }
+    }
+
+    fn open_local(&mut self, id: u64, i: usize) {
+        let Some(row) = self.tabs.get(self.active).and_then(|t| t.local.rows.get(i)).cloned() else { return };
+        if row.dir {
+            self.list_local(id, Some(row.path));
+        } else if let Err(e) = native_term_win::shell::open_file(&row.path) {
+            self.log(id, e.to_string(), true);
+        }
+    }
+
+    fn ask_recycle(&mut self, id: u64) {
+        let paths = self.local_selection(id);
+        if paths.is_empty() {
+            return;
+        }
+        let what = describe(&paths.iter().map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>());
+        self.confirm = Some(Confirm::RecycleLocal { tab: id, paths, what });
+    }
+
+    fn ask_delete_remote(&mut self, id: u64) {
+        let items = self.remote_selection(id);
+        if items.is_empty() {
+            return;
+        }
+        let names = self.tabs.iter().find(|t| t.id == id).map(|t| t.remote.names).unwrap_or_default();
+        let what = describe(&items.iter().map(|(p, _)| names.decode(last(p))).collect::<Vec<_>>());
+        let folders = items.iter().any(|(_, a)| a.is_dir() && !a.is_symlink());
+        self.confirm = Some(Confirm::DeleteRemote { tab: id, items, what, folders });
+    }
+
+    fn remote_side(&mut self, ui: &mut egui::Ui) {
+        self.tab_row(ui, true);
+        ui.separator();
+        let Some(tab) = self.tabs.get(self.active) else {
+            ui.weak(t!("files-no-tabs"));
+            return;
+        };
+        let id = tab.id;
+        // the session's log, at the bottom of this side
+        egui::Panel::bottom("files-log").resizable(true).default_size(110.0).show_inside(ui, |ui| {
+            egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
+                for (time, text, error) in &self.tabs[self.active].log {
+                    let line = format!("{time}  {text}");
+                    if *error {
+                        ui.colored_label(RED, line);
+                    } else {
+                        ui.weak(line);
+                    }
                 }
-                let text_color = if selected { visuals.selection.stroke.color } else { visuals.text_color() };
-                let font = egui::TextStyle::Body.resolve(ui.style());
-                let glyph = if row.dir { icons::FOLDER } else if row.entry.attrs.is_symlink() { icons::LINK } else { icons::DOCUMENT };
-                let y = rect.center().y;
-                let painter = ui.painter_at(rect);
-                painter.text(egui::pos2(rect.left() + 6.0, y), egui::Align2::LEFT_CENTER, glyph, font.clone(), text_color);
-                let name_right = rect.right() - size_w - date_w - mode_w;
-                let name_rect = egui::Rect::from_min_max(egui::pos2(rect.left() + 28.0, rect.top()), egui::pos2(name_right - 8.0, rect.bottom()));
-                if self.renaming.as_ref().is_some_and(|(n, _)| *n == row.entry.name) {
-                    let (_, text) = self.renaming.as_mut().expect("renaming");
-                    let edit = ui.put(name_rect, egui::TextEdit::singleline(text));
-                    edit.request_focus();
-                    if edit.lost_focus() {
-                        let (old, text) = self.renaming.take().expect("renaming");
-                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) && text != row.name {
-                            self.rename(old, text);
+            });
+        });
+        let tab = &self.tabs[self.active];
+        let connected = tab.remote.sftp.is_some();
+        let selected = !tab.remote.selected.is_empty();
+        let file = tab.remote.rows.iter().find(|r| tab.remote.selected.len() == 1 && tab.remote.selected.contains(&r.entry.name) && !r.dir).cloned();
+        let at_root = tab.remote.path == b"/";
+        let mut path_text = tab.remote.path_text.clone();
+        let mut names = tab.remote.names;
+        let (mut up, mut refresh, mut download, mut edit, mut delete, mut new_folder, mut go_to) = (false, false, false, false, false, false, None);
+        ui.horizontal(|ui| {
+            let b = ui.add_enabled(connected && !at_root, egui::Button::new(icon(icons::UP))).on_hover_text(t!("files-up"));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, connected, t!("files-up")));
+            up = b.clicked();
+            let b = ui.add_enabled(connected, egui::Button::new(icon(icons::REFRESH))).on_hover_text(t!("files-refresh"));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, connected, t!("files-refresh")));
+            refresh = b.clicked();
+            let path = ui.add_enabled(connected, egui::TextEdit::singleline(&mut path_text).desired_width((ui.available_width() - 480.0).max(120.0)));
+            if path.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                go_to = Some(path_text.clone());
+            }
+            let b = egui::Button::new(format!("{} {}", icons::DOWNLOAD, t!("files-download-to-local")));
+            download = ui.add_enabled(connected && selected, b).on_hover_text(t!("files-download-hint")).clicked();
+            let b = egui::Button::new(format!("{} {}", icons::EDIT, t!("files-edit")));
+            edit = ui.add_enabled(connected && file.is_some(), b).on_hover_text(t!("files-edit-hint")).clicked();
+            delete = ui.add_enabled(connected && selected, egui::Button::new(format!("{} {}", icons::DELETE, t!("files-delete")))).clicked();
+            new_folder = ui.add_enabled(connected, egui::Button::new(format!("{} {}", icons::NEW_FOLDER, t!("files-new-folder")))).clicked();
+            let shown = if matches!(names, Names::Auto { .. }) { t!("files-encoding-auto") } else { names.label().to_string() };
+            egui::ComboBox::from_id_salt("files-encoding")
+                .selected_text(shown)
+                .width(100.0)
+                .show_ui(ui, |ui| {
+                    for label in ENCODINGS {
+                        if let Some(choice) = Names::from_label(label) {
+                            let text = if label == "auto" { t!("files-encoding-auto") } else { label.to_string() };
+                            ui.selectable_value(&mut names, choice, text);
                         }
                     }
-                } else {
-                    ui.painter_at(name_rect).text(
-                        egui::pos2(name_rect.left(), y),
-                        egui::Align2::LEFT_CENTER,
-                        &row.name,
-                        font.clone(),
-                        text_color,
-                    );
-                }
-                let size = if row.dir { String::new() } else { row.entry.attrs.size.map(size_text).unwrap_or_default() };
-                painter.text(egui::pos2(name_right + size_w - 8.0, y), egui::Align2::RIGHT_CENTER, size, font.clone(), text_color);
-                let date = row.entry.attrs.mtime().map(|m| native_term_win::local_date_time(m as u64)).unwrap_or_default();
-                painter.text(egui::pos2(name_right + size_w + 8.0, y), egui::Align2::LEFT_CENTER, date, font.clone(), text_color);
-                let mode = row.entry.attrs.permissions.map(mode_text).unwrap_or_default();
-                let mono = egui::TextStyle::Monospace.resolve(ui.style());
-                painter.text(egui::pos2(name_right + size_w + date_w + 4.0, y), egui::Align2::LEFT_CENTER, mode, mono, text_color);
-
-                if response.clicked() {
-                    self.click(i, modifiers);
-                }
-                if response.double_clicked() {
-                    open = Some(row.clone());
-                }
-                if response.secondary_clicked() && !selected {
-                    self.selected = std::iter::once(row.entry.name.clone()).collect();
-                    self.anchor = Some(i);
-                }
-                response.context_menu(|ui| {
-                    let many = self.selected.len() > 1;
-                    if ui.button(format!("{} {}", icons::DOWNLOAD, t!("files-download"))).clicked() {
-                        menu_action = Some(MenuAction::Download);
-                        ui.close();
-                    }
-                    if ui.button(t!("files-download-to")).clicked() {
-                        menu_action = Some(MenuAction::DownloadTo);
-                        ui.close();
-                    }
-                    if !row.dir && !many && ui.button(format!("{} {}", icons::EDIT, t!("files-edit"))).clicked() {
-                        menu_action = Some(MenuAction::Edit(row.clone()));
-                        ui.close();
-                    }
-                    ui.separator();
-                    if !many && ui.button(format!("{} {}", icons::RENAME, t!("files-rename"))).clicked() {
-                        menu_action = Some(MenuAction::Rename(row.clone()));
-                        ui.close();
-                    }
-                    if ui.button(t!("files-copy-path")).clicked() {
-                        let paths: Vec<String> = self.selection().iter().map(|(p, _)| self.names.decode(p)).collect();
-                        ui.ctx().copy_text(paths.join("\n"));
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui.button(egui::RichText::new(format!("{} {}", icons::DELETE, t!("files-delete"))).color(RED)).clicked() {
-                        menu_action = Some(MenuAction::Delete);
-                        ui.close();
-                    }
-                });
-            }
+                })
+                .response
+                .on_hover_text(t!("files-encoding-hint"));
         });
-        if let Some(row) = open {
-            if row.dir {
-                self.go(native_term_sftp::join(&self.path, &row.entry.name));
-            } else {
-                self.edit(&row);
+        {
+            let r = &mut self.tabs[self.active].remote;
+            r.path_text = path_text;
+            if names != r.names {
+                r.names = names;
+                for row in &mut r.rows {
+                    row.name = names.decode(&row.entry.name);
+                }
+                r.path_text = names.decode(&r.path);
             }
         }
-        match menu_action {
-            Some(MenuAction::Download) => self.download_here(),
-            Some(MenuAction::DownloadTo) => self.pick_download(self.selection()),
-            Some(MenuAction::Edit(row)) => self.edit(&row),
-            Some(MenuAction::Rename(row)) => self.renaming = Some((row.entry.name.clone(), row.name.clone())),
-            Some(MenuAction::Delete) => self.confirm_delete = Some(self.selection()),
+        if up {
+            let parent = native_term_sftp::parent(&self.tabs[self.active].remote.path);
+            self.go(id, parent);
+        }
+        if refresh {
+            self.refresh(id);
+        }
+        if let Some(text) = go_to {
+            match names.encode(text.trim()) {
+                Some(p) if !p.is_empty() => self.go(id, p),
+                _ => self.log(id, t!("files-bad-name", name = text.as_str()), true),
+            }
+        }
+        if download {
+            let items = self.remote_selection(id);
+            self.download(id, items);
+        }
+        if let (true, Some(row)) = (edit, &file) {
+            self.edit(id, row);
+        }
+        if delete {
+            self.ask_delete_remote(id);
+        }
+        if new_folder {
+            self.new_folder = Some((id, true, String::new()));
+        }
+
+        let tab = &self.tabs[self.active];
+        match (&tab.remote.sftp, &tab.remote.failed) {
+            (_, Some(error)) => {
+                ui.colored_label(RED, error);
+                ui.weak(t!("files-batch"));
+                if ui.button(t!("files-reconnect")).clicked() {
+                    self.connect(id);
+                }
+                return;
+            }
+            (None, None) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(t!("files-connecting", host = tab.spec.alias.as_str()));
+                });
+                return;
+            }
+            (Some(_), None) => {}
+        }
+        if let Some(e) = &tab.remote.error {
+            ui.colored_label(RED, e);
+        }
+        if tab.remote.listing {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.weak(t!("files-listing"));
+            });
+        }
+        let lines: Vec<Line> = tab
+            .remote
+            .rows
+            .iter()
+            .map(|r| Line {
+                key: r.entry.name.clone(),
+                name: r.name.clone(),
+                glyph: if r.dir { icons::FOLDER } else if r.entry.attrs.is_symlink() { icons::LINK } else { icons::DOCUMENT },
+                size: if r.dir { None } else { r.entry.attrs.size },
+                modified: r.entry.attrs.mtime().map(u64::from),
+                mode: r.entry.attrs.permissions.map(mode_text),
+            })
+            .collect();
+        let mut remote = std::mem::take(&mut self.tabs[self.active].remote.selected);
+        let mut anchor = self.tabs[self.active].remote.anchor;
+        let mut renaming = self.tabs[self.active].remote.renaming.take();
+        let out = list(ui, "remote-list", &lines, &mut remote, &mut anchor, &mut renaming, true);
+        {
+            let r = &mut self.tabs[self.active].remote;
+            r.selected = remote;
+            r.anchor = anchor;
+            r.renaming = renaming;
+        }
+        self.remote_rect = Some(out.response.rect);
+        if out.clicked {
+            self.remote_focus = true;
+        }
+        if let Some(i) = out.open {
+            self.open_remote(id, i);
+        }
+        if let Some((old, new)) = out.renamed {
+            self.rename_remote(id, old, new);
+        }
+        if out.drag {
+            let keys = self.tabs[self.active].remote.selected.iter().cloned().collect();
+            out.response.dnd_set_drag_payload(Dragged { tab: id, from_remote: true, keys });
+        }
+        if let Some(dragged) = out.dropped.filter(|d| !d.from_remote && d.tab == id) {
+            let files: Vec<PathBuf> =
+                self.tabs[self.active].local.rows.iter().filter(|r| dragged.keys.contains(&local_key(r))).map(|r| r.path.clone()).collect();
+            self.upload(id, files);
+        }
+        match out.action {
+            Some((i, Action::Open)) => self.open_remote(id, i),
+            Some((_, Action::Transfer)) => {
+                let items = self.remote_selection(id);
+                self.download(id, items);
+            }
+            Some((i, Action::Edit)) => {
+                let row = self.tabs[self.active].remote.rows[i].clone();
+                self.edit(id, &row);
+            }
+            Some((i, Action::Rename)) => {
+                let row = self.tabs[self.active].remote.rows[i].clone();
+                self.tabs[self.active].remote.renaming = Some((row.entry.name.clone(), row.name));
+            }
+            Some((_, Action::CopyPath)) => {
+                let tab = &self.tabs[self.active];
+                let text: Vec<String> = self.remote_selection(id).iter().map(|(p, _)| tab.remote.names.decode(p)).collect();
+                ui.ctx().copy_text(text.join("\n"));
+            }
+            Some((_, Action::Delete)) => self.ask_delete_remote(id),
             None => {}
         }
     }
 
-    fn click(&mut self, i: usize, modifiers: egui::Modifiers) {
-        let name = self.rows[i].entry.name.clone();
-        if modifiers.shift {
-            let from = self.anchor.unwrap_or(i);
-            let (a, b) = (from.min(i), from.max(i));
-            if !modifiers.command {
-                self.selected.clear();
-            }
-            self.selected.extend(self.rows[a..=b].iter().map(|r| r.entry.name.clone()));
-        } else if modifiers.command {
-            if !self.selected.remove(&name) {
-                self.selected.insert(name);
-            }
-            self.anchor = Some(i);
+    fn open_remote(&mut self, id: u64, i: usize) {
+        let Some(row) = self.tabs.get(self.active).and_then(|t| t.remote.rows.get(i)).cloned() else { return };
+        if row.dir {
+            let path = native_term_sftp::join(&self.tabs[self.active].remote.path, &row.entry.name);
+            self.go(id, path);
         } else {
-            self.selected = std::iter::once(name).collect();
-            self.anchor = Some(i);
+            self.edit(id, &row);
         }
     }
 
-    /// Transfers and edited files, at the bottom.
+    /// The transfer queue (every session's) and edited files.
     fn activity(&mut self, ui: &mut egui::Ui) {
-        let mut remove = None;
-        for job in &self.jobs {
-            ui.horizontal(|ui| {
-                let done = job.progress.done.load(Ordering::Relaxed);
-                let total = job.progress.total.load(Ordering::Relaxed);
-                match &job.state {
-                    JobState::Running => {
-                        let secs = job.started.elapsed().as_secs_f64().max(0.001);
-                        let speed = format!("{}/s", size_text((done as f64 / secs) as u64));
-                        let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-                        let text = if job.kind == Kind::Delete { job.title.clone() } else { format!("{}  {} / {}  {speed}", job.title, size_text(done), size_text(total)) };
-                        ui.add(egui::ProgressBar::new(fraction).desired_width(ui.available_width() - 90.0).text(text));
-                        if ui.small_button(t!("button-cancel")).clicked() {
-                            job.progress.cancel.store(true, Ordering::Relaxed);
-                        }
-                    }
-                    JobState::Done => {
-                        ui.colored_label(GREEN, format!("{} {}", icons::ACCEPT, job.title));
-                        if let Some(folder) = &job.folder {
-                            if ui.small_button(t!("files-open-folder")).clicked() {
-                                let _ = std::process::Command::new("explorer.exe").arg(folder).spawn();
+        ui.horizontal(|ui| {
+            ui.strong(t!("files-queue"));
+            let finished = self.jobs.iter().any(|j| !matches!(j.state, JobState::Running));
+            if ui.add_enabled(finished, egui::Button::new(t!("files-queue-clear")).small()).clicked() {
+                self.jobs.retain(|j| matches!(j.state, JobState::Running));
+            }
+        });
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            for job in &self.jobs {
+                ui.horizontal(|ui| {
+                    let done = job.progress.done.load(Ordering::Relaxed);
+                    let total = job.progress.total.load(Ordering::Relaxed);
+                    let secs = job.finished.unwrap_or_else(Instant::now).duration_since(job.started).as_secs_f64().max(0.001);
+                    let speed = format!("{}/s", size_text((done as f64 / secs) as u64));
+                    ui.weak(format!("[{}]", job.host));
+                    match &job.state {
+                        JobState::Running => {
+                            let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+                            let text = if job.kind == Kind::Delete {
+                                job.title.clone()
+                            } else {
+                                format!("{}  {} / {}  {speed}", job.title, size_text(done), size_text(total))
+                            };
+                            ui.add(egui::ProgressBar::new(fraction).desired_width(ui.available_width() - 90.0).text(text));
+                            if ui.small_button(t!("button-cancel")).clicked() {
+                                job.progress.cancel.store(true, Ordering::Relaxed);
                             }
                         }
-                        if ui.small_button(icon(icons::CLEAR)).clicked() {
-                            remove = Some(job.id);
+                        JobState::Done => {
+                            let size = match (job.kind, secs >= 1.0) {
+                                (Kind::Delete, _) => String::new(),
+                                (_, true) => format!("  {}  {speed}", size_text(done)),
+                                (_, false) => format!("  {}", size_text(done)),
+                            };
+                            ui.colored_label(GREEN, format!("{} {}{size}", icons::ACCEPT, job.title));
+                        }
+                        JobState::Failed(e) => {
+                            ui.colored_label(RED, format!("{}: {e}", job.title));
+                        }
+                        JobState::Cancelled => {
+                            ui.weak(t!("files-job-cancelled", what = job.title.as_str()));
                         }
                     }
-                    JobState::Failed(e) => {
-                        ui.colored_label(RED, format!("{}: {e}", job.title));
-                        if ui.small_button(icon(icons::CLEAR)).clicked() {
-                            remove = Some(job.id);
+                });
+            }
+            for tab in &mut self.tabs {
+                let mut stop = None;
+                for (i, edit) in tab.edits.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        ui.weak(format!("[{}]", tab.spec.label));
+                        ui.label(format!("{} {}", icons::EDIT, edit.name));
+                        ui.weak(edit.status.lock().unwrap_or_else(|e| e.into_inner()).as_str());
+                        if edit.conflict.load(Ordering::Relaxed) && ui.small_button(egui::RichText::new(t!("files-edit-overwrite")).color(RED)).clicked() {
+                            edit.overwrite.store(true, Ordering::Relaxed);
                         }
-                    }
-                    JobState::Cancelled => {
-                        ui.weak(t!("files-job-cancelled", what = job.title.as_str()));
-                        if ui.small_button(icon(icons::CLEAR)).clicked() {
-                            remove = Some(job.id);
+                        if ui.small_button(t!("files-edit-stop")).on_hover_text(edit.local.display().to_string()).clicked() {
+                            stop = Some(i);
                         }
-                    }
+                    });
                 }
-            });
-        }
-        if let Some(id) = remove {
-            self.jobs.retain(|j| j.id != id);
-        }
-        let mut stop = None;
-        for (i, edit) in self.edits.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(format!("{} {}", icons::EDIT, edit.name));
-                ui.weak(edit.status.lock().unwrap_or_else(|e| e.into_inner()).as_str());
-                if edit.conflict.load(Ordering::Relaxed) && ui.small_button(egui::RichText::new(t!("files-edit-overwrite")).color(RED)).clicked() {
-                    edit.overwrite.store(true, Ordering::Relaxed);
+                if let Some(i) = stop {
+                    let edit = tab.edits.remove(i);
+                    edit.stop.store(true, Ordering::Relaxed);
                 }
-                if ui.small_button(t!("files-edit-stop")).on_hover_text(edit.local.display().to_string()).clicked() {
-                    stop = Some(i);
-                }
-            });
-        }
-        if let Some(i) = stop {
-            let edit = self.edits.remove(i);
-            edit.stop.store(true, Ordering::Relaxed);
-        }
+            }
+        });
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
-        if let Some((question, typed)) = &mut self.question {
+        if let Some((tab, question, typed)) = &mut self.question {
+            let host = self.tabs.iter().find(|t| t.id == *tab).map(|t| t.spec.alias.clone()).unwrap_or_default();
             let mut done = None;
-            modal(ctx, "files-question", t!("files-question-title", host = self.spec.alias.as_str()), |ui| {
+            modal(ctx, "files-question", t!("files-question-title", host = host.as_str()), |ui| {
                 ui.label(question.prompt.trim());
                 let edit = ui.add(egui::TextEdit::singleline(typed).password(question.secret).desired_width(320.0));
                 edit.request_focus();
@@ -801,12 +1233,13 @@ impl FilesWindow {
                 });
             });
             if let Some(ok) = done {
-                if let Some((question, typed)) = self.question.take() {
+                if let Some((_, question, typed)) = self.question.take() {
                     let _ = question.reply.send(ok.then_some(typed));
                 }
             }
         }
-        if let Some(name) = &mut self.new_folder {
+        if let Some((tab, remote, name)) = &mut self.new_folder {
+            let (tab, remote) = (*tab, *remote);
             let mut done = None;
             modal(ctx, "files-new-folder", t!("files-new-folder"), |ui| {
                 let edit = ui.add(egui::TextEdit::singleline(name).hint_text(t!("files-new-folder-hint")));
@@ -820,110 +1253,279 @@ impl FilesWindow {
                     }
                 });
             });
-            match done {
-                Some(true) => {
-                    let name = self.new_folder.take().unwrap_or_default();
-                    if !name.trim().is_empty() {
-                        self.mkdir(name);
-                    }
-                }
-                Some(false) => self.new_folder = None,
-                None => {}
-            }
-        }
-        if let Some(items) = &self.confirm_delete {
-            let what = describe(&items.iter().map(|(p, _)| self.names.decode(last(p))).collect::<Vec<_>>());
-            let folders = items.iter().any(|(_, a)| a.is_dir() && !a.is_symlink());
-            let mut done = None;
-            modal(ctx, "files-delete", t!("files-delete"), |ui| {
-                ui.label(t!("files-delete-confirm", what = what));
-                if folders {
-                    ui.colored_label(RED, t!("files-delete-folders"));
-                }
-                ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new(t!("files-delete-now")).color(RED)).clicked() {
-                        done = Some(true);
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        done = Some(false);
-                    }
-                });
-            });
-            if let Some(yes) = done {
-                let items = self.confirm_delete.take().unwrap_or_default();
-                if yes {
-                    self.delete(items);
+            if let Some(ok) = done {
+                let name = self.new_folder.take().map(|(_, _, n)| n).unwrap_or_default();
+                if ok && !name.trim().is_empty() {
+                    self.mkdir(tab, remote, name);
                 }
             }
         }
-        if self.confirm_close {
-            let mut done = None;
-            let (running, edits) = (self.running(), self.edits.len());
-            modal(ctx, "files-close", t!("files-close-title"), |ui| {
-                if running > 0 {
-                    ui.label(t!("files-close-running", count = running));
-                }
-                if edits > 0 {
-                    ui.label(t!("files-close-edits", count = edits));
-                }
-                ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new(t!("files-close-now")).color(RED)).clicked() {
-                        done = Some(true);
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        done = Some(false);
-                    }
-                });
-            });
-            match done {
-                Some(true) => self.close = true,
-                Some(false) => self.confirm_close = false,
-                None => {}
+        let Some(confirm) = &self.confirm else { return };
+        let (title, text, warning, button) = match confirm {
+            Confirm::DeleteRemote { what, folders, .. } => (
+                t!("files-delete"),
+                t!("files-delete-confirm", what = what.as_str()),
+                folders.then(|| t!("files-delete-folders")),
+                t!("files-delete-now"),
+            ),
+            Confirm::RecycleLocal { what, .. } => (t!("files-delete"), t!("files-recycle-confirm", what = what.as_str()), None, t!("files-recycle-now")),
+            Confirm::CloseTab(id) => (
+                t!("files-close-title"),
+                t!("files-close-running", count = self.running(Some(*id))) + "\n" + &t!("files-close-edits", count = self.edits(Some(*id))),
+                None,
+                t!("files-close-now"),
+            ),
+            Confirm::CloseWindow => (
+                t!("files-close-title"),
+                t!("files-close-running", count = self.running(None)) + "\n" + &t!("files-close-edits", count = self.edits(None)),
+                None,
+                t!("files-close-now"),
+            ),
+        };
+        let mut done = None;
+        modal(ctx, "files-confirm", title, |ui| {
+            ui.label(text);
+            if let Some(w) = warning {
+                ui.colored_label(RED, w);
             }
+            ui.horizontal(|ui| {
+                if ui.button(egui::RichText::new(button).color(RED)).clicked() {
+                    done = Some(true);
+                }
+                if ui.button(t!("button-cancel")).clicked() {
+                    done = Some(false);
+                }
+            });
+        });
+        match (done, self.confirm.take()) {
+            (Some(true), Some(Confirm::DeleteRemote { tab, items, what, .. })) => self.delete_remote(tab, items, what),
+            (Some(true), Some(Confirm::RecycleLocal { tab, paths, .. })) => self.recycle_local(tab, paths),
+            (Some(true), Some(Confirm::CloseTab(id))) => self.close_tab(id),
+            (Some(true), Some(Confirm::CloseWindow)) => self.close = true,
+            (Some(_), _) => {}
+            (None, pending) => self.confirm = pending,
         }
     }
 
     fn keys(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() || self.sftp.is_none() {
+        if ctx.egui_wants_keyboard_input() || self.tabs.is_empty() || self.question.is_some() || self.confirm.is_some() {
             return;
         }
         let (f5, back, delete, f2, enter) = ctx.input(|i| {
             let k = |key| i.key_pressed(key);
             (k(egui::Key::F5), k(egui::Key::Backspace), k(egui::Key::Delete), k(egui::Key::F2), k(egui::Key::Enter))
         });
-        if enter && self.selected.len() == 1 {
-            if let Some(row) = self.rows.iter().find(|r| self.selected.contains(&r.entry.name)).cloned() {
-                if row.dir {
-                    self.go(native_term_sftp::join(&self.path, &row.entry.name));
-                } else {
-                    self.edit(&row);
-                }
+        let id = self.tabs[self.active].id;
+        if self.remote_focus {
+            let tab = &self.tabs[self.active];
+            if tab.remote.sftp.is_none() {
+                return;
             }
-        }
-        if f5 {
-            self.refresh();
-        }
-        if back && self.path != b"/" {
-            let parent = native_term_sftp::parent(&self.path);
-            self.go(parent);
-        }
-        if delete && !self.selected.is_empty() {
-            self.confirm_delete = Some(self.selection());
-        }
-        if f2 && self.selected.len() == 1 {
-            if let Some(row) = self.rows.iter().find(|r| self.selected.contains(&r.entry.name)) {
-                self.renaming = Some((row.entry.name.clone(), row.name.clone()));
+            let single = tab.remote.rows.iter().position(|r| tab.remote.selected.len() == 1 && tab.remote.selected.contains(&r.entry.name));
+            let parent = (tab.remote.path != b"/").then(|| native_term_sftp::parent(&tab.remote.path));
+            if f5 {
+                self.refresh(id);
+            }
+            if let (true, Some(parent)) = (back, parent) {
+                self.go(id, parent);
+            }
+            if delete {
+                self.ask_delete_remote(id);
+            }
+            if let (true, Some(i)) = (f2, single) {
+                let row = self.tabs[self.active].remote.rows[i].clone();
+                self.tabs[self.active].remote.renaming = Some((row.entry.name.clone(), row.name));
+            }
+            if let (true, Some(i)) = (enter, single) {
+                self.open_remote(id, i);
+            }
+        } else {
+            let tab = &self.tabs[self.active];
+            let single = tab.local.rows.iter().position(|r| tab.local.selected.len() == 1 && tab.local.selected.contains(&local_key(r)));
+            let path = tab.local.path.clone();
+            if f5 {
+                self.refresh_local(id);
+            }
+            if let (true, Some(p)) = (back, &path) {
+                self.list_local(id, p.parent().map(Path::to_path_buf));
+            }
+            if delete && path.is_some() {
+                self.ask_recycle(id);
+            }
+            if let (true, Some(i)) = (f2, single) {
+                let row = self.tabs[self.active].local.rows[i].clone();
+                self.tabs[self.active].local.renaming = Some((local_key(&row), row.name));
+            }
+            if let (true, Some(i)) = (enter, single) {
+                self.open_local(id, i);
             }
         }
     }
 }
 
-enum MenuAction {
-    Download,
-    DownloadTo,
-    Edit(Row),
-    Rename(Row),
-    Delete,
+/// What a list reports back.
+struct Listed {
+    response: egui::Response,
+    clicked: bool,
+    open: Option<usize>,
+    action: Option<(usize, Action)>,
+    renamed: Option<(Vec<u8>, String)>,
+    drag: bool,
+    dropped: Option<Arc<Dragged>>,
+}
+
+/// A file list: selection (Ctrl, Shift), double-click, right-click menu,
+/// inline rename, dragging out and dropping in.
+fn list(
+    ui: &mut egui::Ui,
+    salt: &str,
+    lines: &[Line],
+    selected: &mut HashSet<Vec<u8>>,
+    anchor: &mut Option<usize>,
+    renaming: &mut Option<(Vec<u8>, String)>,
+    remote: bool,
+) -> Listed {
+    let visuals = ui.visuals().clone();
+    let (size_w, date_w, mode_w) = (80.0, 130.0, if remote { 104.0 } else { 0.0 });
+    let area = ui.available_rect_before_wrap();
+    let response = ui.interact(area, ui.id().with((salt, "drop")), egui::Sense::hover());
+    let dropped = response.dnd_release_payload::<Dragged>();
+    let hovered_drop = response.dnd_hover_payload::<Dragged>().is_some_and(|d| d.from_remote != remote);
+    if hovered_drop {
+        ui.painter().rect_stroke(area, 4.0, egui::Stroke::new(2.0_f32, GREEN), egui::StrokeKind::Inside);
+    }
+    let mut out = Listed { response, clicked: false, open: None, action: None, renamed: None, drag: false, dropped };
+    // header, placed like the rows' columns
+    {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 18.0), egui::Sense::hover());
+        let (font, color, y) = (egui::TextStyle::Body.resolve(ui.style()), visuals.weak_text_color(), rect.center().y);
+        let name_right = rect.right() - size_w - date_w - mode_w;
+        let painter = ui.painter_at(rect);
+        painter.text(egui::pos2(rect.left() + 28.0, y), egui::Align2::LEFT_CENTER, t!("files-col-name"), font.clone(), color);
+        painter.text(egui::pos2(name_right + size_w - 8.0, y), egui::Align2::RIGHT_CENTER, t!("files-col-size"), font.clone(), color);
+        painter.text(egui::pos2(name_right + size_w + 8.0, y), egui::Align2::LEFT_CENTER, t!("files-col-modified"), font.clone(), color);
+        if remote {
+            painter.text(egui::pos2(name_right + size_w + date_w + 4.0, y), egui::Align2::LEFT_CENTER, t!("files-col-mode"), font, color);
+        }
+    }
+    ui.separator();
+    let modifiers = ui.input(|i| i.modifiers);
+    egui::ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show_rows(ui, ROW, lines.len(), |ui, range| {
+        for i in range {
+            let line = &lines[i];
+            let is_selected = selected.contains(&line.key);
+            let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW), egui::Sense::click_and_drag());
+            // for screen readers and UI automation: a selectable item named after the file
+            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, is_selected, &line.name));
+            if is_selected {
+                ui.painter().rect_filled(rect, 3.0, visuals.selection.bg_fill);
+            } else if response.hovered() {
+                ui.painter().rect_filled(rect, 3.0, visuals.widgets.hovered.weak_bg_fill);
+            }
+            let color = if is_selected { visuals.selection.stroke.color } else { visuals.text_color() };
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let y = rect.center().y;
+            let painter = ui.painter_at(rect);
+            painter.text(egui::pos2(rect.left() + 6.0, y), egui::Align2::LEFT_CENTER, line.glyph, font.clone(), color);
+            let name_right = rect.right() - size_w - date_w - mode_w;
+            let name_rect = egui::Rect::from_min_max(egui::pos2(rect.left() + 28.0, rect.top()), egui::pos2(name_right - 8.0, rect.bottom()));
+            if renaming.as_ref().is_some_and(|(k, _)| *k == line.key) {
+                let (_, text) = renaming.as_mut().expect("renaming");
+                let edit = ui.put(name_rect, egui::TextEdit::singleline(text));
+                edit.request_focus();
+                if edit.lost_focus() {
+                    let (key, text) = renaming.take().expect("renaming");
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) && text != line.name {
+                        out.renamed = Some((key, text));
+                    }
+                }
+            } else {
+                ui.painter_at(name_rect).text(egui::pos2(name_rect.left(), y), egui::Align2::LEFT_CENTER, &line.name, font.clone(), color);
+            }
+            if let Some(size) = line.size {
+                painter.text(egui::pos2(name_right + size_w - 8.0, y), egui::Align2::RIGHT_CENTER, size_text(size), font.clone(), color);
+            }
+            if let Some(m) = line.modified {
+                painter.text(egui::pos2(name_right + size_w + 8.0, y), egui::Align2::LEFT_CENTER, native_term_win::local_date_time(m), font.clone(), color);
+            }
+            if let Some(mode) = &line.mode {
+                let mono = egui::TextStyle::Monospace.resolve(ui.style());
+                painter.text(egui::pos2(name_right + size_w + date_w + 4.0, y), egui::Align2::LEFT_CENTER, mode, mono, color);
+            }
+
+            if response.clicked() {
+                out.clicked = true;
+                click(lines, i, modifiers, selected, anchor);
+            }
+            if response.double_clicked() {
+                out.open = Some(i);
+            }
+            if response.drag_started() {
+                if !is_selected {
+                    *selected = std::iter::once(line.key.clone()).collect();
+                    *anchor = Some(i);
+                }
+                out.drag = true;
+                out.response = response.clone();
+            }
+            if response.secondary_clicked() {
+                out.clicked = true;
+                if !is_selected {
+                    *selected = std::iter::once(line.key.clone()).collect();
+                    *anchor = Some(i);
+                }
+            }
+            response.context_menu(|ui| {
+                let many = selected.len() > 1;
+                let mut item = |ui: &mut egui::Ui, text: String, action: Action| {
+                    if ui.button(text).clicked() {
+                        out.action = Some((i, action));
+                        ui.close();
+                    }
+                };
+                item(ui, format!("{} {}", icons::OPEN, t!("files-open")), Action::Open);
+                if remote {
+                    item(ui, format!("{} {}", icons::DOWNLOAD, t!("files-download-to-local")), Action::Transfer);
+                    if !many && line.glyph != icons::FOLDER {
+                        item(ui, format!("{} {}", icons::EDIT, t!("files-edit")), Action::Edit);
+                    }
+                } else {
+                    item(ui, format!("{} {}", t!("files-upload-to-remote"), icons::UPLOAD), Action::Transfer);
+                }
+                ui.separator();
+                if !many {
+                    item(ui, format!("{} {}", icons::RENAME, t!("files-rename")), Action::Rename);
+                }
+                item(ui, t!("files-copy-path"), Action::CopyPath);
+                ui.separator();
+                if ui.button(egui::RichText::new(format!("{} {}", icons::DELETE, t!("files-delete"))).color(RED)).clicked() {
+                    out.action = Some((i, Action::Delete));
+                    ui.close();
+                }
+            });
+        }
+    });
+    out
+}
+
+fn click(lines: &[Line], i: usize, modifiers: egui::Modifiers, selected: &mut HashSet<Vec<u8>>, anchor: &mut Option<usize>) {
+    let key = lines[i].key.clone();
+    if modifiers.shift {
+        let from = anchor.unwrap_or(i);
+        let (a, b) = (from.min(i), from.max(i));
+        if !modifiers.command {
+            selected.clear();
+        }
+        selected.extend(lines[a..=b].iter().map(|l| l.key.clone()));
+    } else if modifiers.command {
+        if !selected.remove(&key) {
+            selected.insert(key);
+        }
+        *anchor = Some(i);
+    } else {
+        *selected = std::iter::once(key).collect();
+        *anchor = Some(i);
+    }
 }
 
 impl crate::window::Ui for FilesWindow {
@@ -933,88 +1535,44 @@ impl crate::window::Ui for FilesWindow {
                 ui.ctx().set_theme(theme);
             }
         }
+        self.take_pending();
         while let Ok(event) = self.rx.try_recv() {
             self.handle(event);
         }
         let ctx = ui.ctx().clone();
-        // files dropped from Explorer: uploaded here
+        // files dropped from Explorer onto the server's side: uploaded there
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
-        if !dropped.is_empty() && self.sftp.is_some() {
-            self.upload(dropped);
+        if !dropped.is_empty() {
+            let over_remote = ctx.input(|i| i.pointer.latest_pos()).zip(self.remote_rect).is_none_or(|(p, r)| r.contains(p));
+            match (self.tabs.get(self.active).map(|t| t.id), over_remote) {
+                (Some(id), true) => self.upload(id, dropped),
+                (Some(id), false) => self.log(id, t!("files-drop-remote-only"), true),
+                (None, _) => {}
+            }
         }
-        let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
         self.keys(&ctx);
-        egui::Panel::top("files-toolbar").show_inside(ui, |ui| {
-            ui.add_space(4.0);
-            self.toolbar(ui);
-            ui.add_space(2.0);
-        });
-        if !self.jobs.is_empty() || !self.edits.is_empty() {
-            egui::Panel::bottom("files-activity").resizable(true).max_size(240.0).show_inside(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.activity(ui));
-            });
+        if !self.jobs.is_empty() || self.edits(None) > 0 {
+            egui::Panel::bottom("files-activity").resizable(true).default_size(150.0).max_size(360.0).show_inside(ui, |ui| self.activity(ui));
         }
-        if let Some((text, error)) = &self.notice {
-            let mut dismiss = false;
-            egui::Panel::bottom("files-notice").show_inside(ui, |ui| {
-                ui.horizontal(|ui| {
-                    if *error {
-                        ui.colored_label(RED, text);
-                    } else {
-                        ui.label(text);
-                    }
-                    dismiss = ui.small_button(icon(icons::CLEAR)).clicked();
-                });
-            });
-            if dismiss {
-                self.notice = None;
-            }
-        }
-        egui::CentralPanel::default().show_inside(ui, |ui| match (&self.sftp, &self.failed) {
-            (_, Some(error)) => {
-                ui.colored_label(RED, error);
-                ui.weak(t!("files-batch"));
-                if ui.button(t!("files-reconnect")).clicked() {
-                    self.connect();
-                }
-            }
-            (None, None) => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(t!("files-connecting", host = self.spec.alias.as_str()));
-                });
-            }
-            (Some(_), None) => {
-                if let Some(e) = &self.list_error {
-                    ui.colored_label(RED, e);
-                }
-                if self.listing {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.weak(t!("files-listing"));
-                    });
-                }
-                if hovering {
-                    ui.colored_label(GREEN, t!("files-drop-here", path = self.path_text.as_str()));
-                }
-                self.table(ui);
-            }
-        });
+        let half = ui.available_width() / 2.0;
+        // the same margins on both sides, so their rows line up
+        let frame = egui::Frame::NONE.inner_margin(8.0_f32).fill(ui.visuals().panel_fill);
+        egui::Panel::left("files-local").resizable(true).default_size(half).frame(frame).show_inside(ui, |ui| self.local_side(ui));
+        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| self.remote_side(ui));
         self.dialogs(&ctx);
-        // progress bars move by themselves
-        if self.running() > 0 {
+        // progress bars and edit states move by themselves
+        if self.running(None) > 0 {
             ctx.request_repaint_after(Duration::from_millis(250));
-        }
-        if !self.edits.is_empty() {
+        } else if self.edits(None) > 0 {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
     }
 
     fn close_requested(&mut self) -> bool {
-        if self.running() == 0 && self.edits.is_empty() {
+        if self.running(None) + self.edits(None) == 0 {
             return true;
         }
-        self.confirm_close = true;
+        self.confirm = Some(Confirm::CloseWindow);
         false
     }
 
@@ -1025,19 +1583,89 @@ impl crate::window::Ui for FilesWindow {
 
 impl Drop for FilesWindow {
     fn drop(&mut self) {
-        if let Some((question, _)) = self.question.take() {
+        WINDOW.with(|w| *w.borrow_mut() = None);
+        if let Some((_, question, _)) = self.question.take() {
             let _ = question.reply.send(None);
         }
         for job in &self.jobs {
             job.progress.cancel.store(true, Ordering::Relaxed);
         }
-        for edit in &self.edits {
-            edit.stop.store(true, Ordering::Relaxed);
-        }
-        if let Some(sftp) = &self.sftp {
-            sftp.disconnect();
+        for tab in &self.tabs {
+            end_tab(tab);
         }
     }
+}
+
+fn end_tab(tab: &Tab) {
+    for edit in &tab.edits {
+        edit.stop.store(true, Ordering::Relaxed);
+    }
+    if let Some(sftp) = &tab.remote.sftp {
+        sftp.disconnect();
+    }
+}
+
+fn empty_local() -> Local {
+    Local { path: None, path_text: String::new(), rows: Vec::new(), error: None, selected: HashSet::new(), anchor: None, renaming: None }
+}
+
+/// A local row's key (its path, as bytes of UTF-16).
+fn local_key(row: &LocalRow) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    row.path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect()
+}
+
+/// A server folder's entries, folders first, by name.
+fn list_remote(sftp: &Session, names: Names, path: Vec<u8>) -> What {
+    let result = sftp.read_dir(&path).map_err(|e| e.to_string()).map(|entries| {
+        let mut rows: Vec<RemoteRow> = entries
+            .into_iter()
+            .map(|entry| {
+                // a link to a folder opens like one
+                let dir = entry.attrs.is_dir()
+                    || (entry.attrs.is_symlink() && sftp.stat(&native_term_sftp::join(&path, &entry.name)).is_ok_and(|a| a.is_dir()));
+                RemoteRow { name: names.decode(&entry.name), dir, entry }
+            })
+            .collect();
+        rows.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        rows
+    });
+    What::Listed { path, result }
+}
+
+/// A local folder's entries (folders first, by name), or the drives.
+fn list_local(path: Option<&Path>) -> std::io::Result<Vec<LocalRow>> {
+    let Some(path) = path else {
+        return Ok(native_term_win::shell::drives()
+            .into_iter()
+            .map(|d| LocalRow { name: d.display().to_string(), path: d, dir: true, size: None, modified: None })
+            .collect());
+    };
+    let mut rows = Vec::new();
+    for entry in std::fs::read_dir(path)? {
+        let Ok(entry) = entry else { continue };
+        let meta = entry.metadata().ok();
+        let modified = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok()).map(|d| d.as_secs());
+        rows.push(LocalRow {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            path: entry.path(),
+            dir: meta.as_ref().is_some_and(|m| m.is_dir()),
+            size: meta.as_ref().map(|m| m.len()),
+            modified,
+        });
+    }
+    rows.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(rows)
+}
+
+/// The current folder of the terminal tab's tmux session (asked with
+/// `ssh -o BatchMode=yes`: keys or the agent; otherwise the home folder).
+fn terminal_folder(ssh: &Path, config: Option<&Path>, alias: &str, session: &str, sftp: &Session) -> Option<Vec<u8>> {
+    let name: String = session.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')).collect();
+    let command = format!("sh -c 'tmux display-message -p -t ={name}: \"#{{pane_current_path}}\"'");
+    let out = native_term_config::persistent::run_remote_bytes(ssh, config, alias, &command).ok()?;
+    let path: Vec<u8> = out.strip_suffix(b"\n").unwrap_or(&out).to_vec();
+    (path.starts_with(b"/") && sftp.stat(&path).is_ok_and(|a| a.is_dir())).then_some(path)
 }
 
 /// Serves ssh's askpass questions on a private pipe (only this user may
@@ -1047,6 +1675,7 @@ impl Drop for FilesWindow {
 /// asking in the window. Cancelling a question cancels the rest of this
 /// connection's too (ssh would ask for the password again otherwise).
 fn serve_questions(
+    tab: u64,
     target: Option<native_term_config::password::Target>,
     ssh_pid: Arc<std::sync::atomic::AtomicU32>,
     served: Arc<AtomicBool>,
@@ -1080,7 +1709,7 @@ fn serve_questions(
                 None => {
                     let (reply, answer) = mpsc::channel();
                     let secret = !prompt.contains("(yes/no");
-                    if tx.send(Event::Ask(Question { prompt: prompt.clone(), secret, reply })).is_err() {
+                    if tx.send(Event { tab, what: What::Ask(Question { prompt: prompt.clone(), secret, reply }) }).is_err() {
                         break;
                     }
                     ctx.request_repaint();
@@ -1161,14 +1790,12 @@ fn upload_in_place(sftp: &Session, remote: &[u8], local: &Path, attrs: &Attrs) -
     temp_name.extend_from_slice(name);
     temp_name.extend_from_slice(format!(".nt-{:x}", unique()).as_bytes());
     let temp = native_term_sftp::join(&native_term_sftp::parent(remote), &temp_name);
-    let replaced = sftp
-        .upload(local, &temp, attrs.permissions, &mut |_| true)
-        .and_then(|_| {
-            if let Some(p) = attrs.permissions {
-                let _ = sftp.setstat(&temp, &Attrs { permissions: Some(p & 0o7777), ..Default::default() });
-            }
-            sftp.rename(&temp, remote, true)
-        });
+    let replaced = sftp.upload(local, &temp, attrs.permissions, &mut |_| true).and_then(|_| {
+        if let Some(p) = attrs.permissions {
+            let _ = sftp.setstat(&temp, &Attrs { permissions: Some(p & 0o7777), ..Default::default() });
+        }
+        sftp.rename(&temp, remote, true)
+    });
     match replaced {
         Ok(()) => Ok(()),
         Err(_) => {
@@ -1262,6 +1889,19 @@ mod tests {
         assert_eq!(mode_text(0o120777), "lrwxrwxrwx");
         assert_eq!(last(b"/home/a/b.txt"), b"b.txt");
         assert_eq!(last(b"/home/a/"), b"a");
+    }
+
+    #[test]
+    fn local_folders_first() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"12345").unwrap();
+        std::fs::create_dir(dir.path().join("Z 文件夹")).unwrap();
+        std::fs::write(dir.path().join("A.txt"), b"").unwrap();
+        let rows = list_local(Some(dir.path())).unwrap();
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["Z 文件夹", "A.txt", "b.txt"]);
+        assert_eq!(rows[2].size, Some(5));
+        assert!(list_local(None).unwrap().iter().any(|r| r.dir), "the drives");
     }
 
     /// An edited file is uploaded when saved, by replacing (the server's

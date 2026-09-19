@@ -104,6 +104,47 @@ pub fn open_file(path: &std::path::Path) -> std::io::Result<()> {
     Err(std::io::Error::other("no program to open it"))
 }
 
+/// Moves files and folders to the Recycle Bin (no questions from Windows:
+/// NativeTerm asked already); an error if any stayed.
+pub fn recycle(paths: &[PathBuf]) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::UI::Shell::{
+        SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW,
+    };
+    if paths.is_empty() {
+        return Ok(());
+    }
+    // NUL-terminated paths, the list ended by one more NUL
+    let mut from: Vec<u16> = Vec::new();
+    for path in paths {
+        from.extend(path.as_os_str().encode_wide());
+        from.push(0);
+    }
+    from.push(0);
+    let mut op = SHFILEOPSTRUCTW {
+        wFunc: FO_DELETE,
+        pFrom: PCWSTR(from.as_ptr()),
+        fFlags: (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_NOERRORUI | FOF_SILENT).0 as u16,
+        ..Default::default()
+    };
+    // SAFETY: `op` points at `from`, a double-NUL-terminated list alive
+    // through the call; no window, no progress title.
+    let result = unsafe { SHFileOperationW(&mut op) };
+    if result != 0 || op.fAnyOperationsAborted.as_bool() {
+        return Err(std::io::Error::other(format!("not moved to the Recycle Bin (error {result})")));
+    }
+    Ok(())
+}
+
+/// The drives (`C:\`, `D:\`, …).
+pub fn drives() -> Vec<PathBuf> {
+    use windows::Win32::Storage::FileSystem::GetLogicalDriveStringsW;
+    let mut buf = vec![0u16; 512];
+    // SAFETY: the buffer is ours; its length goes with it.
+    let len = unsafe { GetLogicalDriveStringsW(Some(&mut buf)) } as usize;
+    buf[..len.min(buf.len())].split(|&c| c == 0).filter(|d| !d.is_empty()).map(|d| PathBuf::from(String::from_utf16_lossy(d))).collect()
+}
+
 /// The window in front (the one the user just clicked in): the owner for
 /// a picker.
 pub fn foreground_window() -> isize {
@@ -125,6 +166,16 @@ pub fn downloads_folder() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn drives_and_recycle_bin() {
+        assert!(super::drives().iter().any(|d| d.to_string_lossy().eq_ignore_ascii_case("C:\\")), "{:?}", super::drives());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("回收站测试.txt");
+        std::fs::write(&file, b"x").unwrap();
+        super::recycle(std::slice::from_ref(&file)).unwrap();
+        assert!(!file.exists());
+    }
+
     #[test]
     fn downloads() {
         let d = super::downloads_folder().expect("a Downloads folder");

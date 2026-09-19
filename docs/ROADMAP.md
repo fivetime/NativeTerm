@@ -485,11 +485,15 @@
 - [ ] Localization (rest): config library errors; more languages
 - [ ] Animations (respecting the system animation setting) and toasts
 - [x] Built-in file transfer over SFTP (`native_term_sftp` over `ssh -s
-      sftp`; files window per host: browse, upload / download / drag in,
-      folders, rename, delete, edit in place with upload on save, any file
-      name encoding, saved password or asked in the window)
+      sftp`): one SecureFX-style window, local and server sides with a tab
+      per session moving together; from a host's or a terminal tab's menu
+      (a tmux tab opens at its current folder); transfers by buttons, drag
+      between the sides or from Explorer; folders, rename, delete (local:
+      Recycle Bin), edit in place with upload on save, any file name
+      encoding, saved password or asked in the window
 - [ ] SFTP (rest): resume broken transfers, last folder per host, folder
-      compare / sync, a configured external tool as an option
+      trees beside the lists, folder compare / sync, a configured external
+      tool as an option
 - [ ] Shared credential sets (`NativeTermCredential`)
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)
