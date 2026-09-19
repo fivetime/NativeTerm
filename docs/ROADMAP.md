@@ -546,7 +546,11 @@
       (`NativeTerm/proxy/<url>`); SOCKS5 RFC 1929, HTTP Basic, SOCKS4 user
       id; a refused password is marked and not retried
 - [ ] NTLM / Negotiate proxy logins
-- [ ] Optional `trzsz ssh` per host (`NativeTermTrzsz`, user-installed)
+- [ ] rz / sz (ZMODEM) in every SSH tab: our fork of Win32-OpenSSH
+      (`fivetime/openssh-portable`, small channel output filter) handing
+      over to `nativeterm-shim --zmodem` (crate `zmodem2`, verified
+      against lrzsz); ntplink sessions through the same helper. Replaces
+      the per-host `trzsz ssh` idea (see `docs/RZSZ.md`)
 - [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions
 - [ ] Optional `plink -ssh` for GBK SSH hosts (host/port/user/key from
       `ssh -G`, `.ppk` key, Pageant)
