@@ -46,3 +46,15 @@ plink-no-control = [NativeTerm] 本次连接无法发送 Break 和 Telnet 命令
 plink-load-failed = [NativeTerm] 无法传递该会话的 PuTTY 选项：{ $error }
 port-busy = [NativeTerm] { $line } 正被其他程序或会话占用。
 port-unavailable = [NativeTerm] 无法打开 { $line }：{ $error }
+
+## the ProxyCommand helper (--proxy)
+proxy-failed = 无法通过代理 { $url } 连接到 { $host }:{ $port }：{ $error }
+proxy-unknown = 找不到代理服务器 { $proxy }（{ $error }）
+proxy-unreachable = 连不上代理服务器 { $proxy }（{ $error }）
+proxy-broken = 与代理的连接中断（{ $error }）
+proxy-needs-login = 代理要求用户名和密码，NativeTerm 暂不支持
+proxy-not-socks = 这不是 { $kind } 代理（它的回答不对），请检查代理类型和端口
+proxy-not-http = 这不是 HTTP 代理（它的回答不对），请检查代理类型和端口
+proxy-refused = 代理拒绝了这个连接：{ $reason }
+proxy-socks4-v6 = SOCKS4 不支持 IPv6 地址，请改用 SOCKS5 或 HTTP 代理
+proxy-no-answer = 代理没有回答：请检查代理类型和端口

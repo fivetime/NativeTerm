@@ -4,7 +4,8 @@
 //! restored sessions; `--no-forwards`: a clone, which would clash with the
 //! original's port forwards), or
 //! `nativeterm-shim --authenticated <shim-pid>` (the `LocalCommand` login
-//! signal).
+//! signal), or `nativeterm-shim --proxy <url> <host> <port>` (the
+//! `ProxyCommand` helper).
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -33,6 +34,12 @@ pub enum Mode {
     },
     /// Load the default keys into ssh-agent (ssh-add asks for passphrases).
     AddKeys,
+    /// ssh's `ProxyCommand`: reach `host:port` through the proxy at `url`.
+    Proxy {
+        url: String,
+        host: String,
+        port: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -68,6 +75,13 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 return Ok(Mode::InstallKeys { key, aliases });
             }
             "--add-keys" => return Ok(Mode::AddKeys),
+            "--proxy" => {
+                let rest: Vec<String> = args.collect();
+                let [url, host, port] = rest.as_slice() else {
+                    return Err("--proxy needs a proxy URL, a host and a port".into());
+                };
+                return Ok(Mode::Proxy { url: url.clone(), host: host.clone(), port: port.clone() });
+            }
             "--create-key" => {
                 let path = args.next().ok_or("--create-key needs a path")?;
                 return Ok(Mode::CreateKey { path });
@@ -90,6 +104,15 @@ mod tests {
 
     fn p(args: &[&str]) -> Result<Mode, String> {
         parse(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn proxy_helper() {
+        assert_eq!(
+            p(&["--proxy", "socks5://gw:1080", "db.lan", "22"]).unwrap(),
+            Mode::Proxy { url: "socks5://gw:1080".into(), host: "db.lan".into(), port: "22".into() }
+        );
+        assert!(p(&["--proxy", "socks5://gw:1080", "db.lan"]).is_err());
     }
 
     #[test]

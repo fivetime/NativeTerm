@@ -794,3 +794,57 @@ fn plink_always_loads_its_own_session() {
     assert_eq!(wait_exit(&mut shim), 0);
     registry::delete_user_tree(&base).unwrap();
 }
+
+/// The ProxyCommand helper against a SOCKS5 proxy on this machine that
+/// answers the connection by echoing in upper case: ssh's bytes go
+/// through both ways, and a refusal comes out on stderr.
+#[test]
+fn proxy_helper_passes_bytes_both_ways() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = std::thread::spawn(move || {
+        for refuse in [false, true] {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut hello = [0u8; 3];
+            s.read_exact(&mut hello).unwrap();
+            s.write_all(&[5, 0]).unwrap();
+            let mut head = [0u8; 5];
+            s.read_exact(&mut head).unwrap();
+            let mut name = vec![0u8; head[4] as usize + 2];
+            s.read_exact(&mut name).unwrap();
+            assert_eq!(&name[..name.len() - 2], b"target.lan");
+            if refuse {
+                s.write_all(&[5, 4, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+                continue;
+            }
+            s.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).unwrap();
+            let mut got = Vec::new();
+            s.read_to_end(&mut got).unwrap();
+            s.write_all(&got.to_ascii_uppercase()).unwrap();
+        }
+    });
+    let url = format!("socks5://127.0.0.1:{port}");
+    let run = |input: &[u8]| {
+        let mut child = Command::new(shim_exe())
+            .args(["--proxy", &url, "target.lan", "22"])
+            .env("NATIVETERM_LANG", "en")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        child.wait_with_output().unwrap()
+    };
+    let out = run(b"ssh-2.0 hello\n");
+    assert!(out.status.success());
+    assert_eq!(out.stdout, b"SSH-2.0 HELLO\n");
+    let refused = run(b"");
+    assert!(!refused.status.success());
+    let error = String::from_utf8_lossy(&refused.stderr);
+    assert!(error.contains("host unreachable") && error.contains("target.lan:22"), "{error}");
+    server.join().unwrap();
+}

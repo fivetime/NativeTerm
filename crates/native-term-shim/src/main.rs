@@ -25,6 +25,7 @@ mod link;
 mod look;
 mod persistent;
 mod plink;
+mod proxy;
 mod saved;
 mod ssh;
 mod win;
@@ -78,6 +79,9 @@ fn main() {
             wait_for_any_key();
             std::process::exit(code);
         }
+        // ssh's ProxyCommand: stdin and stdout are ssh's connection, so
+        // nothing else may be printed or waited for
+        Mode::Proxy { url, host, port } => std::process::exit(proxy::run(&url, &host, &port)),
         Mode::CreateKey { path } => {
             let code = keys::create(&path);
             wait_for_any_key();

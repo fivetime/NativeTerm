@@ -74,6 +74,8 @@ pub const SPECS: &[Spec] = &[
     folder_spec("User", Connection, Kind::Text),
     folder_spec("Port", Connection, Kind::Text),
     folder_spec("ProxyJump", Connection, Kind::Text),
+    // shown as a proxy type and address (see `proxy`)
+    spec("ProxyCommand", Connection, Kind::Text),
     spec("ConnectTimeout", Connection, Kind::Text),
     spec("ServerAliveInterval", Connection, Kind::Text),
     spec("ServerAliveCountMax", Connection, Kind::Text),

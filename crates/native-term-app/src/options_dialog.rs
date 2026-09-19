@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use native_term_app::t;
 use native_term_config::options::{self, Category, Kind, Names, Values};
+use native_term_config::proxy::{self, Proxy};
 
 use crate::dialogs::Outcome;
 
@@ -18,8 +19,22 @@ pub enum OptionsTarget {
     Folder(PathBuf),
 }
 
+/// The proxy field: none, one of NativeTerm's (type and address), or a
+/// `ProxyCommand` of another form, kept as text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProxyChoice {
+    Default,
+    Kind(proxy::Kind),
+    Other,
+}
+
 pub struct OptionsDialog {
     pub target: OptionsTarget,
+    proxy: ProxyChoice,
+    /// `host:port` for NativeTerm's proxy.
+    proxy_address: String,
+    /// The helper written into `ProxyCommand`.
+    shim: PathBuf,
     label: String,
     category: Category,
     /// Field text per keyword; repeated options one per line.
@@ -80,6 +95,7 @@ fn option_name(keyword: &str) -> String {
         "User" => t!("field-user"),
         "Port" => t!("field-port"),
         "ProxyJump" => t!("field-jump"),
+        "ProxyCommand" => t!("opt-proxy"),
         "IdentityFile" => t!("field-keys"),
         other => other.to_string(),
     }
@@ -124,8 +140,17 @@ impl OptionsDialog {
         for (k, v) in effective {
             by_keyword.entry(k).or_default().push(v);
         }
+        let written = values.get("ProxyCommand").and_then(|v| v.first()).map(String::as_str).unwrap_or("");
+        let (proxy, proxy_address) = match Proxy::from_command(written) {
+            _ if written.trim().is_empty() => (ProxyChoice::Default, String::new()),
+            Some(p) => (ProxyChoice::Kind(p.kind), p.address()),
+            None => (ProxyChoice::Other, String::new()),
+        };
         OptionsDialog {
             target,
+            proxy,
+            proxy_address,
+            shim: native_term_app::default_shim_path().unwrap_or_default(),
             label: label.to_string(),
             category: Category::Connection,
             text,
@@ -137,7 +162,82 @@ impl OptionsDialog {
     }
 
     pub fn values(&self) -> Values {
-        self.text.iter().map(|(k, v)| (*k, v.lines().map(str::to_string).collect())).collect()
+        let mut values: Values = self.text.iter().map(|(k, v)| (*k, v.lines().map(str::to_string).collect())).collect();
+        let proxy = match self.proxy {
+            ProxyChoice::Default => Vec::new(),
+            ProxyChoice::Kind(kind) => {
+                Proxy::from_address(kind, &self.proxy_address).map(|p| vec![p.command(&self.shim)]).unwrap_or_default()
+            }
+            ProxyChoice::Other => values.get("ProxyCommand").cloned().unwrap_or_default(),
+        };
+        values.insert("ProxyCommand", proxy);
+        values
+    }
+
+    /// What is wrong with the proxy's address, if a proxy is chosen.
+    fn proxy_error(&self) -> Option<String> {
+        match self.proxy {
+            ProxyChoice::Kind(kind) => {
+                Proxy::from_address(kind, &self.proxy_address).err().map(|e| t!("proxy-invalid", error = e))
+            }
+            _ => None,
+        }
+    }
+
+    /// The proxy: a type, then its address (or another command as text).
+    fn proxy_field(&mut self, ui: &mut egui::Ui) {
+        ui.label(option_name("ProxyCommand")).on_hover_text("ProxyCommand");
+        let effective = self.effective_of("ProxyCommand").join(" ");
+        let inherited = match Proxy::from_command(&effective) {
+            Some(p) => format!("{} {}", p.kind.name(), p.address()),
+            None if effective.is_empty() || effective.eq_ignore_ascii_case("none") => t!("proxy-none"),
+            None => effective.clone(),
+        };
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                let name = |choice: ProxyChoice| match choice {
+                    ProxyChoice::Default => t!("options-default", value = inherited.clone()),
+                    ProxyChoice::Kind(kind) => kind.name().to_string(),
+                    ProxyChoice::Other => t!("proxy-other"),
+                };
+                egui::ComboBox::from_id_salt("proxy-kind").selected_text(name(self.proxy)).width(140.0).show_ui(
+                    ui,
+                    |ui| {
+                        let mut choices = vec![ProxyChoice::Default];
+                        choices.extend(proxy::Kind::ALL.map(ProxyChoice::Kind));
+                        if self.proxy == ProxyChoice::Other {
+                            choices.push(ProxyChoice::Other);
+                        }
+                        for choice in choices {
+                            ui.selectable_value(&mut self.proxy, choice, name(choice));
+                        }
+                    },
+                );
+                match self.proxy {
+                    ProxyChoice::Kind(kind) => {
+                        let hint = format!("proxy.example.com:{}", kind.default_port());
+                        let field = egui::TextEdit::singleline(&mut self.proxy_address).hint_text(hint);
+                        ui.add(field.desired_width(172.0));
+                    }
+                    ProxyChoice::Other => {
+                        let value = self.text.entry("ProxyCommand").or_default();
+                        ui.add(egui::TextEdit::singleline(value).desired_width(172.0));
+                    }
+                    ProxyChoice::Default => {}
+                }
+            });
+            if let Some(error) = self.proxy_error().filter(|_| !self.proxy_address.trim().is_empty()) {
+                ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+            }
+            // ssh uses whichever of the two it reads first
+            let jump = self.text.get("ProxyJump").map(|v| v.trim().to_string()).unwrap_or_default();
+            let jump = if jump.is_empty() { self.effective_of("ProxyJump").join(",") } else { jump };
+            let jumping = !jump.is_empty() && !jump.eq_ignore_ascii_case("none");
+            if jumping && matches!(self.proxy, ProxyChoice::Kind(_)) {
+                ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), t!("proxy-and-jump", jump = jump));
+            }
+        });
+        ui.end_row();
     }
 
     fn effective_of(&self, keyword: &str) -> &[String] {
@@ -155,6 +255,9 @@ impl OptionsDialog {
     }
 
     fn field(&mut self, ui: &mut egui::Ui, keyword: &'static str, kind: Kind) {
+        if keyword == "ProxyCommand" {
+            return self.proxy_field(ui);
+        }
         ui.label(option_name(keyword)).on_hover_text(keyword);
         let effective = self.effective_of(keyword).to_vec();
         let current = effective.join(", ");
@@ -270,6 +373,9 @@ impl OptionsDialog {
                                 Category::Forwarding => {
                                     ui.weak(t!("options-forwarding-note"));
                                 }
+                                Category::Connection => {
+                                    ui.weak(t!("proxy-note"));
+                                }
                                 _ => {}
                             }
                         });
@@ -282,7 +388,10 @@ impl OptionsDialog {
                 }
                 ui.horizontal(|ui| {
                     if ui.button(t!("button-save")).clicked() {
-                        outcome = Outcome::Submit(self.values());
+                        match self.proxy_error() {
+                            Some(error) => self.error = Some(error),
+                            None => outcome = Outcome::Submit(self.values()),
+                        }
                     }
                     if ui.button(t!("button-cancel")).clicked() {
                         outcome = Outcome::Cancel;
@@ -313,6 +422,32 @@ mod tests {
         for spec in options::SPECS {
             assert_ne!(option_name(spec.keyword), spec.keyword, "{}", spec.keyword);
         }
+    }
+
+    #[test]
+    fn proxy_as_type_and_address() {
+        let shim = Path::new(r"C:\nt\nativeterm-shim.exe");
+        let written = Proxy::from_address(proxy::Kind::Http, "squid:3128").unwrap().command(shim);
+        let mut values = options::empty();
+        values.insert("ProxyCommand", vec![written.clone()]);
+        let host = || OptionsTarget::Host("web".into());
+        let mut dialog = OptionsDialog::new(host(), "Web", &values, Vec::new(), Path::new("ssh"));
+        assert_eq!(dialog.proxy, ProxyChoice::Kind(proxy::Kind::Http));
+        assert_eq!(dialog.proxy_address, "squid:3128");
+        // another type: this install's shim is written
+        dialog.proxy = ProxyChoice::Kind(proxy::Kind::Socks5);
+        dialog.proxy_address = "gw".into();
+        let command = dialog.values()["ProxyCommand"][0].clone();
+        assert!(command.ends_with(" --proxy socks5://gw:1080 %h %p"), "{command}");
+        dialog.proxy_address = "g w".into();
+        assert!(dialog.proxy_error().is_some());
+        dialog.proxy = ProxyChoice::Default;
+        assert!(dialog.values()["ProxyCommand"].is_empty());
+        // someone else's command is kept as it is
+        values.insert("ProxyCommand", vec!["connect -S gw:1080 %h %p".into()]);
+        let dialog = OptionsDialog::new(host(), "Web", &values, Vec::new(), Path::new("ssh"));
+        assert_eq!(dialog.proxy, ProxyChoice::Other);
+        assert_eq!(dialog.values()["ProxyCommand"], ["connect -S gw:1080 %h %p"]);
     }
 
     #[test]

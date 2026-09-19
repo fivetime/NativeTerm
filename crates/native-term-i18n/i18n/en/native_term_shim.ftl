@@ -48,3 +48,15 @@ plink-no-control = [NativeTerm] Break and Telnet commands are unavailable in thi
 plink-load-failed = [NativeTerm] The session's PuTTY options couldn't be passed on: { $error }
 port-busy = [NativeTerm] { $line } is in use by another program or session.
 port-unavailable = [NativeTerm] { $line } can't be opened: { $error }
+
+## the ProxyCommand helper (--proxy)
+proxy-failed = Couldn't reach { $host }:{ $port } through the proxy { $url }: { $error }
+proxy-unknown = The proxy { $proxy } wasn't found ({ $error })
+proxy-unreachable = Couldn't connect to the proxy { $proxy } ({ $error })
+proxy-broken = The connection to the proxy broke ({ $error })
+proxy-needs-login = The proxy wants a user name and password, which NativeTerm doesn't support yet
+proxy-not-socks = This isn't a { $kind } proxy (its answer doesn't fit): check the proxy type and port
+proxy-not-http = This isn't an HTTP proxy (its answer doesn't fit): check the proxy type and port
+proxy-refused = The proxy refused the connection: { $reason }
+proxy-socks4-v6 = SOCKS4 can't reach IPv6 addresses: use a SOCKS5 or HTTP proxy
+proxy-no-answer = The proxy didn't answer: check the proxy type and port

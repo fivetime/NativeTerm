@@ -476,6 +476,49 @@ NativeTerm has a session options dialog with the same categories.
   a whole folder use ssh's own mechanism instead of the folder's
   defaults block (whose host name never matches): see "Folder options".
 
+### Proxies (SOCKS5, SOCKS4, HTTP)
+
+Windows' OpenSSH ships no `nc` or `connect`, and OpenSSH has no proxy
+option of its own besides `ProxyCommand`. So the shim is the helper:
+`nativeterm-shim --proxy <url> %h %p` (`native_term_config::proxy`,
+shim `proxy.rs`).
+
+- **Where it is kept:** written into the host block (or the folder's
+  options block) as a real `ProxyCommand "<shim>" --proxy
+  socks5://gw:1080 %h %p`. No `NativeTerm*` key: every ssh run uses it
+  as it is — tabs, the files window, background checks, tmux sends, key
+  installs — and so do plain `ssh`, `scp` and VS Code Remote. The
+  session options' "Connection" page shows it as a type (SOCKS5, SOCKS4,
+  HTTP) and an address; saving writes this install's shim path, and a
+  `ProxyCommand` of any other form is shown and kept as text. With a
+  jump host set as well, the page warns: ssh uses whichever comes first.
+- **The helper:** connects to the proxy (20 s), asks for `host:port` —
+  SOCKS5 (RFC 1928, no authentication; names sent as names so the proxy
+  resolves them), SOCKS4a (IPv4 addresses as is, IPv6 refused), or HTTP
+  `CONNECT` (the answer read a byte at a time so the server's first
+  bytes stay for ssh) — then relays stdin to the connection and the
+  connection to stdout (flushed per read) until either side closes. A
+  proxy that doesn't answer in 10 s is reported as the wrong type or
+  port. Errors go to stderr in the user's language, which ssh shows in
+  the tab (or a background run reports).
+- **Not yet:** proxies needing a user name and password (reported as
+  such: SOCKS5 method `0xFF`, HTTP 407); passwords would belong in
+  Credential Manager, never in the config.
+- **No crate:** the `socks` crate (sync, SOCKS4/5) last released in 2022
+  and pulls in the old `winapi`; the three handshakes are a few dozen
+  lines each, tested against in-memory proxies, and end to end against a
+  local SOCKS5 proxy with the real shim binary.
+- Verified live: a host whose name (`inner.lab`) only resolves inside
+  the test container, reached through an `ssh -D` SOCKS5 proxy and
+  through tinyproxy (HTTP): plain `ssh` ran commands (`SSH_CONNECTION`
+  from 127.0.0.1 inside the container), a NativeTerm tab connected
+  (its tmux session created on the server), the files window listed
+  `/root` through the HTTP proxy, the options page showed "SOCKS5
+  127.0.0.1:10800" and saving rewrote it with the backslash path, which
+  ssh still ran. No proxy listening, and an HTTP proxy spoken to as
+  SOCKS5, gave "couldn't connect to the proxy …" and "the proxy didn't
+  answer: check the type and port" (after 10 s).
+
 ### Folder options
 
 ssh has no folders, so NativeTerm marks a folder's hosts and matches the
@@ -518,7 +561,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | Display logon prompts in terminal window | Default behavior | ✅ |
 | **SSH2**: Hostname, Port, Username (IPv6 too) | `HostName`, `Port`, `User` | ✅ |
 | Prompt for hostname | Quick connect | ✅ |
-| Firewall (jump host, SOCKS/HTTP proxy) | `ProxyJump`; `NativeTermProxy` with the shim as `ProxyCommand` helper | ✅ |
+| Firewall (jump host, SOCKS/HTTP proxy) | `ProxyJump`; a `ProxyCommand` running the shim as the helper (see "Proxies") | ✅ |
 | Credentials (shared sets) | `NativeTermCredential` | ✅ |
 | Authentication methods and order | `PreferredAuthentications`; GSSAPI depends on the Windows OpenSSH build | ✅/🟡 |
 | Key exchange list and order | `KexAlgorithms` | ✅ |
@@ -1374,7 +1417,6 @@ Keys NativeTerm reads:
 | `NativeTermOnLogin` | Post-login command(s) |
 | `NativeTermPreConnect` | Local command run by the shim before `ssh` (SecureCRT "Pre-connect"); runs as the user, shown in the session editor |
 | `NativeTermCredential` | Name of a shared credential set (Credential Manager entry `NativeTerm/cred/<name>`) used by several hosts, like SecureCRT's "Credentials"; on a folder, its hosts' default; `none` on a host keeps the folder's set away |
-| `NativeTermProxy` | `socks5://host:port` or `http://host:port`: the shim acts as the `ProxyCommand` helper (Windows OpenSSH ships no `nc`); jump hosts use plain `ProxyJump` |
 | `NativeTermTrzsz` | Opt-in: run `trzsz ssh` (user-installed) instead of `ssh` for `rz`/`sz`-style transfers. It sits in the output path, which is why it is per host and off by default |
 
 ### What lives where (no database *of record*)
