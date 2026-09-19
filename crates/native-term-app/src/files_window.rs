@@ -1579,10 +1579,11 @@ impl FilesWindow {
                 if question.secret {
                     crate::dialogs::no_ime(&edit);
                 }
+                // the field keeps the focus (it gives it up on Enter and takes
+                // it back in the same frame): Enter anywhere submits
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    if ui.button(t!("button-ok")).clicked()
-                        || (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                    {
+                    if ui.button(t!("button-ok")).clicked() || enter {
                         done = Some(true);
                     }
                     if ui.button(t!("button-cancel")).clicked() {
@@ -1591,6 +1592,8 @@ impl FilesWindow {
                 });
             });
             if let Some(ok) = done {
+                // the field's focus goes with the dialog (else the list's keys stay dead)
+                ctx.memory_mut(|m| m.stop_text_input());
                 if let Some((_, question, typed)) = self.question.take() {
                     let _ = question.reply.send(ok.then_some(typed));
                 }
@@ -1602,10 +1605,9 @@ impl FilesWindow {
             modal(ctx, "files-new-folder", t!("files-new-folder"), |ui| {
                 let edit = ui.add(egui::TextEdit::singleline(name).hint_text(t!("files-new-folder-hint")));
                 edit.request_focus();
+                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    if ui.button(t!("button-create")).clicked()
-                        || (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-                    {
+                    if ui.button(t!("button-create")).clicked() || enter {
                         done = Some(true);
                     }
                     if ui.button(t!("button-cancel")).clicked() {
@@ -1614,6 +1616,7 @@ impl FilesWindow {
                 });
             });
             if let Some(ok) = done {
+                ctx.memory_mut(|m| m.stop_text_input());
                 let name = self.new_folder.take().map(|(_, _, n)| n).unwrap_or_default();
                 if ok && !name.trim().is_empty() {
                     self.mkdir(tab, remote, name);
@@ -1966,10 +1969,22 @@ fn list(
                 if renaming.as_ref().is_some_and(|(k, _)| *k == line.key) {
                     let (_, text) = renaming.as_mut().expect("renaming");
                     let edit = ui.put(name_rect, egui::TextEdit::singleline(text));
-                    edit.request_focus();
-                    if edit.lost_focus() {
+                    // the focus once, when renaming starts (taken every frame,
+                    // the field would never give it up)
+                    let started = egui::Id::new((salt, "renaming"));
+                    let fresh = ui.data_mut(|d| {
+                        let fresh = d.get_temp::<Vec<u8>>(started).as_ref() != Some(&line.key);
+                        d.insert_temp(started, line.key.clone());
+                        fresh
+                    });
+                    if fresh {
+                        edit.request_focus();
+                    } else if edit.lost_focus() {
+                        // Enter or a click elsewhere renames; Esc doesn't
                         let (key, text) = renaming.take().expect("renaming");
-                        if ui.input(|i| i.key_pressed(egui::Key::Enter)) && text != line.name {
+                        ui.data_mut(|d| d.remove::<Vec<u8>>(started));
+                        let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                        if !cancelled && !text.trim().is_empty() && text != line.name {
                             out.renamed = Some((key, text));
                         }
                     }

@@ -2500,9 +2500,19 @@ testing): a local file dragged onto the server's list was uploaded to
 the folder shown, a server's file dragged onto the local list was
 downloaded, a local file dropped on `incoming` in the server's tree went
 to `/srv/incoming`, and a 3 MB file dragged from an Explorer window onto
-the server's list was uploaded. Not tried here: typing into the window's
-text fields (egui's text fields don't take UI Automation's SetValue), and
-the tab menu item itself (its handler is the one the test hook calls).
+the server's list was uploaded. With the real keyboard (the IME composes
+typed letters, so names went in through the clipboard): New folder took
+`新目录 乙` and Enter; F2 renamed `改名前.txt` to `改名后.txt` in place;
+the password field (no IME) took the letters as typed, three wrong
+passwords ended the connection and Reconnect with the right one
+connected. Found and fixed on the way: Enter didn't submit the dialogs
+(the field took the focus back every frame, so it never reported losing
+it), and after a dialog the list's keys (F2, F5, Delete) stayed dead
+until a click, as the closed field kept the keyboard. The tab menu: a
+right click on a tmux tab of the portable Terminal and "文件（SFTP）"
+opened the window on that host in the tab's folder (`/root`); after
+`cd /etc/ssh` in the tab, the same item brought the same window and tab
+to `/etc/ssh` without a second connection.
 
 **Not yet:** resuming a broken transfer, transfers between two servers,
 remembering the last folder per host, comparing / syncing folders.
