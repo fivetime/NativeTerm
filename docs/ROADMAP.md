@@ -503,7 +503,24 @@
       (size, modification time; times kept by transfers), both ways /
       local is the source / server is the source, optional deletion of
       extras, as ordinary pausable transfers
-- [ ] SFTP (rest): a configured external tool as an option
+- [ ] Files over protocols without SSH (FTP/FTPS, WebDAV, S3, cloud
+      drives), later and only if wanted. Hosts reached over SSH keep our
+      own SFTP client (one experience: ssh config, askpass, pause/resume
+      at the byte, non-UTF-8 names). Evaluated 2026-09-19: rclone
+      (fork fivetime/rclone) as a back end behind the same window, queue
+      and Synchronize dialog, driven through `rclone rcd`. Its progress
+      (`core/stats`: bytes, percent, speed, ETA per file) fits the queue,
+      but upstream has no pause and no resume (a stopped copy deletes its
+      `.partial` file; the next starts at 0), its JSON API turns non-UTF-8
+      names into U+FFFD for good (a GBK name can't be named again), the
+      SFTP back end with an external ssh hangs ~40 s per remote probing
+      `md5sum` (stdin left open), and it is 80 MB (30 MB trimmed to
+      local/SFTP/FTP/WebDAV/S3 and `rcd`). Before using it: patch the fork
+      to send names' bytes, skip hash probing with an external ssh, trim
+      the build, and (if large resumable transfers are needed there) keep
+      and continue partial files; download it on demand, not bundled.
+      A configured external client (WinSCP etc.) was dropped: they don't
+      read the ssh config the hosts are defined in.
 - [ ] Shared credential sets (`NativeTermCredential`)
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)
