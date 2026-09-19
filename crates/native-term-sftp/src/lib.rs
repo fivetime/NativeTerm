@@ -11,8 +11,8 @@
 //! 64 × 32 KB), which is what makes them fast over a long round trip.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs::File;
-use std::io::{self, Read, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -544,8 +544,23 @@ impl Session {
     /// reads are in flight; each chunk is written where it belongs, so
     /// replies may come in any order and a short read is asked again.
     pub fn download(&self, remote: &[u8], local: &Path, progress: &mut dyn FnMut(u64) -> bool) -> Result<u64> {
+        self.download_from(remote, local, 0, progress)
+    }
+
+    /// Downloads `remote` into `local` from byte `offset` on: what `local`
+    /// holds before it is kept (a partial download continued), the rest
+    /// is written (0: `local` created or truncated). `progress` and the
+    /// result count the bytes from `offset`.
+    pub fn download_from(
+        &self,
+        remote: &[u8],
+        local: &Path,
+        offset: u64,
+        progress: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<u64> {
         let handle = self.open(remote, wire::OPEN_READ, &Attrs::default())?;
-        let result = File::create(local).map_err(Error::from).and_then(|file| self.read_into(&handle, &file, progress));
+        let file = if offset == 0 { File::create(local) } else { OpenOptions::new().write(true).open(local) };
+        let result = file.map_err(Error::from).and_then(|file| self.read_into(&handle, &file, offset, progress));
         let closed = self.close(&handle);
         let done = result?;
         closed?;
@@ -555,13 +570,13 @@ impl Session {
     /// Reads until the server says EOF, `WINDOW` reads in flight; the
     /// file ends where the last byte read ends (it may have changed size
     /// since `stat`, which is only a hint here).
-    fn read_into(&self, handle: &[u8], file: &File, progress: &mut dyn FnMut(u64) -> bool) -> Result<u64> {
+    fn read_into(&self, handle: &[u8], file: &File, start: u64, progress: &mut dyn FnMut(u64) -> bool) -> Result<u64> {
         // offset → (length asked, reply), oldest first
         let mut in_flight: BTreeMap<u64, (u32, Receiver<Result<Reply>>)> = BTreeMap::new();
-        let mut next = 0u64;
+        let mut next = start;
         let mut eof_at: Option<u64> = None;
         let mut done = 0u64;
-        let mut end = 0u64;
+        let mut end = start;
         let read = |offset: u64, len: u32| self.send(wire::READ, Body::default().string(handle).u64(offset).u32(len));
         loop {
             while eof_at.is_none() && in_flight.len() < WINDOW {
@@ -620,19 +635,41 @@ impl Session {
         permissions: Option<u32>,
         progress: &mut dyn FnMut(u64) -> bool,
     ) -> Result<u64> {
+        self.upload_from(local, remote, 0, permissions, progress)
+    }
+
+    /// Uploads `local` to `remote` from byte `offset` on: what `remote`
+    /// holds before it is kept (a partial upload continued; 0: created or
+    /// truncated). `progress` and the result count the bytes from `offset`.
+    pub fn upload_from(
+        &self,
+        local: &Path,
+        remote: &[u8],
+        offset: u64,
+        permissions: Option<u32>,
+        progress: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<u64> {
         let mut file = File::open(local)?;
+        file.seek(SeekFrom::Start(offset))?;
         let attrs = Attrs { permissions, ..Default::default() };
-        let handle = self.open(remote, wire::OPEN_WRITE | wire::OPEN_CREAT | wire::OPEN_TRUNC, &attrs)?;
-        let result = self.write_from(&handle, &mut file, progress);
+        let truncate = if offset == 0 { wire::OPEN_TRUNC } else { 0 };
+        let handle = self.open(remote, wire::OPEN_WRITE | wire::OPEN_CREAT | truncate, &attrs)?;
+        let result = self.write_from(&handle, &mut file, offset, progress);
         let closed = self.close(&handle);
         let done = result?;
         closed?;
         Ok(done)
     }
 
-    fn write_from(&self, handle: &[u8], file: &mut File, progress: &mut dyn FnMut(u64) -> bool) -> Result<u64> {
+    fn write_from(
+        &self,
+        handle: &[u8],
+        file: &mut File,
+        start: u64,
+        progress: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<u64> {
         let mut in_flight = std::collections::VecDeque::new();
-        let mut offset = 0u64;
+        let mut offset = start;
         let mut done = 0u64;
         let mut buf = vec![0u8; CHUNK as usize];
         let mut end = false;

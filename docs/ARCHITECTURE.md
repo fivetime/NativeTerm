@@ -2405,8 +2405,8 @@ the test server showed as `����.txt` and couldn't be opened
   folder is listed while a transfer runs;
 - transfers keep 64 × 32 KB requests in flight (as OpenSSH's sftp),
   writing each chunk where it belongs (replies in any order, short reads
-  asked again), progress per chunk, cancel; a cancelled or failed
-  download leaves no partial file;
+  asked again), progress per chunk; each can start at a byte offset
+  (`download_from` / `upload_from`: the part before it is kept);
 - file names are bytes end to end. `Names` decides only how they're shown
   and how new ones are written: Auto (UTF-8 where valid, else the system's
   ANSI code page) or any `encoding_rs` encoding (GBK, GB18030, Big5,
@@ -2418,6 +2418,19 @@ the test server showed as `����.txt` and couldn't be opened
   folders reused, files replaced; a link to a folder isn't followed, so
   no loops), recursive delete; server names become valid Windows names
   (`< > : " / \ | ? *`, trailing dots, `CON`…).
+- *Pause and resume:* a file is copied as `<name>.ntpart` (locally for a
+  download, on the server for an upload) and renamed over the real name
+  when complete (an upload keeps the old file's permissions; a server
+  without `posix-rename` gets the old file removed first), so a partial
+  file never passes for the real one. Pause stops a transfer and keeps
+  its plan, the index of the first file not copied and the partial file;
+  Resume goes on from that file, at the partial file's length. Cancel
+  (running or paused) removes the partial file. A partial file is also
+  continued by any later transfer of the same file (after a lost
+  connection, a closed window, a restart) if it is no longer than the
+  file and not older than the file's last change; otherwise the copy
+  starts over. Closing the window or a tab stops transfers as Pause does.
+  Speed counts only what the current run copied.
 
 **The window** (`files_window.rs`; `window::open`: the runner opens
 windows while running, each with its own egui context; sessions asked
@@ -2451,8 +2464,10 @@ first; a session's tab closes its connection).
   start a transfer), every session's: its header counts what runs (with
   their total speed), what is done and what failed; each transfer shows
   host, progress, percent, bytes, speed and the time left while it runs
-  (size and speed once done), Cancel; Clear Finished. The files being
-  edited are listed there too, with their state.
+  (size and speed once done); Pause / Resume / Cancel on each transfer,
+  Resume also on a failed one; Pause All, Resume All, Clear Finished
+  (done, cancelled, failed), and ✕ to remove one finished row. The files
+  being edited are listed there too, with their state.
 - *Status lines* under both sides, on the same row: what the folder holds
   (folders, files) and what is selected (count and size); the server's
   starts with its connection (connected, connecting, not connected).
@@ -2520,8 +2535,22 @@ opened the window on that host in the tab's folder (`/root`); after
 `cd /etc/ssh` in the tab, the same item brought the same window and tab
 to `/etc/ssh` without a second connection.
 
-**Not yet:** resuming a broken transfer, transfers between two servers,
-remembering the last folder per host, comparing / syncing folders.
+Pause and resume, live against a daas container (a 40 MB random file,
+~1.5 MB/s down, ~8 MB/s up): a download paused at 21% left
+`大文件.bin.ntpart` at 8,585,216 bytes, not growing; Resume went on from
+21% and the file's SHA-256 matched the server's. A download with the
+program killed at ~11 MB, then the same file downloaded again after a
+restart, started at that point and matched too. An upload paused at 60%
+left `大文件.bin.ntpart` on the server beside the untouched old file;
+Resume finished it and the server's SHA-256 matched. Pause All / Resume
+All; Cancel on a paused upload and a paused download removed the partial
+file (and the list no longer showed it); ✕ and Clear Finished emptied the
+queue. Tests (with Windows' `sftp-server.exe`): a paused download and a
+paused upload go on to the same bytes, a new plan continues an old
+partial upload, when a partial file is continued.
+
+**Not yet:** transfers between two servers, remembering the last folder
+per host, comparing / syncing folders.
 
 ## Active session tracking
 

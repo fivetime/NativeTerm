@@ -494,8 +494,11 @@
 - [x] SFTP folder trees beside both lists (local: Desktop, Documents,
       Downloads, drives; server: `/`), read when opened, opened down to the
       folder shown, drop targets
-- [ ] SFTP (rest): resume broken transfers, last folder per host, folder
-      compare / sync, a configured external tool as an option
+- [x] SFTP transfers: pause / resume / cancel each or all, resume at the
+      byte (`.ntpart` partial files, also after a lost connection or a
+      restart), clear finished
+- [ ] SFTP (rest): last folder per host, folder compare / sync, a
+      configured external tool as an option
 - [ ] Shared credential sets (`NativeTermCredential`)
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)

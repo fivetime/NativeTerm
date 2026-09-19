@@ -1,9 +1,16 @@
 //! Transfers of files and folders: first a plan (every file and folder,
 //! and the total size, so progress is a fraction), then the copying, with
-//! progress and cancelling. Also deleting a folder with what's in it.
+//! progress, pausing and cancelling. Also deleting a folder with what's in
+//! it.
+//!
+//! A file is copied under its name plus [`PART`] and renamed when it is
+//! complete, so a partial file never looks like the real one. A partial
+//! file left by a pause, a lost connection or a closed window is
+//! continued from where it ends by the next transfer of that file, unless
+//! the source changed since it was written.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use crate::wire::Attrs;
@@ -20,7 +27,13 @@ pub struct Item {
     /// The remote file's permissions (downloads keep none; uploads of a
     /// new file get 0644, folders 0755).
     pub permissions: Option<u32>,
+    /// The source's modification time (seconds since the Unix epoch): a
+    /// partial copy older than it isn't continued.
+    pub modified: Option<u64>,
 }
+
+/// What a file being copied is called until it is complete.
+pub const PART: &str = ".ntpart";
 
 /// A transfer's state, shared with whoever shows it.
 #[derive(Default)]
@@ -28,6 +41,14 @@ pub struct Progress {
     pub done: AtomicU64,
     pub total: AtomicU64,
     pub cancel: AtomicBool,
+    /// Stops like `cancel`, but the partial file stays to be continued.
+    pub pause: AtomicBool,
+    /// The first planned item not yet copied (where a paused or failed
+    /// transfer goes on).
+    pub next: AtomicUsize,
+    /// Of `done`, what was copied before (by an earlier run, or found in
+    /// a partial file): not counted for a speed.
+    pub skipped: AtomicU64,
     /// The file being copied (for showing).
     pub current: Mutex<String>,
 }
@@ -35,6 +56,25 @@ pub struct Progress {
 impl Progress {
     pub fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+    }
+
+    pub fn paused(&self) -> bool {
+        self.pause.load(Ordering::Relaxed)
+    }
+
+    /// Cancelled or paused.
+    pub fn stopped(&self) -> bool {
+        self.cancelled() || self.paused()
+    }
+
+    /// Before going on with a plan: `done` as the items before `next`
+    /// add up to.
+    fn restart(&self, items: &[Item]) -> usize {
+        let next = self.next.load(Ordering::Relaxed).min(items.len());
+        let before = items[..next].iter().map(|i| i.size).sum();
+        self.done.store(before, Ordering::Relaxed);
+        self.skipped.store(before, Ordering::Relaxed);
+        next
     }
 
     fn set_current(&self, text: String) {
@@ -102,16 +142,24 @@ fn walk_remote(
     items: &mut Vec<Item>,
     progress: &Progress,
 ) -> Result<()> {
-    if progress.cancelled() {
+    if progress.stopped() {
         return Err(Error::Cancelled);
     }
     if !attrs.is_dir() {
         let size = attrs.size.unwrap_or(0);
         progress.total.fetch_add(size, Ordering::Relaxed);
-        items.push(Item { remote: remote.to_vec(), local, dir: false, size, permissions: None });
+        let modified = attrs.atime_mtime.map(|(_, m)| m as u64);
+        items.push(Item { remote: remote.to_vec(), local, dir: false, size, permissions: None, modified });
         return Ok(());
     }
-    items.push(Item { remote: remote.to_vec(), local: local.clone(), dir: true, size: 0, permissions: None });
+    items.push(Item {
+        remote: remote.to_vec(),
+        local: local.clone(),
+        dir: true,
+        size: 0,
+        permissions: None,
+        modified: None,
+    });
     for entry in sftp.read_dir(remote)? {
         let path = join(remote, &entry.name);
         // links: what they point to (a link to a folder is not followed,
@@ -142,13 +190,20 @@ pub fn plan_upload(names: &Names, locals: &[PathBuf], into: &[u8], progress: &Pr
 }
 
 fn walk_local(names: &Names, local: &Path, remote: Vec<u8>, items: &mut Vec<Item>, progress: &Progress) -> Result<()> {
-    if progress.cancelled() {
+    if progress.stopped() {
         return Err(Error::Cancelled);
     }
     let meta = std::fs::metadata(local)?;
     if !meta.is_dir() {
         progress.total.fetch_add(meta.len(), Ordering::Relaxed);
-        items.push(Item { remote, local: local.to_path_buf(), dir: false, size: meta.len(), permissions: Some(0o644) });
+        items.push(Item {
+            remote,
+            local: local.to_path_buf(),
+            dir: false,
+            size: meta.len(),
+            permissions: Some(0o644),
+            modified: meta.modified().ok().and_then(unix_secs),
+        });
         return Ok(());
     }
     items.push(Item {
@@ -157,6 +212,7 @@ fn walk_local(names: &Names, local: &Path, remote: Vec<u8>, items: &mut Vec<Item
         dir: true,
         size: 0,
         permissions: Some(0o755),
+        modified: None,
     });
     let mut children: Vec<PathBuf> = std::fs::read_dir(local)?.filter_map(|e| e.ok().map(|e| e.path())).collect();
     children.sort();
@@ -167,41 +223,58 @@ fn walk_local(names: &Names, local: &Path, remote: Vec<u8>, items: &mut Vec<Item
     Ok(())
 }
 
-/// Downloads the planned items. An existing local folder is used; an
-/// existing file is replaced.
+/// Downloads the planned items from `progress.next` on. An existing local
+/// folder is used; an existing file is replaced once its copy is
+/// complete.
 pub fn download(sftp: &Session, names: &Names, items: &[Item], progress: &Progress) -> Result<()> {
-    for item in items {
-        if progress.cancelled() {
+    let start = progress.restart(items);
+    for (i, item) in items.iter().enumerate().skip(start) {
+        if progress.stopped() {
             return Err(Error::Cancelled);
         }
         if item.dir {
             std::fs::create_dir_all(&item.local)?;
+            progress.next.store(i + 1, Ordering::Relaxed);
             continue;
         }
         if let Some(parent) = item.local.parent() {
             std::fs::create_dir_all(parent)?;
         }
         progress.set_current(names.decode(&item.remote));
-        let base = progress.done.load(Ordering::Relaxed);
-        let result = sftp.download(&item.remote, &item.local, &mut |done| {
+        let part = local_part(&item.local);
+        let offset = local_resume(&part, item);
+        let base = progress.done.load(Ordering::Relaxed) + offset;
+        progress.done.store(base, Ordering::Relaxed);
+        progress.skipped.fetch_add(offset, Ordering::Relaxed);
+        let result = sftp.download_from(&item.remote, &part, offset, &mut |done| {
             progress.done.store(base + done, Ordering::Relaxed);
-            !progress.cancelled()
+            !progress.stopped()
         });
-        if result.is_err() {
-            // a partial file isn't left behind
-            let _ = std::fs::remove_file(&item.local);
-        }
-        let done = result?;
+        let done = match result {
+            Ok(done) => done,
+            Err(e) => {
+                // cancelled: nothing is left behind; paused or broken off:
+                // the partial file is continued next time
+                if progress.cancelled() {
+                    let _ = std::fs::remove_file(&part);
+                }
+                return Err(e);
+            }
+        };
+        std::fs::rename(&part, &item.local)?;
         progress.done.store(base + done, Ordering::Relaxed);
+        progress.next.store(i + 1, Ordering::Relaxed);
     }
     Ok(())
 }
 
-/// Uploads the planned items. An existing remote folder is used; an
-/// existing file is replaced.
+/// Uploads the planned items from `progress.next` on. An existing remote
+/// folder is used; an existing file is replaced once its copy is complete
+/// (keeping its permissions).
 pub fn upload(sftp: &Session, names: &Names, items: &[Item], progress: &Progress) -> Result<()> {
-    for item in items {
-        if progress.cancelled() {
+    let start = progress.restart(items);
+    for (i, item) in items.iter().enumerate().skip(start) {
+        if progress.stopped() {
             return Err(Error::Cancelled);
         }
         if item.dir {
@@ -214,17 +287,99 @@ pub fn upload(sftp: &Session, names: &Names, items: &[Item], progress: &Progress
                     }
                 }
             }
+            progress.next.store(i + 1, Ordering::Relaxed);
             continue;
         }
         progress.set_current(names.decode(&item.remote));
-        let base = progress.done.load(Ordering::Relaxed);
-        let done = sftp.upload(&item.local, &item.remote, item.permissions, &mut |done| {
+        let part = remote_part(&item.remote);
+        let offset = remote_resume(sftp, &part, item);
+        let base = progress.done.load(Ordering::Relaxed) + offset;
+        progress.done.store(base, Ordering::Relaxed);
+        progress.skipped.fetch_add(offset, Ordering::Relaxed);
+        let result = sftp.upload_from(&item.local, &part, offset, item.permissions, &mut |done| {
             progress.done.store(base + done, Ordering::Relaxed);
-            !progress.cancelled()
-        })?;
+            !progress.stopped()
+        });
+        let done = match result {
+            Ok(done) => done,
+            Err(e) => {
+                if progress.cancelled() {
+                    let _ = sftp.remove(&part);
+                }
+                return Err(e);
+            }
+        };
+        finish_upload(sftp, &part, &item.remote)?;
         progress.done.store(base + done, Ordering::Relaxed);
+        progress.next.store(i + 1, Ordering::Relaxed);
     }
     Ok(())
+}
+
+/// Removes the partial file of the item a paused or failed transfer
+/// stopped at (when it is cancelled for good).
+pub fn discard(sftp: Option<&Session>, items: &[Item], progress: &Progress, upload: bool) {
+    let Some(item) = items.get(progress.next.load(Ordering::Relaxed)).filter(|i| !i.dir) else { return };
+    if upload {
+        if let Some(sftp) = sftp {
+            let _ = sftp.remove(&remote_part(&item.remote));
+        }
+    } else {
+        let _ = std::fs::remove_file(local_part(&item.local));
+    }
+}
+
+/// The complete upload in the file's place: renamed over it (with its
+/// permissions), or, where the server can't rename over a file, after it
+/// is removed.
+fn finish_upload(sftp: &Session, part: &[u8], remote: &[u8]) -> Result<()> {
+    if let Ok(old) = sftp.stat(remote) {
+        if let Some(p) = old.permissions {
+            let _ = sftp.setstat(part, &Attrs { permissions: Some(p & 0o7777), ..Default::default() });
+        }
+    }
+    if sftp.rename(part, remote, true).is_ok() {
+        return Ok(());
+    }
+    let _ = sftp.remove(remote);
+    sftp.rename(part, remote, false)
+}
+
+/// A local file's name while it is being downloaded.
+pub fn local_part(local: &Path) -> PathBuf {
+    let mut name = local.as_os_str().to_os_string();
+    name.push(PART);
+    PathBuf::from(name)
+}
+
+/// A server's file's name while it is being uploaded.
+pub fn remote_part(remote: &[u8]) -> Vec<u8> {
+    [remote, PART.as_bytes()].concat()
+}
+
+/// Where a local partial copy goes on: its length, if it is no longer
+/// than the file and not older than the file's last change (else 0).
+fn local_resume(part: &Path, item: &Item) -> u64 {
+    let Ok(meta) = std::fs::metadata(part) else { return 0 };
+    resume_at(meta.len(), meta.modified().ok().and_then(unix_secs), item)
+}
+
+fn remote_resume(sftp: &Session, part: &[u8], item: &Item) -> u64 {
+    let Ok(attrs) = sftp.stat(part) else { return 0 };
+    resume_at(attrs.size.unwrap_or(0), attrs.atime_mtime.map(|(_, m)| m as u64), item)
+}
+
+fn resume_at(len: u64, written: Option<u64>, item: &Item) -> u64 {
+    let changed_since = matches!((written, item.modified), (Some(w), Some(m)) if m > w);
+    if len > item.size || changed_since {
+        0
+    } else {
+        len
+    }
+}
+
+fn unix_secs(time: std::time::SystemTime) -> Option<u64> {
+    time.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs())
 }
 
 /// Deletes a file, a link, or a folder and everything in it (links inside
@@ -334,5 +489,113 @@ mod tests {
         assert_eq!(download(&sftp, &names, &items, &progress), Err(Error::Cancelled));
         watcher.join().unwrap();
         assert!(!out.join("big.bin").exists());
+        assert!(!local_part(&out.join("big.bin")).exists());
+    }
+
+    /// Pauses once `at` bytes are done (from another thread).
+    fn pause_at(progress: &std::sync::Arc<Progress>, at: u64) -> std::thread::JoinHandle<()> {
+        let p = std::sync::Arc::clone(progress);
+        std::thread::spawn(move || {
+            while p.done.load(Ordering::Relaxed) < at {
+                std::thread::yield_now();
+            }
+            p.pause.store(true, Ordering::Relaxed);
+        })
+    }
+
+    fn pattern(len: usize) -> Vec<u8> {
+        (0..len).map(|i| (i * 7 % 251) as u8).collect()
+    }
+
+    /// Paused halfway, a download leaves a partial file (not the real
+    /// name); going on with the same plan continues it to the same bytes.
+    #[test]
+    fn a_paused_download_goes_on_where_it_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(sftp) = local_server(dir.path()) else { return };
+        let names = Names::default();
+        let data = pattern(12 * 1024 * 1024);
+        std::fs::write(dir.path().join("a.bin"), &data).unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"second").unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let progress = std::sync::Arc::new(Progress::default());
+        let mut items = Vec::new();
+        for name in ["a.bin", "b.txt"] {
+            let path = join(&remote(dir.path()), name.as_bytes());
+            let attrs = sftp.stat(&path).unwrap();
+            items.extend(plan_download(&sftp, &names, &path, &attrs, &out, &progress).unwrap());
+        }
+        let watcher = pause_at(&progress, 4 * 1024 * 1024);
+        assert_eq!(download(&sftp, &names, &items, &progress), Err(Error::Cancelled));
+        watcher.join().unwrap();
+        let part = local_part(&out.join("a.bin"));
+        let kept = std::fs::metadata(&part).unwrap().len();
+        assert!(kept >= 4 * 1024 * 1024 && kept < data.len() as u64, "{kept}");
+        assert!(!out.join("a.bin").exists());
+        assert_eq!(progress.next.load(Ordering::Relaxed), 0);
+
+        progress.pause.store(false, Ordering::Relaxed);
+        download(&sftp, &names, &items, &progress).unwrap();
+        assert_eq!(std::fs::read(out.join("a.bin")).unwrap(), data);
+        assert_eq!(std::fs::read(out.join("b.txt")).unwrap(), b"second");
+        assert!(!part.exists());
+        assert_eq!(progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed));
+        assert_eq!(progress.next.load(Ordering::Relaxed), items.len());
+    }
+
+    /// The same for an upload: the partial file on the server is
+    /// continued, then renamed over the old file.
+    #[test]
+    fn a_paused_upload_goes_on_where_it_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(sftp) = local_server(dir.path()) else { return };
+        let names = Names::default();
+        let data = pattern(12 * 1024 * 1024);
+        let src = dir.path().join("up.bin");
+        std::fs::write(&src, &data).unwrap();
+        let server_dir = dir.path().join("server");
+        std::fs::create_dir(&server_dir).unwrap();
+        std::fs::write(server_dir.join("up.bin"), b"old").unwrap();
+        let progress = std::sync::Arc::new(Progress::default());
+        let items = plan_upload(&names, std::slice::from_ref(&src), &remote(&server_dir), &progress).unwrap();
+        let watcher = pause_at(&progress, 4 * 1024 * 1024);
+        assert_eq!(upload(&sftp, &names, &items, &progress), Err(Error::Cancelled));
+        watcher.join().unwrap();
+        let part = server_dir.join(format!("up.bin{PART}"));
+        let kept = std::fs::metadata(&part).unwrap().len();
+        assert!(kept > 0 && kept < data.len() as u64, "{kept}");
+        assert_eq!(std::fs::read(server_dir.join("up.bin")).unwrap(), b"old");
+
+        // a new transfer of the same file (the window closed meanwhile)
+        // continues the partial file too
+        let again = Progress::default();
+        let items = plan_upload(&names, std::slice::from_ref(&src), &remote(&server_dir), &again).unwrap();
+        let remote_file = join(&remote(&server_dir), b"up.bin");
+        assert_eq!(remote_resume(&sftp, &remote_part(&remote_file), &items[0]), kept);
+        upload(&sftp, &names, &items, &again).unwrap();
+        assert_eq!(std::fs::read(server_dir.join("up.bin")).unwrap(), data);
+        assert!(!part.exists());
+    }
+
+    /// A partial file is only continued if it can be part of the file as
+    /// it is now.
+    #[test]
+    fn when_a_partial_file_is_continued() {
+        let item = Item {
+            remote: b"/f".to_vec(),
+            local: PathBuf::from("f"),
+            dir: false,
+            size: 100,
+            permissions: None,
+            modified: Some(1_000),
+        };
+        assert_eq!(resume_at(40, Some(2_000), &item), 40);
+        assert_eq!(resume_at(100, Some(2_000), &item), 100);
+        // longer than the file, or older than its last change: again from 0
+        assert_eq!(resume_at(140, Some(2_000), &item), 0);
+        assert_eq!(resume_at(40, Some(500), &item), 0);
+        // times unknown: the length decides
+        assert_eq!(resume_at(40, None, &item), 40);
     }
 }

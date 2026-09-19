@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use native_term_app::t;
-use native_term_sftp::transfer::{self, Progress};
+use native_term_sftp::transfer::{self, Item, Progress};
 use native_term_sftp::wire::Attrs;
 use native_term_sftp::{Entry, Names, Session};
 
@@ -188,9 +188,18 @@ enum Kind {
 
 enum JobState {
     Running,
+    /// Stopped with the partial file kept: Resume goes on from there.
+    Paused,
     Done,
     Failed(String),
     Cancelled,
+}
+
+/// What a transfer copies, kept so it can go on after a pause or an error.
+#[derive(Clone)]
+enum Work {
+    Upload { names: Names, files: Vec<PathBuf>, into: Vec<u8> },
+    Download { names: Names, items: Vec<(Vec<u8>, Attrs)>, folder: PathBuf },
 }
 
 struct Job {
@@ -203,6 +212,27 @@ struct Job {
     state: JobState,
     started: Instant,
     finished: Option<Instant>,
+    /// Transfers (not deletes): what to copy and, once planned, the plan.
+    work: Option<Work>,
+    plan: Arc<Mutex<Option<Vec<Item>>>>,
+}
+
+impl Job {
+    /// Bytes per second since it (re)started (what was already copied
+    /// before doesn't count).
+    fn speed(&self) -> f64 {
+        let secs = self.finished.unwrap_or_else(Instant::now).duration_since(self.started).as_secs_f64().max(0.001);
+        let p = &self.progress;
+        p.done.load(Ordering::Relaxed).saturating_sub(p.skipped.load(Ordering::Relaxed)) as f64 / secs
+    }
+}
+
+/// What a button in the queue asks for.
+enum JobAction {
+    Pause,
+    Resume,
+    Cancel,
+    Remove,
 }
 
 /// A file being edited: uploaded again whenever its local copy changes.
@@ -623,11 +653,13 @@ impl FilesWindow {
                     j.finished = Some(Instant::now());
                     j.state = match &result {
                         Ok(()) => JobState::Done,
+                        Err(native_term_sftp::Error::Cancelled) if j.progress.paused() => JobState::Paused,
                         Err(native_term_sftp::Error::Cancelled) => JobState::Cancelled,
                         Err(e) => JobState::Failed(e.to_string()),
                     };
                     let line = match &j.state {
                         JobState::Done => (t!("files-log-done", what = j.title.as_str()), false),
+                        JobState::Paused => (t!("files-job-paused", what = j.title.as_str()), false),
                         JobState::Cancelled => (t!("files-job-cancelled", what = j.title.as_str()), false),
                         JobState::Failed(e) => (format!("{}: {e}", j.title), true),
                         JobState::Running => (String::new(), false),
@@ -807,7 +839,7 @@ impl FilesWindow {
         l.rows.iter().filter(|x| l.selected.contains(&local_key(x))).map(|x| x.path.clone()).collect()
     }
 
-    fn add_job(&mut self, tab: u64, kind: Kind, title: String) -> (u64, Arc<Progress>) {
+    fn add_job(&mut self, tab: u64, kind: Kind, title: String, work: Option<Work>) -> (u64, Arc<Progress>) {
         let id = self.next_id;
         self.next_id += 1;
         let host = self.tabs.iter().find(|t| t.id == tab).map(|t| t.spec.label.clone()).unwrap_or_default();
@@ -822,8 +854,85 @@ impl FilesWindow {
             state: JobState::Running,
             started: Instant::now(),
             finished: None,
+            work,
+            plan: Arc::new(Mutex::new(None)),
         });
         (id, progress)
+    }
+
+    /// Starts a transfer, or goes on with a paused or failed one: from the
+    /// first file not yet copied, and in that file from where its partial
+    /// copy ends. It needs the session connected.
+    fn run_job(&mut self, id: u64) {
+        let Some(job) = self.jobs.iter().find(|j| j.id == id) else { return };
+        let (tab, Some(work)) = (job.tab, job.work.clone()) else { return };
+        let Some(sftp) = self.tabs.iter().find(|t| t.id == tab).and_then(|t| t.remote.sftp.clone()) else {
+            self.log(tab, t!("files-job-not-connected"), true);
+            return;
+        };
+        let Some(job) = self.jobs.iter_mut().find(|j| j.id == id) else { return };
+        let progress = Arc::clone(&job.progress);
+        progress.cancel.store(false, Ordering::Relaxed);
+        progress.pause.store(false, Ordering::Relaxed);
+        job.state = JobState::Running;
+        job.started = Instant::now();
+        job.finished = None;
+        let plan = Arc::clone(&job.plan);
+        self.spawn(tab, move || {
+            let known = plan.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let items = match known {
+                Some(items) => Ok(items),
+                None => {
+                    // planned again from scratch (a pause while planning)
+                    progress.total.store(0, Ordering::Relaxed);
+                    progress.next.store(0, Ordering::Relaxed);
+                    plan_work(&sftp, &work, &progress)
+                }
+            };
+            let result = items.and_then(|items| {
+                *plan.lock().unwrap_or_else(|e| e.into_inner()) = Some(items.clone());
+                match &work {
+                    Work::Upload { names, .. } => transfer::upload(&sftp, names, &items, &progress),
+                    Work::Download { names, .. } => transfer::download(&sftp, names, &items, &progress),
+                }
+            });
+            What::JobDone { job: id, result }
+        });
+    }
+
+    fn job_action(&mut self, id: u64, action: JobAction) {
+        let Some(i) = self.jobs.iter().position(|j| j.id == id) else { return };
+        let job = &mut self.jobs[i];
+        match (action, &job.state) {
+            (JobAction::Pause, JobState::Running) => job.progress.pause.store(true, Ordering::Relaxed),
+            (JobAction::Resume, JobState::Paused | JobState::Failed(_)) => self.run_job(id),
+            (JobAction::Cancel, JobState::Running) => job.progress.cancel.store(true, Ordering::Relaxed),
+            (JobAction::Cancel, JobState::Paused | JobState::Failed(_)) => {
+                // nothing runs: the partial file is removed here
+                job.state = JobState::Cancelled;
+                job.finished = Some(Instant::now());
+                let (tab, upload) = (job.tab, job.kind == Kind::Upload);
+                let (plan, progress) = (Arc::clone(&job.plan), Arc::clone(&job.progress));
+                let line = t!("files-job-cancelled", what = job.title.as_str());
+                let sftp = self.tabs.iter().find(|t| t.id == tab).and_then(|t| t.remote.sftp.clone());
+                self.log(tab, line, false);
+                // then the side it was on is shown again, without the file
+                self.spawn(tab, move || {
+                    if let Some(items) = plan.lock().unwrap_or_else(|e| e.into_inner()).as_deref() {
+                        transfer::discard(sftp.as_deref(), items, &progress, upload);
+                    }
+                    if upload {
+                        What::Refresh
+                    } else {
+                        What::LocalRefresh
+                    }
+                });
+            }
+            (JobAction::Remove, JobState::Done | JobState::Cancelled | JobState::Failed(_)) => {
+                self.jobs.remove(i);
+            }
+            _ => {}
+        }
     }
 
     /// Local files and folders to the server's folder shown.
@@ -834,7 +943,9 @@ impl FilesWindow {
     /// Local files and folders to a server's folder (`None`: the one shown).
     fn upload_to(&mut self, id: u64, files: Vec<PathBuf>, into: Option<Vec<u8>>) {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
-        let (Some(sftp), false) = (tab.remote.sftp.clone(), files.is_empty()) else { return };
+        if tab.remote.sftp.is_none() || files.is_empty() {
+            return;
+        }
         let (names, into) = (tab.remote.names, into.unwrap_or_else(|| tab.remote.path.clone()));
         let title = describe(
             &files
@@ -842,12 +953,9 @@ impl FilesWindow {
                 .map(|f| f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
                 .collect::<Vec<_>>(),
         );
-        let (job, progress) = self.add_job(id, Kind::Upload, t!("files-job-upload", what = title));
-        self.spawn(id, move || {
-            let result = transfer::plan_upload(&names, &files, &into, &progress)
-                .and_then(|items| transfer::upload(&sftp, &names, &items, &progress));
-            What::JobDone { job, result }
-        });
+        let work = Work::Upload { names, files, into };
+        let (job, _) = self.add_job(id, Kind::Upload, t!("files-job-upload", what = title), Some(work));
+        self.run_job(job);
     }
 
     /// The server's files and folders to the local folder shown.
@@ -859,7 +967,9 @@ impl FilesWindow {
     /// shown).
     fn download_to(&mut self, id: u64, items: Vec<(Vec<u8>, Attrs)>, into: Option<PathBuf>) {
         let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
-        let Some(sftp) = tab.remote.sftp.clone() else { return };
+        if tab.remote.sftp.is_none() {
+            return;
+        }
         let Some(folder) = into.or_else(|| tab.local.path.clone()) else {
             let text = t!("files-local-no-folder");
             self.log(id, text, true);
@@ -870,27 +980,14 @@ impl FilesWindow {
         }
         let names = tab.remote.names;
         let title = describe(&items.iter().map(|(p, _)| names.decode(last(p))).collect::<Vec<_>>());
-        let (job, progress) = self.add_job(id, Kind::Download, t!("files-job-download", what = title));
-        self.spawn(id, move || {
-            let mut plan = Vec::new();
-            let mut result = Ok(());
-            for (path, attrs) in &items {
-                match transfer::plan_download(&sftp, &names, path, attrs, &folder, &progress) {
-                    Ok(p) => plan.extend(p),
-                    Err(e) => {
-                        result = Err(e);
-                        break;
-                    }
-                }
-            }
-            let result = result.and_then(|()| transfer::download(&sftp, &names, &plan, &progress));
-            What::JobDone { job, result }
-        });
+        let work = Work::Download { names, items, folder };
+        let (job, _) = self.add_job(id, Kind::Download, t!("files-job-download", what = title), Some(work));
+        self.run_job(job);
     }
 
     fn delete_remote(&mut self, id: u64, items: Vec<(Vec<u8>, Attrs)>, what: String) {
         let Some(sftp) = self.tab(id).and_then(|t| t.remote.sftp.clone()) else { return };
-        let (job, _) = self.add_job(id, Kind::Delete, t!("files-job-delete", what = what));
+        let (job, _) = self.add_job(id, Kind::Delete, t!("files-job-delete", what = what), None);
         self.spawn(id, move || {
             let result = items.iter().try_for_each(|(path, attrs)| transfer::remove(&sftp, path, attrs));
             What::JobDone { job, result }
@@ -1011,8 +1108,9 @@ impl FilesWindow {
     }
 
     fn close_tab(&mut self, id: u64) {
+        // as by Pause (the partial files stay to be continued)
         for job in self.jobs.iter().filter(|j| j.tab == id) {
-            job.progress.cancel.store(true, Ordering::Relaxed);
+            job.progress.pause.store(true, Ordering::Relaxed);
         }
         if let Some(i) = self.tabs.iter().position(|t| t.id == id) {
             let tab = self.tabs.remove(i);
@@ -1517,18 +1615,19 @@ impl FilesWindow {
             let running = self.running(None);
             let done = self.jobs.iter().filter(|j| matches!(j.state, JobState::Done)).count();
             let failed = self.jobs.iter().filter(|j| matches!(j.state, JobState::Failed(_))).count();
+            let paused = self.jobs.iter().filter(|j| matches!(j.state, JobState::Paused)).count();
             if running > 0 {
                 let speed: f64 = self
                     .jobs
                     .iter()
                     .filter(|j| matches!(j.state, JobState::Running) && j.kind != Kind::Delete)
-                    .map(|j| {
-                        let secs = j.started.elapsed().as_secs_f64().max(0.001);
-                        j.progress.done.load(Ordering::Relaxed) as f64 / secs
-                    })
+                    .map(Job::speed)
                     .sum();
                 ui.label(t!("files-queue-running", count = running));
                 ui.weak(format!("{}/s", size_text(speed as u64)));
+            }
+            if paused > 0 {
+                ui.label(t!("files-queue-paused", count = paused));
             }
             if done > 0 {
                 ui.colored_label(GREEN, t!("files-queue-done", count = done));
@@ -1536,11 +1635,28 @@ impl FilesWindow {
             if failed > 0 {
                 ui.colored_label(RED, t!("files-queue-failed", count = failed));
             }
-            let finished = self.jobs.iter().any(|j| !matches!(j.state, JobState::Running));
+            let pausable = self.jobs.iter().any(|j| matches!(j.state, JobState::Running) && j.work.is_some());
+            let label = format!("{} {}", icons::PAUSE, t!("files-queue-pause-all"));
+            if ui.add_enabled(pausable, egui::Button::new(label).small()).clicked() {
+                for job in self.jobs.iter().filter(|j| matches!(j.state, JobState::Running) && j.work.is_some()) {
+                    job.progress.pause.store(true, Ordering::Relaxed);
+                }
+            }
+            let label = format!("{} {}", icons::PLAY, t!("files-queue-resume-all"));
+            if ui.add_enabled(paused > 0, egui::Button::new(label).small()).clicked() {
+                let ids: Vec<u64> =
+                    self.jobs.iter().filter(|j| matches!(j.state, JobState::Paused)).map(|j| j.id).collect();
+                for id in ids {
+                    self.run_job(id);
+                }
+            }
+            // finished: done, cancelled or failed (paused ones stay)
+            let finished = self.jobs.iter().any(|j| !matches!(j.state, JobState::Running | JobState::Paused));
             if ui.add_enabled(finished, egui::Button::new(t!("files-queue-clear")).small()).clicked() {
-                self.jobs.retain(|j| matches!(j.state, JobState::Running));
+                self.jobs.retain(|j| matches!(j.state, JobState::Running | JobState::Paused));
             }
         });
+        let mut actions = Vec::new();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             if self.jobs.is_empty() && self.edits(None) == 0 {
                 ui.weak(t!("files-queue-empty"));
@@ -1551,33 +1667,50 @@ impl FilesWindow {
                     let total = job.progress.total.load(Ordering::Relaxed);
                     let secs =
                         job.finished.unwrap_or_else(Instant::now).duration_since(job.started).as_secs_f64().max(0.001);
-                    let speed = format!("{}/s", size_text((done as f64 / secs) as u64));
+                    let rate = job.speed();
+                    let speed = format!("{}/s", size_text(rate as u64));
+                    let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+                    let figures = format!("{}%  {} / {}", (fraction * 100.0) as u32, size_text(done), size_text(total));
                     ui.weak(format!("[{}]", job.host));
+                    // the buttons are on the right; the bar takes what's left
+                    let buttons = 150.0;
                     match &job.state {
                         JobState::Running => {
-                            let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
                             let text = if job.kind == Kind::Delete {
                                 job.title.clone()
                             } else {
                                 // the time left, once something has gone (a rate to go by)
-                                let left = (done > 0 && total > done).then(|| {
-                                    let secs = ((total - done) as f64 * secs / done as f64).ceil() as u64;
+                                let left = (rate > 0.0 && total > done).then(|| {
+                                    let secs = ((total - done) as f64 / rate).ceil() as u64;
                                     format!("  {}", t!("files-job-left", time = clock_text(secs)))
                                 });
-                                format!(
-                                    "{}  {}%  {} / {}  {speed}{}",
-                                    job.title,
-                                    (fraction * 100.0) as u32,
-                                    size_text(done),
-                                    size_text(total),
-                                    left.unwrap_or_default()
-                                )
+                                format!("{}  {figures}  {speed}{}", job.title, left.unwrap_or_default())
                             };
-                            ui.add(
-                                egui::ProgressBar::new(fraction).desired_width(ui.available_width() - 90.0).text(text),
-                            );
+                            let width = ui.available_width() - buttons;
+                            ui.add(egui::ProgressBar::new(fraction).desired_width(width).text(text));
+                            if job.work.is_some()
+                                && ui.small_button(format!("{} {}", icons::PAUSE, t!("files-job-pause"))).clicked()
+                            {
+                                actions.push((job.id, JobAction::Pause));
+                            }
                             if ui.small_button(t!("button-cancel")).clicked() {
-                                job.progress.cancel.store(true, Ordering::Relaxed);
+                                actions.push((job.id, JobAction::Cancel));
+                            }
+                        }
+                        JobState::Paused => {
+                            let text = format!("{}  {figures}  {}", job.title, t!("files-job-paused-short"));
+                            let width = ui.available_width() - buttons;
+                            ui.add(
+                                egui::ProgressBar::new(fraction)
+                                    .desired_width(width)
+                                    .text(text)
+                                    .fill(ui.visuals().widgets.inactive.bg_fill),
+                            );
+                            if ui.small_button(format!("{} {}", icons::PLAY, t!("files-job-resume"))).clicked() {
+                                actions.push((job.id, JobAction::Resume));
+                            }
+                            if ui.small_button(t!("button-cancel")).clicked() {
+                                actions.push((job.id, JobAction::Cancel));
                             }
                         }
                         JobState::Done => {
@@ -1590,9 +1723,26 @@ impl FilesWindow {
                         }
                         JobState::Failed(e) => {
                             ui.colored_label(RED, format!("{}: {e}", job.title));
+                            if job.work.is_some() {
+                                let b = ui
+                                    .small_button(format!("{} {}", icons::PLAY, t!("files-job-resume")))
+                                    .on_hover_text(t!("files-job-resume-hint"));
+                                if b.clicked() {
+                                    actions.push((job.id, JobAction::Resume));
+                                }
+                            }
                         }
                         JobState::Cancelled => {
                             ui.weak(t!("files-job-cancelled", what = job.title.as_str()));
+                        }
+                    }
+                    if matches!(job.state, JobState::Done | JobState::Cancelled | JobState::Failed(_)) {
+                        let b = ui.small_button(icon(icons::CLEAR)).on_hover_text(t!("files-job-remove"));
+                        b.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t!("files-job-remove"))
+                        });
+                        if b.clicked() {
+                            actions.push((job.id, JobAction::Remove));
                         }
                     }
                 });
@@ -1624,6 +1774,9 @@ impl FilesWindow {
                 }
             }
         });
+        for (id, action) in actions {
+            self.job_action(id, action);
+        }
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
@@ -2238,8 +2391,10 @@ impl Drop for FilesWindow {
         if let Some((_, question, _)) = self.question.take() {
             let _ = question.reply.send(None);
         }
+        // stopped as by Pause: a new transfer of the same files goes on
+        // from their partial copies
         for job in &self.jobs {
-            job.progress.cancel.store(true, Ordering::Relaxed);
+            job.progress.pause.store(true, Ordering::Relaxed);
         }
         for tab in &self.tabs {
             end_tab(tab);
@@ -2271,6 +2426,20 @@ fn status_line(
             ui.label(t!("files-status-selected", count = selected, size = size_text(bytes)));
         }
     });
+}
+
+/// Every file and folder a transfer involves.
+fn plan_work(sftp: &Session, work: &Work, progress: &Progress) -> native_term_sftp::Result<Vec<Item>> {
+    match work {
+        Work::Upload { names, files, into } => transfer::plan_upload(names, files, into, progress),
+        Work::Download { names, items, folder } => {
+            let mut plan = Vec::new();
+            for (path, attrs) in items {
+                plan.extend(transfer::plan_download(sftp, names, path, attrs, folder, progress)?);
+            }
+            Ok(plan)
+        }
+    }
 }
 
 fn end_tab(tab: &Tab) {

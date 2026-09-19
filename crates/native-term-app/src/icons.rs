@@ -37,6 +37,8 @@ pub const EDIT: char = '\u{E70F}';
 pub const RENAME: char = '\u{E8AC}';
 pub const DELETE: char = '\u{E74D}';
 pub const ACCEPT: char = '\u{E73E}';
+pub const PLAY: char = '\u{E768}';
+pub const PAUSE: char = '\u{E769}';
 
 /// `glyph` then `text`, for buttons.
 pub fn with(glyph: char, text: impl AsRef<str>) -> String {
