@@ -1127,6 +1127,14 @@ impl FilesWindow {
         if let Some(e) = self.tabs.get(self.active).and_then(|t| t.local.error.clone()) {
             ui.colored_label(RED, e);
         }
+        // the status line, under the tree and the list
+        egui::Panel::bottom("local-status").show_inside(ui, |ui| {
+            let local = &self.tabs[self.active].local;
+            let chosen = local.rows.iter().filter(|r| local.selected.contains(&local_key(r)));
+            let (count, bytes) = chosen.fold((0, 0), |(n, b), r| (n + 1, b + r.size.unwrap_or(0)));
+            let folders = local.rows.iter().filter(|r| r.dir).count();
+            status_line(ui, None, folders, local.rows.len() - folders, count, bytes);
+        });
         // the tree
         let roots = self.local_roots.clone();
         let tree_out = egui::Panel::left("local-tree")
@@ -1247,7 +1255,21 @@ impl FilesWindow {
             return;
         };
         let id = tab.id;
-        // the session's log, at the bottom of this side
+        // the status line, at the very bottom (in line with the local one)
+        egui::Panel::bottom("remote-status").show_inside(ui, |ui| {
+            let remote = &self.tabs[self.active].remote;
+            let state = match (&remote.sftp, &remote.failed) {
+                (_, Some(_)) => (RED, t!("files-status-failed")),
+                (None, None) => (ui.visuals().weak_text_color(), t!("files-status-connecting")),
+                (Some(_), None) => (GREEN, t!("files-status-connected")),
+            };
+            let chosen = remote.rows.iter().filter(|r| remote.selected.contains(&r.entry.name));
+            let (count, bytes) =
+                chosen.fold((0, 0), |(n, b), r| (n + 1, b + if r.dir { 0 } else { r.entry.attrs.size.unwrap_or(0) }));
+            let folders = remote.rows.iter().filter(|r| r.dir).count();
+            status_line(ui, Some(state), folders, remote.rows.len() - folders, count, bytes);
+        });
+        // the session's log, above the status line
         egui::Panel::bottom("files-log").resizable(true).default_size(110.0).show_inside(ui, |ui| {
             egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
                 for (time, text, error) in &self.tabs[self.active].log {
@@ -1492,12 +1514,37 @@ impl FilesWindow {
     fn activity(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.strong(t!("files-queue"));
+            let running = self.running(None);
+            let done = self.jobs.iter().filter(|j| matches!(j.state, JobState::Done)).count();
+            let failed = self.jobs.iter().filter(|j| matches!(j.state, JobState::Failed(_))).count();
+            if running > 0 {
+                let speed: f64 = self
+                    .jobs
+                    .iter()
+                    .filter(|j| matches!(j.state, JobState::Running) && j.kind != Kind::Delete)
+                    .map(|j| {
+                        let secs = j.started.elapsed().as_secs_f64().max(0.001);
+                        j.progress.done.load(Ordering::Relaxed) as f64 / secs
+                    })
+                    .sum();
+                ui.label(t!("files-queue-running", count = running));
+                ui.weak(format!("{}/s", size_text(speed as u64)));
+            }
+            if done > 0 {
+                ui.colored_label(GREEN, t!("files-queue-done", count = done));
+            }
+            if failed > 0 {
+                ui.colored_label(RED, t!("files-queue-failed", count = failed));
+            }
             let finished = self.jobs.iter().any(|j| !matches!(j.state, JobState::Running));
             if ui.add_enabled(finished, egui::Button::new(t!("files-queue-clear")).small()).clicked() {
                 self.jobs.retain(|j| matches!(j.state, JobState::Running));
             }
         });
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            if self.jobs.is_empty() && self.edits(None) == 0 {
+                ui.weak(t!("files-queue-empty"));
+            }
             for job in &self.jobs {
                 ui.horizontal(|ui| {
                     let done = job.progress.done.load(Ordering::Relaxed);
@@ -1512,7 +1559,19 @@ impl FilesWindow {
                             let text = if job.kind == Kind::Delete {
                                 job.title.clone()
                             } else {
-                                format!("{}  {} / {}  {speed}", job.title, size_text(done), size_text(total))
+                                // the time left, once something has gone (a rate to go by)
+                                let left = (done > 0 && total > done).then(|| {
+                                    let secs = ((total - done) as f64 * secs / done as f64).ceil() as u64;
+                                    format!("  {}", t!("files-job-left", time = clock_text(secs)))
+                                });
+                                format!(
+                                    "{}  {}%  {} / {}  {speed}{}",
+                                    job.title,
+                                    (fraction * 100.0) as u32,
+                                    size_text(done),
+                                    size_text(total),
+                                    left.unwrap_or_default()
+                                )
                             };
                             ui.add(
                                 egui::ProgressBar::new(fraction).desired_width(ui.available_width() - 90.0).text(text),
@@ -2135,13 +2194,13 @@ impl crate::window::Ui for FilesWindow {
             }
         }
         self.keys(&ctx);
-        if !self.jobs.is_empty() || self.edits(None) > 0 {
-            egui::Panel::bottom("files-activity")
-                .resizable(true)
-                .default_size(150.0)
-                .max_size(360.0)
-                .show_inside(ui, |ui| self.activity(ui));
-        }
+        // the queue is always there (empty, it says how to start a transfer)
+        egui::Panel::bottom("files-activity")
+            .resizable(true)
+            .default_size(150.0)
+            .min_size(64.0)
+            .max_size(360.0)
+            .show_inside(ui, |ui| self.activity(ui));
         let half = ui.available_width() / 2.0;
         // the same margins on both sides, so their rows line up
         let frame = egui::Frame::NONE.inner_margin(8.0_f32).fill(ui.visuals().panel_fill);
@@ -2186,6 +2245,32 @@ impl Drop for FilesWindow {
             end_tab(tab);
         }
     }
+}
+
+/// A side's status line: the connection (the server's side), what the
+/// folder holds, and what is selected.
+fn status_line(
+    ui: &mut egui::Ui,
+    state: Option<(egui::Color32, String)>,
+    folders: usize,
+    files: usize,
+    selected: usize,
+    bytes: u64,
+) {
+    ui.horizontal(|ui| {
+        if let Some((color, text)) = state {
+            // a dot drawn (the font may have no glyph for one)
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+            ui.painter().circle_filled(rect.center(), 4.0, color);
+            ui.colored_label(color, text);
+            ui.separator();
+        }
+        ui.weak(t!("files-status-items", folders = folders, files = files));
+        if selected > 0 {
+            ui.separator();
+            ui.label(t!("files-status-selected", count = selected, size = size_text(bytes)));
+        }
+    });
 }
 
 fn end_tab(tab: &Tab) {
@@ -2457,6 +2542,16 @@ pub fn size_text(bytes: u64) -> String {
     }
 }
 
+/// A duration as a clock: `0:07`, `12:30`, `1:02:03`.
+fn clock_text(secs: u64) -> String {
+    let (h, m, s) = (secs / 3600, secs / 60 % 60, secs % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
 /// `drwxr-xr-x`, as `ls -l` shows it.
 pub fn mode_text(mode: u32) -> String {
     let kind = match mode & 0o170000 {
@@ -2497,6 +2592,9 @@ mod tests {
         assert_eq!(size_text(512), "512 B");
         assert_eq!(size_text(1536), "1.5 KB");
         assert_eq!(size_text(5 * 1024 * 1024 * 1024), "5.0 GB");
+        assert_eq!(clock_text(7), "0:07");
+        assert_eq!(clock_text(750), "12:30");
+        assert_eq!(clock_text(3723), "1:02:03");
         assert_eq!(mode_text(0o040755), "drwxr-xr-x");
         assert_eq!(mode_text(0o100600), "-rw-------");
         assert_eq!(mode_text(0o120777), "lrwxrwxrwx");

@@ -667,6 +667,7 @@ files-job-upload = Upload { $what }
 files-job-download = Download { $what }
 files-job-delete = Delete { $what }
 files-job-cancelled = { $what }: cancelled
+files-job-left = { $time } left
 files-open-folder = Open Folder
 files-and-more = { $first } and { $count } more
 files-edit-opening = downloading…
@@ -700,6 +701,21 @@ files-local-no-folder = Choose a local folder on the left first.
 files-drop-remote-only = Drop files on the server's side (right) to upload them.
 files-queue = Transfers
 files-queue-clear = Clear Finished
+files-queue-empty = No transfers. Select files and click Upload or Download, or drag them to the other side (or from Explorer onto the server's side).
+files-queue-running = { $count } running
+files-queue-done = { $count } done
+files-queue-failed = { $count } failed
+files-status-items = { $folders ->
+    [one] 1 folder
+   *[other] { $folders } folders
+}, { $files ->
+    [one] 1 file
+   *[other] { $files } files
+}
+files-status-selected = { $count } selected ({ $size })
+files-status-connected = Connected
+files-status-connecting = Connecting…
+files-status-failed = Not connected
 files-log-connecting = Connecting to { $host }…
 files-log-connected = Connected; folder { $path }
 files-log-done = { $what }: done

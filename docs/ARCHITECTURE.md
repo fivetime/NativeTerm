@@ -2447,9 +2447,15 @@ first; a session's tab closes its connection).
 - Ctrl/Shift selection, right-click menus, F5, Backspace, Enter, F2,
   Delete on the side clicked last. Rows, tabs and icon buttons are named
   for screen readers and UI automation (AccessKit).
-- *Transfer queue* at the bottom, every session's (host, progress, size,
-  speed for transfers of a second or more, Cancel; Clear Finished), and
-  the files being edited with their state.
+- *Transfer queue* at the bottom, always shown (empty, it says how to
+  start a transfer), every session's: its header counts what runs (with
+  their total speed), what is done and what failed; each transfer shows
+  host, progress, percent, bytes, speed and the time left while it runs
+  (size and speed once done), Cancel; Clear Finished. The files being
+  edited are listed there too, with their state.
+- *Status lines* under both sides, on the same row: what the folder holds
+  (folders, files) and what is selected (count and size); the server's
+  starts with its connection (connected, connecting, not connected).
 - *From a terminal tab kept in tmux* (`NativeTermPersistent tmux` /
   `tmux-log`) the server's side starts in the tab's current folder:
   `tmux display-message -p -t =<session>: "#{pane_current_path}"` over
