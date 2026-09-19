@@ -520,7 +520,8 @@
       the build, and (if large resumable transfers are needed there) keep
       and continue partial files; download it on demand, not bundled.
       A configured external client (WinSCP etc.) was dropped: they don't
-      read the ssh config the hosts are defined in.
+      read the ssh config the hosts are defined in. Details, rclone's
+      back ends and API, and how to repeat it: `docs/RCLONE-EVALUATION.md`.
 - [ ] Shared credential sets (`NativeTermCredential`)
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)
