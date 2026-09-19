@@ -2421,7 +2421,21 @@ the test server showed as `����.txt` and couldn't be opened
 - `transfer`: folders both ways (planned first for the total, existing
   folders reused, files replaced; a link to a folder isn't followed, so
   no loops), recursive delete; server names become valid Windows names
-  (`< > : " / \ | ? *`, trailing dots, `CON`…).
+  (`< > : " / \ | ? *`, trailing dots, `CON`…). Files keep their
+  modification time both ways (as SecureFX and WinSCP do by default), so
+  a copied file compares the same afterwards.
+- `sync`: compares a local folder with a server's folder and everything
+  below them. Names are matched as they would be written on Windows;
+  files by size and modification time (2 s slack, as FAT keeps); a folder
+  on one side only is one entry, copied or deleted whole; folders on both
+  sides are gone into; `.ntpart` files are left out; a link to a folder
+  on the server isn't gone into. What each entry needs, per direction:
+  *both ways* (what a side lacks is copied to it; of two different files
+  the newer wins; the same time with different sizes can't be decided),
+  *local is the source*, *server is the source*; the one-way ones can
+  delete what the target has in excess. A file on one side and a folder
+  of that name on the other, or a name the server's encoding can't
+  write, is left alone and said so.
 - *Pause and resume:* a file is copied as `<name>.ntpart` (locally for a
   download, on the server for an upload) and renamed over the real name
   when complete (an upload keeps the old file's permissions; a server
@@ -2570,7 +2584,29 @@ there ("connected; folder /srv/深/层") with the local tree scrolled to
 `子目录`; with `/srv/深/层` deleted on the server, the next start went to
 `/root`.
 
-**Not yet:** transfers between two servers, comparing / syncing folders.
+**Synchronize** (`files_sync.rs`; the server's toolbar, with the local
+side at a folder): the local folder shown and the server's folder shown
+are compared on a worker (the count so far shown, Cancel), then listed:
+a tick, what is done (upload, download, delete local, delete on the
+server, same, kept, can't decide), the path, and both sides' size and
+time; only what something is done with unless "Show files that are the
+same". The direction and "Delete extra files on the target" change the
+list at once, without comparing again. The summary counts and weighs
+the ticked copies (folders copied whole are counted, not weighed) and
+deletions (in red). Start runs the copies as ordinary transfers (one
+upload job, one download job: pausable, resumable) and the deletions
+as deletes (local ones to the Recycle Bin); with deletions it asks once
+more first. Live: `sync-l` against `/srv/同步` (a file the same on both
+sides, one newer locally, one only local, a folder only on the server,
+a common subfolder with the same file) listed download 只在服务器
+(folder), upload 改.txt and 本地新.txt, nothing else; after Start both
+sides held the same files with the same times, and comparing again said
+they are alike. With an extra file and folder put on the server, "local
+is the source" and "Delete extra files" listed two deletions, asked
+once more, and deleted both on the server. Tests: what each mode does
+with each case, and two trees against Windows' `sftp-server.exe`.
+
+**Not yet:** transfers between two servers.
 
 ## Active session tracking
 

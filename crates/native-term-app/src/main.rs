@@ -15,6 +15,7 @@ mod commands_import;
 mod dialogs;
 mod dock;
 mod fab;
+mod files_sync;
 mod files_window;
 mod icons;
 mod import_dialog;

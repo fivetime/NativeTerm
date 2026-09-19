@@ -178,6 +178,31 @@ fn walk_remote(
     Ok(())
 }
 
+/// What downloading each server's file or folder to its own local path
+/// involves (a synchronization's copies).
+pub fn plan_download_pairs(
+    sftp: &Session,
+    names: &Names,
+    pairs: &[(Vec<u8>, Attrs, PathBuf)],
+    progress: &Progress,
+) -> Result<Vec<Item>> {
+    let mut items = Vec::new();
+    for (remote, attrs, local) in pairs {
+        walk_remote(sftp, names, remote, attrs, local.clone(), &mut items, progress)?;
+    }
+    Ok(items)
+}
+
+/// What uploading each local file or folder to its own server's path
+/// involves.
+pub fn plan_upload_pairs(names: &Names, pairs: &[(PathBuf, Vec<u8>)], progress: &Progress) -> Result<Vec<Item>> {
+    let mut items = Vec::new();
+    for (local, remote) in pairs {
+        walk_local(names, local, remote.clone(), &mut items, progress)?;
+    }
+    Ok(items)
+}
+
 /// What uploading local files and folders into the remote folder `into`
 /// involves.
 pub fn plan_upload(names: &Names, locals: &[PathBuf], into: &[u8], progress: &Progress) -> Result<Vec<Item>> {
@@ -261,6 +286,11 @@ pub fn download(sftp: &Session, names: &Names, items: &[Item], progress: &Progre
                 return Err(e);
             }
         };
+        if let Some(m) = item.modified {
+            // the server's modification time kept (compare / sync go by it)
+            let file = std::fs::OpenOptions::new().write(true).open(&part)?;
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(m))?;
+        }
         std::fs::rename(&part, &item.local)?;
         progress.done.store(base + done, Ordering::Relaxed);
         progress.next.store(i + 1, Ordering::Relaxed);
@@ -309,6 +339,10 @@ pub fn upload(sftp: &Session, names: &Names, items: &[Item], progress: &Progress
                 return Err(e);
             }
         };
+        if let Some(m) = item.modified.and_then(|m| u32::try_from(m).ok()) {
+            // the local modification time kept (compare / sync go by it)
+            let _ = sftp.setstat(&part, &Attrs { atime_mtime: Some((m, m)), ..Default::default() });
+        }
         finish_upload(sftp, &part, &item.remote)?;
         progress.done.store(base + done, Ordering::Relaxed);
         progress.next.store(i + 1, Ordering::Relaxed);
@@ -437,6 +471,9 @@ mod tests {
         let src = dir.path().join("源");
         std::fs::create_dir_all(src.join("子目录").join("空")).unwrap();
         std::fs::write(src.join("a.txt"), b"alpha").unwrap();
+        // an old modification time, to see it kept both ways
+        let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_577_836_800);
+        std::fs::File::options().write(true).open(src.join("a.txt")).unwrap().set_modified(old).unwrap();
         std::fs::write(src.join("子目录").join("b.bin"), vec![9u8; 200_000]).unwrap();
         let server_dir = dir.path().join("server");
         std::fs::create_dir(&server_dir).unwrap();
@@ -462,6 +499,9 @@ mod tests {
         assert_eq!(progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed));
         assert_eq!(std::fs::read(back.join("源").join("a.txt")).unwrap(), b"alpha");
         assert!(back.join("源").join("子目录").join("空").is_dir());
+        let up = sftp.stat(&join(&remote_src, b"a.txt")).unwrap();
+        assert_eq!(up.atime_mtime.map(|(_, m)| m), Some(1_577_836_800));
+        assert_eq!(std::fs::metadata(back.join("源").join("a.txt")).unwrap().modified().unwrap(), old);
 
         remove(&sftp, &remote_src, &attrs).unwrap();
         assert!(!server_dir.join("源").exists());

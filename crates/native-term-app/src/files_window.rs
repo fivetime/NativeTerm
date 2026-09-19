@@ -26,8 +26,8 @@ use native_term_sftp::{Entry, Names, Session};
 
 use crate::icons;
 
-const RED: egui::Color32 = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
-const GREEN: egui::Color32 = egui::Color32::from_rgb(0x2e, 0xa0, 0x43);
+pub const RED: egui::Color32 = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
+pub const GREEN: egui::Color32 = egui::Color32::from_rgb(0x2e, 0xa0, 0x43);
 const ROW: f32 = 22.0;
 /// Log lines kept per session.
 const LOG_LINES: usize = 200;
@@ -174,6 +174,8 @@ enum What {
         path: PathBuf,
         folders: Vec<(String, PathBuf)>,
     },
+    /// Synchronize's comparison.
+    Compared(Result<Vec<native_term_sftp::sync::Found>, native_term_sftp::Error>),
 }
 
 /// What happened, for which session.
@@ -201,8 +203,40 @@ enum JobState {
 /// What a transfer copies, kept so it can go on after a pause or an error.
 #[derive(Clone)]
 enum Work {
-    Upload { names: Names, files: Vec<PathBuf>, into: Vec<u8> },
-    Download { names: Names, items: Vec<(Vec<u8>, Attrs)>, folder: PathBuf },
+    Upload {
+        names: Names,
+        files: Vec<PathBuf>,
+        into: Vec<u8>,
+    },
+    Download {
+        names: Names,
+        items: Vec<(Vec<u8>, Attrs)>,
+        folder: PathBuf,
+    },
+    /// Each to its own path (a synchronization).
+    UploadPairs {
+        names: Names,
+        pairs: Vec<(PathBuf, Vec<u8>)>,
+    },
+    DownloadPairs {
+        names: Names,
+        pairs: Vec<(Vec<u8>, Attrs, PathBuf)>,
+    },
+}
+
+impl Work {
+    fn names(&self) -> &Names {
+        match self {
+            Work::Upload { names, .. }
+            | Work::Download { names, .. }
+            | Work::UploadPairs { names, .. }
+            | Work::DownloadPairs { names, .. } => names,
+        }
+    }
+
+    fn uploads(&self) -> bool {
+        matches!(self, Work::Upload { .. } | Work::UploadPairs { .. })
+    }
 }
 
 struct Job {
@@ -357,6 +391,8 @@ struct FilesWindow {
     computer: String,
     /// The local tree's top: Desktop, Documents, Downloads, the drives.
     local_roots: Vec<(String, PathBuf)>,
+    /// Synchronize: the folders compared, what was found, what to do.
+    sync: Option<crate::files_sync::SyncDialog>,
 }
 
 impl FilesWindow {
@@ -386,6 +422,7 @@ impl FilesWindow {
                     (p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(p.display().to_string()), p)
                 })
                 .collect(),
+            sync: None,
         }
     }
 
@@ -734,6 +771,16 @@ impl FilesWindow {
                 }
             }
             What::Notice(text, error) => self.log(id, text, error),
+            What::Compared(result) => {
+                use crate::files_sync::Scan;
+                if let Some(d) = self.sync.as_mut().filter(|d| d.tab == id) {
+                    d.scan = match result {
+                        Ok(found) => Scan::Done(found),
+                        Err(native_term_sftp::Error::Cancelled) => Scan::Failed(t!("files-sync-cancelled")),
+                        Err(e) => Scan::Failed(e.to_string()),
+                    };
+                }
+            }
             What::Refresh => self.refresh(id),
             What::LocalRefresh => self.refresh_local(id),
             What::RemoteTree { path, folders } => {
@@ -950,13 +997,67 @@ impl FilesWindow {
             };
             let result = items.and_then(|items| {
                 *plan.lock().unwrap_or_else(|e| e.into_inner()) = Some(items.clone());
-                match &work {
-                    Work::Upload { names, .. } => transfer::upload(&sftp, names, &items, &progress),
-                    Work::Download { names, .. } => transfer::download(&sftp, names, &items, &progress),
+                if work.uploads() {
+                    transfer::upload(&sftp, work.names(), &items, &progress)
+                } else {
+                    transfer::download(&sftp, work.names(), &items, &progress)
                 }
             });
             What::JobDone { job: id, result }
         });
+    }
+
+    /// Synchronize: the local folder shown with the server's folder shown.
+    fn open_sync(&mut self, id: u64) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let Some(local) = tab.local.path.clone() else { return };
+        let (host, remote, text) = (tab.spec.label.clone(), tab.remote.path.clone(), tab.remote.path_text.clone());
+        let scan = crate::files_sync::Scan::Failed(String::new());
+        self.sync = Some(crate::files_sync::SyncDialog::new(id, host, local, remote, text, scan));
+        self.compare(id);
+    }
+
+    /// Compares the dialog's folders again, in the background.
+    fn compare(&mut self, id: u64) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let (Some(sftp), names) = (tab.remote.sftp.clone(), tab.remote.names) else { return };
+        let Some(d) = self.sync.as_mut().filter(|d| d.tab == id) else { return };
+        let (seen, stop) = (Arc::new(std::sync::atomic::AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+        d.scan = crate::files_sync::Scan::Running { seen: Arc::clone(&seen), stop: Arc::clone(&stop) };
+        let (local, remote) = (d.local.clone(), d.remote.clone());
+        self.spawn(id, move || {
+            What::Compared(native_term_sftp::sync::compare(&sftp, &names, &local, &remote, &seen, &stop))
+        });
+    }
+
+    /// Synchronize's Start: the copies as transfers (pausable like any),
+    /// the deletions as deletes (local ones to the Recycle Bin).
+    fn start_sync(&mut self, id: u64, plan: crate::files_sync::Plan) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        if tab.remote.sftp.is_none() {
+            self.log(id, t!("files-job-not-connected"), true);
+            return;
+        }
+        let names = tab.remote.names;
+        if !plan.uploads.is_empty() {
+            let title = t!("files-job-sync-upload", count = plan.uploads.len());
+            let work = Work::UploadPairs { names, pairs: plan.uploads };
+            let (job, _) = self.add_job(id, Kind::Upload, title, Some(work));
+            self.run_job(job);
+        }
+        if !plan.downloads.is_empty() {
+            let title = t!("files-job-sync-download", count = plan.downloads.len());
+            let work = Work::DownloadPairs { names, pairs: plan.downloads };
+            let (job, _) = self.add_job(id, Kind::Download, title, Some(work));
+            self.run_job(job);
+        }
+        if !plan.delete_remote.is_empty() {
+            let what = describe(&plan.delete_remote.iter().map(|(p, _)| names.decode(last(p))).collect::<Vec<_>>());
+            self.delete_remote(id, plan.delete_remote, what);
+        }
+        if !plan.delete_local.is_empty() {
+            self.recycle_local(id, plan.delete_local);
+        }
     }
 
     fn job_action(&mut self, id: u64, action: JobAction) {
@@ -1453,6 +1554,8 @@ impl FilesWindow {
         let mut names = tab.remote.names;
         let (mut up, mut refresh, mut download, mut edit, mut delete, mut new_folder, mut go_to) =
             (false, false, false, false, false, false, None);
+        let mut sync = false;
+        let local_folder = tab.local.path.is_some();
         ui.horizontal(|ui| {
             let b =
                 ui.add_enabled(connected && !at_root, egui::Button::new(icon(icons::UP))).on_hover_text(t!("files-up"));
@@ -1464,7 +1567,7 @@ impl FilesWindow {
             refresh = b.clicked();
             let path = ui.add_enabled(
                 connected,
-                egui::TextEdit::singleline(&mut path_text).desired_width((ui.available_width() - 480.0).max(120.0)),
+                egui::TextEdit::singleline(&mut path_text).desired_width((ui.available_width() - 560.0).max(120.0)),
             );
             if path.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 go_to = Some(path_text.clone());
@@ -1481,6 +1584,13 @@ impl FilesWindow {
                 .clicked();
             new_folder = ui
                 .add_enabled(connected, egui::Button::new(format!("{} {}", icons::NEW_FOLDER, t!("files-new-folder"))))
+                .clicked();
+            sync = ui
+                .add_enabled(
+                    connected && local_folder,
+                    egui::Button::new(format!("{} {}", icons::SYNC, t!("files-sync"))),
+                )
+                .on_hover_text(t!("files-sync-hint"))
                 .clicked();
             let shown =
                 if matches!(names, Names::Auto { .. }) { t!("files-encoding-auto") } else { names.label().to_string() };
@@ -1534,6 +1644,9 @@ impl FilesWindow {
         }
         if new_folder {
             self.new_folder = Some((id, true, String::new()));
+        }
+        if sync {
+            self.open_sync(id);
         }
 
         let tab = &self.tabs[self.active];
@@ -1839,6 +1952,19 @@ impl FilesWindow {
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
+        if let Some(d) = &mut self.sync {
+            use crate::files_sync::Asked;
+            let tab = d.tab;
+            match d.show(ctx) {
+                Some(Asked::Rescan) => self.compare(tab),
+                Some(Asked::Start(plan)) => {
+                    self.sync = None;
+                    self.start_sync(tab, plan);
+                }
+                Some(Asked::Close) => self.sync = None,
+                None => {}
+            }
+        }
         if let Some((tab, question, typed)) = &mut self.question {
             let host = self.tabs.iter().find(|t| t.id == *tab).map(|t| t.spec.alias.clone()).unwrap_or_default();
             let mut done = None;
@@ -2512,6 +2638,8 @@ fn status_line(
 fn plan_work(sftp: &Session, work: &Work, progress: &Progress) -> native_term_sftp::Result<Vec<Item>> {
     match work {
         Work::Upload { names, files, into } => transfer::plan_upload(names, files, into, progress),
+        Work::UploadPairs { names, pairs } => transfer::plan_upload_pairs(names, pairs, progress),
+        Work::DownloadPairs { names, pairs } => transfer::plan_download_pairs(sftp, names, pairs, progress),
         Work::Download { names, items, folder } => {
             let mut plan = Vec::new();
             for (path, attrs) in items {

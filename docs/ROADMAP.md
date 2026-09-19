@@ -499,8 +499,11 @@
       restart), clear finished
 - [x] SFTP: last folder per host on both sides (`state.db`), trees scroll
       to the folder shown
-- [ ] SFTP (rest): folder compare / sync, a configured external tool as
-      an option
+- [x] SFTP Synchronize: compare a local and a server's folder recursively
+      (size, modification time; times kept by transfers), both ways /
+      local is the source / server is the source, optional deletion of
+      extras, as ordinary pausable transfers
+- [ ] SFTP (rest): a configured external tool as an option
 - [ ] Shared credential sets (`NativeTermCredential`)
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)
