@@ -92,9 +92,89 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// The name for showing, the automatic way (see `Names`).
     pub fn name_lossy(&self) -> String {
-        String::from_utf8_lossy(&self.name).into_owned()
+        Names::default().decode(&self.name)
     }
+}
+
+/// How a server's file names become text and back. SFTP v3 names are
+/// bytes in whatever encoding the files were named in: UTF-8 today, GBK,
+/// Big5, Shift_JIS, EUC-KR, a Windows or ISO-8859 code page on older
+/// systems. Requests always use the bytes as listed, so every file can be
+/// opened, renamed or deleted whatever its name; this only decides how a
+/// name is shown and how a new one (upload, rename, new folder) is
+/// written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Names {
+    /// UTF-8 where a name is valid UTF-8, else code page `fallback` (the
+    /// system's ANSI code page by default); new names in UTF-8.
+    Auto { fallback: u32 },
+    /// Every name in this Windows code page (65001: UTF-8 only).
+    CodePage(u32),
+}
+
+impl Default for Names {
+    fn default() -> Names {
+        #[cfg(windows)]
+        let fallback = native_term_win::ansi_code_page();
+        #[cfg(not(windows))]
+        let fallback = 28591;
+        Names::Auto { fallback }
+    }
+}
+
+impl Names {
+    /// A name as text; bytes that are valid in neither encoding show as
+    /// `\xNN`, so no name is ever hidden.
+    pub fn decode(&self, bytes: &[u8]) -> String {
+        let decoded = match *self {
+            Names::Auto { fallback } => std::str::from_utf8(bytes).ok().map(str::to_string).or_else(|| code_page(fallback, bytes)),
+            Names::CodePage(cp) => code_page(cp, bytes),
+        };
+        decoded.unwrap_or_else(|| escaped(bytes))
+    }
+
+    /// A new name's bytes; `None` if a character can't be written in the
+    /// chosen code page (never a look-alike substitute).
+    pub fn encode(&self, text: &str) -> Option<Vec<u8>> {
+        match *self {
+            Names::Auto { .. } => Some(text.as_bytes().to_vec()),
+            Names::CodePage(cp) => {
+                #[cfg(windows)]
+                return native_term_win::registry::encode_code_page(cp, text);
+                #[cfg(not(windows))]
+                return (cp == 65001).then(|| text.as_bytes().to_vec());
+            }
+        }
+    }
+}
+
+fn code_page(cp: u32, bytes: &[u8]) -> Option<String> {
+    #[cfg(windows)]
+    return native_term_win::registry::decode_code_page(cp, bytes);
+    #[cfg(not(windows))]
+    return (cp == 65001).then(|| std::str::from_utf8(bytes).ok().map(str::to_string)).flatten();
+}
+
+/// UTF-8 where it is, `\xNN` for the other bytes.
+fn escaped(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for chunk in bytes.utf8_chunks() {
+        out.push_str(chunk.valid());
+        for b in chunk.invalid() {
+            out.push_str(&format!("\\x{b:02X}"));
+        }
+    }
+    out
+}
+
+/// ssh's stderr as text (its `\ooo` escapes undone).
+fn ssh_text(bytes: &[u8]) -> String {
+    #[cfg(windows)]
+    return native_term_win::ssh_message(bytes);
+    #[cfg(not(windows))]
+    return String::from_utf8_lossy(bytes).into_owned();
 }
 
 type Waiters = HashMap<u32, Sender<Result<Reply>>>;
@@ -170,7 +250,7 @@ impl Session {
         let stdin: ChildStdin = child.stdin.take().ok_or_else(|| Error::Io("no stdin".into()))?;
         let stdout = child.stdout.take().ok_or_else(|| Error::Io("no stdout".into()))?;
         // ssh's messages: why it couldn't connect, if it can't
-        let stderr_text = Arc::new(Mutex::new(String::new()));
+        let stderr_text = Arc::new(Mutex::new(Vec::<u8>::new()));
         if let Some(mut stderr) = child.stderr.take() {
             let text = Arc::clone(&stderr_text);
             std::thread::spawn(move || {
@@ -181,7 +261,7 @@ impl Session {
                     }
                     let mut t = lock(&text);
                     if t.len() < 8192 {
-                        t.push_str(&String::from_utf8_lossy(&buf[..n]));
+                        t.extend_from_slice(&buf[..n]);
                     }
                 }
             });
@@ -189,7 +269,7 @@ impl Session {
         let last_words = move || {
             // give the stderr thread a moment to catch ssh's last line
             std::thread::sleep(std::time::Duration::from_millis(100));
-            let t = lock(&stderr_text).trim().to_string();
+            let t = ssh_text(&lock(&stderr_text)).trim().to_string();
             if t.is_empty() { "the connection closed".to_string() } else { t }
         };
         let mut session = Session::start(Box::new(stdin), Box::new(stdout), last_words)?;
@@ -242,6 +322,14 @@ impl Session {
             s.closed = Some(why);
         });
         Ok(Session { writer: Mutex::new(writer), next_id: AtomicU32::new(1), shared, child: Mutex::new(None), extensions })
+    }
+
+    /// Ends the connection now: ssh is killed, everything waiting fails
+    /// with `Closed`.
+    pub fn disconnect(&self) {
+        if let Some(child) = lock(&self.child).as_mut() {
+            let _ = child.kill();
+        }
     }
 
     pub fn has_extension(&self, name: &str) -> bool {
@@ -635,6 +723,29 @@ mod tests {
     }
 
     #[test]
+    fn names_in_any_encoding() {
+        let gbk = [0xd6u8, 0xd0, 0xce, 0xc4, b'.', b't', b'x', b't'];
+        let big5 = native_term_win::registry::encode_code_page(950, "繁體.txt").unwrap();
+        let sjis = native_term_win::registry::encode_code_page(932, "日本語.txt").unwrap();
+        let cyrillic = native_term_win::registry::encode_code_page(1251, "Привет.txt").unwrap();
+        // chosen per host
+        assert_eq!(Names::CodePage(936).decode(&gbk), "中文.txt");
+        assert_eq!(Names::CodePage(950).decode(&big5), "繁體.txt");
+        assert_eq!(Names::CodePage(932).decode(&sjis), "日本語.txt");
+        assert_eq!(Names::CodePage(1251).decode(&cyrillic), "Привет.txt");
+        // automatic: UTF-8 first, then the fallback
+        let auto = Names::Auto { fallback: 936 };
+        assert_eq!(auto.decode("文件.txt".as_bytes()), "文件.txt");
+        assert_eq!(auto.decode(&gbk), "中文.txt");
+        // neither: every byte still shows
+        assert_eq!(Names::CodePage(65001).decode(&gbk), "\\xD6\\xD0\\xCE\\xC4.txt");
+        // new names
+        assert_eq!(Names::CodePage(936).encode("中文.txt").unwrap(), gbk);
+        assert_eq!(Names::CodePage(1251).encode("中文"), None, "can't be written in 1251");
+        assert_eq!(auto.encode("中文").unwrap(), "中文".as_bytes());
+    }
+
+    #[test]
     fn paths() {
         assert_eq!(join(b"/home/a", b"x"), b"/home/a/x");
         assert_eq!(join(b"/", b"x"), b"/x");
@@ -734,8 +845,99 @@ mod tests {
         let mb = data.len() as f64 / 1048576.0;
         println!("32 MB up {:.1} MB/s, down {:.1} MB/s", mb / up.as_secs_f64(), mb / down.as_secs_f64());
         sftp.remove(&target).unwrap();
+
+        // prepared on the server: `中文.txt` named in GBK, and a link to /tmp
+        let gbk_name = [0xd6u8, 0xd0, 0xce, 0xc4, b'.', b't', b'x', b't'];
+        let entries = sftp.read_dir(&home).unwrap();
+        let gbk = entries.iter().find(|e| e.name == gbk_name).expect("the GBK-named file is listed with its bytes");
+        println!("GBK name listed: {:?} ({} bytes)", gbk.name_lossy(), gbk.attrs.size.unwrap_or(0));
+        let local = dir.path().join("gbk.txt");
+        sftp.download(&join(&home, &gbk_name), &local, &mut |_| true).unwrap();
+        assert_eq!(std::fs::read(&local).unwrap(), b"gbk content");
+        let renamed = join(&home, b"renamed-gbk.txt");
+        sftp.rename(&join(&home, &gbk_name), &renamed, false).unwrap();
+        sftp.rename(&renamed, &join(&home, &gbk_name), false).unwrap();
+        let link = entries.iter().find(|e| e.name == b"link-to-tmp").expect("the link");
+        assert!(link.attrs.is_symlink(), "listed as a link: {:?}", link.attrs);
+        assert!(sftp.stat(&join(&home, b"link-to-tmp")).unwrap().is_dir(), "stat follows it to a directory");
+        assert_eq!(sftp.readlink(&join(&home, b"link-to-tmp")).unwrap(), b"/tmp");
+
         let wrong = Session::connect(ssh, Some(Path::new(config)), "no-such-host.invalid", None);
         println!("unknown host: {}", wrong.err().unwrap());
+    }
+
+    /// A connection lost halfway: the transfer fails (no hang), and so does
+    /// everything after it.
+    #[test]
+    fn a_lost_connection_fails_everything_waiting() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(sftp) = local_server(dir.path()) else { return };
+        let sftp = Arc::new(sftp);
+        let base = remote(dir.path());
+        let big = dir.path().join("big.bin");
+        std::fs::write(&big, vec![1u8; 64 * 1024 * 1024]).unwrap();
+        let s = Arc::clone(&sftp);
+        let started = std::time::Instant::now();
+        let mut killed = false;
+        let result = s.upload(&big, &join(&base, b"copy.bin"), None, &mut |done| {
+            if done > 4 * 1024 * 1024 && !killed {
+                killed = true;
+                sftp.disconnect();
+            }
+            true
+        });
+        assert!(matches!(result, Err(Error::Closed(_))), "{result:?}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+        assert!(matches!(sftp.stat(&base), Err(Error::Closed(_))));
+        assert!(sftp.closed().is_some());
+    }
+
+    #[test]
+    fn errors_are_reported_and_nothing_is_left_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(sftp) = local_server(dir.path()) else { return };
+        let base = remote(dir.path());
+        std::fs::write(dir.path().join("a.txt"), b"old").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+
+        // a missing file
+        let e = sftp.download(&join(&base, b"missing"), &dir.path().join("x"), &mut |_| true).unwrap_err();
+        assert!(e.is_status(wire::FX_NO_SUCH_FILE), "{e:?}");
+        // a local file that can't be written: the remote handle is closed again
+        let e = sftp.download(&join(&base, b"a.txt"), &dir.path().join("no").join("dir").join("x"), &mut |_| true).unwrap_err();
+        assert!(matches!(e, Error::Io(_)), "{e:?}");
+        // a directory isn't a file
+        assert!(sftp.download(&join(&base, b"sub"), &dir.path().join("y"), &mut |_| true).is_err());
+        assert!(sftp.rmdir(&join(&base, b"a.txt")).is_err());
+        assert!(sftp.mkdir(&join(&base, b"sub")).is_err(), "exists");
+        // an upload replaces an existing file's content
+        let local = dir.path().join("new.txt");
+        std::fs::write(&local, b"new and longer").unwrap();
+        sftp.upload(&local, &join(&base, b"a.txt"), None, &mut |_| true).unwrap();
+        assert_eq!(std::fs::read(dir.path().join("a.txt")).unwrap(), b"new and longer");
+        // a rename onto an existing file: refused plainly, done with replace
+        std::fs::write(dir.path().join("b.txt"), b"b").unwrap();
+        assert!(sftp.rename(&join(&base, b"b.txt"), &join(&base, b"a.txt"), false).is_err());
+        sftp.rename(&join(&base, b"b.txt"), &join(&base, b"a.txt"), true).unwrap();
+        assert_eq!(std::fs::read(dir.path().join("a.txt")).unwrap(), b"b");
+        // after all that, the directory can be removed: no handle was left open
+        std::fs::remove_file(dir.path().join("a.txt")).unwrap();
+        std::fs::remove_file(dir.path().join("new.txt")).unwrap();
+        sftp.rmdir(&join(&base, b"sub")).unwrap();
+    }
+
+    #[test]
+    fn a_large_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..3000 {
+            std::fs::write(dir.path().join(format!("文件-{i:04}.txt")), b"").unwrap();
+        }
+        let Some(sftp) = local_server(dir.path()) else { return };
+        let started = std::time::Instant::now();
+        let entries = sftp.read_dir(&remote(dir.path())).unwrap();
+        assert_eq!(entries.len(), 3000);
+        assert!(entries.iter().all(|e| e.name_lossy().starts_with("文件-")));
+        eprintln!("3000 entries in {:?}", started.elapsed());
     }
 
     #[test]

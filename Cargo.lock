@@ -1829,6 +1829,7 @@ dependencies = [
 name = "native-term-sftp"
 version = "0.1.0"
 dependencies = [
+ "native-term-win",
  "tempfile",
 ]
 

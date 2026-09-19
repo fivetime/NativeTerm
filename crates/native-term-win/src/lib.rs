@@ -241,6 +241,11 @@ pub fn map_file_for_process(path: &Path) -> io::Result<&'static [u8]> {
     }
 }
 
+/// The system's ANSI code page (936 on Chinese Windows).
+pub fn ansi_code_page() -> u32 {
+    unsafe { windows::Win32::Globalization::GetACP() }
+}
+
 /// A message Windows' OpenSSH wrote to stderr, as text. ssh escapes bytes
 /// it won't print as `\ooo` (octal), and the system's own messages (e.g.
 /// "no such host" from `getaddrinfo`) are in the ANSI code page, so

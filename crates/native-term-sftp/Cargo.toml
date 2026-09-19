@@ -6,5 +6,8 @@ license.workspace = true
 
 [dependencies]
 
+[target.'cfg(windows)'.dependencies]
+native-term-win = { path = "../native-term-win" }
+
 [dev-dependencies]
 tempfile = "3"
