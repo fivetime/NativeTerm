@@ -1,6 +1,7 @@
 //! Windows Terminal backend: tabs are opened with `wt` and found, selected
 //! and closed through UI Automation, for one chosen Terminal install.
 
+pub mod capture;
 pub mod command;
 pub mod events;
 pub mod install;

@@ -40,6 +40,8 @@ pub const ACCEPT: char = '\u{E73E}';
 pub const PLAY: char = '\u{E768}';
 pub const PAUSE: char = '\u{E769}';
 pub const SYNC: char = '\u{E895}';
+pub const LIST: char = '\u{E8FD}';
+pub const GRID: char = '\u{F0E2}';
 
 /// `glyph` then `text`, for buttons.
 pub fn with(glyph: char, text: impl AsRef<str>) -> String {

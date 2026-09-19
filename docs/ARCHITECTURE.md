@@ -3087,6 +3087,39 @@ NativeTerm ever does.
 Windows Terminal's own tab search (`tabSearch` action) also lists tabs by
 title and benefits from the same stable labels.
 
+### Pictures (implemented)
+
+"All Tabs" shows the tabs as a list or as pictures (a switch next to its
+search box, kept in `state.db` as `tabs.view`). In the list, hovering a
+tab shows its picture. The pictures view shows each window's tabs as
+cards: the picture, the name with the session's state, and "as of HH:MM".
+A tab never seen selected shows a note instead ("select it once").
+
+- **Taking them** (`previews.rs`, `windows_terminal::capture`): after a
+  scan that followed one of Terminal's notifications (a tab or window
+  switched, opened, closed, moved to the front) or the tab list opening,
+  the selected tab of every Terminal window of the chosen install is
+  pictured: `PrintWindow` with `PW_RENDERFULLCONTENT` (works while the
+  window is covered, not minimized), the visible frame only
+  (`DWMWA_EXTENDED_FRAME_BOUNDS`) below the tab strip (the tab items'
+  bottom), scaled with `HALFTONE` to 360 px wide, read with `GetDIBits`.
+  A tab pictured under the same title in the last 3 s isn't pictured
+  again. The 60 s fallback scan and the list's title rescan (every 5 s,
+  only while NativeTerm has the focus) take no pictures: no timer ever
+  does.
+- **Kept** in memory only, by window and tab position, with the title
+  then and the time; forgotten when the window or tab is gone, or when
+  the window's tab count changed and the title at that position differs
+  (the tabs moved). About 360×200×4 bytes a tab.
+- The list no longer repaints every 5 s while NativeTerm is in the
+  background: Terminal's notifications repaint it.
+- Verified: two tmux tabs with different output in the portable Terminal;
+  the pictures view showed each tab's own screen, the selected one
+  marked "current tab"; selecting the other tab from its card updated
+  its picture to its newer output; the view choice survived a restart.
+  Idle with the pictures view open and Terminal in front: 47 ms CPU in
+  130 s (the two fallback scans, no pictures).
+
 ### Taking over Ctrl+Tab (source review, Terminal 1.26, 2026-09-18)
 
 Terminal's Ctrl+Tab list is the command palette in "tab switch" mode

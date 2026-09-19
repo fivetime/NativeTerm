@@ -10,6 +10,7 @@ pub mod data_dir;
 pub mod fuzzy;
 pub mod i18n;
 pub mod import;
+mod previews;
 pub mod quick;
 pub mod registry;
 pub mod shortcuts;
@@ -31,6 +32,7 @@ use native_term_session::pipe::{self, PipeConnection, PipeListener};
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 use native_term_session::{classify_exit, SessionEnd, PROTOCOL_VERSION};
 
+pub use previews::Preview;
 use registry::{Record, Registry};
 
 /// Tabs are rescanned when Terminal reports a change; this is only the
@@ -294,6 +296,11 @@ pub(crate) struct Shared {
     auto_reconnect: std::sync::atomic::AtomicBool,
     /// The tab list is shown: scan every tab even without sessions.
     all_tabs: std::sync::atomic::AtomicBool,
+    /// Pictures of the tabs last seen selected, for the tab list.
+    previews: Mutex<previews::Previews>,
+    /// The next scan only looks again at titles (the tab list's rescan):
+    /// no pictures, those follow Terminal's notifications only.
+    titles_only: std::sync::atomic::AtomicBool,
     /// The Terminal window that was last in front.
     last_terminal: std::sync::atomic::AtomicIsize,
     /// Where sent commands are recorded (`<data dir>\\audit`).
@@ -470,6 +477,8 @@ impl Core {
             placeholders: Mutex::new(placeholders),
             auto_reconnect: Default::default(),
             all_tabs: Default::default(),
+            previews: Default::default(),
+            titles_only: Default::default(),
             last_terminal: Default::default(),
             audit_dir: Mutex::new(None),
             host_labels: Mutex::new(HashMap::new()),
@@ -516,7 +525,9 @@ impl Core {
         *lock(&shared.watcher) = Some(watcher);
         let refresher = Arc::clone(&shared);
         std::thread::Builder::new().name("tab-refresh".into()).spawn(move || loop {
-            match woken.recv_timeout(FALLBACK_REFRESH) {
+            use std::sync::atomic::Ordering::Relaxed;
+            // pictures only after a notification, never on a timer
+            let picture = match woken.recv_timeout(FALLBACK_REFRESH) {
                 Err(mpsc::RecvTimeoutError::Disconnected) => return,
                 Ok(()) => {
                     // let the burst finish (or the window drag end), then
@@ -527,10 +538,11 @@ impl Core {
                             break;
                         }
                     }
+                    !refresher.titles_only.swap(false, Relaxed)
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-            }
-            refresh(&refresher);
+                Err(mpsc::RecvTimeoutError::Timeout) => false,
+            };
+            scan(&refresher, picture);
         })?;
         let replacer = Arc::clone(&shared);
         std::thread::Builder::new()
@@ -786,9 +798,16 @@ impl Core {
         }
     }
 
+    /// The picture of the tab at `index` in `window` from when it was
+    /// last seen selected.
+    pub fn preview(&self, window: isize, index: usize) -> Option<Preview> {
+        lock(&self.shared.previews).get(window, index)
+    }
+
     /// Scan Terminal's tabs again soon (titles change without a
     /// notification).
     pub fn rescan(&self) {
+        self.shared.titles_only.store(true, std::sync::atomic::Ordering::Relaxed);
         self.shared.refresh_soon();
     }
 
@@ -1201,6 +1220,12 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
 
 /// Read all tabs and store each session's position.
 fn refresh(shared: &Shared) -> Snapshot {
+    scan(shared, true)
+}
+
+/// Read Terminal's tabs; with `picture`, also take the selected tabs'
+/// pictures (see `previews`).
+fn scan(shared: &Shared, picture: bool) -> Snapshot {
     let labels = shared.labels();
     let all_tabs = shared.all_tabs.load(std::sync::atomic::Ordering::Relaxed);
     let snapshot = if labels.is_empty() && !all_tabs {
@@ -1210,7 +1235,11 @@ fn refresh(shared: &Shared) -> Snapshot {
         shared.scans.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         shared.terminal.snapshot(&labels)
     };
-    let mut changed = *lock(&shared.snapshot) != snapshot;
+    let mut changed = {
+        let before = lock(&shared.snapshot);
+        lock(&shared.previews).prune(&before, &snapshot);
+        *before != snapshot
+    };
     let order = {
         let mut order = lock(&shared.window_order);
         if snapshot.complete {
@@ -1279,6 +1308,10 @@ fn refresh(shared: &Shared) -> Snapshot {
     }
     if changed {
         *lock(&shared.snapshot) = snapshot.clone();
+    }
+    // the selected tabs, as they look now
+    let pictured = picture && previews::take(&shared.previews, &snapshot);
+    if changed || pictured {
         // only then: an idle NativeTerm doesn't repaint
         shared.changed();
     }

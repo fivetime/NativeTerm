@@ -1,11 +1,12 @@
 //! All tabs in all Terminal windows, NativeTerm's and the user's own, with
-//! their full titles (see `docs/ARCHITECTURE.md`, "Tab switcher").
+//! their full titles (see `docs/ARCHITECTURE.md`, "Tab switcher"), as a
+//! list or as pictures (each tab as it looked when last seen selected).
 //! Clicking one only switches to it.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-use native_term_app::{fuzzy, t, Core, SessionView, State};
+use native_term_app::{fuzzy, t, Core, Preview, SessionView, State};
 use native_term_platform::Snapshot;
 
 use crate::icons;
@@ -14,11 +15,21 @@ use crate::icons;
 /// NativeTerm has the focus, look again this often.
 const RESCAN: Duration = Duration::from_secs(5);
 
+/// `state.db` setting: `pictures` for the pictures view.
+const VIEW_SETTING: &str = "tabs.view";
+
+/// A picture's size in the pictures view (points).
+const CARD: egui::Vec2 = egui::vec2(240.0, 135.0);
+
 #[derive(Default)]
 pub struct TabList {
     query: String,
     focus_search: bool,
     last_scan: Option<Instant>,
+    /// The view, once read from `state.db`: pictures, or the list.
+    pictures: Option<bool>,
+    /// Pictures on the GPU, by window and tab: when taken, and the texture.
+    textures: HashMap<(isize, usize), (SystemTime, egui::TextureHandle)>,
 }
 
 /// One tab, ready to show.
@@ -85,27 +96,60 @@ impl TabList {
         self.focus_search = true;
     }
 
+    /// The tab's picture, as a texture.
+    fn texture(&mut self, ctx: &egui::Context, core: &Core, e: &Entry) -> Option<(Preview, egui::TextureHandle)> {
+        let preview = core.preview(e.window, e.index)?;
+        let key = (e.window, e.index);
+        match self.textures.get(&key) {
+            Some((taken, texture)) if *taken == preview.taken => Some((preview, texture.clone())),
+            _ => {
+                let image = &preview.image;
+                let size = [image.width as usize, image.height as usize];
+                let pixels = egui::ColorImage::from_rgba_unmultiplied(size, &image.rgba);
+                let name = format!("tab-{}-{}", e.window, e.index);
+                let texture = ctx.load_texture(name, pixels, egui::TextureOptions::LINEAR);
+                self.textures.insert(key, (preview.taken, texture.clone()));
+                Some((preview, texture))
+            }
+        }
+    }
+
     pub fn show(&mut self, ui: &mut egui::Ui, core: &Core) {
         core.want_all_tabs(true);
+        let pictures = *self.pictures.get_or_insert_with(|| core.setting(VIEW_SETTING).as_deref() == Some("pictures"));
         let now = Instant::now();
         let focused = ui.input(|i| i.viewport().focused.unwrap_or(false));
         if focused && self.last_scan.is_none_or(|t| now - t >= RESCAN) {
             self.last_scan = Some(now);
             core.rescan();
         }
-        ui.ctx().request_repaint_after(RESCAN);
+        // in the background, Terminal's notifications repaint it
+        if focused {
+            ui.ctx().request_repaint_after(RESCAN);
+        }
 
         let mut clear = false;
         let search = ui
             .horizontal(|ui| {
                 ui.label(icons::SEARCH.to_string());
                 let clear_width = ui.spacing().interact_size.y + ui.spacing().item_spacing.x + 4.0;
-                let width = ui.available_width() - if self.query.is_empty() { 0.0 } else { clear_width };
+                let view_width = 2.0 * (ui.spacing().interact_size.y + ui.spacing().item_spacing.x) + 8.0;
+                let width = ui.available_width() - view_width - if self.query.is_empty() { 0.0 } else { clear_width };
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.query).hint_text(t!("tabs-search-hint")).desired_width(width),
                 );
                 if !self.query.is_empty() && ui.small_button(icons::CLEAR.to_string()).clicked() {
                     clear = true;
+                }
+                ui.add_space(8.0);
+                for (value, glyph, hint) in
+                    [(false, icons::LIST, t!("tabs-view-list")), (true, icons::GRID, t!("tabs-view-pictures"))]
+                {
+                    let button = egui::Button::new(glyph.to_string()).selected(pictures == value);
+                    if ui.add(button).on_hover_text(hint).clicked() && pictures != value {
+                        self.pictures = Some(value);
+                        core.set_setting(VIEW_SETTING, if value { "pictures" } else { "list" });
+                    }
                 }
                 search
             })
@@ -130,22 +174,141 @@ impl TabList {
         }
         let searching = !self.query.trim().is_empty();
         let row_height = ui.spacing().interact_size.y + 6.0;
+        // a picture no tab has any more
+        self.textures.retain(|(w, i), _| list.iter().any(|e| e.window == *w && e.index == *i));
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let mut last_window = None;
+            // the tabs of one window at a time (all together while searching)
+            let mut groups: Vec<Vec<&Entry>> = Vec::new();
             for e in &list {
-                if !searching && last_window != Some(e.window) {
-                    last_window = Some(e.window);
-                    let count = list.iter().filter(|x| x.window == e.window).count();
-                    let number = e.window_number.map(|n| n.to_string()).unwrap_or_else(|| "?".into());
-                    ui.add_space(4.0);
-                    ui.weak(t!("tabs-window", number = number, count = count));
+                match groups.last_mut() {
+                    Some(group) if searching || group[0].window == e.window => group.push(e),
+                    _ => groups.push(vec![e]),
                 }
-                if tab_row(ui, row_height, e, searching).clicked() {
-                    core.select_tab(e.window, e.index, &e.title);
+            }
+            for group in groups {
+                if !searching {
+                    let number = group[0].window_number.map(|n| n.to_string()).unwrap_or_else(|| "?".into());
+                    ui.add_space(4.0);
+                    ui.weak(t!("tabs-window", number = number, count = group.len()));
+                }
+                if pictures {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
+                        for e in group {
+                            let picture = self.texture(ui.ctx(), core, e);
+                            if tab_card(ui, e, searching, picture).clicked() {
+                                core.select_tab(e.window, e.index, &e.title);
+                            }
+                        }
+                    });
+                } else {
+                    for e in group {
+                        let response = tab_row(ui, row_height, e, searching);
+                        let response = response.on_hover_ui(|ui| match self.texture(ui.ctx(), core, e) {
+                            Some((preview, texture)) => {
+                                ui.add(egui::Image::new(&texture).max_width(CARD.x * 1.5));
+                                ui.weak(taken_text(&preview));
+                            }
+                            None => {
+                                ui.weak(t!("tabs-not-seen"));
+                            }
+                        });
+                        if response.clicked() {
+                            core.select_tab(e.window, e.index, &e.title);
+                        }
+                    }
                 }
             }
         });
     }
+}
+
+/// "As of 14:05" for a picture.
+fn taken_text(preview: &Preview) -> String {
+    let unix = preview.taken.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    t!("tabs-seen-at", time = native_term_win::local_time_of_day(unix))
+}
+
+/// The name a tab is shown with: NativeTerm's label, then its title.
+fn shown_name(e: &Entry) -> String {
+    match &e.session {
+        Some((label, _)) if *label != e.title => format!("{label} — {}", e.title),
+        _ => e.title.clone(),
+    }
+}
+
+/// One tab in the pictures view: its picture (or a note that it hasn't
+/// been seen), then its name and where it is.
+fn tab_card(
+    ui: &mut egui::Ui,
+    e: &Entry,
+    searching: bool,
+    picture: Option<(Preview, egui::TextureHandle)>,
+) -> egui::Response {
+    let body_height = ui.text_style_height(&egui::TextStyle::Body);
+    let text_height = body_height + ui.text_style_height(&egui::TextStyle::Small);
+    let size = egui::vec2(CARD.x + 12.0, CARD.y + text_height + 20.0);
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let name = shown_name(e);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, e.selected, &name));
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let current = e.selected && e.foreground_window;
+    let visuals = ui.style().interact_selectable(&response, current);
+    let painter = ui.painter().with_clip_rect(rect);
+    painter.rect_filled(rect, visuals.corner_radius, ui.visuals().faint_bg_color);
+    if response.hovered() || current {
+        painter.rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+    }
+    if current {
+        let stroke = egui::Stroke::new(2.0_f32, ui.visuals().selection.stroke.color);
+        painter.rect_stroke(rect, visuals.corner_radius, stroke, egui::StrokeKind::Inside);
+    }
+    let frame = egui::Rect::from_min_size(rect.min + egui::vec2(6.0, 6.0), CARD);
+    let weak = ui.visuals().weak_text_color();
+    let small = egui::TextStyle::Small.resolve(ui.style());
+    match &picture {
+        Some((_, texture)) => {
+            // fitted into the frame, centered
+            let s = texture.size_vec2();
+            let scale = (CARD.x / s.x).min(CARD.y / s.y);
+            let shown = egui::Rect::from_center_size(frame.center(), s * scale);
+            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            painter.image(texture.id(), shown, uv, egui::Color32::WHITE);
+        }
+        None => {
+            painter.rect_stroke(frame, 2.0, egui::Stroke::new(1.0_f32, weak), egui::StrokeKind::Inside);
+            let note = painter.layout(t!("tabs-not-seen"), small.clone(), weak, CARD.x - 20.0);
+            painter.galley(frame.center() - note.size() / 2.0, note, weak);
+        }
+    }
+    // the name, with the session's state
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let mut x = frame.left();
+    let y = frame.bottom() + 6.0 + body_height / 2.0;
+    if let Some((_, state)) = &e.session {
+        painter.circle_filled(egui::pos2(x + 4.0, y), 4.0, state_color(state));
+        x += 14.0;
+    }
+    let text = painter.layout_no_wrap(name, font, visuals.text_color());
+    painter.galley(egui::pos2(x, y - text.size().y / 2.0), text, visuals.text_color());
+    // where it is, and when it was seen
+    let mut place = Vec::new();
+    if searching {
+        let number = e.window_number.map(|n| n.to_string()).unwrap_or_else(|| "?".into());
+        let tab = e.index + 1;
+        place.push(t!("session-location", window = number, tab = tab));
+    }
+    if e.selected {
+        place.push(t!("session-selected"));
+    }
+    if let Some((preview, _)) = &picture {
+        place.push(taken_text(preview));
+    }
+    let galley = painter.layout_no_wrap(place.join(" · "), small, weak);
+    painter.galley(egui::pos2(frame.left(), y + body_height / 2.0 + 2.0), galley, weak);
+    response
 }
 
 fn state_color(state: &State) -> egui::Color32 {
@@ -161,10 +324,7 @@ fn state_color(state: &State) -> egui::Color32 {
 fn tab_row(ui: &mut egui::Ui, height: f32, e: &Entry, searching: bool) -> egui::Response {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
-    let name = match &e.session {
-        Some((label, _)) if *label != e.title => format!("{label} — {}", e.title),
-        _ => e.title.clone(),
-    };
+    let name = shown_name(e);
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, e.selected, &name));
     if !ui.is_rect_visible(rect) {
         return response;

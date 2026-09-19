@@ -254,6 +254,10 @@ tabs-window =
         [one] Window { $number } · 1 tab
        *[other] Window { $number } · { $count } tabs
     }
+tabs-view-list = List
+tabs-view-pictures = Pictures (each tab as it looked when last selected)
+tabs-not-seen = Not seen yet: select this tab once to get its picture
+tabs-seen-at = As of { $time }
 sessions-clear-finished = Clear finished
 sessions-restored-waiting =
     { $count ->
