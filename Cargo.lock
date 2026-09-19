@@ -1826,6 +1826,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "native-term-sftp"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "native-term-shim"
 version = "0.1.0"
 dependencies = [

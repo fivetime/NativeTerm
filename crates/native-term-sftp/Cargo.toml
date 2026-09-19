@@ -1,0 +1,10 @@
+[package]
+name = "native-term-sftp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+tempfile = "3"

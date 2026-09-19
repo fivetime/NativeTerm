@@ -241,8 +241,50 @@ pub fn map_file_for_process(path: &Path) -> io::Result<&'static [u8]> {
     }
 }
 
+/// A message Windows' OpenSSH wrote to stderr, as text. ssh escapes bytes
+/// it won't print as `\ooo` (octal), and the system's own messages (e.g.
+/// "no such host" from `getaddrinfo`) are in the ANSI code page, so
+/// `\262\273…` is GBK on a Chinese system: undo the escapes, then decode as
+/// UTF-8 or, if that isn't valid, the ANSI code page.
+pub fn ssh_message(bytes: &[u8]) -> String {
+    let mut raw = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let octal = bytes.get(i + 1..i + 4).filter(|d| bytes[i] == b'\\' && d.iter().all(|c| (b'0'..=b'7').contains(c)));
+        match octal {
+            Some(d) => {
+                let v = d.iter().fold(0u32, |v, c| v * 8 + (c - b'0') as u32);
+                raw.push(v as u8);
+                i += 4;
+            }
+            None => {
+                raw.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    match String::from_utf8(raw) {
+        Ok(text) => text,
+        Err(e) => registry::from_ansi(e.as_bytes()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ssh_messages() {
+        assert_eq!(super::ssh_message(b"ssh: connect to host x port 22: Connection refused"), "ssh: connect to host x port 22: Connection refused");
+        assert_eq!(super::ssh_message("已经是 UTF-8".as_bytes()), "已经是 UTF-8");
+        // "不知道这样的主机。" in GBK, escaped by ssh; only on a Chinese system
+        let gbk = super::ssh_message(
+            br"ssh: Could not resolve hostname h: \262\273\326\252\265\300\325\342\321\371\265\304\326\367\273\372\241\243",
+        );
+        assert!(!gbk.contains(r"\262"), "{gbk}");
+        if unsafe { windows::Win32::Globalization::GetACP() } == 936 {
+            assert!(gbk.ends_with("不知道这样的主机。"), "{gbk}");
+        }
+    }
+
     #[test]
     fn process_start_times() {
         let me = super::process_started(std::process::id()).expect("this process runs");
