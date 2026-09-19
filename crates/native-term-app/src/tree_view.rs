@@ -40,6 +40,9 @@ pub enum TreeAction {
     CredentialSets,
     /// NativeTerm's tmux / screen sessions on this host.
     ServerSessions(String),
+    /// The same for the folder's hosts kept on the server: its name, and
+    /// those hosts.
+    FolderServerSessions(String, Vec<HostRequest>),
     /// The host's files (SFTP).
     Files(String),
     /// Keep the folder out of sends to several sessions (or not).
@@ -596,6 +599,25 @@ impl TreeView {
                             {
                                 let list = hosts.iter().map(|h| (h.alias.clone(), h.label.clone())).collect();
                                 actions.push(TreeAction::InstallKey(list));
+                                ui.close();
+                            }
+                            // its hosts kept on the server (tmux / screen)
+                            let kept: Vec<HostRequest> = hosts
+                                .iter()
+                                .filter(|r| {
+                                    tree.find(&r.alias).is_some_and(|(f, h)| {
+                                        h.plink.is_none() && native_term_config::persistent::for_host(f, h).is_some()
+                                    })
+                                })
+                                .cloned()
+                                .collect();
+                            if ui
+                                .add_enabled(!kept.is_empty(), egui::Button::new(t!("menu-server-sessions")))
+                                .on_hover_text(t!("menu-folder-server-sessions-hint"))
+                                .on_disabled_hover_text(t!("menu-folder-server-sessions-none"))
+                                .clicked()
+                            {
+                                actions.push(TreeAction::FolderServerSessions(name.clone(), kept));
                                 ui.close();
                             }
                             if let Some((file, is_main)) = &own {

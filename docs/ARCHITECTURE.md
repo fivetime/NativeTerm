@@ -2410,9 +2410,24 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
   → "End Now" on it ended the session on the server (`tmux ls`: no
   server), the list said there were none, and the tab showed "ended (0)"
   (the remote shell ended, ssh exited normally).
-- **Not yet**: the same list per folder, hiding tmux's status bar,
-  `tmux send-keys` group send, previews, logging for screen sessions
-  (`-L -Logfile` needs screen 4.6).
+- **Per folder**: "Sessions on the Server…" in a folder's menu (only
+  when a host under it is kept on the server) lists the sessions of all
+  those hosts in one window, grouped by host, each with the same actions.
+  The hosts are asked at the same time, six at most (one `ssh -o
+  BatchMode=yes` each); a host that can't be asked shows its own error
+  and the rest are still listed. After ending a session or deleting a
+  log only that host is asked again. Two aliases of one server both list
+  its sessions: each session shows under the host it belongs to only.
+  "Open All (n)" opens every session of these hosts that is attached
+  nowhere and in no tab, in new tabs (after a restart, say).
+  Verified: two hosts on one container with a detached session each and
+  an ended session's log; the folder's list showed each session under
+  its own host and the log under its host; "Open All (2)" opened two
+  tabs attached to them (`tmux ls`: both attached, no new session; the
+  text typed before was still on screen) and the list then showed "in
+  tab …" with "Show Tab".
+- **Not yet**: previews, logging for screen sessions (`-L -Logfile` needs
+  screen 4.6).
 
 ## File transfer (SFTP)
 

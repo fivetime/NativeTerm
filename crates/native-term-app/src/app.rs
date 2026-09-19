@@ -573,17 +573,22 @@ impl App {
                     let on_login = folder.nt(host, "onlogin").map(str::to_string);
                     let ssh = self.editor.ssh().to_path_buf();
                     let config = self.editor.config().map(Path::to_path_buf);
-                    let dialog = ServerSessionsDialog::new(
-                        &self.egui_ctx,
-                        &alias,
-                        host.label(),
+                    let request = native_term_app::HostRequest {
                         on_login,
-                        ssh,
-                        config,
-                        self.data_dir.clone(),
-                    );
+                        ..native_term_app::HostRequest::new(&alias, host.label())
+                    };
+                    let data_dir = self.data_dir.clone();
+                    let dialog =
+                        ServerSessionsDialog::new(&self.egui_ctx, host.label(), vec![request], ssh, config, data_dir);
                     self.dialog = Some(Dialog::ServerSessions(Box::new(dialog)));
                 }
+            }
+            TreeAction::FolderServerSessions(name, hosts) => {
+                let ssh = self.editor.ssh().to_path_buf();
+                let config = self.editor.config().map(Path::to_path_buf);
+                let data_dir = self.data_dir.clone();
+                let dialog = ServerSessionsDialog::new(&self.egui_ctx, &name, hosts, ssh, config, data_dir);
+                self.dialog = Some(Dialog::ServerSessions(Box::new(dialog)));
             }
             TreeAction::FolderTabColor(file, value) => {
                 if let Err(e) = self.editor.set_folder_tab_color(&file, value.as_deref()) {
