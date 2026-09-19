@@ -137,6 +137,9 @@ pub struct App {
     /// The recent hosts, read from `state.db` at most every 2 s (the tree
     /// asks on every frame, and scrolling draws many).
     recent_cache: std::cell::RefCell<(Option<std::time::Instant>, Vec<String>)>,
+    /// Tests: `NATIVETERM_OPEN_FILES=<alias>` opens that host's files
+    /// window once the tree is there.
+    open_files: Option<String>,
     /// Hosts of folders marked "No group send", per tree generation.
     no_group_cache: std::cell::RefCell<(u64, std::collections::HashSet<String>)>,
     dialog: Option<Dialog>,
@@ -245,6 +248,7 @@ impl App {
             view: TreeView::default(),
             send_line: SendLine::default(),
             recent_cache: std::cell::RefCell::new((None, Vec::new())),
+            open_files: std::env::var("NATIVETERM_OPEN_FILES").ok().filter(|a| !a.is_empty()),
             no_group_cache: std::cell::RefCell::new((u64::MAX, std::collections::HashSet::new())),
             dialog: None,
             profile,
@@ -452,6 +456,23 @@ impl App {
                         self.dialog = Some(Dialog::Options(Box::new(dialog)));
                     }
                     Err(e) => self.notices.push(e.to_string()),
+                }
+            }
+            TreeAction::Files(alias) => {
+                if let Some((folder, host)) = self.tree.find(&alias) {
+                    // `NativeTermFileEncoding` (host or folder): how the server names files
+                    let names = folder
+                        .nt(host, "fileencoding")
+                        .and_then(native_term_sftp::Names::from_label)
+                        .unwrap_or_default();
+                    crate::files_window::open(crate::files_window::Spec {
+                        alias: alias.clone(),
+                        label: host.label().to_string(),
+                        ssh: self.editor.ssh().to_path_buf(),
+                        config: self.editor.config().map(Path::to_path_buf),
+                        names,
+                        shim: native_term_app::default_shim_path().unwrap_or_default(),
+                    });
                 }
             }
             TreeAction::ServerSessions(alias) => {
@@ -1434,6 +1455,9 @@ impl crate::window::Ui for App {
             });
         for action in actions {
             self.handle(action);
+        }
+        if let Some(alias) = self.open_files.take_if(|a| self.tree.find(a).is_some()) {
+            self.handle(TreeAction::Files(alias));
         }
         egui::CentralPanel::default().show_inside(ui, |ui| self.right_panel(ui));
         self.show_dialog(ctx);

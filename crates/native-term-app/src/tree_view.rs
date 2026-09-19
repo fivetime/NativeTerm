@@ -36,6 +36,8 @@ pub enum TreeAction {
     FolderPersistent(PathBuf, Option<String>),
     /// NativeTerm's tmux / screen sessions on this host.
     ServerSessions(String),
+    /// The host's files (SFTP).
+    Files(String),
     /// Keep the folder out of sends to several sessions (or not).
     FolderNoGroupSend(PathBuf, bool),
     /// The folder's tab color / color scheme default (`None`: none).
@@ -729,6 +731,10 @@ impl TreeView {
                             }
                             if ssh && ui.button(t!("menu-server-sessions")).on_hover_text(t!("menu-server-sessions-hint")).clicked() {
                                 actions.push(TreeAction::ServerSessions(alias.to_string()));
+                                ui.close();
+                            }
+                            if ssh && ui.button(t!("menu-files")).on_hover_text(t!("menu-files-hint")).clicked() {
+                                actions.push(TreeAction::Files(alias.to_string()));
                                 ui.close();
                             }
                             ui.menu_button(t!("menu-move-to"), |ui| {

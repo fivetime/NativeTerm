@@ -27,6 +27,16 @@ pub const UNLOCK: char = '\u{E785}';
 pub const STAR_FILLED: char = '\u{E735}';
 pub const CONNECT: char = '\u{E703}';
 pub const SAVE: char = '\u{E74E}';
+pub const UP: char = '\u{E74A}';
+pub const UPLOAD: char = '\u{E898}';
+pub const DOWNLOAD: char = '\u{E896}';
+pub const NEW_FOLDER: char = '\u{E8F4}';
+pub const DOCUMENT: char = '\u{E8A5}';
+pub const LINK: char = '\u{E71B}';
+pub const EDIT: char = '\u{E70F}';
+pub const RENAME: char = '\u{E8AC}';
+pub const DELETE: char = '\u{E74D}';
+pub const ACCEPT: char = '\u{E73E}';
 
 /// `glyph` then `text`, for buttons.
 pub fn with(glyph: char, text: impl AsRef<str>) -> String {

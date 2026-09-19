@@ -20,6 +20,10 @@ use native_term_session::pipe;
 /// Set for ssh (and so for the helper): the batch's pipe.
 pub const PIPE_VAR: &str = "NATIVETERM_ASKPASS";
 
+/// Set when ssh has no console the user can see (NativeTerm's SFTP):
+/// what the pipe doesn't answer is cancelled, never asked in the console.
+pub const NO_CONSOLE_VAR: &str = "NATIVETERM_ASKPASS_NO_CONSOLE";
+
 /// Whether ssh asks for the account password (not a passphrase, a new
 /// password or a code).
 pub fn is_password_prompt(prompt: &str) -> bool {
@@ -59,10 +63,13 @@ pub fn serve_with(answer: impl Fn(&str, u32) -> Option<String> + Send + 'static)
 pub fn answer(pipe_name: &str, prompt: &str) -> i32 {
     let served = pipe::connect(pipe_name, Duration::from_secs(2)).ok().and_then(|conn| {
         conn.send(&prompt.to_string()).ok()?;
-        conn.recv::<Option<String>>(Duration::from_secs(10)).ok().flatten().flatten()
+        // long enough for an answer typed in NativeTerm's window (SFTP)
+        conn.recv::<Option<String>>(Duration::from_secs(300)).ok().flatten().flatten()
     });
     let answer = match served {
         Some(password) => password,
+        // cancelled, with nobody at a console to ask
+        None if std::env::var_os(NO_CONSOLE_VAR).is_some() => return 1,
         // not a password: ask here, echoing only a yes/no question
         None => match crate::win::read_line(prompt, prompt.contains("(yes/no")) {
             Ok(line) => line,

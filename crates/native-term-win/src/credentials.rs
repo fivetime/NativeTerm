@@ -33,11 +33,28 @@ pub fn read(target: &str) -> io::Result<Option<Saved>> {
         let c = &*found;
         let blob = std::slice::from_raw_parts(c.CredentialBlob, c.CredentialBlobSize as usize);
         let text = |p: PWSTR| if p.is_null() { String::new() } else { p.to_string().unwrap_or_default() };
-        let saved = Saved { user: text(c.UserName), secret: String::from_utf8_lossy(blob).into_owned(), comment: text(c.Comment) };
+        let saved = Saved { user: text(c.UserName), secret: blob_text(blob), comment: text(c.Comment) };
         CredFree(found as *const _);
         saved
     };
     Ok(Some(saved))
+}
+
+/// A credential's secret as text. NativeTerm writes UTF-8; `cmdkey`,
+/// Windows' own credential dialogs and most other tools write UTF-16LE.
+/// UTF-8 text has no NUL bytes (a password can't contain NUL), UTF-16 of
+/// ASCII has one in every other byte, and UTF-16 of other text is almost
+/// never valid UTF-8: so valid UTF-8 without NUL is UTF-8, anything else
+/// of even length is UTF-16.
+fn blob_text(blob: &[u8]) -> String {
+    match std::str::from_utf8(blob) {
+        Ok(text) if !text.contains('\0') => text.to_string(),
+        _ if blob.len().is_multiple_of(2) => {
+            let wide: Vec<u16> = blob.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+            String::from_utf16_lossy(&wide).trim_end_matches('\0').to_string()
+        }
+        _ => String::from_utf8_lossy(blob).into_owned(),
+    }
 }
 
 /// Create or replace the credential named `target`.
@@ -92,5 +109,15 @@ mod tests {
         assert!(delete(&target).unwrap());
         assert!(!delete(&target).unwrap());
         assert_eq!(read(&target).unwrap(), None);
+    }
+
+    /// Secrets written by other tools (UTF-16LE) read like NativeTerm's own.
+    #[test]
+    fn secrets_in_utf16() {
+        let utf16 = |s: &str| s.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<u8>>();
+        assert_eq!(blob_text(b"plain"), "plain");
+        assert_eq!(blob_text("密码".as_bytes()), "密码");
+        assert_eq!(blob_text(&utf16("plain")), "plain");
+        assert_eq!(blob_text(&utf16("密码 pässwörd")), "密码 pässwörd");
     }
 }

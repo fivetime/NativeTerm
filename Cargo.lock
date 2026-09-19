@@ -1826,6 +1826,7 @@ dependencies = [
  "native-term-i18n",
  "native-term-platform",
  "native-term-session",
+ "native-term-sftp",
  "native-term-win",
  "rusqlite",
  "serde",

@@ -7,10 +7,12 @@
 //! memory at all. A window is repainted only on input and on
 //! `request_repaint`.
 //!
-//! Two windows: the main one (dockable, see `dock.rs`) and the floating
-//! button, shown while the docked main window is hidden. Each has its own
-//! egui context, so they paint independently.
+//! The main window (dockable, see `dock.rs`), the floating button (shown
+//! while the docked main window is hidden), and windows opened while
+//! running (`open`, e.g. a host's files). Each has its own egui context,
+//! so they paint independently.
 
+use std::cell::RefCell;
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -33,6 +35,37 @@ pub trait Ui {
 
     /// The main window is closing and the program ends.
     fn on_exit(&mut self) {}
+
+    /// A window from `open`: its close button was clicked. False keeps it
+    /// open (to ask first, e.g. while files are being transferred).
+    fn close_requested(&mut self) -> bool {
+        true
+    }
+
+    /// A window from `open` wants to close (checked after each frame).
+    fn wants_close(&self) -> bool {
+        false
+    }
+}
+
+/// A window to open (see `open`).
+struct Request {
+    key: String,
+    viewport: egui::ViewportBuilder,
+    factory: Factory,
+}
+
+thread_local! {
+    static REQUESTS: RefCell<Vec<Request>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Opens another window, or brings the one with the same `key` to the
+/// front. Called from a window's UI (the event loop's thread); the window
+/// appears once the current frame is done. It ends when closed (its `Ui`
+/// is dropped then) or with the main window.
+pub fn open(key: impl Into<String>, viewport: egui::ViewportBuilder, factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static) {
+    let request = Request { key: key.into(), viewport, factory: Box::new(factory) };
+    REQUESTS.with(|r| r.borrow_mut().push(request));
 }
 
 type Factory = Box<dyn FnOnce(&egui::Context) -> Box<dyn Ui>>;
@@ -103,6 +136,8 @@ struct Docking {
 enum Which {
     Main,
     Button,
+    /// A window from `open`, by its number.
+    Extra(u64),
 }
 
 enum UserEvent {
@@ -327,6 +362,9 @@ struct Runner {
     placement: Option<Placement>,
     save: SavePlacement,
     docking: Docking,
+    /// Windows from `open`: number, key, window.
+    extras: Vec<(u64, String, Pane)>,
+    next_extra: u64,
 }
 
 /// Run the windows until the main one is closed.
@@ -355,6 +393,8 @@ pub fn run(
         placement,
         save,
         docking: Docking::default(),
+        extras: Vec::new(),
+        next_extra: 1,
     };
     event_loop.run_app(&mut runner).map_err(|e| e.to_string())?;
     match runner.error {
@@ -418,7 +458,46 @@ impl Runner {
         if self.button.as_ref().is_some_and(|p| p.window.id() == id) {
             return self.button.as_mut().map(|p| (Which::Button, p));
         }
-        None
+        self.extras.iter_mut().find(|(_, _, p)| p.window.id() == id).map(|(n, _, p)| (Which::Extra(*n), p))
+    }
+
+    fn extra(&mut self, n: u64) -> Option<&mut Pane> {
+        self.extras.iter_mut().find(|(m, _, _)| *m == n).map(|(_, _, p)| p)
+    }
+
+    /// Opens the windows asked for since the last time (or shows the open
+    /// one with the same key).
+    fn open_requested(&mut self, event_loop: &ActiveEventLoop) {
+        let requests = REQUESTS.with(|r| std::mem::take(&mut *r.borrow_mut()));
+        for request in requests {
+            if let Some((_, _, pane)) = self.extras.iter().find(|(_, k, _)| *k == request.key) {
+                if pane.window.is_minimized() == Some(true) {
+                    pane.window.set_minimized(false);
+                }
+                pane.window.focus_window();
+                continue;
+            }
+            let n = self.next_extra;
+            self.next_extra += 1;
+            let viewport = request.viewport.with_visible(false);
+            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, |_| {}) {
+                Ok(mut pane) => {
+                    // painted at once: a hidden window gets no redraw
+                    if let Err(e) = pane.paint(self.frame_log.as_ref(), true) {
+                        eprintln!("window {}: {e}", request.key);
+                        continue;
+                    }
+                    pane.window.focus_window();
+                    self.extras.push((n, request.key, pane));
+                }
+                Err(e) => eprintln!("window {}: {e}", request.key),
+            }
+        }
+    }
+
+    fn close_extra(&mut self, n: u64) {
+        // dropping the pane drops its Ui (which ends its connections)
+        self.extras.retain(|(m, _, _)| *m != n);
     }
 
     fn hwnd(&self) -> Option<isize> {
@@ -640,6 +719,13 @@ impl Runner {
                     button.paint(log, false)?;
                 }
             }
+            Which::Extra(n) => {
+                let Some((_, _, pane)) = self.extras.iter_mut().find(|(m, _, _)| *m == n) else { return Ok(()) };
+                pane.paint(log, true)?;
+                if pane.ui.wants_close() {
+                    self.close_extra(n);
+                }
+            }
         }
         Ok(())
     }
@@ -677,9 +763,18 @@ impl ApplicationHandler<UserEvent> for Runner {
                 if let Some(main) = self.main.as_mut() {
                     main.ui.on_exit();
                 }
+                self.extras.clear();
                 event_loop.exit();
             }
-            WindowEvent::CloseRequested => {}
+            WindowEvent::CloseRequested => {
+                if let Which::Extra(n) = which {
+                    if pane.ui.close_requested() {
+                        self.close_extra(n);
+                    } else {
+                        pane.window.request_redraw();
+                    }
+                }
+            }
             event => {
                 if pane.state.on_window_event(&pane.window, &event).repaint {
                     pane.window.request_redraw();
@@ -691,6 +786,7 @@ impl ApplicationHandler<UserEvent> for Runner {
                             self.button_settle = Some(now + dock::DRAG_POLL);
                         }
                     }
+                    Which::Extra(_) => {}
                 }
             }
         }
@@ -702,6 +798,7 @@ impl ApplicationHandler<UserEvent> for Runner {
                 let pane = match which {
                     Which::Main => self.main.as_mut(),
                     Which::Button => self.button.as_mut(),
+                    Which::Extra(n) => self.extra(n),
                 };
                 if let Some(pane) = pane {
                     pane.on_repaint(when, pass);
@@ -716,6 +813,7 @@ impl ApplicationHandler<UserEvent> for Runner {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.open_requested(event_loop);
         let now = Instant::now();
         if shell::take_show_main() {
             self.show_main();
@@ -737,7 +835,8 @@ impl ApplicationHandler<UserEvent> for Runner {
         }
         let main = self.main.as_mut().and_then(|p| p.tick(now));
         let button = self.button.as_mut().and_then(|p| p.tick(now));
-        match [main, button, docking, self.button_settle].into_iter().flatten().min() {
+        let extras = self.extras.iter_mut().filter_map(|(_, _, p)| p.tick(now)).min();
+        match [main, button, docking, self.button_settle, extras].into_iter().flatten().min() {
             Some(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at.max(now))),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }

@@ -22,6 +22,7 @@ native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
 native-term-platform = { path = "../native-term-platform" }
 native-term-win = { path = "../native-term-win" }
+native-term-sftp = { path = "../native-term-sftp" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 toml = "0.9"
 serde = { version = "1", features = ["derive"] }

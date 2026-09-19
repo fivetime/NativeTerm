@@ -9,6 +9,7 @@ pub mod desktop;
 pub mod dock;
 pub mod registry;
 pub mod service;
+pub mod shell;
 pub mod watch;
 
 use std::io;
@@ -243,6 +244,7 @@ pub fn map_file_for_process(path: &Path) -> io::Result<&'static [u8]> {
 
 /// The system's ANSI code page (936 on Chinese Windows).
 pub fn ansi_code_page() -> u32 {
+    // SAFETY: no parameters, reads a system value.
     unsafe { windows::Win32::Globalization::GetACP() }
 }
 

@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+pub mod transfer;
 pub mod wire;
 
 use wire::{Attrs, Body, Fields};
@@ -200,6 +201,15 @@ fn ssh_text(bytes: &[u8]) -> String {
     return String::from_utf8_lossy(bytes).into_owned();
 }
 
+/// ssh's prompts (password, passphrase, host key, codes) go to `program`
+/// (`SSH_ASKPASS`, forced), with `env` added for it.
+pub struct Askpass {
+    pub program: std::path::PathBuf,
+    pub env: Vec<(String, String)>,
+    /// `NumberOfPasswordPrompts` (1 with a saved password: no retries).
+    pub password_prompts: Option<u32>,
+}
+
 type Waiters = HashMap<u32, Sender<Result<Reply>>>;
 
 struct Shared {
@@ -224,8 +234,15 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 impl Session {
     /// SFTP to `alias` through ssh: `ssh [-F config] <options> -s -- alias
     /// sftp`. Without `askpass` ssh runs in batch mode (keys or the agent
-    /// only); with it, `SSH_ASKPASS` is that program, forced.
-    pub fn connect(ssh: &Path, config: Option<&Path>, alias: &str, askpass: Option<&Path>) -> Result<Session> {
+    /// only); with it, every prompt goes to that helper (see `Askpass`).
+    /// `on_spawn` gets ssh's process id before it asks anything.
+    pub fn connect(
+        ssh: &Path,
+        config: Option<&Path>,
+        alias: &str,
+        askpass: Option<&Askpass>,
+        on_spawn: impl FnOnce(u32),
+    ) -> Result<Session> {
         if alias.is_empty() || alias.starts_with('-') {
             return Err(Error::Protocol(format!("invalid host {alias:?}")));
         }
@@ -248,9 +265,14 @@ impl Session {
             command.arg("-o").arg(option);
         }
         match askpass {
-            Some(program) => {
-                command.env("SSH_ASKPASS", program).env("SSH_ASKPASS_REQUIRE", "force");
-                command.arg("-o").arg("NumberOfPasswordPrompts=1");
+            Some(a) => {
+                command.env("SSH_ASKPASS", &a.program).env("SSH_ASKPASS_REQUIRE", "force");
+                for (key, value) in &a.env {
+                    command.env(key, value);
+                }
+                if let Some(n) = a.password_prompts {
+                    command.arg("-o").arg(format!("NumberOfPasswordPrompts={n}"));
+                }
             }
             None => {
                 command.arg("-o").arg("BatchMode=yes");
@@ -262,14 +284,20 @@ impl Session {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000); // no console window
         }
-        Session::spawn(command)
+        Session::spawn_then(command, on_spawn)
     }
 
     /// Runs `command` (an SFTP server on its stdin and stdout, e.g. `ssh
     /// -s … sftp` or a local `sftp-server`) and starts the session.
-    pub fn spawn(mut command: Command) -> Result<Session> {
+    pub fn spawn(command: Command) -> Result<Session> {
+        Session::spawn_then(command, |_| {})
+    }
+
+    /// `spawn`, telling `on_spawn` the process id first.
+    pub fn spawn_then(mut command: Command, on_spawn: impl FnOnce(u32)) -> Result<Session> {
         command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = command.spawn().map_err(|e| Error::Io(e.to_string()))?;
+        on_spawn(child.id());
         let stdin: ChildStdin = child.stdin.take().ok_or_else(|| Error::Io("no stdin".into()))?;
         let stdout = child.stdout.take().ok_or_else(|| Error::Io("no stdout".into()))?;
         // ssh's messages: why it couldn't connect, if it can't
@@ -867,7 +895,7 @@ mod tests {
         let (config, alias) = spec.split_once('|').unwrap();
         let ssh = Path::new(r"C:\Windows\System32\OpenSSH\ssh.exe");
         let start = std::time::Instant::now();
-        let sftp = Session::connect(ssh, Some(Path::new(config)), alias, None).unwrap();
+        let sftp = Session::connect(ssh, Some(Path::new(config)), alias, None, |_| {}).unwrap();
         let home = sftp.realpath(b".").unwrap();
         println!("connected in {:?}, home {}", start.elapsed(), String::from_utf8_lossy(&home));
         let dir = tempfile::tempdir().unwrap();
@@ -903,7 +931,7 @@ mod tests {
         assert!(sftp.stat(&join(&home, b"link-to-tmp")).unwrap().is_dir(), "stat follows it to a directory");
         assert_eq!(sftp.readlink(&join(&home, b"link-to-tmp")).unwrap(), b"/tmp");
 
-        let wrong = Session::connect(ssh, Some(Path::new(config)), "no-such-host.invalid", None);
+        let wrong = Session::connect(ssh, Some(Path::new(config)), "no-such-host.invalid", None, |_| {});
         println!("unknown host: {}", wrong.err().unwrap());
     }
 

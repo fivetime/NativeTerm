@@ -18,6 +18,7 @@ mod send_dialog;
 mod send_line;
 mod server_sessions;
 mod fab;
+mod files_window;
 mod icons;
 mod key_dialog;
 mod options_dialog;

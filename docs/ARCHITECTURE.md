@@ -445,7 +445,7 @@ Therefore NativeTerm provides its own menus:
 | Send to New Window (move a running tab) | Manual | No `wt` command; the user drags the tab out and NativeTerm re-claims it |
 | Save Session | Yes | Writes a `Host` block into `~/.ssh/config.d/<folder>.conf` |
 | Font | Indirect | Windows Terminal profile, selected per folder/host |
-| Connect SFTP / Open SecureFX | Indirect | Shell out to an external tool (e.g. WinSCP) |
+| Connect SFTP / Open SecureFX | **Yes** | Built in: "Files (SFTP)…" on a host, see "File transfer (SFTP)" |
 | Send Commands to Active Session | Yes | See "Sending commands" |
 | Send Commands to This Group | **Yes** (source-confirmed) | Shim-based console input injection, confirmed against both the console host and Windows OpenSSH sources; an end-to-end prototype remains. `tmux send-keys` fallback for persistent sessions |
 | Session logging (record all output) | **SSH: no** (client side); **other protocols: yes** | SSH output goes straight into the terminal; NativeTerm never sees it. Server-side logging for persistent sessions ("tmux, recorded on the server", see "Persistent remote sessions (tmux)"); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
@@ -508,7 +508,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 |---|---|---|
 | **Connection**: Name | `NativeTermLabel` | ✅ |
 | Protocol SSH2 / Telnet / Serial / … | SSH via OpenSSH; others via plink | ✅ |
-| File transfer / "SFTP session" | `sftp <alias>` in a tab, or a configured external tool (e.g. WinSCP) | 🟡 |
+| File transfer / "SFTP session" | Built-in files window over `ssh -s sftp` (browse, up/download, drag in, edit in place, any file name encoding) | ✅ |
 | Local shell command: Pre-connect | `NativeTermPreConnect` (shim runs it before `ssh`); plink: `-preconnectcommand` | ✅ |
 | Description | one line in `NativeTermNote`; multi-line in `state.db` | ✅ |
 | **Logon Actions**: Automate logon (Expect/Send table) | Not in general: NativeTerm never reads output. Covered cases: passwords and keyboard-interactive via askpass (SSH); commands after login via the `LocalCommand` signal (SSH) or a delay (plink); a password for `su`/`sudo` after login as delayed, hidden injection | 🟡 |
@@ -539,7 +539,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | Log File | SSH: not client-side (OpenSSH), but on the server for persistent sessions (`tmux-log`: `pipe-pane`, read / copied / deleted from "Sessions on the Server"); other protocols: ntplink's session log; Terminal's "Export text" by hand | 🟡 |
 | Printing | Not in Windows Terminal | ❌ |
 | X/Y/Zmodem | Not in Windows Terminal; optional `NativeTermTrzsz` | 🟡 |
-| **File Transfer**: FTP/SFTP | External tool / `sftp` / `scp` | 🟡 |
+| **File Transfer**: FTP/SFTP | SFTP built in (see "File transfer (SFTP)"); FTP not planned | ✅/❌ |
 | **PuTTY-only pages** (plink sessions) | See "Other protocols via plink" | |
 
 ## Tab identity
@@ -2350,6 +2350,116 @@ Implemented (`native_term_config::persistent`, shim `persistent.rs`):
 - **Not yet**: the same list per folder, hiding tmux's status bar,
   `tmux send-keys` group send, previews, logging for screen sessions
   (`-L -Logfile` needs screen 4.6).
+
+## File transfer (SFTP)
+
+Every SSH host has **Files (SFTP)…** in its menu: a window of its own
+(one per host) to browse the server's files, upload, download, create
+folders, rename, delete, and edit a file in place. Nothing is installed
+on the server: the SFTP subsystem comes with OpenSSH's server (a user
+without sudo, or one who won't install lrzsz/trzsz, can still transfer
+files). Decided by the user: file transfer is built in, not only handed
+to an external tool.
+
+**Transport: `ssh -s <alias> sftp`, Windows' own OpenSSH.** The host's
+config, keys, ssh-agent, jump hosts and `known_hosts` work exactly as in
+its terminal tab; NativeTerm doesn't carry a second SSH implementation.
+Options added: `RequestTTY=no`, `ClearAllForwardings=yes`,
+`PermitLocalCommand=no`, `RemoteCommand=none` (a host's own
+RemoteCommand next to `-s` makes ssh refuse), `ForwardAgent=no`,
+`ForwardX11=no`, `ConnectTimeout=15`, `ServerAliveInterval=15`, no console
+window. Windows OpenSSH can't share the terminal's connection
+(`ControlMaster` needs descriptor passing), so the files window logs in
+once more. ssh's stderr is decoded for messages (`\ooo` escapes, then
+UTF-8 or the ANSI code page: "不知道这样的主机。" instead of
+`\262\273…`, `native_term_win::ssh_message`).
+
+**Authentication.** ssh's prompts go to the shim as askpass helper
+(`SSH_ASKPASS` forced, `NATIVETERM_ASKPASS` = a private pipe of the files
+window, `NATIVETERM_ASKPASS_NO_CONSOLE=1`). Only the helper whose parent is
+this window's ssh is answered: the account's own password prompt
+(`Target::answers`) from Credential Manager when saved and not marked
+refused (then `NumberOfPasswordPrompts=1`; a refusal marks it, as in a
+tab); any other prompt — a password not saved, a passphrase, a new host
+key, a code — is asked in the window (password fields without IME).
+Cancelling one cancels the rest of that connection's prompts (ssh would
+ask again), and with no console the helper never waits on a hidden one.
+The helper waits up to 300 s for an answer typed in the window.
+Credential Manager secrets written by other tools (`cmdkey`, Windows'
+dialogs: UTF-16LE) are read too (`credentials::blob_text`).
+
+**Protocol: `native_term_sftp`, SFTP v3 of our own (~750 lines).** The
+libraries checked (2026-09) — `russh-sftp` 3.0 and `openssh-sftp-client`
+0.15 — both run over `ssh.exe`'s pipes on Windows at the same speed, but
+both take file names as UTF-8 (`String` / `Path`): a GBK-named file on
+the test server showed as `����.txt` and couldn't be opened
+(`russh-sftp`), or the whole directory failed to list
+(`openssh-sftp-client`); both also need tokio. Ours:
+- a `Session` usable from several threads: requests written under a
+  lock, a reader thread hands each reply to its request by id, so a
+  folder is listed while a transfer runs;
+- transfers keep 64 × 32 KB requests in flight (as OpenSSH's sftp),
+  writing each chunk where it belongs (replies in any order, short reads
+  asked again), progress per chunk, cancel; a cancelled or failed
+  download leaves no partial file;
+- file names are bytes end to end. `Names` decides only how they're shown
+  and how new ones are written: Auto (UTF-8 where valid, else the system's
+  ANSI code page) or any `encoding_rs` encoding (GBK, GB18030, Big5,
+  Shift_JIS, EUC-JP, EUC-KR, Windows-125x, ISO-8859-x, KOI8, …) chosen in
+  the window or as `NativeTermFileEncoding` (host or folder). Bytes valid
+  in neither show as `\xNN`; new names are encoded strictly (a name that
+  can't be written in the encoding is refused, never a look-alike);
+- `transfer`: folders both ways (planned first for the total, existing
+  folders reused, files replaced; a link to a folder isn't followed, so
+  no loops), recursive delete; server names become valid Windows names
+  (`< > : " / \ | ? *`, trailing dots, `CON`…).
+
+**The window** (`files_window.rs`, `window::open`: the runner now opens
+windows while running, each with its own egui context; closing one with
+transfers or edits running asks first). Toolbar: up, refresh, path,
+Upload… (the system's file picker on a thread), Download (to Downloads;
+right-click: Download To…), Edit, Delete (asked, "folders with
+everything in them"), New Folder, name encoding. Files dropped from
+Explorer are uploaded to the folder shown. Rows show name, size,
+modified, `ls -l` permissions; links to folders open like folders;
+Ctrl/Shift selection; F5, Backspace, Enter, F2, Delete. Rows and icon
+buttons are named for screen readers and UI automation (AccessKit).
+Transfers show progress, speed and Cancel; a finished download has Open
+Folder.
+
+**Editing in place.** Edit (or Enter, double-click) downloads the file
+to `%TEMP%\NativeTerm-edit\<host>\<random>\`, opens it with its program
+(ShellExecute; none registered: Windows' "How do you want to open"), and
+watches it: when it changes and has stopped changing, it is uploaded to
+`.<name>.nt-<random>` next to the original, given the original's
+permissions and renamed over it (`posix-rename@openssh.com`), so the file
+on the server is never half written; where that isn't allowed (no write
+access to the folder) it is written in place. If the server's copy
+changed since it was opened, nothing is uploaded until "Overwrite".
+
+**Verified** (Windows 11, daas Ubuntu container over the network, and
+Windows' own `sftp-server.exe` over pipes in unit tests): listing a
+3000-entry folder in 0.34 s; 32 MB up 10–11 MB/s, down at the link's
+1.2 MB/s (`sftp.exe`: the same); a connection killed mid-upload fails
+at once, later calls too; missing file, unwritable local path, directory
+as file, rename without and with replace, nothing left open; a GBK-named
+file listed as 中文.txt, downloaded, renamed and back; a link to /tmp
+listed as a link, opened as a folder; folders up and down with an empty
+folder and CJK names, progress adding up; an edited file uploaded on save
+by replacing (no temporary file left), a change on the server holding
+the upload until Overwrite. In the real window, driven through UI
+Automation in a test instance (`NATIVETERM_OPEN_FILES`,
+`NATIVETERM_DOWNLOADS`, test folders): listing, Download of the GBK file,
+Upload of two files through the picker (SHA256 equal on the server),
+Delete with confirmation; a password host with the password saved (test
+credential) connected without asking; without it the window asked
+(`root@…'s password:`), and Cancel ended the connection at once with
+ssh's message. Not tried here: typing into the window's text fields
+(egui's text fields don't take UI Automation's SetValue) and dropping
+files from Explorer.
+
+**Not yet:** resuming a broken transfer, transfers between two servers,
+remembering the last folder per host, comparing / syncing folders.
 
 ## Active session tracking
 
