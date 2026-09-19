@@ -34,6 +34,10 @@ pub enum TreeAction {
     FolderOptions(PathBuf),
     /// The folder's persistent-session default (`tmux`, `screen`, none).
     FolderPersistent(PathBuf, Option<String>),
+    /// The folder's credential set (`None`: no set).
+    FolderCredential(PathBuf, Option<String>),
+    /// The credential sets dialog.
+    CredentialSets,
     /// NativeTerm's tmux / screen sessions on this host.
     ServerSessions(String),
     /// The host's files (SFTP).
@@ -636,6 +640,27 @@ impl TreeView {
                                     })
                                     .response
                                     .on_hover_text(t!("field-persistent-hint"));
+                                    let set = folder
+                                        .and_then(|i| folders.get(i))
+                                        .and_then(|f| f.defaults.get(native_term_config::password::KEY))
+                                        .map(str::to_string);
+                                    ui.menu_button(t!("menu-folder-credential"), |ui| {
+                                        let sets = crate::credential_sets::names();
+                                        for value in std::iter::once(None).chain(sets.into_iter().map(Some)) {
+                                            let text = value.clone().unwrap_or_else(|| t!("credential-folder-none"));
+                                            if ui.radio(set == value, text).clicked() {
+                                                actions.push(TreeAction::FolderCredential(file.clone(), value));
+                                                ui.close();
+                                            }
+                                        }
+                                        ui.separator();
+                                        if ui.button(t!("cred-sets-button")).clicked() {
+                                            actions.push(TreeAction::CredentialSets);
+                                            ui.close();
+                                        }
+                                    })
+                                    .response
+                                    .on_hover_text(t!("field-credential-hint"));
                                     let defaults = folder.and_then(|i| folders.get(i)).map(|f| &f.defaults);
                                     let color = defaults
                                         .and_then(|d| d.get(native_term_config::appearance::TAB_COLOR))

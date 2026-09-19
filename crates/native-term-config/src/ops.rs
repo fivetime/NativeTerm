@@ -18,6 +18,7 @@ use crate::effective;
 use crate::folder_options;
 use crate::header;
 use crate::options;
+use crate::password;
 use crate::persistent;
 use crate::plink::{self, PlinkSession};
 use crate::securecrt::{self, Plan};
@@ -47,6 +48,9 @@ pub struct HostDraft {
     /// The host's own `NativeTermColorScheme` (a scheme name, `none`);
     /// `None` follows the folder.
     pub color_scheme: Option<String>,
+    /// The host's own `NativeTermCredential` (a credential set's name, or
+    /// `none`); `None` follows the folder.
+    pub credential: Option<String>,
 }
 
 impl HostDraft {
@@ -63,6 +67,7 @@ impl HostDraft {
             persistent: host.nt.get(persistent::KEY).map(str::to_string),
             tab_color: host.nt.get(appearance::TAB_COLOR).map(str::to_string),
             color_scheme: host.nt.get(appearance::COLOR_SCHEME).map(str::to_string),
+            credential: host.nt.get(password::KEY).map(str::to_string),
         }
     }
 
@@ -88,6 +93,11 @@ impl HostDraft {
         }
         if self.on_login.as_deref().is_some_and(|n| n.contains(['\r', '\n'])) {
             return Err(EditError::Invalid("the login command must be one line".into()));
+        }
+        if let Some(c) = &self.credential {
+            if !c.eq_ignore_ascii_case("none") && !password::valid_set_name(c) {
+                return Err(EditError::Invalid(format!("credential set {c:?}: no spaces, quotes or / \\ : * ?")));
+            }
         }
         if let Some(p) = &self.persistent {
             if !matches!(p.as_str(), "tmux" | persistent::TMUX_LOG | "screen" | "off") {
@@ -476,6 +486,15 @@ impl Editor {
         self.set_folder_value(file, "NativeTermPersistent", value)
     }
 
+    /// The credential set of every host in a folder file that has no
+    /// setting of its own (`None` removes the default).
+    pub fn set_folder_credential(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
+        if value.is_some_and(|v| !password::valid_set_name(v)) {
+            return Err(EditError::Invalid(format!("credential set {value:?}: no spaces, quotes or / \\ : * ?")));
+        }
+        self.set_folder_value(file, "NativeTermCredential", value)
+    }
+
     /// The tab color of a folder's hosts (a preset name or `#RRGGBB`;
     /// `None` removes it).
     pub fn set_folder_tab_color(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
@@ -591,6 +610,7 @@ impl Editor {
                 set_or_remove(doc, block, "NativeTermPersistent", draft.persistent.as_deref());
                 set_or_remove(doc, block, "NativeTermTabColor", draft.tab_color.as_deref());
                 set_or_remove(doc, block, "NativeTermColorScheme", draft.color_scheme.as_deref());
+                set_or_remove(doc, block, "NativeTermCredential", draft.credential.as_deref());
             },
             || self.validate(&alias, Some(draft.hostname.trim())),
         )?;
@@ -1111,6 +1131,9 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
     if let Some(scheme) = &draft.color_scheme {
         entries.push(("NativeTermColorScheme", scheme.clone()));
     }
+    if let Some(set) = &draft.credential {
+        entries.push(("NativeTermCredential", set.clone()));
+    }
     if let Some(id) = id {
         entries.push(("NativeTermId", id.to_string()));
     }
@@ -1438,6 +1461,40 @@ mod tests {
 
         editor.rename_folder(&folder, "Ceph").unwrap();
         assert_eq!(tree(&editor).folders().find(|f| f.file == folder).unwrap().label(), "Ceph");
+    }
+
+    /// `NativeTermCredential`: a folder's set reaches its hosts, a host's
+    /// own set (or `none`) wins, bad names are refused, ssh accepts it.
+    #[test]
+    fn credential_sets_per_folder_and_host() {
+        use crate::password::set_for_host;
+        let Some((_home, editor)) = setup() else { return };
+        let lab = editor.create_folder("机房").unwrap();
+        editor.create_host(&tree(&editor), &lab, &draft("web", "10.0.0.1")).unwrap();
+        let mut own = draft("db", "10.0.0.2");
+        own.credential = Some("none".into());
+        editor.create_host(&tree(&editor), &lab, &own).unwrap();
+        let set = |alias: &str| {
+            let t = tree(&editor);
+            let (folder, host) = t.find(alias).unwrap();
+            set_for_host(folder, host).map(str::to_string)
+        };
+        assert_eq!(set("web"), None);
+        editor.set_folder_credential(&lab, Some("机房-A")).unwrap();
+        assert_eq!(set("web").as_deref(), Some("机房-A"), "the folder's");
+        assert_eq!(set("db"), None, "the host's own none wins");
+        assert!(editor.effective("web").is_ok(), "ssh ignores the key");
+
+        let web = tree(&editor).find("web").unwrap().1.clone();
+        let mut draft = HostDraft::from_host(&web);
+        draft.credential = Some("team".into());
+        editor.update_host(&web, &draft).unwrap();
+        assert_eq!(set("web").as_deref(), Some("team"));
+        draft.credential = Some("two words".into());
+        assert!(editor.update_host(&web, &draft).is_err());
+        assert!(editor.set_folder_credential(&lab, Some("a/b")).is_err());
+        editor.set_folder_credential(&lab, None).unwrap();
+        assert!(!std::fs::read_to_string(&lab).unwrap().contains("机房-A"));
     }
 
     /// `NativeTermPersistent`: a folder default reaches its hosts, a host's

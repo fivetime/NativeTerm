@@ -9,7 +9,7 @@ use std::io;
 use windows::core::{HSTRING, PWSTR};
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Security::Credentials::{
-    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS, CRED_PERSIST_LOCAL_MACHINE,
+    CredDeleteW, CredEnumerateW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS, CRED_PERSIST_LOCAL_MACHINE,
     CRED_TYPE_GENERIC,
 };
 
@@ -87,6 +87,38 @@ pub fn write(target: &str, saved: &Saved) -> io::Result<()> {
     result.map_err(io::Error::from)
 }
 
+/// The names of this user's generic credentials that start with `prefix`
+/// (names only: no secret is read), sorted.
+pub fn list(prefix: &str) -> io::Result<Vec<String>> {
+    let filter = HSTRING::from(format!("{prefix}*"));
+    let mut count = 0u32;
+    let mut found: *mut *mut CREDENTIALW = std::ptr::null_mut();
+    // SAFETY: `filter` is a NUL-terminated wide string that outlives the
+    // call; `count` and `found` are out-parameters the API writes.
+    if let Err(e) = unsafe { CredEnumerateW(&filter, None, &mut count, &mut found) } {
+        // ERROR_NOT_FOUND: none match
+        return if e.code() == windows::Win32::Foundation::ERROR_NOT_FOUND.to_hresult() {
+            Ok(Vec::new())
+        } else {
+            Err(e.into())
+        };
+    }
+    let mut names = Vec::new();
+    // SAFETY: on success `found` points to `count` valid credential
+    // pointers, one block freed once with `CredFree` after they are read.
+    unsafe {
+        for &c in std::slice::from_raw_parts(found, count as usize) {
+            let c = &*c;
+            if c.Type == CRED_TYPE_GENERIC && !c.TargetName.is_null() {
+                names.push(c.TargetName.to_string().unwrap_or_default());
+            }
+        }
+        CredFree(found as *const _);
+    }
+    names.sort();
+    Ok(names)
+}
+
 /// Remove the credential named `target`; `Ok(false)` if there was none.
 pub fn delete(target: &str) -> io::Result<bool> {
     match unsafe { CredDeleteW(&HSTRING::from(target), CRED_TYPE_GENERIC, None) } {
@@ -114,6 +146,22 @@ mod tests {
         assert!(delete(&target).unwrap());
         assert!(!delete(&target).unwrap());
         assert_eq!(read(&target).unwrap(), None);
+    }
+
+    /// Only the names with the prefix, sorted; none is an empty list.
+    #[test]
+    fn listed_by_prefix() {
+        let prefix = format!("NativeTerm-Tests-{}-list/", std::process::id());
+        assert_eq!(list(&prefix).unwrap(), Vec::<String>::new());
+        let saved = Saved { user: String::new(), secret: "x".into(), comment: String::new() };
+        for name in ["乙", "a"] {
+            write(&format!("{prefix}{name}"), &saved).unwrap();
+        }
+        let listed = list(&prefix);
+        for name in ["乙", "a"] {
+            delete(&format!("{prefix}{name}")).unwrap();
+        }
+        assert_eq!(listed.unwrap(), [format!("{prefix}a"), format!("{prefix}乙")]);
     }
 
     /// Secrets written by other tools (UTF-16LE) read like NativeTerm's own.

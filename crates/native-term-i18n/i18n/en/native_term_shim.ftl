@@ -9,6 +9,7 @@ persistent-log = [NativeTerm] Recorded on the server in ~/{ $file }.
 persistent-missing = [NativeTerm] { $program } is not installed on this host: a plain shell, not kept after a disconnect.
 persistent-own-command = [NativeTerm] { $alias } has its own RemoteCommand: the session is not kept on the server.
 saved-password-refused = [NativeTerm] The saved password was refused. It is not used again until you save a new one (Edit this host).
+saved-password-refused-set = [NativeTerm] The password of the credential set "{ $set }" was refused. No host uses it again until you save a new one (NativeTerm → Credential Sets).
 unreachable = [NativeTerm] Could not connect to the server (exit code { $code }).
 disconnected = [NativeTerm] Disconnected (exit code { $code }).
 ended = [NativeTerm] Session ended (exit code { $code }).

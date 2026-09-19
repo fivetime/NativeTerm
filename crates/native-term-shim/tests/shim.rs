@@ -286,6 +286,76 @@ fn saved_passwords_are_given_once_and_marked_when_refused() {
     credentials::delete(&target).unwrap();
 }
 
+/// A folder's credential set (`NativeTermCredential`): its password is
+/// given, not the account's own entry; a refusal marks the set and names
+/// it.
+#[test]
+fn a_folders_credential_set_is_used_and_marked() {
+    use native_term_win::credentials::{self, Saved};
+    let prefix = format!("NativeTerm-Tests-shimset-{}", std::process::id());
+    let set = format!("{prefix}/cred/机房");
+    let own = format!("{prefix}:tester@web01:22");
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join(".ssh");
+    std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+    std::fs::write(ssh.join("config"), format!("Include {}/config.d/*.conf\n", ssh.display())).unwrap();
+    std::fs::write(
+        ssh.join("config.d").join("lab.conf"),
+        "Host __nativeterm_folder__\n    NativeTermCredential 机房\n\nHost web01\n    HostName web01\n",
+    )
+    .unwrap();
+    let log = dir.path().join("ssh.log");
+    let run = |password: &str| {
+        let name = pipe_name("set");
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let mut shim = spawn_shim(
+            &name,
+            &["--ssh-dir", ssh.to_str().unwrap(), "--session", "s-set", "web01"],
+            &[
+                ("NATIVETERM_CRED_PREFIX", &prefix),
+                ("FAKE_SSH_G", "user tester;hostname web01;port 22;proxyjump bastion"),
+                ("FAKE_SSH_PASSWORD", password),
+                ("FAKE_SSH_LOG", log.to_str().unwrap()),
+            ],
+        );
+        let conn = listener.accept().unwrap();
+        assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+        let mut seen = Vec::new();
+        loop {
+            let m = expect(&conn);
+            let done = matches!(m, ShimMessage::Exited { .. });
+            seen.push(m);
+            if done {
+                break;
+            }
+        }
+        conn.send(&AppMessage::Close).unwrap();
+        assert_eq!(wait_exit(&mut shim), 0);
+        (seen, String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string())
+    };
+    let saved = |secret: &str| Saved { user: String::new(), secret: secret.into(), comment: String::new() };
+    credentials::write(&set, &saved("shared")).unwrap();
+    credentials::write(&own, &saved("own-wrong")).unwrap();
+
+    let (seen, text) = run("shared");
+    let cleanup = || {
+        let _ = credentials::delete(&set);
+        let _ = credentials::delete(&own);
+    };
+    if seen != [ShimMessage::Connecting { attempt: 1 }, ShimMessage::Exited { code: 0 }] {
+        cleanup();
+        panic!("the set's password logs in: {seen:?} {text}");
+    }
+    let (seen, text) = run("changed");
+    let marked = credentials::read(&set).unwrap().unwrap().comment;
+    let own_note = credentials::read(&own).unwrap().unwrap().comment;
+    cleanup();
+    assert!(seen.contains(&ShimMessage::PasswordRefused), "{seen:?}");
+    assert!(text.contains("credential set \"机房\" was refused"), "{text}");
+    assert_eq!(marked, native_term_config::password::REFUSED, "the set is marked");
+    assert_eq!(own_note, "", "the account's own entry is left alone");
+}
+
 /// A direct connection (no proxy in `ssh -G`) that never got a TCP
 /// connection up: "could not connect", not a failed login.
 #[test]

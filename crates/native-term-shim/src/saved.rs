@@ -1,6 +1,7 @@
-//! Saved passwords (opt-in, per account in Windows Credential Manager):
-//! a session whose account has one runs ssh with the shim as its askpass
-//! helper (forced, per process only) and `NumberOfPasswordPrompts=1`.
+//! Saved passwords (opt-in, in Windows Credential Manager, per account or
+//! in the host's shared credential set): a session that has one runs ssh
+//! with the shim as its askpass helper (forced, per process only) and
+//! `NumberOfPasswordPrompts=1`.
 //!
 //! - The helper gets the password over this shim's private pipe, only for
 //!   ssh's own password prompt for this account (`Target::answers`), and
@@ -59,15 +60,24 @@ fn server() -> Option<&'static Server> {
         .as_ref()
 }
 
+/// The credential set the host `alias` uses (`NativeTermCredential`, its
+/// own or its folder's), if any.
+pub fn credential_set(alias: &str) -> Option<String> {
+    let tree = native_term_config::tree::SessionTree::load(&crate::plink::ssh_dir());
+    let (folder, host) = tree.find(alias)?;
+    password::set_for_host(folder, host).map(str::to_string)
+}
+
 /// The saved password for this attempt's account.
 pub struct Attempt {
     target: Target,
 }
 
 impl Attempt {
-    /// If the account (from `ssh -G`) has a usable saved password.
-    pub fn find(effective: &[(String, String)]) -> Option<Attempt> {
-        let target = password::target(effective)?;
+    /// If the account (from `ssh -G`) has a usable saved password: in the
+    /// credential set `set` if the host uses one, else its own.
+    pub fn find(effective: &[(String, String)], set: Option<&str>) -> Option<Attempt> {
+        let target = password::target(effective, set)?;
         let saved = credentials::read(&target.name).ok()??;
         (saved.comment != REFUSED).then_some(Attempt { target })
     }
@@ -99,6 +109,11 @@ impl Attempt {
         let Some(server) = server() else { return false };
         *server.armed.lock().unwrap_or_else(|e| e.into_inner()) = Armed::default();
         server.served.load(Ordering::SeqCst) > 0
+    }
+
+    /// The credential set it came from, if shared.
+    pub fn set(&self) -> Option<&str> {
+        self.target.set.as_deref()
     }
 
     /// The server refused it: keep it, marked, until the user saves a new one.

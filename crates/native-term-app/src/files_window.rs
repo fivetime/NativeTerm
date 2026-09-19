@@ -67,6 +67,8 @@ pub struct Spec {
     /// Where the last folders per host are kept (`state.db`); none in a
     /// run without one.
     pub memory: Option<native_term_app::Core>,
+    /// The host's credential set (`NativeTermCredential`), if it uses one.
+    pub credential: Option<String>,
 }
 
 thread_local! {
@@ -557,13 +559,13 @@ impl FilesWindow {
         let spec = &tab.spec;
         let (ssh, config, alias, shim, tmux) =
             (spec.ssh.clone(), spec.config.clone(), spec.alias.clone(), spec.shim.clone(), spec.tmux_session.clone());
-        let memory = spec.memory.clone();
+        let (memory, credential) = (spec.memory.clone(), spec.credential.clone());
         let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         self.log(id, t!("files-log-connecting", host = alias.as_str()), false);
         self.spawn(id, move || {
             let effective =
                 native_term_config::effective::effective_with(&ssh, config.as_deref(), &alias).unwrap_or_default();
-            let target = native_term_config::password::target(&effective);
+            let target = native_term_config::password::target(&effective, credential.as_deref());
             let saved = target.as_ref().is_some_and(|t| {
                 native_term_win::credentials::read(&t.name)
                     .ok()

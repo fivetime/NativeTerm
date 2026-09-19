@@ -522,7 +522,9 @@
       A configured external client (WinSCP etc.) was dropped: they don't
       read the ssh config the hosts are defined in. Details, rclone's
       back ends and API, and how to repeat it: `docs/RCLONE-EVALUATION.md`.
-- [ ] Shared credential sets (`NativeTermCredential`)
+- [x] Shared credential sets (`NativeTermCredential` on hosts and folders,
+      `NativeTerm/cred/<name>` in Credential Manager): host dialog, folder
+      menu, "Credential Sets…" dialog; refusals mark the set for all hosts
 - [ ] SOCKS/HTTP proxy helper in the shim (`NativeTermProxy` as
       `ProxyCommand`)
 - [ ] Optional `trzsz ssh` per host (`NativeTermTrzsz`, user-installed)

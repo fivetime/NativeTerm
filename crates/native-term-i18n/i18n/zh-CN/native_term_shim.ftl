@@ -7,6 +7,7 @@ persistent-log = [NativeTerm] 服务器上记录到 ~/{ $file }。
 persistent-missing = [NativeTerm] 此主机没有安装 { $program }：已改用普通 shell，断线后不会保留。
 persistent-own-command = [NativeTerm] { $alias } 已有自己的 RemoteCommand：会话不会保持在服务器上。
 saved-password-refused = [NativeTerm] 保存的密码被服务器拒绝。在你保存新密码之前不会再使用它（编辑此主机）。
+saved-password-refused-set = [NativeTerm] 凭据集“{ $set }”的密码被服务器拒绝。在你为它保存新密码之前，使用它的主机都不会再用它（NativeTerm → 凭据集）。
 unreachable = [NativeTerm] 无法连接到服务器（退出码 { $code }）。
 disconnected = [NativeTerm] 连接已断开（退出码 { $code }）。
 ended = [NativeTerm] 会话已结束（退出码 { $code }）。

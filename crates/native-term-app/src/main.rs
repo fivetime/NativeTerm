@@ -12,6 +12,7 @@
 mod agent;
 mod app;
 mod commands_import;
+mod credential_sets;
 mod dialogs;
 mod dock;
 mod fab;

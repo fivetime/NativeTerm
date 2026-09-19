@@ -242,7 +242,9 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         let direct = ssh::is_direct(&effective);
         let mut command = Command::new(&ssh_path);
         // a saved password: the shim answers ssh's password prompt
-        let saved = saved::Attempt::find(&effective).filter(|s| s.configure(&mut command, &mut arguments));
+        let set = saved::credential_set(alias);
+        let saved =
+            saved::Attempt::find(&effective, set.as_deref()).filter(|s| s.configure(&mut command, &mut arguments));
         let mut child = match command.args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {
@@ -281,7 +283,10 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         let text = if unreachable { t!("unreachable", code = code) } else { describe(end, code) };
         println!("\r\n{text}");
         if refused {
-            println!("{}", t!("saved-password-refused"));
+            match saved.as_ref().and_then(|s| s.set()) {
+                Some(set) => println!("{}", t!("saved-password-refused-set", set = set)),
+                None => println!("{}", t!("saved-password-refused")),
+            }
         }
         match after_exit(link) {
             Next::Reconnect => continue,

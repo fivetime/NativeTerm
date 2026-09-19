@@ -1373,7 +1373,7 @@ Keys NativeTerm reads:
 | `NativeTermPersistent` | tmux / screen |
 | `NativeTermOnLogin` | Post-login command(s) |
 | `NativeTermPreConnect` | Local command run by the shim before `ssh` (SecureCRT "Pre-connect"); runs as the user, shown in the session editor |
-| `NativeTermCredential` | Name of a shared credential set (Credential Manager entry `NativeTerm/cred/<name>`) used by several hosts, like SecureCRT's "Credentials" |
+| `NativeTermCredential` | Name of a shared credential set (Credential Manager entry `NativeTerm/cred/<name>`) used by several hosts, like SecureCRT's "Credentials"; on a folder, its hosts' default; `none` on a host keeps the folder's set away |
 | `NativeTermProxy` | `socks5://host:port` or `http://host:port`: the shim acts as the `ProxyCommand` helper (Windows OpenSSH ships no `nc`); jump hosts use plain `ProxyJump` |
 | `NativeTermTrzsz` | Opt-in: run `trzsz ssh` (user-installed) instead of `ssh` for `rz`/`sz`-style transfers. It sits in the output path, which is why it is per host and off by default |
 
@@ -2074,6 +2074,51 @@ Rules:
     the dialog (with the Chinese IME on), connected with no prompt; the
     server's password changed: refused, marked, notice for both tabs,
     the next reconnect asked in the tab. Test entries were removed.
+
+#### Shared credential sets (`NativeTermCredential`)
+
+Many servers share one account's password (a batch of machines in one
+rack, every device behind a jump host). A credential set is one saved
+password that several hosts use, like SecureCRT's "Credentials":
+
+- **Entry**: `NativeTerm/cred/<name>` in Credential Manager, next to the
+  per-account entries; a set holds a password only. The user is the ssh
+  config's, as always (a folder sets it for its hosts with `User` in the
+  folder options), so there is no second source for the account.
+- **Which hosts**: `NativeTermCredential <name>` on a host, or on a
+  folder for its hosts; `none` on a host keeps its folder's set from it.
+  A set wins over the account's own saved password. A name is 1–64
+  characters without spaces, quotes, `/ \ : * ?` or control characters
+  (it is written unquoted in the ssh config, is part of the entry name,
+  and `*` would match other entries when they are listed), and not
+  `none`.
+- **The same rules as the account's own entry**: only this session's
+  own user@host password prompt is answered (`Target::answers`), never a
+  jump host's, a passphrase or a code; one try; a refusal marks the set
+  (`refused by the server`), so every host that uses it stops giving it
+  until a new password is saved, and the tab names the set. The files
+  window uses the set the same way.
+- **UI**: the host dialog's "Credential set" (as the folder / none / a
+  set / New…) and its password section follow the choice at once: with a
+  set it edits the set's password and says it is shared (no Remove
+  there: that belongs where all its hosts are seen). The folder menu's
+  "Credential Set" sets the folder's default. "Credential Sets…" (in the
+  settings and the folder menu) lists the sets (names only are read to
+  list them: `CredEnumerateW` with the prefix), how many hosts use each,
+  a refused mark, a new password field, Remove (asked twice, with the
+  count), a new set, and sets the ssh config names that have no entry.
+- Verified: unit tests (entry names, which set a host uses: its own,
+  its folder's, `none`; name rules; `ops` writes and refuses bad names;
+  listing by prefix); a shim test with the fake ssh (a folder's set is
+  given instead of a wrong per-account entry; a refusal marks the set,
+  names it, leaves the account's entry alone). Live, against a container
+  with password login: a set made in the dialog (IME off in the password
+  field), put on the "Lab" folder from its menu; `daas-pw` (root) and
+  `daas-pw2` (another account, `ops`, same password) both logged in with
+  no prompt, and the files window connected with it; after the server's
+  root password changed, a reconnect was refused once, the tab named the
+  set, the dialog showed it refused, and `daas-pw2` then asked in its tab
+  instead of giving the refused password.
 
 ### Installing public keys (`ssh-copy-id`)
 

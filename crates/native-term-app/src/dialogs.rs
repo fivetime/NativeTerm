@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use native_term_app::t;
 use native_term_config::ops::HostDraft;
-use native_term_config::password::{Target, REFUSED};
+use native_term_config::password::{self, Target, REFUSED};
 use native_term_config::persistent;
 use native_term_win::credentials::{self, Saved};
 
@@ -39,8 +39,19 @@ pub struct HostDialog {
     color_scheme: Option<String>,
     /// The folder's, shown with "as the folder".
     folder_look: (Option<String>, Option<String>),
-    /// The account's saved password (editing a saved host only).
+    /// The account's saved password (editing a saved host only): its own
+    /// entry, or its credential set's.
     password: Option<PasswordField>,
+    /// The account's own entry (`password` switches between it and a set).
+    account: Option<Target>,
+    /// The host's own `NativeTermCredential` (`None`: as the folder;
+    /// `none`: no set).
+    credential: Option<String>,
+    /// A new set's name being typed ("New…").
+    new_set: Option<String>,
+    /// The folder's set, and the sets there are, for the choice.
+    folder_credential: Option<String>,
+    sets: Vec<String>,
     pub error: Option<String>,
 }
 
@@ -72,11 +83,21 @@ impl PasswordField {
 
     fn show(&mut self, ui: &mut egui::Ui) {
         ui.separator();
-        ui.label(egui::RichText::new(t!("password-title")).strong());
-        let (text, color) = match self.state {
-            PasswordState::None => (t!("password-none"), None),
-            PasswordState::Saved => (t!("password-saved", target = self.target.name.as_str()), None),
-            PasswordState::Refused => (t!("password-refused"), Some(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a))),
+        let set = self.target.set.clone();
+        let title = match &set {
+            Some(set) => t!("password-title-set", set = set.as_str()),
+            None => t!("password-title"),
+        };
+        ui.label(egui::RichText::new(title).strong());
+        let (text, color) = match (self.state, &set) {
+            (PasswordState::None, Some(_)) => (t!("password-none-set"), None),
+            (PasswordState::None, None) => (t!("password-none"), None),
+            (PasswordState::Saved, Some(_)) => (t!("password-saved-set"), None),
+            (PasswordState::Saved, None) => (t!("password-saved", target = self.target.name.as_str()), None),
+            (PasswordState::Refused, Some(_)) => {
+                (t!("password-refused-set"), Some(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a)))
+            }
+            (PasswordState::Refused, None) => (t!("password-refused"), Some(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a))),
         };
         match color {
             Some(c) => ui.colored_label(c, text),
@@ -84,16 +105,17 @@ impl PasswordField {
         };
         ui.horizontal(|ui| {
             let account = format!("{}@{}", self.target.user, self.target.host);
-            let hint = t!("password-hint", account = account.as_str());
+            let hint = match &set {
+                Some(_) => t!("password-hint-set"),
+                None => t!("password-hint", account = account.as_str()),
+            };
             let field =
                 ui.add(egui::TextEdit::singleline(&mut self.typed).password(true).hint_text(hint).desired_width(200.0));
             no_ime(&field);
             if ui.add_enabled(!self.typed.is_empty(), egui::Button::new(t!("password-save"))).clicked() {
-                let saved = Saved {
-                    user: self.target.user.clone(),
-                    secret: std::mem::take(&mut self.typed),
-                    comment: String::new(),
-                };
+                // a set's password isn't one account's
+                let user = if set.is_some() { String::new() } else { self.target.user.clone() };
+                let saved = Saved { user, secret: std::mem::take(&mut self.typed), comment: String::new() };
                 let result = credentials::write(&self.target.name, &saved);
                 drop(saved);
                 self.message = Some(match result {
@@ -104,7 +126,8 @@ impl PasswordField {
                     Err(e) => e.to_string(),
                 });
             }
-            if self.state != PasswordState::None && ui.button(t!("password-remove")).clicked() {
+            // a set is removed where all its hosts are seen (Credential Sets)
+            if set.is_none() && self.state != PasswordState::None && ui.button(t!("password-remove")).clicked() {
                 self.message = Some(match credentials::delete(&self.target.name) {
                     Ok(_) => {
                         self.state = PasswordState::None;
@@ -168,8 +191,81 @@ impl HostDialog {
             color_scheme: d.color_scheme.clone(),
             folder_look: (None, None),
             password: None,
+            account: None,
+            credential: d.credential.clone(),
+            new_set: None,
+            folder_credential: None,
+            sets: Vec::new(),
             error: None,
         }
+    }
+
+    /// The folder's credential set and the sets there are, for the choice.
+    pub fn with_credentials(mut self, folder: Option<String>, sets: Vec<String>) -> HostDialog {
+        self.folder_credential = folder.filter(|f| password::valid_set_name(f));
+        self.sets = sets;
+        self.follow_set();
+        self
+    }
+
+    /// The set the host would use as the dialog stands.
+    fn chosen_set(&self) -> Option<String> {
+        match self.new_set.as_deref().map(str::trim) {
+            Some(name) => Some(name.to_string()).filter(|n| password::valid_set_name(n)),
+            None => match self.credential.as_deref() {
+                Some(own) if own.eq_ignore_ascii_case("none") => None,
+                Some(own) => Some(own.to_string()).filter(|n| password::valid_set_name(n)),
+                None => self.folder_credential.clone(),
+            },
+        }
+    }
+
+    /// The password field shows the chosen set's password, or the
+    /// account's own.
+    fn follow_set(&mut self) {
+        let Some(account) = &self.account else { return };
+        let set = self.chosen_set();
+        if self.password.as_ref().is_some_and(|p| p.target.set == set) {
+            return;
+        }
+        let target = match &set {
+            Some(set) => Target { name: password::set_entry(set), set: Some(set.clone()), ..account.clone() },
+            None => account.clone(),
+        };
+        self.password = Some(PasswordField::new(target));
+    }
+
+    /// The credential-set choice: as the folder, none, a set, or a new one.
+    fn credential_choice(&mut self, ui: &mut egui::Ui) {
+        let folder_text = self.folder_credential.clone().unwrap_or_else(|| t!("credential-folder-none"));
+        let current = match (&self.new_set, self.credential.as_deref()) {
+            (Some(_), _) => t!("credential-new"),
+            (None, None) => t!("credential-folder", value = folder_text.as_str()),
+            (None, Some(v)) if v.eq_ignore_ascii_case("none") => t!("credential-none"),
+            (None, Some(v)) => v.to_string(),
+        };
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("host-credential").selected_text(current).width(180.0).show_ui(ui, |ui| {
+                let mut pick = |ui: &mut egui::Ui, value: Option<String>, text: String| {
+                    let on = self.new_set.is_none() && self.credential == value;
+                    if ui.selectable_label(on, text).clicked() {
+                        self.credential = value;
+                        self.new_set = None;
+                    }
+                };
+                pick(ui, None, t!("credential-folder", value = folder_text.as_str()));
+                pick(ui, Some("none".into()), t!("credential-none"));
+                for set in self.sets.clone() {
+                    pick(ui, Some(set.clone()), set);
+                }
+                if ui.selectable_label(self.new_set.is_some(), t!("credential-new")).clicked() {
+                    self.new_set = Some(String::new());
+                }
+            });
+            if let Some(name) = &mut self.new_set {
+                ui.add(egui::TextEdit::singleline(name).hint_text(t!("cred-sets-name-hint")).desired_width(110.0));
+            }
+        });
     }
 
     /// The folder's tab color and color scheme, for "as the folder (…)".
@@ -179,9 +275,10 @@ impl HostDialog {
     }
 
     /// Offer a saved password for this account (`ssh -G`'s user, host,
-    /// port); a new host has none yet.
+    /// port), or for its credential set; a new host has none yet.
     pub fn with_password(mut self, target: Option<Target>) -> HostDialog {
-        self.password = target.map(PasswordField::new);
+        self.account = target;
+        self.follow_set();
         self
     }
 
@@ -210,6 +307,11 @@ impl HostDialog {
             persistent: self.persistent.clone(),
             tab_color: self.tab_color.clone().filter(|c| c != "#"),
             color_scheme: self.color_scheme.clone().filter(|s| !s.trim().is_empty()),
+            credential: match self.new_set.as_deref().map(str::trim) {
+                Some(name) if password::valid_set_name(name) => Some(name.to_string()),
+                Some(_) => return Err(t!("cred-sets-bad-name")),
+                None => self.credential.clone(),
+            },
         })
     }
 
@@ -274,10 +376,14 @@ impl HostDialog {
                         },
                     );
                     ui.end_row();
+                    ui.label(t!("field-credential")).on_hover_text(t!("field-credential-hint"));
+                    self.credential_choice(ui);
+                    ui.end_row();
                 });
                 if let Some(alias) = &self.alias {
                     ui.weak(t!("host-alias-kept", alias = alias.as_str()));
                 }
+                self.follow_set();
                 match &mut self.password {
                     Some(field) => field.show(ui),
                     None if self.alias.is_none() => {

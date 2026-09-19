@@ -40,6 +40,7 @@ enum Dialog {
     Import(Box<ImportDialog>),
     Send(Box<SendDialog>),
     ServerSessions(Box<ServerSessionsDialog>),
+    CredentialSets(Box<crate::credential_sets::CredentialSetsDialog>),
 }
 
 /// Opening at least this many hosts that forward the ssh-agent is pointed out.
@@ -360,6 +361,12 @@ impl App {
         (folder.defaults.get(TAB_COLOR).map(str::to_string), folder.defaults.get(COLOR_SCHEME).map(str::to_string))
     }
 
+    /// A folder's `NativeTermCredential` default.
+    fn folder_credential(&self, file: &Path) -> Option<String> {
+        let folder = self.tree.folders().find(|f| f.file == file)?;
+        folder.defaults.get(native_term_config::password::KEY).map(str::to_string)
+    }
+
     /// A folder's `NativeTermPersistent` default.
     fn folder_persistent(&self, file: &Path) -> Option<String> {
         let folder = self.tree.folders().find(|f| f.file == file)?;
@@ -407,8 +414,11 @@ impl App {
                 let label = self.folder_label(&file);
                 let folder = self.folder_persistent(&file);
                 let (color, scheme) = self.folder_look(&file);
-                let dialog =
-                    HostDialog::new_host(file, &label).with_folder_default(folder).with_folder_look(color, scheme);
+                let set = self.folder_credential(&file);
+                let dialog = HostDialog::new_host(file, &label)
+                    .with_folder_default(folder)
+                    .with_folder_look(color, scheme)
+                    .with_credentials(set, crate::credential_sets::names());
                 self.dialog = Some(Dialog::Host(Box::new(dialog)));
             }
             TreeAction::NewPlink(file) => {
@@ -428,11 +438,13 @@ impl App {
                                 .editor
                                 .effective(&alias)
                                 .ok()
-                                .and_then(|e| native_term_config::password::target(&e));
+                                .and_then(|e| native_term_config::password::target(&e, None));
                             let (color, scheme) = self.folder_look(&host.file);
+                            let set = self.folder_credential(&host.file);
                             let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host))
                                 .with_folder_default(folder)
                                 .with_folder_look(color, scheme)
+                                .with_credentials(set, crate::credential_sets::names())
                                 .with_password(account);
                             Dialog::Host(Box::new(dialog))
                         }
@@ -510,6 +522,18 @@ impl App {
                     self.notices.push(e.to_string());
                 }
                 self.reload();
+            }
+            TreeAction::FolderCredential(file, value) => {
+                if let Err(e) = self.editor.set_folder_credential(&file, value.as_deref()) {
+                    self.notices.push(e.to_string());
+                }
+                self.reload();
+            }
+            TreeAction::CredentialSets => {
+                if self.dialog.is_none() {
+                    let dialog = crate::credential_sets::CredentialSetsDialog::new(&self.tree);
+                    self.dialog = Some(Dialog::CredentialSets(Box::new(dialog)));
+                }
             }
             TreeAction::FolderPersistent(file, value) => {
                 if let Err(e) = self.editor.set_folder_persistent(&file, value.as_deref()) {
@@ -747,6 +771,7 @@ impl App {
             shim: native_term_app::default_shim_path().unwrap_or_default(),
             tmux_session,
             memory: self.core.clone(),
+            credential: native_term_config::password::set_for_host(folder, host).map(str::to_string),
         });
     }
 
@@ -887,6 +912,7 @@ impl App {
     fn show_dialog(&mut self, ctx: &egui::Context) {
         let Some(dialog) = self.dialog.as_mut() else { return };
         let done = match dialog {
+            Dialog::CredentialSets(d) => matches!(d.show(ctx), Outcome::Cancel),
             Dialog::Host(d) => match d.show(ctx) {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
@@ -1488,6 +1514,11 @@ impl crate::window::Ui for App {
                     }
                     ui.separator();
                     self.agent.settings_ui(ui, &self.ssh_dir, self.core.as_ref());
+                    let sets = ui.button(t!("cred-sets-button")).on_hover_text(t!("cred-sets-intro"));
+                    if sets.clicked() && self.dialog.is_none() {
+                        let dialog = crate::credential_sets::CredentialSetsDialog::new(&self.tree);
+                        self.dialog = Some(Dialog::CredentialSets(Box::new(dialog)));
+                    }
                     if ui.small_button(t!("button-check-again")).clicked() {
                         self.agent.refresh(&self.ssh_dir, ui.ctx());
                     }
