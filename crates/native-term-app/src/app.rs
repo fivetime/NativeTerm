@@ -766,7 +766,7 @@ impl App {
                     self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
                 }
                 WizardAction::ImportPutty => {
-                    let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.tree);
+                    let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.egui_ctx);
                     self.dialog = Some(Dialog::Import(Box::new(dialog)));
                 }
                 WizardAction::CreateKey => {
@@ -1358,7 +1358,7 @@ impl crate::window::Ui for App {
                     self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
                 }
                 if self.putty_sessions && ui.button(icons::with(icons::IMPORT, t!("import-putty-button"))).clicked() && self.dialog.is_none() {
-                    let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.tree);
+                    let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.egui_ctx);
                     self.dialog = Some(Dialog::Import(Box::new(dialog)));
                 }
             });

@@ -390,6 +390,7 @@ import-title = Import from SecureCRT
 import-folder-label = SecureCRT config folder
 import-into = Into: { $path }  (every changed file is backed up first)
 import-not-found = SecureCRT's config folder wasn't found; enter it above.
+import-scanning = Reading the configuration… (a folder on OneDrive may have to be downloaded first)
 import-preview = Preview
 import-run =
     { $count ->

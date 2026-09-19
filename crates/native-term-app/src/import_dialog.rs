@@ -10,13 +10,21 @@ use native_term_app::import::{self, Line};
 use native_term_app::t;
 use native_term_config::ops::ImportOutcome;
 use native_term_config::putty;
-use native_term_config::securecrt::{self, Origin, Plan};
+use native_term_config::securecrt::{self, Origin, Plan, Scan};
 use native_term_config::SessionTree;
 
 use crate::dialogs::Outcome;
 
+/// A scan's result: the sessions, and the button bars' commands with their
+/// preview lines.
+type Scanned = Result<(Scan, Vec<Line>, Vec<crate::commands_import::Imported>), String>;
+
 enum Step {
     Choose,
+    /// Reading the configuration in the background: a folder on OneDrive
+    /// may have to be downloaded first, which took long enough to freeze
+    /// the window when it was read on the UI thread.
+    Scanning { rx: Receiver<Scanned> },
     /// `commands`: SecureCRT's send-string buttons, for the command library.
     Preview { plan: Box<Plan>, lines: Vec<Line>, commands: Vec<crate::commands_import::Imported> },
     Running { rx: Receiver<(Result<ImportOutcome, String>, Option<String>)>, done: Arc<AtomicUsize>, total: usize },
@@ -42,30 +50,51 @@ impl ImportDialog {
     }
 
     /// PuTTY's saved sessions, previewed right away.
-    pub fn putty(ssh_dir: PathBuf, data_dir: PathBuf, tree: &SessionTree) -> ImportDialog {
+    pub fn putty(ssh_dir: PathBuf, data_dir: PathBuf, ctx: &egui::Context) -> ImportDialog {
         let path = format!(r"HKEY_CURRENT_USER\{}", putty::sessions_key());
         let mut dialog = ImportDialog { origin: Origin::Putty, path, step: Step::Choose, error: None, ssh_dir, data_dir };
-        dialog.preview(tree);
+        dialog.preview(ctx);
         dialog
     }
 
-    fn preview(&mut self, tree: &SessionTree) {
-        let scanned = match self.origin {
-            Origin::SecureCrt => securecrt::scan(&PathBuf::from(self.path.trim())),
-            Origin::Putty => putty::scan(),
-        };
-        match scanned {
-            Ok(scan) => {
-                let plan = securecrt::plan(&scan, tree);
-                let mut lines = import::summary(&scan, &plan);
-                let commands = match self.origin {
-                    Origin::SecureCrt => crate::commands_import::scan(&PathBuf::from(self.path.trim()), &mut lines),
+    /// Reads the configuration in the background; `scanned` makes the
+    /// preview once it's there.
+    fn preview(&mut self, ctx: &egui::Context) {
+        let (tx, rx) = mpsc::channel();
+        let (origin, path, ctx) = (self.origin, PathBuf::from(self.path.trim()), ctx.clone());
+        std::thread::spawn(move || {
+            let scanned = match origin {
+                Origin::SecureCrt => securecrt::scan(&path),
+                Origin::Putty => putty::scan(),
+            };
+            let result = scanned.map_err(|e| e.to_string()).map(|scan| {
+                let mut lines = Vec::new();
+                let commands = match origin {
+                    Origin::SecureCrt => crate::commands_import::scan(&path, &mut lines),
                     Origin::Putty => Vec::new(),
                 };
-                self.error = None;
+                (scan, lines, commands)
+            });
+            let _ = tx.send(result);
+            ctx.request_repaint();
+        });
+        self.error = None;
+        self.step = Step::Scanning { rx };
+    }
+
+    /// The preview of a finished scan (planning against the tree is quick).
+    fn scanned(&mut self, scanned: Scanned, tree: &SessionTree) {
+        match scanned {
+            Ok((scan, button_lines, commands)) => {
+                let plan = securecrt::plan(&scan, tree);
+                let mut lines = import::summary(&scan, &plan);
+                lines.extend(button_lines);
                 self.step = Step::Preview { plan: Box::new(plan), lines, commands };
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => {
+                self.error = Some(e);
+                self.step = Step::Choose;
+            }
         }
     }
 
@@ -94,6 +123,13 @@ impl ImportDialog {
 
     /// `Submit(())` once something was written (the tree needs a reload).
     pub fn show(&mut self, ctx: &egui::Context, tree: &SessionTree) -> Outcome<()> {
+        if let Step::Scanning { rx } = &self.step {
+            match rx.try_recv() {
+                Ok(scanned) => self.scanned(scanned, tree),
+                Err(mpsc::TryRecvError::Disconnected) => self.step = Step::Choose,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if let Step::Running { rx, .. } = &self.step {
             if let Ok((result, commands)) = rx.try_recv() {
                 self.step = match result {
@@ -150,6 +186,12 @@ impl ImportDialog {
                             ui.label(t!("import-not-found"));
                         }
                     }
+                    Step::Scanning { .. } => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(t!("import-scanning"));
+                        });
+                    }
                     Step::Preview { lines, .. } => {
                         // lines: the sessions' summary, then the buttons'
 
@@ -187,7 +229,7 @@ impl ImportDialog {
                 ui.horizontal(|ui| match &self.step {
                     Step::Choose | Step::Preview { .. } => {
                         if ui.add_enabled(!self.path.trim().is_empty(), egui::Button::new(t!("import-preview"))).clicked() {
-                            self.preview(tree);
+                            self.preview(ctx);
                         }
                         if let Step::Preview { plan, commands, .. } = &self.step {
                             let n = plan.host_count();
@@ -201,6 +243,11 @@ impl ImportDialog {
                                 start = Some((Plan::clone(plan), commands.clone()));
                             }
                         }
+                        if ui.button(t!("button-cancel")).clicked() {
+                            outcome = Outcome::Cancel;
+                        }
+                    }
+                    Step::Scanning { .. } => {
                         if ui.button(t!("button-cancel")).clicked() {
                             outcome = Outcome::Cancel;
                         }

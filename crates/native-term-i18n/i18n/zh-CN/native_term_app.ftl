@@ -375,6 +375,7 @@ import-title = 从 SecureCRT 导入
 import-folder-label = SecureCRT 配置文件夹
 import-into = 导入到：{ $path }（改动的文件都会先备份）
 import-not-found = 没有找到 SecureCRT 的配置文件夹，请在上面填写。
+import-scanning = 正在读取配置…（OneDrive 上的文件夹可能需要先下载）
 import-preview = 预览
 import-run = 导入 { $count } 台主机
 import-checking = 每个文件夹写入后都会用 ssh -G 检查。
