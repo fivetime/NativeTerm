@@ -80,22 +80,36 @@ pub fn session_name(alias: &str, session_id: &str) -> String {
 /// is appended to `log_file(name)` by `pipe-pane`, started only when the
 /// session is created: on attaching, `pipe-pane -o` would toggle the open
 /// pipe off (verified with tmux 3.4) and a plain one would replace it.
+///
+/// tmux, only for NativeTerm's own session (nothing server-wide): a new
+/// session keeps `HISTORY` lines (`history-limit` applies to windows made
+/// after it is set, so the session gets a new window then and its first
+/// one, `^`, goes), and on every attach the status bar is turned off (the
+/// session card says it is kept on the server instead). A target for
+/// `set-option` is written `=name:` (tmux 3.4 says "no such session" to
+/// `=name`).
 pub fn remote_command(persistence: Persistence, name: &str, missing: &str, log: bool) -> String {
     // inside single quotes: no ', and nothing ssh would expand (%)
     let missing: String = missing.chars().filter(|c| !matches!(c, '\'' | '%' | '\\' | '"' | '\r' | '\n')).collect();
+    // `";"` separates tmux commands (a backslash wouldn't survive ssh's
+    // option parsing)
+    let create = format!(
+        "tmux new-session -d -s {name} \";\" set-option -t ={name}: history-limit {HISTORY} \";\" \
+         new-window -t ={name}: \";\" kill-window -t ={name}:^"
+    );
+    let attach = format!("tmux set-option -t ={name}: status off >/dev/null 2>&1; exec tmux attach-session -t ={name}");
     let (program, run) = match (persistence, log) {
-        // `";"` separates tmux commands (a backslash wouldn't survive
-        // ssh's option parsing)
         (Persistence::Tmux, true) => (
             "tmux",
             format!(
                 "mkdir -p \"$HOME/{LOG_DIR}\"; tmux has-session -t ={name} 2>/dev/null || \
-                 tmux new-session -d -s {name} \";\" pipe-pane \"cat >> $HOME/{}\"; \
-                 exec tmux attach-session -t ={name}",
+                 {create} \";\" pipe-pane \"cat >> $HOME/{}\"; {attach}",
                 log_file(name)
             ),
         ),
-        (Persistence::Tmux, false) => ("tmux", format!("exec tmux new-session -A -s {name}")),
+        (Persistence::Tmux, false) => {
+            ("tmux", format!("tmux has-session -t ={name} 2>/dev/null || {create}; {attach}"))
+        }
         (Persistence::Screen, _) => ("screen", format!("exec screen -D -R -S {name}")),
     };
     format!(
@@ -103,6 +117,10 @@ pub fn remote_command(persistence: Persistence, name: &str, missing: &str, log: 
          echo \"{missing}\" >&2; exec \"${{SHELL:-/bin/sh}}\" -l'"
     )
 }
+
+/// Lines of history a new tmux session of NativeTerm's keeps (tmux's own
+/// default is 2000).
+pub const HISTORY: u32 = 50_000;
 
 /// A NativeTerm session found on a server.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -432,7 +450,12 @@ mod tests {
             remote_command(Persistence::Tmux, "nt-web01-0f3a9c21", "[NativeTerm] no tmux: a plain shell", false);
         assert_eq!(
             command,
-            "sh -c 'if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s nt-web01-0f3a9c21; fi; \
+            "sh -c 'if command -v tmux >/dev/null 2>&1; then \
+             tmux has-session -t =nt-web01-0f3a9c21 2>/dev/null || \
+             tmux new-session -d -s nt-web01-0f3a9c21 \";\" set-option -t =nt-web01-0f3a9c21: history-limit 50000 \";\" \
+             new-window -t =nt-web01-0f3a9c21: \";\" kill-window -t =nt-web01-0f3a9c21:^; \
+             tmux set-option -t =nt-web01-0f3a9c21: status off >/dev/null 2>&1; \
+             exec tmux attach-session -t =nt-web01-0f3a9c21; fi; \
              echo \"[NativeTerm] no tmux: a plain shell\" >&2; exec \"${SHELL:-/bin/sh}\" -l'"
         );
         let screen = remote_command(Persistence::Screen, "nt-x-1", "it's 100% \"missing\"", true);
@@ -442,8 +465,10 @@ mod tests {
         assert!(
             recorded.contains(
                 "then mkdir -p \"$HOME/.nativeterm/logs\"; tmux has-session -t =nt-web01-0f3a9c21 2>/dev/null || \
-                 tmux new-session -d -s nt-web01-0f3a9c21 \";\" \
+                 tmux new-session -d -s nt-web01-0f3a9c21 \";\" set-option -t =nt-web01-0f3a9c21: history-limit 50000 \";\" \
+                 new-window -t =nt-web01-0f3a9c21: \";\" kill-window -t =nt-web01-0f3a9c21:^ \";\" \
                  pipe-pane \"cat >> $HOME/.nativeterm/logs/nt-web01-0f3a9c21.log\"; \
+                 tmux set-option -t =nt-web01-0f3a9c21: status off >/dev/null 2>&1; \
                  exec tmux attach-session -t =nt-web01-0f3a9c21; fi;"
             ),
             "{recorded}"

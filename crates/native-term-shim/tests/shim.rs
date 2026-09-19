@@ -202,7 +202,7 @@ fn persistent_hosts_run_inside_tmux() {
     assert_eq!(connects.len(), 2, "{lines}");
     for line in &connects {
         assert!(line.contains("-o | RequestTTY=yes | -o | RemoteCommand=sh -c '"), "{line}");
-        assert!(line.contains("exec tmux new-session -A -s nt-web01-0f3a9c21;"), "the same session each time: {line}");
+        assert!(line.contains("exec tmux attach-session -t =nt-web01-0f3a9c21;"), "the same session each time: {line}");
         assert!(line.ends_with("| -- | web01"), "{line}");
     }
 

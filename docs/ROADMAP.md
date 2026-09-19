@@ -441,8 +441,11 @@
 - [x] Sessions on the server (a host's menu): list NativeTerm's tmux /
       screen sessions there, show the tab that has one, reopen a closed
       tab's session in a new tab (same shell), end one (asked twice)
-- [ ] Persistent sessions (rest): the list per folder, optional hidden
-      status bar
+- [x] Persistent tmux sessions look plain: status bar off for
+      NativeTerm's sessions (the card says "kept on the server"), 50,000
+      lines of history
+- [ ] Persistent sessions (rest): the list per folder; tmux mouse mode
+      (wheel scrolls the history) as an option, if wanted
 - [x] Optional saved passwords (Windows Credential Manager + per-process
       `SSH_ASKPASS=force`, shim as helper): answers only the session's own
       password prompt and handles every other prompt in the console, one

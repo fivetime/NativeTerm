@@ -2283,6 +2283,23 @@ What persistence enables beyond reconnecting:
   between processes), so each is a full handshake; run in parallel.
 - **Text preview in the tab switcher**: `tmux capture-pane -p` returns the
   current screen text of a background session.
+- **Looks like a plain session** (implemented): tmux's green status
+  bar is turned off, for NativeTerm's own session only (`set-option -t
+  =<name>: status off` on every attach, so sessions made earlier lose it
+  too; nothing server-wide); the session card says "kept on the server
+  (tmux)" instead, with what that means. A new session keeps 50,000
+  lines of history (tmux's default is 2,000): `history-limit` applies
+  to windows made after it is set, so the session is created, the
+  option set, a new window opened and the first one (`^`, whatever the
+  user's `base-index`) closed. `set-option` needs its target as
+  `=<name>:`: tmux 3.4 answers "no such session" to `=<name>`. Not done:
+  tmux's mouse mode would let the wheel scroll the history (tried: it
+  does), but it takes the mouse from Windows Terminal (right click opens
+  tmux's menu instead of pasting, dragging selects in tmux; Shift gives
+  it back), so it is left to the user. Live: a new session had one
+  window, history 50,000, the log pipe on and no status bar; after a
+  disconnect and reconnect the tab showed the same shell and its output,
+  still without the bar.
 - **Server-side session logging** (implemented): `NativeTermPersistent
   tmux-log` ("tmux, recorded on the server" in the host dialog and the
   folder menu). The remote command creates the session detached with
