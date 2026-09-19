@@ -77,7 +77,9 @@ pub enum CloseSet {
 }
 
 pub fn close_set(sessions: &[SessionView], set: &CloseSet) -> Vec<String> {
-    let place = |id: &str| sessions.iter().find(|s| s.id == id).and_then(|s| s.location.as_ref()).map(|l| (l.window, l.tab_index));
+    let place = |id: &str| {
+        sessions.iter().find(|s| s.id == id).and_then(|s| s.location.as_ref()).map(|l| (l.window, l.tab_index))
+    };
     sessions
         .iter()
         .filter(|s| s.state.is_open() && !s.locked)

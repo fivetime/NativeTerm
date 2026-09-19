@@ -41,12 +41,7 @@ const READ_CHUNK: usize = 16 * 1024;
 
 /// This user's and sign-in's pipe name.
 pub fn pipe_name() -> io::Result<String> {
-    Ok(format!(
-        "{}{}-{}",
-        crate::PIPE_NAME_PREFIX,
-        native_term_win::user_sid()?,
-        native_term_win::logon_session_id()?
-    ))
+    Ok(format!("{}{}-{}", crate::PIPE_NAME_PREFIX, native_term_win::user_sid()?, native_term_win::logon_session_id()?))
 }
 
 /// A kernel handle closed on drop.
@@ -379,7 +374,10 @@ mod tests {
                 terminal_window: None,
             })
             .unwrap();
-        assert_eq!(client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(), Some(AppMessage::Welcome { protocol: 1 }));
+        assert_eq!(
+            client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(),
+            Some(AppMessage::Welcome { protocol: 1 })
+        );
         assert_eq!(
             client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(),
             Some(AppMessage::SendText { text: "uptime".into(), enter: true })
@@ -419,7 +417,10 @@ mod tests {
         });
         let client = connect(&name, Duration::from_secs(5)).unwrap();
         let _listener = server.join().unwrap();
-        assert_eq!(client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(), Some(AppMessage::Welcome { protocol: 1 }));
+        assert_eq!(
+            client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(),
+            Some(AppMessage::Welcome { protocol: 1 })
+        );
         assert_eq!(client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(), Some(AppMessage::Close));
         assert_eq!(client.recv::<AppMessage>(Duration::from_secs(1)).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);
     }
@@ -493,7 +494,8 @@ mod tests {
     fn thread_cpu() -> Duration {
         use windows::Win32::Foundation::FILETIME;
         use windows::Win32::System::Threading::{GetCurrentThread, GetThreadTimes};
-        let (mut a, mut b, mut kernel, mut user) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+        let (mut a, mut b, mut kernel, mut user) =
+            (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
         unsafe { GetThreadTimes(GetCurrentThread(), &mut a, &mut b, &mut kernel, &mut user).unwrap() };
         let ticks = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
         Duration::from_nanos((ticks(kernel) + ticks(user)) * 100)
@@ -525,7 +527,10 @@ mod tests {
         let started = Instant::now();
         client.send(&ShimMessage::Connecting { attempt: 1 }).unwrap();
         assert!(started.elapsed() < Duration::from_millis(500), "write was blocked by the pending read");
-        assert_eq!(server_conn.recv::<ShimMessage>(Duration::from_secs(5)).unwrap(), Some(ShimMessage::Connecting { attempt: 1 }));
+        assert_eq!(
+            server_conn.recv::<ShimMessage>(Duration::from_secs(5)).unwrap(),
+            Some(ShimMessage::Connecting { attempt: 1 })
+        );
         server_conn.send(&AppMessage::Close).unwrap();
         assert_eq!(reader.join().unwrap(), Some(AppMessage::Close));
     }

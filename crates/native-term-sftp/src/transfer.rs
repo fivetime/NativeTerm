@@ -47,14 +47,18 @@ impl Progress {
 /// characters, trailing dots and spaces, device names like `CON`).
 pub fn local_name(names: &Names, name: &[u8]) -> String {
     let text = names.decode(name);
-    let mut out: String =
-        text.chars().map(|c| if c < ' ' || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') { '_' } else { c }).collect();
+    let mut out: String = text
+        .chars()
+        .map(|c| if c < ' ' || matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') { '_' } else { c })
+        .collect();
     while out.ends_with(['.', ' ']) {
         out.pop();
     }
     let stem = out.split('.').next().unwrap_or("").to_ascii_uppercase();
     let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && stem.as_bytes()[3].is_ascii_digit());
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit());
     if device {
         out.insert(0, '_');
     }
@@ -67,12 +71,21 @@ pub fn local_name(names: &Names, name: &[u8]) -> String {
 /// A local file's name for the server, in the host's encoding.
 pub fn remote_name(names: &Names, path: &Path) -> Result<Vec<u8>> {
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    names.encode(&name).ok_or_else(|| Error::Protocol(format!("\"{name}\" can't be written in the server's file name encoding")))
+    names
+        .encode(&name)
+        .ok_or_else(|| Error::Protocol(format!("\"{name}\" can't be written in the server's file name encoding")))
 }
 
 /// What downloading `remote` (a file or, with `attrs.is_dir()`, a folder
 /// and everything below) into the folder `into` involves.
-pub fn plan_download(sftp: &Session, names: &Names, remote: &[u8], attrs: &Attrs, into: &Path, progress: &Progress) -> Result<Vec<Item>> {
+pub fn plan_download(
+    sftp: &Session,
+    names: &Names,
+    remote: &[u8],
+    attrs: &Attrs,
+    into: &Path,
+    progress: &Progress,
+) -> Result<Vec<Item>> {
     let name = remote.rsplit(|&c| c == b'/').next().unwrap_or(remote);
     let local = into.join(local_name(names, name));
     let mut items = Vec::new();
@@ -138,7 +151,13 @@ fn walk_local(names: &Names, local: &Path, remote: Vec<u8>, items: &mut Vec<Item
         items.push(Item { remote, local: local.to_path_buf(), dir: false, size: meta.len(), permissions: Some(0o644) });
         return Ok(());
     }
-    items.push(Item { remote: remote.clone(), local: local.to_path_buf(), dir: true, size: 0, permissions: Some(0o755) });
+    items.push(Item {
+        remote: remote.clone(),
+        local: local.to_path_buf(),
+        dir: true,
+        size: 0,
+        permissions: Some(0o755),
+    });
     let mut children: Vec<PathBuf> = std::fs::read_dir(local)?.filter_map(|e| e.ok().map(|e| e.path())).collect();
     children.sort();
     for child in children {

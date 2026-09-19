@@ -8,9 +8,10 @@ use std::time::Instant;
 use native_term_config::{effective::effective, SessionTree};
 
 fn main() {
-    let ssh_dir = std::env::args().nth(1).map(PathBuf::from).unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE")).join(".ssh")
-    });
+    let ssh_dir = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE")).join(".ssh"));
     let started = Instant::now();
     let tree = SessionTree::load(&ssh_dir);
     println!("{} parsed in {:?}", ssh_dir.display(), started.elapsed());
@@ -19,7 +20,11 @@ fn main() {
         let title = if folder.name.is_empty() { "(~/.ssh/config)" } else { folder.label() };
         println!("\n[{title}] {}", folder.file.display());
         for host in &folder.hosts {
-            let extra = if host.aliases.len() > 1 { format!(" (also {})", host.aliases[1..].join(", ")) } else { String::new() };
+            let extra = if host.aliases.len() > 1 {
+                format!(" (also {})", host.aliases[1..].join(", "))
+            } else {
+                String::new()
+            };
             println!(
                 "  {:<28} -> {}{}{}{}  line {}",
                 host.label(),
@@ -32,7 +37,12 @@ fn main() {
         }
     }
     for shared in &tree.shared {
-        println!("shared settings: Host {}  ({} line {})", shared.patterns.join(" "), shared.file.display(), shared.line + 1);
+        println!(
+            "shared settings: Host {}  ({} line {})",
+            shared.patterns.join(" "),
+            shared.file.display(),
+            shared.line + 1
+        );
     }
     for warning in &tree.warnings {
         println!("warning: {warning:?}");

@@ -161,10 +161,8 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
         }
     };
     let (forwards, bad_forwards) = parse_forwards(v.str("PortForwardings").unwrap_or(""));
-    let encoding = v
-        .str("LineCodePage")
-        .filter(|e| !e.to_ascii_lowercase().replace('-', "").contains("utf8"))
-        .map(str::to_string);
+    let encoding =
+        v.str("LineCodePage").filter(|e| !e.to_ascii_lowercase().replace('-', "").contains("utf8")).map(str::to_string);
     let mut options = Vec::new();
     if ssh && v.num("AgentFwd") == Some(1) {
         options.push(("ForwardAgent", "yes".to_string()));
@@ -312,7 +310,8 @@ fn hex_number(text: &str) -> Option<Vec<u8>> {
         return None;
     }
     let padded = if hex.len() % 2 == 1 { format!("0{hex}") } else { hex.to_string() };
-    let bytes: Vec<u8> = (0..padded.len()).step_by(2).map(|i| u8::from_str_radix(&padded[i..i + 2], 16).unwrap()).collect();
+    let bytes: Vec<u8> =
+        (0..padded.len()).step_by(2).map(|i| u8::from_str_radix(&padded[i..i + 2], 16).unwrap()).collect();
     let start = bytes.iter().position(|b| *b != 0).unwrap_or(bytes.len());
     Some(bytes[start..].to_vec())
 }
@@ -409,7 +408,8 @@ pub fn scan_host_keys(key: &str) -> io::Result<crate::known_hosts::KeyScan> {
             scan.not_understood += 1;
             continue;
         };
-        let parsed = parse_host_key_name(&name).and_then(|(t, port, host)| Some((host_key_blob(&t, &value)?, port, host)));
+        let parsed =
+            parse_host_key_name(&name).and_then(|(t, port, host)| Some((host_key_blob(&t, &value)?, port, host)));
         match parsed {
             Some(((key_type, blob), port, host)) => scan.keys.push(crate::known_hosts::HostKey {
                 hosts: vec![host],
@@ -425,7 +425,10 @@ pub fn scan_host_keys(key: &str) -> io::Result<crate::known_hosts::KeyScan> {
 
 /// Where host keys are read from (`NATIVETERM_PUTTY_HOST_KEYS` for tests).
 pub fn host_keys_key() -> String {
-    std::env::var("NATIVETERM_PUTTY_HOST_KEYS").ok().filter(|k| !k.is_empty()).unwrap_or_else(|| HOST_KEYS_KEY.to_string())
+    std::env::var("NATIVETERM_PUTTY_HOST_KEYS")
+        .ok()
+        .filter(|k| !k.is_empty())
+        .unwrap_or_else(|| HOST_KEYS_KEY.to_string())
 }
 
 #[cfg(test)]
@@ -445,7 +448,8 @@ mod tests {
 
     #[test]
     fn forwards() {
-        let (f, bad) = parse_forwards("L8080=localhost:80,4R127.0.0.1:9000=db:5432,D1080,6L[::1]:2222=h:22,X1=y:2,L0=a:1,Lnope");
+        let (f, bad) =
+            parse_forwards("L8080=localhost:80,4R127.0.0.1:9000=db:5432,D1080,6L[::1]:2222=h:22,X1=y:2,L0=a:1,Lnope");
         assert_eq!(bad, 3);
         let directives: Vec<(&str, String)> = f.iter().map(Forward::directive).collect();
         assert_eq!(
@@ -588,12 +592,7 @@ mod tests {
         assert_eq!(n.encodings, [("via host".to_string(), "GBK".to_string())]);
         assert_eq!(n.bad_forwards, ["控制节点"]);
         let skipped: Vec<(&str, &Skip)> = plan.skipped.iter().map(|(p, s)| (p.as_str(), s)).collect();
-        assert_eq!(
-            skipped,
-            [
-                ("empty", &Skip::NoHostname),
-            ]
-        );
+        assert_eq!(skipped, [("empty", &Skip::NoHostname),]);
         let plink = &plan.folders[0].plink;
         let switch = plink.iter().find(|p| p.label() == "switch").unwrap();
         assert_eq!(switch.arguments(None), ["-telnet", "-P", "2323", "10.1.1.1"]);
@@ -718,7 +717,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join(".ssh");
         std::fs::create_dir_all(&dir).unwrap();
-        let editor = crate::ops::Editor::for_directory(&dir, crate::write::Writer::new(home.path().join("backups")), &ssh);
+        let editor =
+            crate::ops::Editor::for_directory(&dir, crate::write::Writer::new(home.path().join("backups")), &ssh);
         std::fs::write(editor.main_config(), "").unwrap();
         crate::acl::restrict_to_owner(&editor.main_config()).unwrap();
         let scan = scan_key(&key.0).unwrap();

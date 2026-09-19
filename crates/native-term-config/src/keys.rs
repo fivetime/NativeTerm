@@ -37,8 +37,15 @@ fn quiet(program: &Path) -> Command {
 /// can't be told: any other failure, e.g. "bad permissions" (the key's
 /// ACL lets others read it), says nothing about a passphrase.
 pub fn has_passphrase(ssh_keygen: &Path, private_key: &Path) -> Option<bool> {
-    let output =
-        quiet(ssh_keygen).arg("-y").arg("-P").arg("").arg("-f").arg(private_key).stderr(Stdio::piped()).output().ok()?;
+    let output = quiet(ssh_keygen)
+        .arg("-y")
+        .arg("-P")
+        .arg("")
+        .arg("-f")
+        .arg(private_key)
+        .stderr(Stdio::piped())
+        .output()
+        .ok()?;
     if output.status.success() {
         return Some(false);
     }

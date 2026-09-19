@@ -70,7 +70,8 @@ fn wait_exit(child: &mut Child) -> i32 {
 fn login_disconnect_reconnect_close() {
     let name = pipe_name("lifecycle");
     let mut listener = PipeListener::bind(&name).unwrap();
-    let mut shim = spawn_shim(&name, &["--session", "s-1", "web01"], &[("FAKE_SSH_LOGIN", "1"), ("FAKE_SSH_CODE", "255")]);
+    let mut shim =
+        spawn_shim(&name, &["--session", "s-1", "web01"], &[("FAKE_SSH_LOGIN", "1"), ("FAKE_SSH_CODE", "255")]);
 
     let conn = listener.accept().unwrap();
     assert_eq!(conn.client_pid().unwrap(), shim.id());
@@ -91,7 +92,11 @@ fn login_disconnect_reconnect_close() {
     match expect(&helper) {
         ShimMessage::Hello { role, wt_session, .. } => {
             assert_eq!(role, Role::AuthSignal);
-            assert_eq!(wt_session.as_deref(), Some("6e7a0000-0000-4000-8000-00000000c0de"), "inherited through ssh and cmd");
+            assert_eq!(
+                wt_session.as_deref(),
+                Some("6e7a0000-0000-4000-8000-00000000c0de"),
+                "inherited through ssh and cmd"
+            );
         }
         other => panic!("{other:?}"),
     }
@@ -253,7 +258,8 @@ fn saved_passwords_are_given_once_and_marked_when_refused() {
         (seen, String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string())
     };
 
-    credentials::write(&target, &Saved { user: "tester".into(), secret: "s3cret".into(), comment: String::new() }).unwrap();
+    credentials::write(&target, &Saved { user: "tester".into(), secret: "s3cret".into(), comment: String::new() })
+        .unwrap();
     let (seen, text) = run("s3cret", 1);
     assert_eq!(seen, [ShimMessage::Connecting { attempt: 1 }, ShimMessage::Exited { code: 0 }], "{text}");
     let lines = std::fs::read_to_string(&log).unwrap();
@@ -543,7 +549,8 @@ fn plink_session_with_putty_options() {
     use native_term_win::registry::{self, RegValue};
     let base = format!(r"Software\NativeTerm-Tests-plink-{}", std::process::id());
     registry::write_user_values(&format!(r"{base}\NativeTerm-4000000000-1"), &[("Left", RegValue::Dword(1))]).unwrap();
-    registry::write_user_values(&format!(r"{base}\MySwitch"), &[("HostName", RegValue::Str("10.0.0.1".into()))]).unwrap();
+    registry::write_user_values(&format!(r"{base}\MySwitch"), &[("HostName", RegValue::Str("10.0.0.1".into()))])
+        .unwrap();
 
     let dir = tempfile::tempdir().unwrap();
     let ssh = dir.path().join(".ssh");
@@ -678,7 +685,8 @@ fn plink_always_loads_its_own_session() {
     std::fs::create_dir_all(ssh.join("config.d")).unwrap();
     std::fs::write(ssh.join("config"), "Include config.d/*.conf\n").unwrap();
     std::fs::write(ssh.join("config.d").join("lab.conf"), "").unwrap();
-    std::fs::write(ssh.join("config.d").join("lab.nt.toml"), "[[session]]\nname = \"sw\"\nhost = \"10.9.9.9\"\n").unwrap();
+    std::fs::write(ssh.join("config.d").join("lab.nt.toml"), "[[session]]\nname = \"sw\"\nhost = \"10.9.9.9\"\n")
+        .unwrap();
     let log = dir.path().join("plink.log");
 
     let name = pipe_name("plink-load");

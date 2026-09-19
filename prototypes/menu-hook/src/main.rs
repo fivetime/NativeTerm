@@ -46,9 +46,9 @@ use windows::Win32::UI::HiDpi::{
     GetDpiForMonitor, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, TrackMouseEvent, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
-    KEYEVENTF_KEYUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MOUSE_EVENT_FLAGS, TME_LEAVE,
-    TRACKMOUSEEVENT, VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_UP,
+    SendInput, TrackMouseEvent, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
+    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MOUSE_EVENT_FLAGS, TME_LEAVE, TRACKMOUSEEVENT, VIRTUAL_KEY,
+    VK_DOWN, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -439,7 +439,8 @@ fn refresher(prefix: String) {
                         complete = false;
                         continue;
                     };
-                    let realized_names: Vec<String> = realized.iter().map(|t| t.get_name().unwrap_or_default()).collect();
+                    let realized_names: Vec<String> =
+                        realized.iter().map(|t| t.get_name().unwrap_or_default()).collect();
                     let names = list.as_ref().and_then(all_tab_names).unwrap_or_else(|| realized_names.clone());
                     let mut claims = carry(snapshots.get(&key).map(Vec::as_slice).unwrap_or(&[]), &names);
                     // rule 1 for every tab, realized or not
@@ -492,11 +493,22 @@ fn refresher(prefix: String) {
         let tracked: usize = snapshots.values().map(|s| s.iter().filter(|(_, c)| c.is_some()).count()).sum();
         let mixed: Vec<String> = snapshots
             .values()
-            .flat_map(|s| s.iter().filter_map(|(n, c)| c.as_ref().filter(|c| c.mixed || *n != c.label).map(|c| format!("{} as {:?}{}", c.label, n, if c.mixed { " [mixed]" } else { "" }))))
+            .flat_map(|s| {
+                s.iter().filter_map(|(n, c)| {
+                    c.as_ref()
+                        .filter(|c| c.mixed || *n != c.label)
+                        .map(|c| format!("{} as {:?}{}", c.label, n, if c.mixed { " [mixed]" } else { "" }))
+                })
+            })
             .collect();
         let summary = format!("{tracked} tracked, {} with rects; renamed/mixed: {}", tabs.len(), mixed.join("; "));
         if summary != last {
-            println!("{} cache: {} windows, refresh {} ms: {summary}", now(), windows_seen.len(), started.elapsed().as_millis());
+            println!(
+                "{} cache: {} windows, refresh {} ms: {summary}",
+                now(),
+                windows_seen.len(),
+                started.elapsed().as_millis()
+            );
             last = summary;
         }
         *CACHE.lock().unwrap() = Cache { windows: windows_seen, tabs };
@@ -615,7 +627,8 @@ fn open_menu(tab: TabEntry, pt: POINT) {
         MENU_RECT[2].store(x + size.cx, Ordering::SeqCst);
         MENU_RECT[3].store(y + size.cy, Ordering::SeqCst);
         MENU.with(|m| {
-            *m.borrow_mut() = Some(Menu { popup, tab, items, hover: None, scale, look, size, text_font, icon_font, rows })
+            *m.borrow_mut() =
+                Some(Menu { popup, tab, items, hover: None, scale, look, size, text_font, icon_font, rows })
         });
         MENU_OPEN.store(true, Ordering::SeqCst);
         let _ = ShowWindow(popup, SW_SHOWNOACTIVATE);
@@ -690,7 +703,9 @@ fn menu_key(vk: VIRTUAL_KEY) {
     let pos = hover.and_then(|h| actions.iter().position(|a| *a == h));
     match vk {
         VK_DOWN => set_hover(Some(actions[pos.map(|p| (p + 1) % actions.len()).unwrap_or(0)])),
-        VK_UP => set_hover(Some(actions[pos.map(|p| (p + actions.len() - 1) % actions.len()).unwrap_or(actions.len() - 1)])),
+        VK_UP => {
+            set_hover(Some(actions[pos.map(|p| (p + actions.len() - 1) % actions.len()).unwrap_or(actions.len() - 1)]))
+        }
         VK_RETURN => {
             if let Some(h) = hover {
                 choose(h);
@@ -860,7 +875,12 @@ fn run(seconds: u32, prefix: String, auto_dismiss: bool) -> windows::core::Resul
     unsafe {
         let instance = GetModuleHandleW(None)?;
         let owner_class = w!("NativeTermMenuOwner");
-        RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(owner_proc), hInstance: instance.into(), lpszClassName: owner_class, ..Default::default() });
+        RegisterClassW(&WNDCLASSW {
+            lpfnWndProc: Some(owner_proc),
+            hInstance: instance.into(),
+            lpszClassName: owner_class,
+            ..Default::default()
+        });
         RegisterClassW(&WNDCLASSW {
             style: CS_DROPSHADOW,
             lpfnWndProc: Some(popup_proc),
@@ -921,7 +941,10 @@ fn mouse(flags: MOUSE_EVENT_FLAGS) -> INPUT {
 
 fn key(vk: VIRTUAL_KEY, up: bool) -> INPUT {
     let flags = if up { KEYEVENTF_KEYUP } else { Default::default() };
-    INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: flags, ..Default::default() } } }
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: flags, ..Default::default() } },
+    }
 }
 
 /// Terminal's own menus are XAML flyouts: Menu elements in the window.
@@ -983,7 +1006,12 @@ fn right_click(tab: &UIElement, shift: bool) -> bool {
         let _ = GetCursorPos(&mut saved);
         let _ = SetCursorPos(x, y);
         if shift {
-            send(&[key(VK_SHIFT, false), mouse(MOUSEEVENTF_RIGHTDOWN), mouse(MOUSEEVENTF_RIGHTUP), key(VK_SHIFT, true)]);
+            send(&[
+                key(VK_SHIFT, false),
+                mouse(MOUSEEVENTF_RIGHTDOWN),
+                mouse(MOUSEEVENTF_RIGHTUP),
+                key(VK_SHIFT, true),
+            ]);
         } else {
             send(&[mouse(MOUSEEVENTF_RIGHTDOWN), mouse(MOUSEEVENTF_RIGHTUP)]);
         }
@@ -1007,7 +1035,9 @@ fn click(title: Option<&str>, index: Option<usize>, shift: bool) -> uiautomation
             .iter()
             .flat_map(|w| scan(&automation, w).map(|(t, _, _)| t).unwrap_or_default())
             .find(|t| t.get_name().unwrap_or_default() == title),
-        (None, Some(i)) => windows.first().and_then(|w| scan(&automation, w).ok()).and_then(|(t, _, _)| t.into_iter().nth(i)),
+        (None, Some(i)) => {
+            windows.first().and_then(|w| scan(&automation, w).ok()).and_then(|(t, _, _)| t.into_iter().nth(i))
+        }
         _ => None,
     };
     match target {

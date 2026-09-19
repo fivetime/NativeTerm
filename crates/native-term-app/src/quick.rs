@@ -38,7 +38,9 @@ fn valid_host(host: &str) -> bool {
 }
 
 fn valid_user(user: &str) -> bool {
-    !user.is_empty() && !user.starts_with('-') && user.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '\\' | '$'))
+    !user.is_empty()
+        && !user.starts_with('-')
+        && user.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '\\' | '$'))
 }
 
 /// Parse what was typed. Something that could just be a search word (no
@@ -60,10 +62,11 @@ pub fn parse(text: &str) -> Option<QuickTarget> {
     // IPv6: bare address only (this ssh doesn't take `ssh://[v6]:port`)
     if rest.matches(':').count() >= 2 {
         let addr = rest.trim_start_matches('[').trim_end_matches(']');
-        return addr
-            .parse::<std::net::Ipv6Addr>()
-            .ok()
-            .map(|_| QuickTarget { user: user.map(str::to_string), host: addr.to_string(), port: None });
+        return addr.parse::<std::net::Ipv6Addr>().ok().map(|_| QuickTarget {
+            user: user.map(str::to_string),
+            host: addr.to_string(),
+            port: None,
+        });
     }
     let (host, port) = match rest.split_once(':') {
         Some((host, port)) => (host, Some(port.parse::<u16>().ok().filter(|p| *p != 0)?)),
@@ -103,7 +106,20 @@ mod tests {
 
     #[test]
     fn not_targets() {
-        for text in ["web", "生产", "a b", "root@", "@host", "-oProxyCommand=x@h", "host:0", "host:99999", "host:x", "a@-h", "", "x@h;y"] {
+        for text in [
+            "web",
+            "生产",
+            "a b",
+            "root@",
+            "@host",
+            "-oProxyCommand=x@h",
+            "host:0",
+            "host:99999",
+            "host:x",
+            "a@-h",
+            "",
+            "x@h;y",
+        ] {
             assert_eq!(parse(text), None, "{text:?}");
         }
     }

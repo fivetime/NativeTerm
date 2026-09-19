@@ -65,7 +65,8 @@ pub fn log_file(name: &str) -> String {
 /// tmux names can't hold `.` or `:`, and a `%` would be expanded by ssh in
 /// `RemoteCommand`, so only letters, digits, `-` and `_` are kept.
 pub fn session_name(alias: &str, session_id: &str) -> String {
-    let clean = |s: &str| s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>();
+    let clean =
+        |s: &str| s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>();
     let alias: String = clean(alias).chars().take(40).collect();
     let id: String = session_id.chars().filter(|c| c.is_ascii_hexdigit()).take(8).collect();
     format!("nt-{alias}-{}", id.to_ascii_lowercase())
@@ -118,7 +119,8 @@ pub struct RemoteSession {
 /// `parse_sessions`. Neither program being there is no error.
 /// Also the logs of `tmux-log` sessions (`LOG_DIR`), ended ones' too
 /// (`parse_logs`).
-pub const LIST_COMMAND: &str = "sh -c 'tmux ls -F \"tmux #{session_name} #{session_created} #{session_attached}\" 2>/dev/null; \
+pub const LIST_COMMAND: &str =
+    "sh -c 'tmux ls -F \"tmux #{session_name} #{session_created} #{session_attached}\" 2>/dev/null; \
      screen -ls 2>/dev/null; ls -1 \"$HOME/.nativeterm/logs\" 2>/dev/null | sed \"s/^/log /\"; true'";
 
 /// The sessions that have a log on the server, from `LIST_COMMAND`'s output.
@@ -334,7 +336,9 @@ pub fn run_remote_bytes(
         use std::os::windows::process::CommandExt;
         run.creation_flags(0x0800_0000); // no console window
     }
-    for option in ["BatchMode=yes", "ConnectTimeout=10", "RequestTTY=no", "ClearAllForwardings=yes", "PermitLocalCommand=no"] {
+    for option in
+        ["BatchMode=yes", "ConnectTimeout=10", "RequestTTY=no", "ClearAllForwardings=yes", "PermitLocalCommand=no"]
+    {
         run.arg("-o").arg(option);
     }
     // -o RemoteCommand: a host's own RemoteCommand plus a command line
@@ -368,14 +372,20 @@ mod tests {
 
     #[test]
     fn sessions_are_read_from_both_programs() {
-        let output = "tmux nt-web01-0f3a9c21 1789735000 1\ntmux nt-web01-11111111 1789736000 0\ntmux work 1789730000 0\n\
+        let output =
+            "tmux nt-web01-0f3a9c21 1789735000 1\ntmux nt-web01-11111111 1789736000 0\ntmux work 1789730000 0\n\
                       There are screens on:\n\t3797.nt-web01-5c4b3a21\t(09/18/26 13:58:19)\t(Detached)\n\
                       \t3801.other\t(09/18/26 13:59:00)\t(Attached)\n2 Sockets in /run/screen/S-root.\n";
         let sessions = parse_sessions(output);
         assert_eq!(sessions.len(), 3, "{sessions:?}");
         assert_eq!(
             sessions[0],
-            RemoteSession { name: "nt-web01-0f3a9c21".into(), program: Persistence::Tmux, created: Some(1789735000), attached: true }
+            RemoteSession {
+                name: "nt-web01-0f3a9c21".into(),
+                program: Persistence::Tmux,
+                created: Some(1789735000),
+                attached: true
+            }
         );
         assert!(!sessions[1].attached);
         assert_eq!(sessions[2].program, Persistence::Screen);
@@ -392,7 +402,12 @@ mod tests {
         assert!(belongs_to("ceph.osd1", "nt-ceph_osd1-0f3a9c21"));
         assert!(!belongs_to("ceph", "nt-ceph_osd1-0f3a9c21"), "another host's");
         assert!(session_id_for("web", "nt-web-xyz", fresh).is_none());
-        let tmux = RemoteSession { name: "nt-web-0f3a9c21".into(), program: Persistence::Tmux, created: None, attached: false };
+        let tmux = RemoteSession {
+            name: "nt-web-0f3a9c21".into(),
+            program: Persistence::Tmux,
+            created: None,
+            attached: false,
+        };
         assert_eq!(kill_command(&tmux), "sh -c 'tmux kill-session -t =nt-web-0f3a9c21'");
     }
 
@@ -413,7 +428,8 @@ mod tests {
 
     #[test]
     fn command_attaches_or_creates_and_falls_back() {
-        let command = remote_command(Persistence::Tmux, "nt-web01-0f3a9c21", "[NativeTerm] no tmux: a plain shell", false);
+        let command =
+            remote_command(Persistence::Tmux, "nt-web01-0f3a9c21", "[NativeTerm] no tmux: a plain shell", false);
         assert_eq!(
             command,
             "sh -c 'if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s nt-web01-0f3a9c21; fi; \

@@ -163,10 +163,14 @@ pub fn look(settings: &Path) -> Look {
     let (dark, description) = match cached_application_theme(settings, windows_dark) {
         Some((name, app)) if app == "light" => (false, format!("light (Terminal theme {name:?})")),
         Some((name, app)) if app == "dark" => (true, format!("dark (Terminal theme {name:?})")),
-        Some((name, _)) => {
-            (windows_dark, format!("{} (Terminal theme {name:?} follows Windows)", if windows_dark { "dark" } else { "light" }))
-        }
-        None => (windows_dark, format!("{} (Windows; Terminal settings unreadable)", if windows_dark { "dark" } else { "light" })),
+        Some((name, _)) => (
+            windows_dark,
+            format!("{} (Terminal theme {name:?} follows Windows)", if windows_dark { "dark" } else { "light" }),
+        ),
+        None => (
+            windows_dark,
+            format!("{} (Windows; Terminal settings unreadable)", if windows_dark { "dark" } else { "light" }),
+        ),
     };
     // WinUI flyout colors (acrylic approximated by its solid fallback)
     let palette = if dark {

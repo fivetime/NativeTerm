@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::BOOL;
 use windows::Win32::System::Console::{
-    AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_BREAK_EVENT,
-    CTRL_CLOSE_EVENT, CTRL_C_EVENT,
+    AttachConsole, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT,
+    CTRL_C_EVENT,
 };
 
 fn log(msg: &str) {
@@ -143,7 +143,9 @@ fn wide(s: &str) -> Vec<u16> {
 
 fn cred_store(target: &str, user: &str, password: &str) -> windows::core::Result<()> {
     use windows::core::PWSTR;
-    use windows::Win32::Security::Credentials::{CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC};
+    use windows::Win32::Security::Credentials::{
+        CredWriteW, CREDENTIALW, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    };
     let mut target_w = wide(target);
     let mut user_w = wide(user);
     let mut blob: Vec<u8> = password.encode_utf16().flat_map(u16::to_le_bytes).collect();
@@ -287,7 +289,10 @@ fn main() {
                     log(&format!("connection established after {:?}", started.elapsed()));
                 }
                 if states.contains(&8) {
-                    log(&format!("CLOSE_WAIT detected after {:?}: server closed; terminating plink", started.elapsed()));
+                    log(&format!(
+                        "CLOSE_WAIT detected after {:?}: server closed; terminating plink",
+                        started.elapsed()
+                    ));
                     let _ = child.kill();
                     let _ = child.wait();
                     println!("\r\n[probe] disconnected: the server closed the connection");

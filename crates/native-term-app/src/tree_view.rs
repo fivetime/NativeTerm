@@ -201,7 +201,8 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
         let painter = ui.painter().with_clip_rect(rect);
         let mut x = rect.left() + 6.0 + look.indent;
         if let Some(stripe) = look.stripe {
-            let bar = egui::Rect::from_min_size(egui::pos2(x - 5.0, rect.top() + 4.0), egui::vec2(3.0, rect.height() - 8.0));
+            let bar =
+                egui::Rect::from_min_size(egui::pos2(x - 5.0, rect.top() + 4.0), egui::vec2(3.0, rect.height() - 8.0));
             painter.rect_filled(bar, 1.0, stripe);
         }
         if let Some(glyph) = look.icon {
@@ -232,7 +233,8 @@ fn request(tree: &SessionTree, host: &HostEntry) -> HostRequest {
 /// recent and in its folder). Just `to`'s alias without such a row.
 fn span(host_rows: &[(usize, &str)], anchor: &str, to: usize) -> Vec<String> {
     let Some(&(_, target)) = host_rows.iter().find(|(row, _)| *row == to) else { return Vec::new() };
-    let start = host_rows.iter().filter(|(_, alias)| *alias == anchor).map(|(row, _)| *row).min_by_key(|row| row.abs_diff(to));
+    let start =
+        host_rows.iter().filter(|(_, alias)| *alias == anchor).map(|(row, _)| *row).min_by_key(|row| row.abs_diff(to));
     let Some(start) = start else { return vec![target.to_string()] };
     let (low, high) = (start.min(to), start.max(to));
     let mut aliases: Vec<String> = Vec::new();
@@ -354,7 +356,10 @@ impl TreeView {
         let recent_hosts: Vec<(usize, &HostEntry)> = recent
             .iter()
             .filter_map(|alias| {
-                folders.iter().enumerate().find_map(|(i, f)| f.hosts.iter().find(|h| h.alias() == alias).map(|h| (i, h)))
+                folders
+                    .iter()
+                    .enumerate()
+                    .find_map(|(i, f)| f.hosts.iter().find(|h| h.alias() == alias).map(|h| (i, h)))
             })
             .take(5)
             .collect();
@@ -406,7 +411,14 @@ impl TreeView {
         folders_under(node, &mut under);
         let count = under.iter().map(|&i| folders[i].hosts.len()).sum();
         let open = self.is_open(&node.path, depth, folders.len());
-        rows.push(Row::Folder { depth, name: node.name.clone(), path: node.path.clone(), folder: node.folder, count, open });
+        rows.push(Row::Folder {
+            depth,
+            name: node.name.clone(),
+            path: node.path.clone(),
+            folder: node.folder,
+            count,
+            open,
+        });
         if !open {
             return;
         }
@@ -426,7 +438,11 @@ impl TreeView {
             _ => indices.extend(folder),
         }
         let folders: Vec<&Folder> = tree.folders().collect();
-        indices.into_iter().filter_map(|i| folders.get(i)).flat_map(|f| f.hosts.iter().map(|h| request(tree, h))).collect()
+        indices
+            .into_iter()
+            .filter_map(|i| folders.get(i))
+            .flat_map(|f| f.hosts.iter().map(|h| request(tree, h)))
+            .collect()
     }
 
     /// `generation` changes whenever `tree` is reloaded; `activity` has the
@@ -479,7 +495,8 @@ impl TreeView {
         let rows = self.rows(tree, generation, recent);
         if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             // the best saved host; a typed target only if nothing matches
-            let host = rows.iter().find_map(|r| if let Row::Host { host, .. } = r { Some(request(tree, host)) } else { None });
+            let host =
+                rows.iter().find_map(|r| if let Row::Host { host, .. } = r { Some(request(tree, host)) } else { None });
             let typed = rows.iter().find_map(|r| if let Row::Quick(q) = r { Some(quick_request(q)) } else { None });
             if let Some(request) = host.or(typed) {
                 actions.push(TreeAction::Open(vec![request], Target::Recent));
@@ -507,11 +524,19 @@ impl TreeView {
                 let index = first + offset;
                 match row {
                     Row::Heading(text) => {
-                        let look = RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
+                        let look =
+                            RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
                         draw_row(ui, row_height, text, look);
                     }
                     Row::Quick(target) => {
-                        let look = RowLook { icon: Some(icons::CONNECT), stripe: None, dot: None, selected: false, weak: false, indent: 0.0 };
+                        let look = RowLook {
+                            icon: Some(icons::CONNECT),
+                            stripe: None,
+                            dot: None,
+                            selected: false,
+                            weak: false,
+                            indent: 0.0,
+                        };
                         let text = t!("quick-connect", target = target.label());
                         let response = draw_row(ui, row_height, &text, look);
                         if response.clicked() {
@@ -525,7 +550,8 @@ impl TreeView {
                         });
                     }
                     Row::Empty(text) => {
-                        let look = RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
+                        let look =
+                            RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
                         draw_row(ui, row_height, text, look);
                     }
                     Row::Folder { depth, name, path, folder, count, open } => {
@@ -560,7 +586,10 @@ impl TreeView {
                                 actions.push(TreeAction::Open(hosts.clone(), Target::NewWindow));
                                 ui.close();
                             }
-                            if ui.add_enabled(!hosts.is_empty(), egui::Button::new(t!("menu-install-key-all"))).clicked() {
+                            if ui
+                                .add_enabled(!hosts.is_empty(), egui::Button::new(t!("menu-install-key-all")))
+                                .clicked()
+                            {
                                 let list = hosts.iter().map(|h| (h.alias.clone(), h.label.clone())).collect();
                                 actions.push(TreeAction::InstallKey(list));
                                 ui.close();
@@ -608,9 +637,13 @@ impl TreeView {
                                     .response
                                     .on_hover_text(t!("field-persistent-hint"));
                                     let defaults = folder.and_then(|i| folders.get(i)).map(|f| &f.defaults);
-                                    let color = defaults.and_then(|d| d.get(native_term_config::appearance::TAB_COLOR)).map(str::to_string);
+                                    let color = defaults
+                                        .and_then(|d| d.get(native_term_config::appearance::TAB_COLOR))
+                                        .map(str::to_string);
                                     ui.menu_button(t!("menu-folder-tab-color"), |ui| {
-                                        let presets = native_term_config::appearance::PRESETS.iter().map(|(n, _)| Some(n.to_string()));
+                                        let presets = native_term_config::appearance::PRESETS
+                                            .iter()
+                                            .map(|(n, _)| Some(n.to_string()));
                                         for value in std::iter::once(None).chain(presets) {
                                             let text: egui::WidgetText = match &value {
                                                 None => t!("look-none").into(),
@@ -622,9 +655,13 @@ impl TreeView {
                                             }
                                         }
                                     });
-                                    let scheme = defaults.and_then(|d| d.get(native_term_config::appearance::COLOR_SCHEME)).map(str::to_string);
+                                    let scheme = defaults
+                                        .and_then(|d| d.get(native_term_config::appearance::COLOR_SCHEME))
+                                        .map(str::to_string);
                                     ui.menu_button(t!("menu-folder-color-scheme"), |ui| {
-                                        let names = native_term_config::appearance::SCHEMES.iter().map(|s| Some(s.name.to_string()));
+                                        let names = native_term_config::appearance::SCHEMES
+                                            .iter()
+                                            .map(|s| Some(s.name.to_string()));
                                         for value in std::iter::once(None).chain(names) {
                                             let text = value.clone().unwrap_or_else(|| t!("look-terminal-default"));
                                             if ui.radio(scheme == value, text).clicked() {
@@ -633,10 +670,12 @@ impl TreeView {
                                             }
                                         }
                                     });
-                                    let excluded = folder.and_then(|i| folders.get(i)).is_some_and(|f| f.no_group_send());
+                                    let excluded =
+                                        folder.and_then(|i| folders.get(i)).is_some_and(|f| f.no_group_send());
                                     let mut on = excluded;
-                                    let toggle =
-                                        ui.checkbox(&mut on, t!("menu-folder-no-group-send")).on_hover_text(t!("menu-folder-no-group-send-hint"));
+                                    let toggle = ui
+                                        .checkbox(&mut on, t!("menu-folder-no-group-send"))
+                                        .on_hover_text(t!("menu-folder-no-group-send-hint"));
                                     if toggle.changed() {
                                         actions.push(TreeAction::FolderNoGroupSend(file.clone(), on));
                                         ui.close();
@@ -701,7 +740,8 @@ impl TreeView {
                                 }
                                 ui.separator();
                                 if ui.button(t!("menu-install-key-selected", count = count)).clicked() {
-                                    let list = chosen.iter().map(|h| (h.alias().to_string(), h.label().to_string())).collect();
+                                    let list =
+                                        chosen.iter().map(|h| (h.alias().to_string(), h.label().to_string())).collect();
                                     actions.push(TreeAction::InstallKey(list));
                                     ui.close();
                                 }
@@ -729,7 +769,12 @@ impl TreeView {
                                 actions.push(TreeAction::Options(alias.to_string()));
                                 ui.close();
                             }
-                            if ssh && ui.button(t!("menu-server-sessions")).on_hover_text(t!("menu-server-sessions-hint")).clicked() {
+                            if ssh
+                                && ui
+                                    .button(t!("menu-server-sessions"))
+                                    .on_hover_text(t!("menu-server-sessions-hint"))
+                                    .clicked()
+                            {
                                 actions.push(TreeAction::ServerSessions(alias.to_string()));
                                 ui.close();
                             }
@@ -757,7 +802,8 @@ impl TreeView {
                                 ui.close();
                             }
                             if ssh && ui.button(t!("menu-install-key")).clicked() {
-                                actions.push(TreeAction::InstallKey(vec![(alias.to_string(), host.label().to_string())]));
+                                actions
+                                    .push(TreeAction::InstallKey(vec![(alias.to_string(), host.label().to_string())]));
                                 ui.close();
                             }
                             if ssh && ui.button(t!("menu-forget-key")).clicked() {
@@ -898,7 +944,8 @@ mod tests {
         for query in ["kzjd", "kongzhi", "控制", "kz jd"] {
             view.query = query.into();
             let hits = view.search(&tree, 1, &[]);
-            let labels: Vec<&str> = hits.iter().map(|(f, h)| tree.folders().nth(*f).unwrap().hosts[*h].label()).collect();
+            let labels: Vec<&str> =
+                hits.iter().map(|(f, h)| tree.folders().nth(*f).unwrap().hosts[*h].label()).collect();
             assert_eq!(labels, ["控制节点"], "{query}");
         }
         view.query = "web".into();

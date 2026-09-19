@@ -76,11 +76,7 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         ));
     }
     for (name, paths) in &n.named_firewalls {
-        out.push(line(
-            t!("summary-firewall", name = name.as_str(), count = paths.len()),
-            true,
-            paths.clone(),
-        ));
+        out.push(line(t!("summary-firewall", name = name.as_str(), count = paths.len()), true, paths.clone()));
     }
     if !n.unresolved_jumps.is_empty() {
         out.push(line(
@@ -90,18 +86,10 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         ));
     }
     if !n.logon_actions.is_empty() {
-        out.push(line(
-            t!("summary-logon-actions", count = n.logon_actions.len()),
-            true,
-            n.logon_actions.clone(),
-        ));
+        out.push(line(t!("summary-logon-actions", count = n.logon_actions.len()), true, n.logon_actions.clone()));
     }
     if n.saved_passwords > 0 {
-        out.push(line(
-            t!("summary-saved-passwords", count = n.saved_passwords),
-            true,
-            Vec::new(),
-        ));
+        out.push(line(t!("summary-saved-passwords", count = n.saved_passwords), true, Vec::new()));
     }
     if !n.encodings.is_empty() {
         out.push(line(
@@ -111,11 +99,7 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         ));
     }
     if !n.bad_forwards.is_empty() {
-        out.push(line(
-            t!("summary-bad-forwards", count = n.bad_forwards.len()),
-            true,
-            n.bad_forwards.clone(),
-        ));
+        out.push(line(t!("summary-bad-forwards", count = n.bad_forwards.len()), true, n.bad_forwards.clone()));
     }
     let mut kept = Vec::new();
     if n.forwards > 0 {
@@ -145,11 +129,7 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         ));
     }
     if !scan.not_utf8.is_empty() {
-        out.push(line(
-            t!("summary-not-utf8", count = scan.not_utf8.len()),
-            true,
-            scan.not_utf8.clone(),
-        ));
+        out.push(line(t!("summary-not-utf8", count = scan.not_utf8.len()), true, scan.not_utf8.clone()));
     }
     let keys = &scan.host_keys;
     if !keys.keys.is_empty() {

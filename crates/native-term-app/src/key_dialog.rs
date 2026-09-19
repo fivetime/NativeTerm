@@ -103,12 +103,15 @@ impl KeyDialog {
                 } else {
                     ui.horizontal(|ui| {
                         ui.label(t!("key-which"));
-                        let name = |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        egui::ComboBox::from_id_salt("public-key").selected_text(name(&self.keys[self.chosen])).show_ui(ui, |ui| {
-                            for (i, k) in self.keys.iter().enumerate() {
-                                ui.selectable_value(&mut self.chosen, i, name(k));
-                            }
-                        });
+                        let name =
+                            |p: &PathBuf| p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                        egui::ComboBox::from_id_salt("public-key")
+                            .selected_text(name(&self.keys[self.chosen]))
+                            .show_ui(ui, |ui| {
+                                for (i, k) in self.keys.iter().enumerate() {
+                                    ui.selectable_value(&mut self.chosen, i, name(k));
+                                }
+                            });
                     });
                     let names: Vec<&str> = self.hosts.iter().map(|(_, l)| l.as_str()).take(8).collect();
                     let more = self.hosts.len().saturating_sub(names.len());
@@ -131,13 +134,17 @@ impl KeyDialog {
                                     let mut tabs = Vec::new();
                                     for group in groups {
                                         let title = t!("key-batch-tab", count = group.len());
-                                        let args = ["--install-key-batch".to_string(), key.clone()].into_iter().chain(group);
+                                        let args =
+                                            ["--install-key-batch".to_string(), key.clone()].into_iter().chain(group);
                                         tabs.push((title, args.collect()));
                                     }
                                     tabs
                                 } else {
                                     let tab = |(alias, label): &(String, String)| {
-                                        (t!("key-tab", label = label.as_str()), vec!["--install-key".into(), key.clone(), alias.clone()])
+                                        (
+                                            t!("key-tab", label = label.as_str()),
+                                            vec!["--install-key".into(), key.clone(), alias.clone()],
+                                        )
                                     };
                                     terminal_hosts.iter().map(tab).collect()
                                 };

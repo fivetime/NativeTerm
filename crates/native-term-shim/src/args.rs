@@ -8,14 +8,29 @@
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Mode {
-    Shim { session: Option<String>, alias: Option<String>, flags: Flags, ssh_dir: Option<String> },
-    Authenticated { shim_pid: u32 },
+    Shim {
+        session: Option<String>,
+        alias: Option<String>,
+        flags: Flags,
+        ssh_dir: Option<String>,
+    },
+    Authenticated {
+        shim_pid: u32,
+    },
     /// Add the public key in `key` to the host's `authorized_keys`.
-    InstallKey { key: String, alias: String },
+    InstallKey {
+        key: String,
+        alias: String,
+    },
     /// The same on several hosts, the password asked once.
-    InstallKeys { key: String, aliases: Vec<String> },
+    InstallKeys {
+        key: String,
+        aliases: Vec<String>,
+    },
     /// Create a key pair at `path` (ssh-keygen asks for the passphrase).
-    CreateKey { path: String },
+    CreateKey {
+        path: String,
+    },
     /// Load the default keys into ssh-agent (ssh-add asks for passphrases).
     AddKeys,
 }
@@ -85,7 +100,10 @@ mod tests {
             p(&["--session", "s1", "web01"]).unwrap(),
             Mode::Shim { session: Some("s1".into()), alias: Some("web01".into()), flags: none, ssh_dir: None }
         );
-        assert_eq!(p(&["web01"]).unwrap(), Mode::Shim { session: None, alias: Some("web01".into()), flags: none, ssh_dir: None });
+        assert_eq!(
+            p(&["web01"]).unwrap(),
+            Mode::Shim { session: None, alias: Some("web01".into()), flags: none, ssh_dir: None }
+        );
         assert_eq!(
             p(&["--session", "s1", "--wait", "--no-forwards", "web01"]).unwrap(),
             Mode::Shim {
@@ -97,7 +115,12 @@ mod tests {
         );
         assert_eq!(
             p(&["--ssh-dir", r"D:\my ssh", "--session", "s1", "sw"]).unwrap(),
-            Mode::Shim { session: Some("s1".into()), alias: Some("sw".into()), flags: none, ssh_dir: Some(r"D:\my ssh".into()) }
+            Mode::Shim {
+                session: Some("s1".into()),
+                alias: Some("sw".into()),
+                flags: none,
+                ssh_dir: Some(r"D:\my ssh".into())
+            }
         );
         assert_eq!(p(&["--authenticated", "4242"]).unwrap(), Mode::Authenticated { shim_pid: 4242 });
         assert_eq!(

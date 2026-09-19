@@ -53,7 +53,8 @@ fn parse_name(stem: &str) -> Option<(String, String, u16)> {
     let name = stem[..open].trim();
     let address = stem[open + 1..close].trim();
     let port: u16 = stem[close + 1..].trim().parse().ok().filter(|p| *p != 0)?;
-    let valid = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'));
+    let valid =
+        |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ':'));
     if !valid(address) {
         return None;
     }
@@ -108,11 +109,7 @@ pub(crate) fn blob_type(blob: &[u8]) -> Option<String> {
 fn parse_key(text: &str) -> Option<(String, String)> {
     let text = text.trim_start_matches('\u{feff}');
     if text.contains("BEGIN SSH2 PUBLIC KEY") {
-        let body: String = text
-            .lines()
-            .filter(|l| !l.contains("----") && !l.contains(':'))
-            .map(str::trim)
-            .collect();
+        let body: String = text.lines().filter(|l| !l.contains("----") && !l.contains(':')).map(str::trim).collect();
         let blob = base64_decode(&body)?;
         return Some((blob_type(&blob)?, body));
     }
@@ -174,14 +171,8 @@ pub fn missing<'k>(existing: &str, keys: &'k [HostKey]) -> Vec<&'k HostKey> {
         .collect();
     keys.iter()
         .filter(|k| {
-            let names: Vec<String> = k
-                .line()
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .split(',')
-                .map(|n| n.to_ascii_lowercase())
-                .collect();
+            let names: Vec<String> =
+                k.line().split_whitespace().next().unwrap_or("").split(',').map(|n| n.to_ascii_lowercase()).collect();
             !known.iter().any(|(existing, blob)| *blob == k.key && names.iter().any(|n| existing.contains(n)))
         })
         .collect()
@@ -214,13 +205,8 @@ pub fn remove(ssh_keygen: &Path, known_hosts: &Path, names: &[String]) -> io::Re
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x0800_0000); // no console window
         }
-        let output = command
-            .arg("-R")
-            .arg(name)
-            .arg("-f")
-            .arg(known_hosts)
-            .stdin(std::process::Stdio::null())
-            .output()?;
+        let output =
+            command.arg("-R").arg(name).arg("-f").arg(known_hosts).stdin(std::process::Stdio::null()).output()?;
         if !output.status.success() {
             let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
             return Err(io::Error::other(format!("ssh-keygen -R {name}: {message}")));
@@ -257,11 +243,16 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("known_hosts");
-        fs::write(&file, format!("10.0.0.5 ssh-ed25519 {ED25519}
+        fs::write(
+            &file,
+            format!(
+                "10.0.0.5 ssh-ed25519 {ED25519}
 [10.0.0.6]:2200 ssh-ed25519 {ED25519}
 keep ssh-ed25519 {ED25519}
-"))
-            .unwrap();
+"
+            ),
+        )
+        .unwrap();
         let names = vec![host_name("10.0.0.5", 22), host_name("10.0.0.6", 2200), host_name("absent", 22)];
         assert_eq!(remove(keygen, &file, &names).unwrap(), ["10.0.0.5", "[10.0.0.6]:2200"]);
         let left = fs::read_to_string(&file).unwrap();
@@ -280,8 +271,15 @@ keep ssh-ed25519 {ED25519}
 
     #[test]
     fn key_formats() {
-        assert_eq!(parse_key(&format!("ssh-ed25519 {ED25519} comment\n")), Some(("ssh-ed25519".into(), ED25519.into())));
-        let rfc = format!("---- BEGIN SSH2 PUBLIC KEY ----\nComment: \"x\"\n{}\n{}\n---- END SSH2 PUBLIC KEY ----\n", &ED25519[..40], &ED25519[40..]);
+        assert_eq!(
+            parse_key(&format!("ssh-ed25519 {ED25519} comment\n")),
+            Some(("ssh-ed25519".into(), ED25519.into()))
+        );
+        let rfc = format!(
+            "---- BEGIN SSH2 PUBLIC KEY ----\nComment: \"x\"\n{}\n{}\n---- END SSH2 PUBLIC KEY ----\n",
+            &ED25519[..40],
+            &ED25519[40..]
+        );
         assert_eq!(parse_key(&rfc), Some(("ssh-ed25519".into(), ED25519.into())));
         assert_eq!(parse_key(&format!("ssh-rsa {ED25519}")), None, "type and blob disagree");
         assert_eq!(parse_key("not a key"), None);

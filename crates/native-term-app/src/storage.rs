@@ -137,16 +137,31 @@ impl StorageCheck {
         let mut dismiss = false;
         ui.vertical(|ui| {
             if !health.conflicts.is_empty() {
-                ui.colored_label(red, t!("storage-conflicts", count = health.conflicts.len(), files = names(&health.conflicts)));
+                ui.colored_label(
+                    red,
+                    t!("storage-conflicts", count = health.conflicts.len(), files = names(&health.conflicts)),
+                );
             }
             if !health.cloud_only.is_empty() {
-                ui.colored_label(red, t!("storage-cloud-only", count = health.cloud_only.len(), files = names(&health.cloud_only)));
+                ui.colored_label(
+                    red,
+                    t!("storage-cloud-only", count = health.cloud_only.len(), files = names(&health.cloud_only)),
+                );
             }
             if !health.not_kept.is_empty() {
-                ui.colored_label(amber, t!("storage-not-kept", count = health.not_kept.len(), files = names(&health.not_kept)));
+                ui.colored_label(
+                    amber,
+                    t!("storage-not-kept", count = health.not_kept.len(), files = names(&health.not_kept)),
+                );
             }
             ui.horizontal(|ui| {
-                let folder = health.conflicts.iter().chain(&health.cloud_only).chain(&health.not_kept).next().and_then(|f| f.parent());
+                let folder = health
+                    .conflicts
+                    .iter()
+                    .chain(&health.cloud_only)
+                    .chain(&health.not_kept)
+                    .next()
+                    .and_then(|f| f.parent());
                 if let Some(folder) = folder {
                     if ui.small_button(t!("wizard-open-folder")).clicked() {
                         let _ = std::process::Command::new("explorer.exe").arg(folder).spawn();
@@ -182,7 +197,9 @@ mod tests {
         ] {
             assert!(is_conflict_copy(name, pc), "{name}");
         }
-        for name in ["web.conf", "desktop-ab12.conf", "web-2.conf", "node (prod).conf", "conflicts.toml", "state.db", "config"] {
+        for name in
+            ["web.conf", "desktop-ab12.conf", "web-2.conf", "node (prod).conf", "conflicts.toml", "state.db", "config"]
+        {
             assert!(!is_conflict_copy(name, pc), "{name}");
         }
         assert!(!is_conflict_copy("web-.conf", ""));
@@ -196,7 +213,12 @@ mod tests {
         let data = dir.path().join("data");
         std::fs::create_dir_all(&data).unwrap();
         let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
-        for f in [ssh.join("config"), ssh.join("id_ed25519 (1)"), ssh.join("config.d").join("web.conf"), data.join("state.db")] {
+        for f in [
+            ssh.join("config"),
+            ssh.join("id_ed25519 (1)"),
+            ssh.join("config.d").join("web.conf"),
+            data.join("state.db"),
+        ] {
             std::fs::write(f, "x").unwrap();
         }
         std::fs::write(ssh.join("config.d").join(format!("web-{machine}.conf")), "x").unwrap();

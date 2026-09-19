@@ -9,7 +9,8 @@ use std::io;
 use windows::core::{HSTRING, PWSTR};
 use windows::Win32::Foundation::FILETIME;
 use windows::Win32::Security::Credentials::{
-    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS, CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC,
+    CredDeleteW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS, CRED_PERSIST_LOCAL_MACHINE,
+    CRED_TYPE_GENERIC,
 };
 
 /// A saved password and its note.
@@ -27,7 +28,11 @@ pub fn read(target: &str) -> io::Result<Option<Saved>> {
     let name = HSTRING::from(target);
     if let Err(e) = unsafe { CredReadW(&name, CRED_TYPE_GENERIC, None, &mut found) } {
         // ERROR_NOT_FOUND
-        return if e.code() == windows::Win32::Foundation::ERROR_NOT_FOUND.to_hresult() { Ok(None) } else { Err(e.into()) };
+        return if e.code() == windows::Win32::Foundation::ERROR_NOT_FOUND.to_hresult() {
+            Ok(None)
+        } else {
+            Err(e.into())
+        };
     }
     let saved = unsafe {
         let c = &*found;

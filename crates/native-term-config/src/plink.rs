@@ -44,7 +44,8 @@ pub enum Protocol {
 }
 
 impl Protocol {
-    pub const ALL: [Protocol; 5] = [Protocol::Telnet, Protocol::Rlogin, Protocol::Raw, Protocol::Serial, Protocol::Supdup];
+    pub const ALL: [Protocol; 5] =
+        [Protocol::Telnet, Protocol::Rlogin, Protocol::Raw, Protocol::Serial, Protocol::Supdup];
 
     /// As written in the file and on plink's command line (without `-`).
     pub fn name(self) -> &'static str {
@@ -266,10 +267,8 @@ pub const PUTTY_TELNET: [PuttyOption; 2] = [
 /// 1 = off, 2 = automatic (the protocol decides: on for raw, off for
 /// serial, negotiated for Telnet). plink applies them to the console
 /// mode, so they work in every protocol.
-pub const PUTTY_LINE: [PuttyOption; 2] = [
-    PuttyOption::Number { key: "LocalEcho", default: 2 },
-    PuttyOption::Number { key: "LocalEdit", default: 2 },
-];
+pub const PUTTY_LINE: [PuttyOption; 2] =
+    [PuttyOption::Number { key: "LocalEcho", default: 2 }, PuttyOption::Number { key: "LocalEdit", default: 2 }];
 
 /// PuTTY's SUPDUP page.
 pub const PUTTY_SUPDUP: [PuttyOption; 4] = [
@@ -588,7 +587,10 @@ serial = { line = "COM3", speed = 115200 }
         s.protocol = Protocol::Raw;
         s.port = Some(4001);
         s.user = Some("admin".into());
-        assert_eq!(s.arguments(Some("NativeTerm-x")), ["-load", "NativeTerm-x", "-raw", "-P", "4001", "-l", "admin", "10.0.0.1"]);
+        assert_eq!(
+            s.arguments(Some("NativeTerm-x")),
+            ["-load", "NativeTerm-x", "-raw", "-P", "4001", "-l", "admin", "10.0.0.1"]
+        );
         let serial = PlinkSession {
             name: "c".into(),
             protocol: Protocol::Serial,

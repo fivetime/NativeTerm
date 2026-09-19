@@ -89,7 +89,11 @@ fn member_indent(text: &str, toks: &[Token]) -> String {
         .map(|t| {
             let line_start = text[..t.start].rfind('\n').map_or(0, |n| n + 1);
             let indent = &text[line_start..t.start];
-            if indent.trim().is_empty() { indent.to_string() } else { "    ".to_string() }
+            if indent.trim().is_empty() {
+                indent.to_string()
+            } else {
+                "    ".to_string()
+            }
         })
         .unwrap_or_else(|| "    ".to_string())
 }
@@ -116,7 +120,11 @@ pub fn edit(text: &str, source: &str, disable: bool) -> Result<Option<String>, S
         match toks[i].kind {
             Kind::Punct('{') | Kind::Punct('[') => depth += 1,
             Kind::Punct('}') | Kind::Punct(']') => depth -= 1,
-            Kind::Str if depth == 1 && string_is(text, &toks[i], KEY) && toks.get(i + 1).map(|t| t.kind) == Some(Kind::Punct(':')) => {
+            Kind::Str
+                if depth == 1
+                    && string_is(text, &toks[i], KEY)
+                    && toks.get(i + 1).map(|t| t.kind) == Some(Kind::Punct(':')) =>
+            {
                 let open = i + 2;
                 if toks.get(open).map(|t| t.kind) != Some(Kind::Punct('[')) {
                     return Err(format!("settings.json: {KEY} isn't a list"));
@@ -155,7 +163,9 @@ pub fn edit(text: &str, source: &str, disable: bool) -> Result<Option<String>, S
                 None => out.insert_str(toks[open].end, &quoted),
             }
         }
-        (Some((open, close)), false) if toks[open + 1..close].iter().all(|t| string_is(text, t, source) || t.kind == Kind::Punct(',')) => {
+        (Some((open, close)), false)
+            if toks[open + 1..close].iter().all(|t| string_is(text, t, source) || t.kind == Kind::Punct(',')) =>
+        {
             // nothing else in the list: the whole member goes, with its
             // line and comma (undoing what adding it did)
             let key = open - 2;
@@ -229,7 +239,8 @@ mod tests {
 
     #[test]
     fn adds_the_list_keeping_comments() {
-        let text = "// my settings\n{\n    // theme\n    \"theme\": \"dark\",\n    \"profiles\": { \"list\": [] },\n}\n";
+        let text =
+            "// my settings\n{\n    // theme\n    \"theme\": \"dark\",\n    \"profiles\": { \"list\": [] },\n}\n";
         let (off, on) = round(text);
         assert_eq!(
             off,
@@ -253,7 +264,10 @@ mod tests {
         assert_eq!(edit(text, S, false).unwrap().unwrap(), "{\"disabledProfileSources\": [\"Windows.Terminal.Wsl\"]}");
         let text = "{\"disabledProfileSources\": []}";
         assert_eq!(edit(text, S, true).unwrap().unwrap(), "{\"disabledProfileSources\": [\"Windows.Terminal.SSH\"]}");
-        assert_eq!(edit("{}", S, true).unwrap().unwrap(), "{\n    \"disabledProfileSources\": [\"Windows.Terminal.SSH\"]}");
+        assert_eq!(
+            edit("{}", S, true).unwrap().unwrap(),
+            "{\n    \"disabledProfileSources\": [\"Windows.Terminal.SSH\"]}"
+        );
         assert_eq!(round("{}").1, "{}");
         let crlf = "{\r\n  \"a\": 1,\r\n  \"b\": 2\r\n}\r\n";
         assert_eq!(round(crlf).1, crlf);

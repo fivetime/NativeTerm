@@ -85,10 +85,15 @@ impl PasswordField {
         ui.horizontal(|ui| {
             let account = format!("{}@{}", self.target.user, self.target.host);
             let hint = t!("password-hint", account = account.as_str());
-            let field = ui.add(egui::TextEdit::singleline(&mut self.typed).password(true).hint_text(hint).desired_width(200.0));
+            let field =
+                ui.add(egui::TextEdit::singleline(&mut self.typed).password(true).hint_text(hint).desired_width(200.0));
             no_ime(&field);
             if ui.add_enabled(!self.typed.is_empty(), egui::Button::new(t!("password-save"))).clicked() {
-                let saved = Saved { user: self.target.user.clone(), secret: std::mem::take(&mut self.typed), comment: String::new() };
+                let saved = Saved {
+                    user: self.target.user.clone(),
+                    secret: std::mem::take(&mut self.typed),
+                    comment: String::new(),
+                };
                 let result = credentials::write(&self.target.name, &saved);
                 drop(saved);
                 self.message = Some(match result {
@@ -258,12 +263,16 @@ impl HostDialog {
                     ui.end_row();
                     ui.label(t!("field-persistent")).on_hover_text(t!("field-persistent-hint"));
                     let choices = self.persistent_choices();
-                    let current = choices.iter().find(|(v, _)| *v == self.persistent).map(|(_, t)| t.clone()).unwrap_or_default();
-                    egui::ComboBox::from_id_salt("host-persistent").selected_text(current).width(280.0).show_ui(ui, |ui| {
-                        for (value, text) in choices {
-                            ui.selectable_value(&mut self.persistent, value, text);
-                        }
-                    });
+                    let current =
+                        choices.iter().find(|(v, _)| *v == self.persistent).map(|(_, t)| t.clone()).unwrap_or_default();
+                    egui::ComboBox::from_id_salt("host-persistent").selected_text(current).width(280.0).show_ui(
+                        ui,
+                        |ui| {
+                            for (value, text) in choices {
+                                ui.selectable_value(&mut self.persistent, value, text);
+                            }
+                        },
+                    );
                     ui.end_row();
                 });
                 if let Some(alias) = &self.alias {
@@ -339,7 +348,9 @@ fn tab_color_choice(ui: &mut egui::Ui, value: &mut Option<String>, folder: Optio
         });
         if let Some(v) = value.as_mut().filter(|v| v.starts_with('#')) {
             ui.add(egui::TextEdit::singleline(v).hint_text("#C0392B").desired_width(90.0));
-            if let Some(color) = native_term_config::appearance::tab_color(v).and_then(|h| egui::Color32::from_hex(&h).ok()) {
+            if let Some(color) =
+                native_term_config::appearance::tab_color(v).and_then(|h| egui::Color32::from_hex(&h).ok())
+            {
                 ui.colored_label(color, "■");
             }
         }
@@ -390,7 +401,12 @@ impl FolderDialog {
     }
 
     pub fn rename(file: PathBuf, current: &str) -> FolderDialog {
-        FolderDialog { title: t!("folder-rename-title", name = current), file: Some(file), name: current.to_string(), error: None }
+        FolderDialog {
+            title: t!("folder-rename-title", name = current),
+            file: Some(file),
+            name: current.to_string(),
+            error: None,
+        }
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<String> {
@@ -402,7 +418,9 @@ impl FolderDialog {
             .open(&mut open)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                let edit = ui.add(egui::TextEdit::singleline(&mut self.name).hint_text(t!("folder-name-hint")).desired_width(260.0));
+                let edit = ui.add(
+                    egui::TextEdit::singleline(&mut self.name).hint_text(t!("folder-name-hint")).desired_width(260.0),
+                );
                 if self.name.is_empty() {
                     edit.request_focus();
                 }

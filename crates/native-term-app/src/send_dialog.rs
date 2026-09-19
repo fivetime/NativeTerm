@@ -91,7 +91,10 @@ impl SendDialog {
         let lib = match &mut self.library {
             Ok(lib) => lib,
             Err(e) => {
-                ui.colored_label(RED, t!("send-library-error", path = self.library_path.display().to_string(), error = e.as_str()));
+                ui.colored_label(
+                    RED,
+                    t!("send-library-error", path = self.library_path.display().to_string(), error = e.as_str()),
+                );
                 return;
             }
         };
@@ -114,7 +117,11 @@ impl SendDialog {
                         ui.weak(g);
                     }
                     for c in lib.commands.iter().filter(|c| c.group == group) {
-                        if ui.selectable_label(self.picked.as_deref() == Some(&c.name), &c.name).on_hover_text(&c.text).clicked() {
+                        if ui
+                            .selectable_label(self.picked.as_deref() == Some(&c.name), &c.name)
+                            .on_hover_text(&c.text)
+                            .clicked()
+                        {
                             self.picked = Some(c.name.clone());
                             self.text = c.text.clone();
                             self.enter = c.enter;
@@ -251,7 +258,8 @@ impl SendDialog {
         self.confirm = false;
         self.result.clear();
         if !report.sent.is_empty() {
-            self.result.push((true, t!("send-result-sent", count = report.sent.len(), labels = report.sent.join(", "))));
+            self.result
+                .push((true, t!("send-result-sent", count = report.sent.len(), labels = report.sent.join(", "))));
         }
         if !report.skipped.is_empty() {
             self.result.push((false, t!("send-result-skipped", labels = report.skipped.join(", "))));

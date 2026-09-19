@@ -81,11 +81,8 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("open") => {
             let new_window = args.iter().any(|a| a == "--new-window");
-            let hosts: Vec<HostRequest> = args[1..]
-                .iter()
-                .filter(|a| !a.starts_with("--"))
-                .map(|l| HostRequest::new(HOST, l.clone()))
-                .collect();
+            let hosts: Vec<HostRequest> =
+                args[1..].iter().filter(|a| !a.starts_with("--")).map(|l| HostRequest::new(HOST, l.clone())).collect();
             core.open(&hosts, if new_window { Target::NewWindow } else { Target::Recent });
             let ok = wait_until(&core, 30, |s| {
                 s.len() >= hosts.len() && settled(s) && s.iter().all(|s| matches!(s.state, State::LoginFailed(_)))

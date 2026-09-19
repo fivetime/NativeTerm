@@ -64,7 +64,10 @@ pub enum WriteError {
     /// The file changed since it was read; nothing was written.
     Conflict,
     /// Validation rejected the new content; the previous content is back.
-    Rejected { reason: String, backup: Option<PathBuf> },
+    Rejected {
+        reason: String,
+        backup: Option<PathBuf>,
+    },
     Io(io::Error),
 }
 
@@ -72,7 +75,9 @@ impl fmt::Display for WriteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             WriteError::Conflict => write!(f, "the file was changed by someone else since it was read"),
-            WriteError::Rejected { reason, .. } => write!(f, "ssh rejected the change, previous version restored: {reason}"),
+            WriteError::Rejected { reason, .. } => {
+                write!(f, "ssh rejected the change, previous version restored: {reason}")
+            }
             WriteError::Io(e) => write!(f, "{e}"),
         }
     }
@@ -141,10 +146,8 @@ impl Writer {
         fs::create_dir_all(&dir)?;
         // a zero-padded counter keeps names sortable within one millisecond
         let stamp = timestamp(SystemTime::now());
-        let file = (1..)
-            .map(|n| dir.join(format!("{stamp}-{n:03}.bak")))
-            .find(|f| !f.exists())
-            .expect("unbounded range");
+        let file =
+            (1..).map(|n| dir.join(format!("{stamp}-{n:03}.bak"))).find(|f| !f.exists()).expect("unbounded range");
         fs::write(&file, bytes)?;
         // backups hold host details too
         #[cfg(windows)]
@@ -198,7 +201,8 @@ pub fn edit_file(
 /// `.ssh_config`, `config.d_ceph-cluster.conf`: the parent folder keeps
 /// `~/.ssh/config` and `config.d/*` apart.
 fn backup_group(path: &Path) -> String {
-    let name = |p: Option<&Path>| p.and_then(Path::file_name).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let name =
+        |p: Option<&Path>| p.and_then(Path::file_name).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     format!("{}_{}", name(path.parent()), name(Some(path)))
 }
 
@@ -275,13 +279,7 @@ fn timestamp(t: SystemTime) -> String {
     let secs = since.as_secs() as i64;
     let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
     let rem = secs.rem_euclid(86_400);
-    format!(
-        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{:03}",
-        rem / 3600,
-        rem % 3600 / 60,
-        rem % 60,
-        since.subsec_millis()
-    )
+    format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{:03}", rem / 3600, rem % 3600 / 60, rem % 60, since.subsec_millis())
 }
 
 /// Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
@@ -427,7 +425,10 @@ mod tests {
         let writer = Writer::new(dir.path().join("backups"));
         let changed = edit_file(&writer, &path, |doc| doc.set(1, "NativeTermLabel", "Web 01"), ok).unwrap();
         assert!(changed);
-        assert_eq!(fs::read_to_string(&path).unwrap(), "Host web01\n    HostName 10.0.0.1\n    NativeTermLabel \"Web 01\"\n");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "Host web01\n    HostName 10.0.0.1\n    NativeTermLabel \"Web 01\"\n"
+        );
         let unchanged = edit_file(&writer, &path, |doc| doc.set(1, "NativeTermLabel", "Web 01"), ok).unwrap();
         assert!(!unchanged);
         assert_eq!(backups(&writer.backups).len(), 1);

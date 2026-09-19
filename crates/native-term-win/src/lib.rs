@@ -12,8 +12,8 @@ pub mod service;
 pub mod shell;
 pub mod watch;
 
-use std::io;
 use std::fs::File;
+use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 
@@ -25,8 +25,8 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::{
     GetTokenInformation, SetFileSecurityW, TokenElevation, TokenStatistics, TokenUser, DACL_SECURITY_INFORMATION,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_ELEVATION, TOKEN_INFORMATION_CLASS,
-    TOKEN_QUERY, TOKEN_STATISTICS, TOKEN_USER,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_ELEVATION, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
+    TOKEN_STATISTICS, TOKEN_USER,
 };
 use windows::Win32::System::Memory::{CreateFileMappingW, MapViewOfFile, FILE_MAP_READ, PAGE_READONLY};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -51,7 +51,9 @@ fn token_information(class: TOKEN_INFORMATION_CLASS) -> io::Result<Vec<u8>> {
 /// process: ids are reused, start times are not.
 pub fn process_started(pid: u32) -> Option<u64> {
     use windows::Win32::Foundation::FILETIME;
-    use windows::Win32::System::Threading::{GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::System::Threading::{
+        GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     const STILL_ACTIVE: u32 = 259;
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut code = 0u32;
@@ -114,7 +116,9 @@ fn local_time(unix: u64) -> Option<windows::Win32::Foundation::SYSTEMTIME> {
     let ticks = (unix + 11_644_473_600) * 10_000_000;
     let file = FILETIME { dwLowDateTime: ticks as u32, dwHighDateTime: (ticks >> 32) as u32 };
     let (mut utc, mut local) = (SYSTEMTIME::default(), SYSTEMTIME::default());
-    let ok = unsafe { FileTimeToSystemTime(&file, &mut utc).is_ok() && SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).is_ok() };
+    let ok = unsafe {
+        FileTimeToSystemTime(&file, &mut utc).is_ok() && SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).is_ok()
+    };
     ok.then_some(local)
 }
 
@@ -201,8 +205,17 @@ pub fn set_file_dacl(path: &Path, sddl: &str) -> io::Result<()> {
 pub fn file_dacl_sddl(path: &Path) -> io::Result<String> {
     unsafe {
         let mut sd = PSECURITY_DESCRIPTOR::default();
-        GetNamedSecurityInfoW(&HSTRING::from(path), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, None, None, None, None, &mut sd)
-            .ok()?;
+        GetNamedSecurityInfoW(
+            &HSTRING::from(path),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            None,
+            None,
+            None,
+            None,
+            &mut sd,
+        )
+        .ok()?;
         let sd = SecurityDescriptor(sd);
         let mut text = PWSTR::null();
         ConvertSecurityDescriptorToStringSecurityDescriptorW(
@@ -228,8 +241,7 @@ pub fn map_file_for_process(path: &Path) -> io::Result<&'static [u8]> {
         return Ok(&[]);
     }
     unsafe {
-        let mapping =
-            CreateFileMappingW(HANDLE(file.as_raw_handle() as _), None, PAGE_READONLY, 0, 0, None)?;
+        let mapping = CreateFileMappingW(HANDLE(file.as_raw_handle() as _), None, PAGE_READONLY, 0, 0, None)?;
         let view = MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0);
         // the view keeps the mapping and the file alive
         let _ = CloseHandle(mapping);
@@ -257,7 +269,8 @@ pub fn ssh_message(bytes: &[u8]) -> String {
     let mut raw = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        let octal = bytes.get(i + 1..i + 4).filter(|d| bytes[i] == b'\\' && d.iter().all(|c| (b'0'..=b'7').contains(c)));
+        let octal =
+            bytes.get(i + 1..i + 4).filter(|d| bytes[i] == b'\\' && d.iter().all(|c| (b'0'..=b'7').contains(c)));
         match octal {
             Some(d) => {
                 let v = d.iter().fold(0u32, |v, c| v * 8 + (c - b'0') as u32);
@@ -280,7 +293,10 @@ pub fn ssh_message(bytes: &[u8]) -> String {
 mod tests {
     #[test]
     fn ssh_messages() {
-        assert_eq!(super::ssh_message(b"ssh: connect to host x port 22: Connection refused"), "ssh: connect to host x port 22: Connection refused");
+        assert_eq!(
+            super::ssh_message(b"ssh: connect to host x port 22: Connection refused"),
+            "ssh: connect to host x port 22: Connection refused"
+        );
         assert_eq!(super::ssh_message("已经是 UTF-8".as_bytes()), "已经是 UTF-8");
         // "不知道这样的主机。" in GBK, escaped by ssh; only on a Chinese system
         let gbk = super::ssh_message(

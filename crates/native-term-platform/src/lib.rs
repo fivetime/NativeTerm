@@ -93,9 +93,7 @@ pub struct Snapshot {
 
 impl Snapshot {
     pub fn claimed(&self) -> impl Iterator<Item = (&WindowView, &TabView, &Claim)> {
-        self.windows
-            .iter()
-            .flat_map(|w| w.tabs.iter().filter_map(move |t| t.claim.as_ref().map(|c| (w, t, c))))
+        self.windows.iter().flat_map(|w| w.tabs.iter().filter_map(move |t| t.claim.as_ref().map(|c| (w, t, c))))
     }
 
     pub fn find(&self, label: &str) -> Option<(&WindowView, &TabView)> {

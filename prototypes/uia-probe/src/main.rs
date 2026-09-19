@@ -79,7 +79,15 @@ fn terminal_hwnds() -> Vec<(windows::Win32::Foundation::HWND, bool)> {
         .map(|hwnd| {
             let mut result = 0usize;
             let answered = unsafe {
-                SendMessageTimeoutW(hwnd, WM_NULL, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, Some(&mut result))
+                SendMessageTimeoutW(
+                    hwnd,
+                    WM_NULL,
+                    WPARAM(0),
+                    LPARAM(0),
+                    SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                    250,
+                    Some(&mut result),
+                )
             };
             (hwnd, answered.0 != 0)
         })
@@ -145,9 +153,7 @@ fn tabs(automation: &UIAutomation, window: &UIElement) -> Res<Vec<UIElement>> {
 }
 
 fn is_selected(tab: &UIElement) -> bool {
-    tab.get_pattern::<UISelectionItemPattern>()
-        .and_then(|p| p.is_selected())
-        .unwrap_or(false)
+    tab.get_pattern::<UISelectionItemPattern>().and_then(|p| p.is_selected()).unwrap_or(false)
 }
 
 fn list(automation: &UIAutomation) -> Res<String> {
@@ -196,7 +202,7 @@ fn all_tabs(automation: &UIAutomation) -> Res<()> {
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Accessibility::{
         IUIAutomationElement, IUIAutomationItemContainerPattern, IUIAutomationVirtualizedItemPattern,
-        UIA_ItemContainerPatternId, UIA_PROPERTY_ID, UIA_VirtualizedItemPatternId,
+        UIA_ItemContainerPatternId, UIA_VirtualizedItemPatternId, UIA_PROPERTY_ID,
     };
     for (wi, w) in terminal_windows(automation)?.iter().enumerate() {
         let lists = descendants_of_type(automation, w, ControlType::List)?;
@@ -214,7 +220,9 @@ fn all_tabs(automation: &UIAutomation) -> Res<()> {
             let Ok(item) = next else { break };
             let mut name = unsafe { item.CurrentName() }.map(|s| s.to_string()).unwrap_or_default();
             if name.is_empty() {
-                if let Ok(v) = unsafe { item.GetCurrentPatternAs::<IUIAutomationVirtualizedItemPattern>(UIA_VirtualizedItemPatternId) } {
+                if let Ok(v) = unsafe {
+                    item.GetCurrentPatternAs::<IUIAutomationVirtualizedItemPattern>(UIA_VirtualizedItemPatternId)
+                } {
                     if unsafe { v.Realize() }.is_ok() {
                         realized += 1;
                         name = unsafe { item.CurrentName() }.map(|s| s.to_string()).unwrap_or_default();
@@ -225,7 +233,10 @@ fn all_tabs(automation: &UIAutomation) -> Res<()> {
             n += 1;
             prev = Some(item);
         }
-        println!("window {wi}: {n} tabs via ItemContainerPattern ({realized} realized, {} ms)", started.elapsed().as_millis());
+        println!(
+            "window {wi}: {n} tabs via ItemContainerPattern ({realized} realized, {} ms)",
+            started.elapsed().as_millis()
+        );
     }
     Ok(())
 }
@@ -236,8 +247,8 @@ fn select_any(automation: &UIAutomation, needle: &str) -> Res<()> {
     use windows::Win32::System::Variant::VARIANT;
     use windows::Win32::UI::Accessibility::{
         IUIAutomationElement, IUIAutomationItemContainerPattern, IUIAutomationSelectionItemPattern,
-        IUIAutomationVirtualizedItemPattern, UIA_ItemContainerPatternId, UIA_PROPERTY_ID,
-        UIA_SelectionItemPatternId, UIA_VirtualizedItemPatternId,
+        IUIAutomationVirtualizedItemPattern, UIA_ItemContainerPatternId, UIA_SelectionItemPatternId,
+        UIA_VirtualizedItemPatternId, UIA_PROPERTY_ID,
     };
     for w in terminal_windows(automation)? {
         let lists = descendants_of_type(automation, &w, ControlType::List)?;
@@ -250,7 +261,9 @@ fn select_any(automation: &UIAutomation, needle: &str) -> Res<()> {
         while let Ok(item) = unsafe { container.FindItemByProperty(prev.as_ref(), UIA_PROPERTY_ID(0), &empty) } {
             let name = unsafe { item.CurrentName() }.map(|s| s.to_string()).unwrap_or_default();
             if name.contains(needle) {
-                if let Ok(v) = unsafe { item.GetCurrentPatternAs::<IUIAutomationVirtualizedItemPattern>(UIA_VirtualizedItemPatternId) } {
+                if let Ok(v) = unsafe {
+                    item.GetCurrentPatternAs::<IUIAutomationVirtualizedItemPattern>(UIA_VirtualizedItemPatternId)
+                } {
                     println!("realize: {:?}", unsafe { v.Realize() });
                 }
                 let sel: IUIAutomationSelectionItemPattern =
@@ -297,12 +310,8 @@ fn text(automation: &UIAutomation) -> Res<()> {
             }
             if let Ok(tp) = e.get_pattern::<UITextPattern>() {
                 let started = Instant::now();
-                let visible = tp
-                    .get_visible_ranges()?
-                    .iter()
-                    .filter_map(|r| r.get_text(-1).ok())
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let visible =
+                    tp.get_visible_ranges()?.iter().filter_map(|r| r.get_text(-1).ok()).collect::<Vec<_>>().join("\n");
                 let lines: Vec<&str> = visible.lines().filter(|l| !l.trim().is_empty()).collect();
                 let keep = std::env::var("NT_TEXT_LINES").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
                 let tail = &lines[lines.len().saturating_sub(keep)..];
@@ -323,8 +332,12 @@ fn text(automation: &UIAutomation) -> Res<()> {
                     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
                         let _ = writeln!(f, "window {wi}:");
                         for l in tail {
-                            let cps: Vec<String> =
-                                l.trim_end().chars().filter(|c| !c.is_ascii()).map(|c| format!("U+{:04X}", c as u32)).collect();
+                            let cps: Vec<String> = l
+                                .trim_end()
+                                .chars()
+                                .filter(|c| !c.is_ascii())
+                                .map(|c| format!("U+{:04X}", c as u32))
+                                .collect();
                             let _ = writeln!(f, "    | {}    [{}]", l.trim_end(), cps.join(" "));
                         }
                     }
@@ -407,10 +420,9 @@ mod events {
     use std::time::Instant;
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
     use windows::Win32::UI::Accessibility::{
-        CUIAutomation8, IUIAutomation, IUIAutomationElement, IUIAutomationEventHandler,
-        IUIAutomationEventHandler_Impl, IUIAutomationFocusChangedEventHandler,
-        IUIAutomationFocusChangedEventHandler_Impl, TreeScope_Subtree, UIA_EVENT_ID,
-        UIA_SelectionItem_ElementSelectedEventId,
+        CUIAutomation8, IUIAutomation, IUIAutomationElement, IUIAutomationEventHandler, IUIAutomationEventHandler_Impl,
+        IUIAutomationFocusChangedEventHandler, IUIAutomationFocusChangedEventHandler_Impl, TreeScope_Subtree,
+        UIA_SelectionItem_ElementSelectedEventId, UIA_EVENT_ID,
     };
     use windows_core::{implement, Ref};
 
@@ -429,7 +441,11 @@ mod events {
     #[implement(IUIAutomationEventHandler)]
     struct Selected(Instant);
     impl IUIAutomationEventHandler_Impl for Selected_Impl {
-        fn HandleAutomationEvent(&self, sender: Ref<IUIAutomationElement>, _id: UIA_EVENT_ID) -> windows_core::Result<()> {
+        fn HandleAutomationEvent(
+            &self,
+            sender: Ref<IUIAutomationElement>,
+            _id: UIA_EVENT_ID,
+        ) -> windows_core::Result<()> {
             if let Some(e) = sender.as_ref() {
                 println!("{:>7} ms  selected: {}", self.0.elapsed().as_millis(), describe(e));
             }
@@ -493,8 +509,8 @@ fn hung() {
     use windows::core::BOOL;
     use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsHungAppWindow, SendMessageTimeoutW,
-        SMTO_ABORTIFHUNG, SMTO_BLOCK, WM_NULL,
+        EnumWindows, GetClassNameW, GetWindowThreadProcessId, IsHungAppWindow, SendMessageTimeoutW, SMTO_ABORTIFHUNG,
+        SMTO_BLOCK, WM_NULL,
     };
     unsafe extern "system" fn each(hwnd: HWND, found: LPARAM) -> BOOL {
         let mut class = [0u16; 64];
@@ -523,7 +539,15 @@ fn hung() {
         let started = Instant::now();
         let mut result = 0usize;
         let answered = unsafe {
-            SendMessageTimeoutW(hwnd, WM_NULL, WPARAM(0), LPARAM(0), SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, Some(&mut result))
+            SendMessageTimeoutW(
+                hwnd,
+                WM_NULL,
+                WPARAM(0),
+                LPARAM(0),
+                SMTO_ABORTIFHUNG | SMTO_BLOCK,
+                250,
+                Some(&mut result),
+            )
         };
         println!(
             "hwnd {:?} pid {pid}: IsHungAppWindow={hung} ({t_hung} us), WM_NULL answered={} ({} ms)",

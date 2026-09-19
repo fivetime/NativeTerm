@@ -105,7 +105,14 @@ impl Painter {
     }
 
     /// Draw into `hdc` (the popup's paint DC), `size` pixels.
-    pub fn paint(&self, hdc: HDC, width: i32, height: i32, background: COLORREF, draw: impl FnOnce(&Canvas)) -> Result<()> {
+    pub fn paint(
+        &self,
+        hdc: HDC,
+        width: i32,
+        height: i32,
+        background: COLORREF,
+        draw: impl FnOnce(&Canvas),
+    ) -> Result<()> {
         unsafe {
             self.target.BindDC(hdc, &RECT { left: 0, top: 0, right: width, bottom: height })?;
             self.target.BeginDraw();
@@ -153,7 +160,16 @@ impl Canvas<'_> {
     /// One line in the box, vertically centered, clipped; color emoji
     /// drawn in color.
     #[allow(clippy::too_many_arguments)]
-    pub fn text(&self, format: &IDWriteTextFormat, text: &str, left: i32, top: i32, right: i32, bottom: i32, c: COLORREF) {
+    pub fn text(
+        &self,
+        format: &IDWriteTextFormat,
+        text: &str,
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+        c: COLORREF,
+    ) {
         let Some(brush) = self.brush(c) else { return };
         let wide: Vec<u16> = text.encode_utf16().collect();
         unsafe {

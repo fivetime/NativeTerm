@@ -64,7 +64,9 @@ pub enum Status {
     /// Defined in the Terminal's own `settings.json` (by hand, or tests).
     InSettings,
     /// The fragment points at another shim (the program folder moved).
-    Outdated { shim: PathBuf },
+    Outdated {
+        shim: PathBuf,
+    },
     /// Installed, but turned off on Terminal's "Extensions" page.
     Disabled,
     Missing,
@@ -89,11 +91,8 @@ pub fn status(install: &Install, root: Option<&Path>, shim: &Path) -> Status {
         Some(installed) if same_path(installed, shim) => return Status::Installed,
         _ => {}
     }
-    let own = settings
-        .as_ref()
-        .and_then(|s| s.pointer("/profiles/list"))
-        .and_then(Value::as_array)
-        .is_some_and(|list| {
+    let own =
+        settings.as_ref().and_then(|s| s.pointer("/profiles/list")).and_then(Value::as_array).is_some_and(|list| {
             list.iter().any(|p| {
                 p.get("name").and_then(Value::as_str) == Some(PROFILE_NAME)
                     && p.get("source").is_none()
@@ -114,7 +113,8 @@ fn same_path(a: &Path, b: &Path) -> bool {
 /// `%LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments` (read by
 /// packaged, unpackaged and portable installs alike).
 pub fn user_fragments_root() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("Microsoft").join("Windows Terminal").join("Fragments"))
+    std::env::var_os("LOCALAPPDATA")
+        .map(|d| PathBuf::from(d).join("Microsoft").join("Windows Terminal").join("Fragments"))
 }
 
 pub fn fragment_path(root: &Path) -> PathBuf {

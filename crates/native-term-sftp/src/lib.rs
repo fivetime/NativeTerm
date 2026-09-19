@@ -32,7 +32,10 @@ pub const WINDOW: usize = 64;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     /// The server's answer (`SSH_FX_*`) and its message.
-    Status { code: u32, message: String },
+    Status {
+        code: u32,
+        message: String,
+    },
     /// The connection is gone; ssh's last words, if any.
     Closed(String),
     /// A local file or the stream.
@@ -73,7 +76,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// A reply to one request.
 #[derive(Debug)]
 enum Reply {
-    Status { code: u32, message: String },
+    Status {
+        code: u32,
+        message: String,
+    },
     Handle(Vec<u8>),
     Data(Vec<u8>),
     Name(Vec<Entry>),
@@ -121,7 +127,8 @@ pub use encoding_rs::Encoding;
 impl Default for Names {
     fn default() -> Names {
         #[cfg(windows)]
-        let fallback = codepage::to_encoding(native_term_win::ansi_code_page() as u16).unwrap_or(encoding_rs::WINDOWS_1252);
+        let fallback =
+            codepage::to_encoding(native_term_win::ansi_code_page() as u16).unwrap_or(encoding_rs::WINDOWS_1252);
         #[cfg(not(windows))]
         let fallback = encoding_rs::WINDOWS_1252;
         Names::Auto { fallback }
@@ -158,7 +165,9 @@ impl Names {
     /// `\xNN`, so no name is ever hidden.
     pub fn decode(&self, bytes: &[u8]) -> String {
         let decoded = match *self {
-            Names::Auto { fallback } => std::str::from_utf8(bytes).ok().map(str::to_string).or_else(|| strict(fallback, bytes)),
+            Names::Auto { fallback } => {
+                std::str::from_utf8(bytes).ok().map(str::to_string).or_else(|| strict(fallback, bytes))
+            }
             Names::Fixed(encoding) => strict(encoding, bytes),
         };
         decoded.unwrap_or_else(|| escaped(bytes))
@@ -321,7 +330,11 @@ impl Session {
             // give the stderr thread a moment to catch ssh's last line
             std::thread::sleep(std::time::Duration::from_millis(100));
             let t = ssh_text(&lock(&stderr_text)).trim().to_string();
-            if t.is_empty() { "the connection closed".to_string() } else { t }
+            if t.is_empty() {
+                "the connection closed".to_string()
+            } else {
+                t
+            }
         };
         let mut session = Session::start(Box::new(stdin), Box::new(stdout), last_words)?;
         session.child = Mutex::new(Some(child));
@@ -372,7 +385,13 @@ impl Session {
             }
             s.closed = Some(why);
         });
-        Ok(Session { writer: Mutex::new(writer), next_id: AtomicU32::new(1), shared, child: Mutex::new(None), extensions })
+        Ok(Session {
+            writer: Mutex::new(writer),
+            next_id: AtomicU32::new(1),
+            shared,
+            child: Mutex::new(None),
+            extensions,
+        })
     }
 
     /// Ends the connection now: ssh is killed, everything waiting fails
@@ -473,7 +492,9 @@ impl Session {
         let mut entries = Vec::new();
         let result = loop {
             match self.call(wire::READDIR, Body::default().string(&handle)) {
-                Ok(Reply::Name(names)) => entries.extend(names.into_iter().filter(|e| e.name != b"." && e.name != b"..")),
+                Ok(Reply::Name(names)) => {
+                    entries.extend(names.into_iter().filter(|e| e.name != b"." && e.name != b".."))
+                }
                 Ok(Reply::Status { code: wire::FX_EOF, .. }) => break Ok(()),
                 Ok(other) => break Err(unexpected(other)),
                 Err(e) => break Err(e),
@@ -592,7 +613,13 @@ impl Session {
 
     /// Uploads `local` to `remote` (created or truncated, with
     /// `permissions` if new). Several writes are in flight.
-    pub fn upload(&self, local: &Path, remote: &[u8], permissions: Option<u32>, progress: &mut dyn FnMut(u64) -> bool) -> Result<u64> {
+    pub fn upload(
+        &self,
+        local: &Path,
+        remote: &[u8],
+        permissions: Option<u32>,
+        progress: &mut dyn FnMut(u64) -> bool,
+    ) -> Result<u64> {
         let mut file = File::open(local)?;
         let attrs = Attrs { permissions, ..Default::default() };
         let handle = self.open(remote, wire::OPEN_WRITE | wire::OPEN_CREAT | wire::OPEN_TRUNC, &attrs)?;
@@ -836,7 +863,12 @@ mod tests {
         sftp.mkdir(&join(&base, "上传".as_bytes())).unwrap();
         let target = join(&join(&base, "上传".as_bytes()), "副本.bin".as_bytes());
         let mut calls = 0;
-        let sent = sftp.upload(&local, &target, Some(0o644), &mut |_| { calls += 1; true }).unwrap();
+        let sent = sftp
+            .upload(&local, &target, Some(0o644), &mut |_| {
+                calls += 1;
+                true
+            })
+            .unwrap();
         assert_eq!(sent, data.len() as u64);
         assert!(calls > 1);
         assert_eq!(std::fs::read(dir.path().join("上传").join("副本.bin")).unwrap(), data);
@@ -973,7 +1005,9 @@ mod tests {
         let e = sftp.download(&join(&base, b"missing"), &dir.path().join("x"), &mut |_| true).unwrap_err();
         assert!(e.is_status(wire::FX_NO_SUCH_FILE), "{e:?}");
         // a local file that can't be written: the remote handle is closed again
-        let e = sftp.download(&join(&base, b"a.txt"), &dir.path().join("no").join("dir").join("x"), &mut |_| true).unwrap_err();
+        let e = sftp
+            .download(&join(&base, b"a.txt"), &dir.path().join("no").join("dir").join("x"), &mut |_| true)
+            .unwrap_err();
         assert!(matches!(e, Error::Io(_)), "{e:?}");
         // a directory isn't a file
         assert!(sftp.download(&join(&base, b"sub"), &dir.path().join("y"), &mut |_| true).is_err());

@@ -22,7 +22,11 @@ pub fn scan(config: &Path, lines: &mut Vec<Line>) -> Vec<Imported> {
     let bytes = match std::fs::read(&file) {
         Ok(b) => b,
         Err(e) => {
-            lines.push(Line { text: t!("buttons-unreadable", error = e.to_string()), warning: true, details: Vec::new() });
+            lines.push(Line {
+                text: t!("buttons-unreadable", error = e.to_string()),
+                warning: true,
+                details: Vec::new(),
+            });
             return Vec::new();
         }
     };
@@ -37,9 +41,8 @@ pub fn scan(config: &Path, lines: &mut Vec<Line>) -> Vec<Imported> {
             bars.push(&b.bar);
         }
         match b.convert() {
-            Converted::Command { text, enter } => imported.push(Imported {
-                command: Command { name: b.label.clone(), text, enter, group: Some(b.bar.clone()) },
-            }),
+            Converted::Command { text, enter } => imported
+                .push(Imported { command: Command { name: b.label.clone(), text, enter, group: Some(b.bar.clone()) } }),
             Converted::Skipped(why) => {
                 let reason = match why {
                     Why::Function(f) => t!("buttons-why-function", function = f.as_str()),
@@ -53,7 +56,8 @@ pub fn scan(config: &Path, lines: &mut Vec<Line>) -> Vec<Imported> {
             }
         }
     }
-    let details = imported.iter().map(|i| format!("{} / {}", i.command.group.as_deref().unwrap_or(""), i.command.name)).collect();
+    let details =
+        imported.iter().map(|i| format!("{} / {}", i.command.group.as_deref().unwrap_or(""), i.command.name)).collect();
     lines.push(Line {
         text: t!("buttons-found", commands = imported.len(), bars = bars.len(), file = file.display().to_string()),
         warning: false,
@@ -104,13 +108,18 @@ mod tests {
         assert_eq!(names, ["ip br", "disk"]);
         assert_eq!(lines.len(), 2, "found, and left out");
         assert_eq!(lines[1].details.len(), 2, "enable (a pause) and clone (a menu function)");
-        assert!(!lines[1].details.iter().any(|d| d.contains("PASSWORD")), "the reason, not the text: {:?}", lines[1].details);
+        assert!(
+            !lines[1].details.iter().any(|d| d.contains("PASSWORD")),
+            "the reason, not the text: {:?}",
+            lines[1].details
+        );
 
         let library = dir.path().join("commands.toml");
         std::fs::write(&library, "[[command]]\nname = \"disk\"\ntext = \"df -hT\"\n").unwrap();
         add(&library, imported.clone());
         let saved = Library::load(&library).unwrap();
-        let names: Vec<(&str, Option<&str>)> = saved.commands.iter().map(|c| (c.name.as_str(), c.group.as_deref())).collect();
+        let names: Vec<(&str, Option<&str>)> =
+            saved.commands.iter().map(|c| (c.name.as_str(), c.group.as_deref())).collect();
         assert_eq!(names, [("disk", None), ("ip br", Some("Cisco")), ("disk (Linux)", Some("Linux"))]);
         // again: nothing new
         add(&library, imported);

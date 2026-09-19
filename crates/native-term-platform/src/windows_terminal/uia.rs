@@ -9,8 +9,8 @@ use windows::core::Interface;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     IUIAutomationElement, IUIAutomationItemContainerPattern, IUIAutomationSelectionItemPattern,
-    IUIAutomationVirtualizedItemPattern, UIA_ItemContainerPatternId, UIA_PROPERTY_ID, UIA_SelectionItemPatternId,
-    UIA_VirtualizedItemPatternId,
+    IUIAutomationVirtualizedItemPattern, UIA_ItemContainerPatternId, UIA_SelectionItemPatternId,
+    UIA_VirtualizedItemPatternId, UIA_PROPERTY_ID,
 };
 
 use super::window::hwnd;

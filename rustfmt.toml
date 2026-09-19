@@ -1,0 +1,5 @@
+# Hand formatting was ~120 columns with short things on one line: these
+# settings keep closest to it (see AGENTS.md: cargo fmt on every change).
+edition = "2021"
+max_width = 120
+use_small_heuristics = "Max"

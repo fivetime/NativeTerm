@@ -228,11 +228,7 @@ impl Document {
     /// Insert a raw directive line at the start of the global part (after
     /// leading comments), e.g. for `IgnoreUnknown`.
     pub fn insert_global_first(&mut self, keyword: &str, value: &str) -> usize {
-        let at = self
-            .lines
-            .iter()
-            .position(|l| !matches!(l.kind, LineKind::Comment))
-            .unwrap_or(self.lines.len());
+        let at = self.lines.iter().position(|l| !matches!(l.kind, LineKind::Comment)).unwrap_or(self.lines.len());
         self.lines.insert(at, parse_line(&format!("{keyword} {}", quote_arg(value))));
         at
     }

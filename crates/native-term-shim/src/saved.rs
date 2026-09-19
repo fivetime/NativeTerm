@@ -81,7 +81,8 @@ impl Attempt {
         let at = arguments.iter().position(|a| a == "--").unwrap_or(arguments.len());
         arguments.splice(at..at, ["-o".into(), "NumberOfPasswordPrompts=1".into()]);
         server.served.store(0, Ordering::SeqCst);
-        *server.armed.lock().unwrap_or_else(|e| e.into_inner()) = Armed { target: Some(self.target.clone()), ssh_pid: 0 };
+        *server.armed.lock().unwrap_or_else(|e| e.into_inner()) =
+            Armed { target: Some(self.target.clone()), ssh_pid: 0 };
         true
     }
 

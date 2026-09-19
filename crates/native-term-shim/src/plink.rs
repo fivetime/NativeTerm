@@ -99,7 +99,8 @@ fn client() -> Option<Client> {
         return Some(Client::Plink(p));
     }
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let ntplink = [exe_dir.join("ntplink.exe"), exe_dir.join("tools").join("ntplink.exe")].into_iter().find(|p| p.is_file());
+    let ntplink =
+        [exe_dir.join("ntplink.exe"), exe_dir.join("tools").join("ntplink.exe")].into_iter().find(|p| p.is_file());
     ntplink.map(Client::Ntplink).or_else(|| plink(&exe_dir).map(Client::Plink))
 }
 
@@ -240,7 +241,8 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
     // its own process group: Ctrl+C never ends plink (see `Watch`)
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x200;
-    let mut child = match Command::new(client.path()).args(&arguments).creation_flags(CREATE_NEW_PROCESS_GROUP).spawn() {
+    let mut child = match Command::new(client.path()).args(&arguments).creation_flags(CREATE_NEW_PROCESS_GROUP).spawn()
+    {
         Ok(child) => child,
         Err(e) => {
             let path = client.path().display().to_string();
@@ -307,7 +309,9 @@ fn ntplink_arguments(session: &PlinkSession, control: Option<&str>) -> Vec<Strin
 fn specials(protocol: Protocol) -> &'static [&'static str] {
     match protocol {
         Protocol::Serial => &["brk"],
-        Protocol::Telnet => &["brk", "ayt", "ip", "ao", "ec", "el", "ga", "nop", "abort", "susp", "eor", "eof", "synch"],
+        Protocol::Telnet => {
+            &["brk", "ayt", "ip", "ao", "ec", "el", "ga", "nop", "abort", "susp", "eor", "eof", "synch"]
+        }
         _ => &[],
     }
 }
@@ -337,7 +341,11 @@ const QUIET_AFTER: Duration = Duration::from_secs(30);
 
 fn quiet_after() -> Duration {
     // tests: NATIVETERM_QUIET_SECS
-    std::env::var("NATIVETERM_QUIET_SECS").ok().and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(QUIET_AFTER)
+    std::env::var("NATIVETERM_QUIET_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(QUIET_AFTER)
 }
 
 fn unix_seconds(at: std::time::SystemTime) -> u64 {
@@ -459,7 +467,6 @@ impl TemporarySession {
         registry::write_user_values(&key, &values)?;
         Ok(Some(TemporarySession { name, key }))
     }
-
 }
 
 const PREFIX: &str = "NativeTerm-";

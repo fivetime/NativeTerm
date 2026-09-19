@@ -32,7 +32,10 @@ pub struct Button {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Converted {
     /// Lines separated by `\n`; `enter`: Enter after the last one.
-    Command { text: String, enter: bool },
+    Command {
+        text: String,
+        enter: bool,
+    },
     Skipped(Why),
 }
 
@@ -49,11 +52,8 @@ pub enum Why {
 /// The button bar file in `config` (SecureCRT's "Config Path"; its
 /// `Sessions` folder is accepted too).
 pub fn find(config: &Path) -> Option<PathBuf> {
-    let config = if config.file_name().is_some_and(|n| n.eq_ignore_ascii_case("Sessions")) {
-        config.parent()?
-    } else {
-        config
-    };
+    let config =
+        if config.file_name().is_some_and(|n| n.eq_ignore_ascii_case("Sessions")) { config.parent()? } else { config };
     ["ButtonBarV5.ini", "ButtonBarV4.ini"].iter().map(|n| config.join(n)).find(|p| p.is_file())
 }
 
@@ -163,9 +163,17 @@ mod tests {
 
     #[test]
     fn send_strings() {
-        let button = |argument: &str| Button { bar: "b".into(), label: "l".into(), function: "SEND".into(), argument: argument.into() };
+        let button = |argument: &str| Button {
+            bar: "b".into(),
+            label: "l".into(),
+            function: "SEND".into(),
+            argument: argument.into(),
+        };
         // several lines; no \r at the end: the last one is left to finish
-        assert_eq!(button("cd /srv\\rls -la").convert(), Converted::Command { text: "cd /srv\nls -la".into(), enter: false });
+        assert_eq!(
+            button("cd /srv\\rls -la").convert(),
+            Converted::Command { text: "cd /srv\nls -la".into(), enter: false }
+        );
         assert_eq!(button("echo a\\\\b\\r").convert(), Converted::Command { text: "echo a\\b".into(), enter: true });
         assert_eq!(button("x\\134y\\r").convert(), Converted::Command { text: "x\\y".into(), enter: true }, "octal");
         assert_eq!(button("ssh \\u@host\\r").convert(), Converted::Skipped(Why::Substitution('u')));

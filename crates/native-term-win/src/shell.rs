@@ -14,7 +14,7 @@ use windows::Win32::System::Com::{
     COINIT_DISABLE_OLE1DDE,
 };
 use windows::Win32::UI::Shell::{
-    FileOpenDialog, IFileOpenDialog, IShellItem, SHGetKnownFolderPath, ShellExecuteW, FOLDERID_Downloads,
+    FOLDERID_Downloads, FileOpenDialog, IFileOpenDialog, IShellItem, SHGetKnownFolderPath, ShellExecuteW,
     FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, KF_FLAG_DEFAULT, SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -92,7 +92,8 @@ pub fn open_file(path: &std::path::Path) -> std::io::Result<()> {
     for verb in ["open", "openas"] {
         // SAFETY: the strings are HSTRINGs alive through the call; null
         // parameters and window are allowed.
-        let result = unsafe { ShellExecuteW(None, &HSTRING::from(verb), &file, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
+        let result =
+            unsafe { ShellExecuteW(None, &HSTRING::from(verb), &file, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
         // greater than 32: success; 31: no program for it
         if result.0 as isize > 32 {
             return Ok(());
@@ -142,7 +143,11 @@ pub fn drives() -> Vec<PathBuf> {
     let mut buf = vec![0u16; 512];
     // SAFETY: the buffer is ours; its length goes with it.
     let len = unsafe { GetLogicalDriveStringsW(Some(&mut buf)) } as usize;
-    buf[..len.min(buf.len())].split(|&c| c == 0).filter(|d| !d.is_empty()).map(|d| PathBuf::from(String::from_utf16_lossy(d))).collect()
+    buf[..len.min(buf.len())]
+        .split(|&c| c == 0)
+        .filter(|d| !d.is_empty())
+        .map(|d| PathBuf::from(String::from_utf16_lossy(d)))
+        .collect()
 }
 
 /// The window in front (the one the user just clicked in): the owner for
@@ -168,7 +173,11 @@ pub fn downloads_folder() -> Option<PathBuf> {
 mod tests {
     #[test]
     fn drives_and_recycle_bin() {
-        assert!(super::drives().iter().any(|d| d.to_string_lossy().eq_ignore_ascii_case("C:\\")), "{:?}", super::drives());
+        assert!(
+            super::drives().iter().any(|d| d.to_string_lossy().eq_ignore_ascii_case("C:\\")),
+            "{:?}",
+            super::drives()
+        );
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("回收站测试.txt");
         std::fs::write(&file, b"x").unwrap();

@@ -16,7 +16,8 @@ pub fn target(effective: &[(String, String)]) -> Option<Target> {
     let host = value("hostname")?.to_string();
     let port = value("port").unwrap_or("22").to_string();
     // tests: NATIVETERM_CRED_PREFIX keeps their entries apart
-    let prefix = std::env::var("NATIVETERM_CRED_PREFIX").ok().filter(|p| !p.is_empty()).unwrap_or_else(|| "NativeTerm".into());
+    let prefix =
+        std::env::var("NATIVETERM_CRED_PREFIX").ok().filter(|p| !p.is_empty()).unwrap_or_else(|| "NativeTerm".into());
     Some(Target { name: format!("{prefix}:{user}@{host}:{port}"), user, host })
 }
 
@@ -36,7 +37,8 @@ impl Target {
     pub fn answers(&self, prompt: &str) -> bool {
         let account = format!("{}@{}", self.user, self.host).to_lowercase();
         let prompt = prompt.trim().to_lowercase();
-        let own = prompt.starts_with(&format!("{account}'s password:")) || prompt.starts_with(&format!("({account}) password:"));
+        let own = prompt.starts_with(&format!("{account}'s password:"))
+            || prompt.starts_with(&format!("({account}) password:"));
         own && prompt.ends_with("password:")
     }
 }

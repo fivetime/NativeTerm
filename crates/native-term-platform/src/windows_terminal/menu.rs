@@ -22,10 +22,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
+use windows::Win32::Graphics::DirectWrite::IDWriteTextFormat;
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
 };
-use windows::Win32::Graphics::DirectWrite::IDWriteTextFormat;
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, EndPaint, GetDC, GetMonitorInfoW,
     InvalidateRect, MonitorFromPoint, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
@@ -42,11 +42,11 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetAncestor, GetMessageW,
     LoadCursorW, PostMessageW, PostThreadMessageW, RegisterClassW, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    UnhookWindowsHookEx, UpdateLayeredWindow, WindowFromPoint, CS_DROPSHADOW, GA_ROOT, ULW_ALPHA, WS_EX_LAYERED, HC_ACTION, HHOOK, IDC_ARROW, KBDLLHOOKSTRUCT,
-    MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT, SW_SHOWNOACTIVATE, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
-    WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WNDCLASSW, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    UnhookWindowsHookEx, UpdateLayeredWindow, WindowFromPoint, CS_DROPSHADOW, GA_ROOT, HC_ACTION, HHOOK, IDC_ARROW,
+    KBDLLHOOKSTRUCT, MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT, SW_SHOWNOACTIVATE, ULW_ALPHA, WH_KEYBOARD_LL, WH_MOUSE_LL,
+    WM_APP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
+    WM_MOUSEWHEEL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WNDCLASSW,
+    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::menu_draw::Painter;
@@ -82,7 +82,12 @@ pub struct MenuTab {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {
     /// A glyph from Segoe Fluent Icons (Segoe MDL2 Assets on Windows 10).
-    Action { id: u32, glyph: char, text: String, enabled: bool },
+    Action {
+        id: u32,
+        glyph: char,
+        text: String,
+        enabled: bool,
+    },
     Header(String),
     Separator,
 }
@@ -641,7 +646,9 @@ fn menu_key(vk: VIRTUAL_KEY) {
     let pos = hover.and_then(|h| actions.iter().position(|a| *a == h));
     match vk {
         VK_DOWN => set_hover(Some(actions[pos.map_or(0, |p| (p + 1) % actions.len())]), false),
-        VK_UP => set_hover(Some(actions[pos.map_or(actions.len() - 1, |p| (p + actions.len() - 1) % actions.len())]), false),
+        VK_UP => {
+            set_hover(Some(actions[pos.map_or(actions.len() - 1, |p| (p + actions.len() - 1) % actions.len())]), false)
+        }
         VK_RETURN => {
             if let Some(h) = hover {
                 choose(h);
@@ -711,7 +718,7 @@ fn present_layered() {
                     let size = SIZE { cx: w, cy: h };
                     let source = POINT { x: 0, y: 0 };
                     let blend = windows::Win32::Graphics::Gdi::BLENDFUNCTION {
-                        BlendOp: 0,  // AC_SRC_OVER
+                        BlendOp: 0, // AC_SRC_OVER
                         BlendFlags: 0,
                         SourceConstantAlpha: 255,
                         AlphaFormat: 1, // AC_SRC_ALPHA

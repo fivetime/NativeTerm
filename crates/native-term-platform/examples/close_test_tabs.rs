@@ -22,7 +22,10 @@ fn main() {
             loop {
                 match conn.recv::<ShimMessage>(Duration::from_secs(30)) {
                     Ok(Some(ShimMessage::Hello { role, wt_session, alias, .. })) => {
-                        println!("{:>6} ms pid {pid} {role:?} {wt_session:?} {alias:?}: closing", started.elapsed().as_millis());
+                        println!(
+                            "{:>6} ms pid {pid} {role:?} {wt_session:?} {alias:?}: closing",
+                            started.elapsed().as_millis()
+                        );
                         let _ = conn.send(&AppMessage::Welcome { protocol: 1 });
                         let _ = conn.send(&AppMessage::Close);
                     }

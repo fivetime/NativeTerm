@@ -153,7 +153,13 @@ fn commands_reach_logged_in_sessions_only() {
 
     // a login command is typed after every login
     let log = tmp.path().join("login.log");
-    let _login = spawn_shim_with("lc-1", "6e7a0000-0000-4000-8000-0000000b0003", &log, true, &[("FAKE_SSH_LOGIN_DELAY_MS", "1500")]);
+    let _login = spawn_shim_with(
+        "lc-1",
+        "6e7a0000-0000-4000-8000-0000000b0003",
+        &log,
+        true,
+        &[("FAKE_SSH_LOGIN_DELAY_MS", "1500")],
+    );
     wait_until("the session is there, not logged in yet", Duration::from_secs(10), || {
         state(&core, "lc-1") == Some(State::Connecting)
     });
@@ -162,7 +168,9 @@ fn commands_reach_logged_in_sessions_only() {
     core.send_text(&["lc-1".to_string()], "exit", true);
     wait_until("ended", Duration::from_secs(10), || matches!(state(&core, "lc-1"), Some(State::Ended(0))));
     core.connect("lc-1");
-    wait_until("typed after the second login", Duration::from_secs(15), || typed(&log) == ["sudo -i", "exit", "sudo -i"]);
+    wait_until("typed after the second login", Duration::from_secs(15), || {
+        typed(&log) == ["sudo -i", "exit", "sudo -i"]
+    });
 
     // close everything through the shims, so their ssh processes end too
     for id in ["sc-in", "sc-out", "lc-1"] {
@@ -173,4 +181,3 @@ fn commands_reach_logged_in_sessions_only() {
     });
     std::thread::sleep(Duration::from_millis(500));
 }
-

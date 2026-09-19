@@ -92,7 +92,11 @@ impl Provider for Actions {
             entries.push(Entry::Header(t!("tabmenu-header-mixed", label = tab.label.as_str())));
             entries.push(Entry::Separator);
         } else if tab.title != tab.label {
-            entries.push(Entry::Header(t!("tabmenu-header-titled", label = tab.label.as_str(), title = tab.title.as_str())));
+            entries.push(Entry::Header(t!(
+                "tabmenu-header-titled",
+                label = tab.label.as_str(),
+                title = tab.title.as_str()
+            )));
             entries.push(Entry::Separator);
         }
         let applies = |id: u32| command(id).is_some_and(|c| c.applies(this));
@@ -126,7 +130,9 @@ impl Provider for Actions {
     fn chosen(&self, tab: &MenuTab, id: u32) {
         let Some(shared) = self.core.upgrade() else { return };
         let core = Core { shared };
-        let Some(this) = core.sessions().into_iter().find(|s| s.state.is_open() && s.label == tab.label) else { return };
+        let Some(this) = core.sessions().into_iter().find(|s| s.state.is_open() && s.label == tab.label) else {
+            return;
+        };
         match (id, command(id), close_item(id, &this.id)) {
             (SEND, _, _) => (self.ask)(MenuRequest::Send(this.id.clone())),
             (RENAME, _, _) => (self.ask)(MenuRequest::Rename(this.alias.clone())),

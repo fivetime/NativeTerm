@@ -130,7 +130,12 @@ fn open_track_reconnect_close() {
 /// Tab titles of a window, now.
 fn tab_names(core: &Core, window: isize) -> Vec<String> {
     let snapshot = core.terminal().snapshot(&Default::default());
-    snapshot.windows.iter().find(|w| w.handle == window).map(|w| w.tabs.iter().map(|t| t.name.clone()).collect()).unwrap_or_default()
+    snapshot
+        .windows
+        .iter()
+        .find(|w| w.handle == window)
+        .map(|w| w.tabs.iter().map(|t| t.name.clone()).collect())
+        .unwrap_or_default()
 }
 
 /// "Close NativeTerm's tabs when it exits": only unlocked NativeTerm

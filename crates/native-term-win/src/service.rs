@@ -24,13 +24,19 @@ pub fn service_state(name: &str) -> ServiceState {
             Err(_) => ServiceState::NotInstalled,
             Ok(service) => {
                 let mut status = SERVICE_STATUS::default();
-                let running = QueryServiceStatus(service, &mut status).is_ok() && status.dwCurrentState == SERVICE_RUNNING;
+                let running =
+                    QueryServiceStatus(service, &mut status).is_ok() && status.dwCurrentState == SERVICE_RUNNING;
                 let mut needed = 0u32;
                 let _ = QueryServiceConfigW(service, None, 0, &mut needed);
                 let mut buffer = vec![0u8; needed as usize];
                 let disabled = needed > 0
-                    && QueryServiceConfigW(service, Some(buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()), needed, &mut needed)
-                        .is_ok()
+                    && QueryServiceConfigW(
+                        service,
+                        Some(buffer.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>()),
+                        needed,
+                        &mut needed,
+                    )
+                    .is_ok()
                     && (*buffer.as_ptr().cast::<QUERY_SERVICE_CONFIGW>()).dwStartType == SERVICE_DISABLED;
                 let _ = CloseServiceHandle(service);
                 if running {

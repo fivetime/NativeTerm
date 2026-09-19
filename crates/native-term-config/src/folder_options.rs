@@ -84,11 +84,8 @@ pub fn has_options(doc: &Document, tag: &str) -> bool {
 /// Remove NativeTerm's folder tags (any folder) from one host block.
 pub fn untag(doc: &mut Document, block: usize) {
     let b = doc.blocks().swap_remove(block);
-    let doomed: Vec<usize> = doc
-        .directives(&b)
-        .filter(|(_, d)| d.is("Tag") && d.value().starts_with(TAG_PREFIX))
-        .map(|(i, _)| i)
-        .collect();
+    let doomed: Vec<usize> =
+        doc.directives(&b).filter(|(_, d)| d.is("Tag") && d.value().starts_with(TAG_PREFIX)).map(|(i, _)| i).collect();
     for i in doomed.into_iter().rev() {
         doc.lines.remove(i);
     }
@@ -223,7 +220,10 @@ Match tagged nativeterm-prod
         assert_eq!(arrange(&mut doc, tag), ["own"]);
         let text = doc.render();
         assert!(text.ends_with("Host db\n    HostName 10.0.0.3\n    Tag nativeterm-prod\n\nMatch tagged nativeterm-prod\n    Compression yes\n    ProxyJump gw\n"), "{text}");
-        assert!(!text.contains("__nativeterm_folder__\n    NativeTermLabel 生产\n    Tag"), "the defaults block isn't a host");
+        assert!(
+            !text.contains("__nativeterm_folder__\n    NativeTermLabel 生产\n    Tag"),
+            "the defaults block isn't a host"
+        );
 
         // a host moved in from another folder keeps no foreign tag
         let db = doc.find_host_block("db").unwrap();

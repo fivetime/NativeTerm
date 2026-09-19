@@ -36,7 +36,8 @@ impl SendLine {
         let sessions = core.sessions();
         let active = core.active_session().filter(|s| s.state == State::Connected && s.linked);
         let all: Vec<&SessionView> = sessions.iter().filter(|s| s.state == State::Connected && s.linked).collect();
-        let chosen: Vec<&SessionView> = all.iter().copied().filter(|s| !s.locked && !no_group_send.contains(&s.alias)).collect();
+        let chosen: Vec<&SessionView> =
+            all.iter().copied().filter(|s| !s.locked && !no_group_send.contains(&s.alias)).collect();
         let left_out = all.len() - chosen.len();
 
         ui.horizontal(|ui| {
@@ -63,7 +64,10 @@ impl SendLine {
         let focused = ui.memory(|m| m.has_focus(id));
         if focused && self.confirm.is_none() {
             let (up, down) = ui.input_mut(|i| {
-                (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown))
+                (
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown),
+                )
             });
             self.browse(up, down);
         }
@@ -73,7 +77,10 @@ impl SendLine {
         };
         let edit = ui.add_enabled(
             self.confirm.is_none(),
-            egui::TextEdit::singleline(&mut self.text).id(id).hint_text(t!("send-line-hint")).desired_width(f32::INFINITY),
+            egui::TextEdit::singleline(&mut self.text)
+                .id(id)
+                .hint_text(t!("send-line-hint"))
+                .desired_width(f32::INFINITY),
         );
         if edit.changed() {
             self.browsing = None;
@@ -82,8 +89,7 @@ impl SendLine {
         let entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
         if let Some((ids, text)) = self.confirm.clone() {
-            let names: Vec<String> =
-                sessions.iter().filter(|s| ids.contains(&s.id)).map(|s| s.label.clone()).collect();
+            let names: Vec<String> = sessions.iter().filter(|s| ids.contains(&s.id)).map(|s| s.label.clone()).collect();
             ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), t!("send-line-confirm", count = ids.len()))
                 .on_hover_text(names.join("\n"));
             let (again, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));

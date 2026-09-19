@@ -12,16 +12,16 @@ use native_term_config::write::Writer;
 use native_term_config::SessionTree;
 
 use crate::dialogs::{ConfirmCloseMixed, ConfirmDelete, ConfirmForget, FolderDialog, HostDialog, Outcome};
+use crate::icons;
 use crate::import_dialog::ImportDialog;
 use crate::key_dialog::KeyDialog;
 use crate::options_dialog::{OptionsDialog, OptionsTarget};
 use crate::plink_dialog::PlinkDialog;
 use crate::send_dialog::SendDialog;
-use crate::server_sessions::ServerSessionsDialog;
 use crate::send_line::SendLine;
-use crate::terminal_profile::ProfileSetup;
-use crate::icons;
+use crate::server_sessions::ServerSessionsDialog;
 use crate::tab_list::TabList;
+use crate::terminal_profile::ProfileSetup;
 use crate::tree_view::{Activity, TreeAction, TreeView};
 use crate::Setup;
 
@@ -74,7 +74,11 @@ fn set_folders_dir(dir: Option<PathBuf>) {
 
 /// Watches the folder files when they live outside `~/.ssh` (that folder
 /// has its own watcher).
-fn watch_folders(ssh_dir: &Path, flag: &std::sync::Arc<std::sync::atomic::AtomicBool>, ctx: &egui::Context) -> Option<native_term_win::watch::FolderWatcher> {
+fn watch_folders(
+    ssh_dir: &Path,
+    flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ctx: &egui::Context,
+) -> Option<native_term_win::watch::FolderWatcher> {
     let dir = folders_dir(ssh_dir);
     if dir.starts_with(ssh_dir) {
         return None;
@@ -162,11 +166,12 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
     let program = native_term_session::ssh_program();
     let ssh = program.as_path();
     let home_ssh = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"));
-    let editor = if home_ssh.as_deref().is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&ssh_dir.to_string_lossy())) {
-        Editor::new(ssh_dir, writer, ssh)
-    } else {
-        Editor::for_directory(ssh_dir, writer, ssh)
-    };
+    let editor =
+        if home_ssh.as_deref().is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&ssh_dir.to_string_lossy())) {
+            Editor::new(ssh_dir, writer, ssh)
+        } else {
+            Editor::for_directory(ssh_dir, writer, ssh)
+        };
     let dir = folders_dir(ssh_dir);
     if dir == ssh_dir.join("config.d") {
         editor
@@ -304,17 +309,20 @@ impl App {
             let serial = host.plink.as_ref()?.serial.as_ref()?;
             Some(serial.line.to_uppercase())
         };
-        let open: Vec<SessionView> =
-            self.core.as_ref().map(|c| c.sessions().into_iter().filter(|s| s.state.is_open()).collect()).unwrap_or_default();
-        let mut taken: HashMap<String, String> = open
-            .iter()
-            .filter_map(|s| line_of(&self.tree, &s.alias).map(|line| (line, s.label.clone())))
-            .collect();
+        let open: Vec<SessionView> = self
+            .core
+            .as_ref()
+            .map(|c| c.sessions().into_iter().filter(|s| s.state.is_open()).collect())
+            .unwrap_or_default();
+        let mut taken: HashMap<String, String> =
+            open.iter().filter_map(|s| line_of(&self.tree, &s.alias).map(|line| (line, s.label.clone()))).collect();
         let mut kept = Vec::new();
         for request in hosts {
             match line_of(&self.tree, &request.alias) {
                 Some(line) => match taken.get(&line) {
-                    Some(owner) => self.notices.push(t!("notice-port-taken", line = line.as_str(), label = owner.as_str())),
+                    Some(owner) => {
+                        self.notices.push(t!("notice-port-taken", line = line.as_str(), label = owner.as_str()))
+                    }
                     None => {
                         taken.insert(line, request.label.clone());
                         kept.push(request);
@@ -338,7 +346,8 @@ impl App {
     fn no_group_send(&self) -> std::collections::HashSet<String> {
         let mut cache = self.no_group_cache.borrow_mut();
         if cache.0 != self.generation {
-            let hosts = self.tree.hosts().filter(|(f, _)| f.no_group_send()).map(|(_, h)| h.alias().to_string()).collect();
+            let hosts =
+                self.tree.hosts().filter(|(f, _)| f.no_group_send()).map(|(_, h)| h.alias().to_string()).collect();
             *cache = (self.generation, hosts);
         }
         cache.1.clone()
@@ -398,7 +407,8 @@ impl App {
                 let label = self.folder_label(&file);
                 let folder = self.folder_persistent(&file);
                 let (color, scheme) = self.folder_look(&file);
-                let dialog = HostDialog::new_host(file, &label).with_folder_default(folder).with_folder_look(color, scheme);
+                let dialog =
+                    HostDialog::new_host(file, &label).with_folder_default(folder).with_folder_look(color, scheme);
                 self.dialog = Some(Dialog::Host(Box::new(dialog)));
             }
             TreeAction::NewPlink(file) => {
@@ -409,10 +419,16 @@ impl App {
             TreeAction::Edit(alias) => {
                 if let Some((_, host)) = self.tree.find(&alias) {
                     self.dialog = Some(match &host.plink {
-                        Some(session) => Dialog::Plink(Box::new(PlinkDialog::edit(session).with_data_dir(&self.data_dir))),
+                        Some(session) => {
+                            Dialog::Plink(Box::new(PlinkDialog::edit(session).with_data_dir(&self.data_dir)))
+                        }
                         None => {
                             let folder = self.folder_persistent(&host.file);
-                            let account = self.editor.effective(&alias).ok().and_then(|e| native_term_config::password::target(&e));
+                            let account = self
+                                .editor
+                                .effective(&alias)
+                                .ok()
+                                .and_then(|e| native_term_config::password::target(&e));
                             let (color, scheme) = self.folder_look(&host.file);
                             let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host))
                                 .with_folder_default(folder)
@@ -429,7 +445,8 @@ impl App {
                         Ok(values) => {
                             let effective = self.editor.effective(&alias).unwrap_or_default();
                             let target = OptionsTarget::Host(alias.clone());
-                            let dialog = OptionsDialog::new(target, host.label(), &values, effective, self.editor.ssh());
+                            let dialog =
+                                OptionsDialog::new(target, host.label(), &values, effective, self.editor.ssh());
                             self.dialog = Some(Dialog::Options(Box::new(dialog)));
                         }
                         Err(e) => self.notices.push(e.to_string()),
@@ -464,7 +481,15 @@ impl App {
                     let on_login = folder.nt(host, "onlogin").map(str::to_string);
                     let ssh = self.editor.ssh().to_path_buf();
                     let config = self.editor.config().map(Path::to_path_buf);
-                    let dialog = ServerSessionsDialog::new(&self.egui_ctx, &alias, host.label(), on_login, ssh, config, self.data_dir.clone());
+                    let dialog = ServerSessionsDialog::new(
+                        &self.egui_ctx,
+                        &alias,
+                        host.label(),
+                        on_login,
+                        ssh,
+                        config,
+                        self.data_dir.clone(),
+                    );
                     self.dialog = Some(Dialog::ServerSessions(Box::new(dialog)));
                 }
             }
@@ -670,7 +695,8 @@ impl App {
         let pointer = data_dir::pointer_for(self.data_source);
         let result = data_dir::check_target(&self.data_dir, new).and_then(|()| {
             let core = self.core.as_ref().ok_or_else(|| "state.db isn't open".to_string())?;
-            let copied = data_dir::copy_data(&self.data_dir, new, |db| core.copy_state_to(db)).map_err(|e| e.to_string())?;
+            let copied =
+                data_dir::copy_data(&self.data_dir, new, |db| core.copy_state_to(db)).map_err(|e| e.to_string())?;
             let program_dir = std::env::current_exe()
                 .ok()
                 .and_then(|e| e.parent().map(Path::to_path_buf))
@@ -709,7 +735,8 @@ impl App {
         }
         // `NativeTermFileEncoding` (host or folder): how the server names files
         let names = folder.nt(host, "fileencoding").and_then(native_term_sftp::Names::from_label).unwrap_or_default();
-        let tmux = native_term_config::persistent::for_host(folder, host) == Some(native_term_config::persistent::Persistence::Tmux);
+        let tmux = native_term_config::persistent::for_host(folder, host)
+            == Some(native_term_config::persistent::Persistence::Tmux);
         let tmux_session = session.filter(|_| tmux).map(|id| native_term_config::persistent::session_name(alias, id));
         crate::files_window::open(crate::files_window::Spec {
             alias: alias.to_string(),
@@ -737,7 +764,12 @@ impl App {
         match request {
             MenuRequest::Send(id) => {
                 if let Some(core) = &self.core {
-                    self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(core, &[id], &self.data_dir, &self.no_group_send()))));
+                    self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(
+                        core,
+                        &[id],
+                        &self.data_dir,
+                        &self.no_group_send(),
+                    ))));
                 }
             }
             MenuRequest::Rename(alias) => match self.tree.find(&alias) {
@@ -802,7 +834,8 @@ impl App {
                 }
                 WizardAction::OpenSettings => self.show_settings = true,
                 WizardAction::ImportSecureCrt => {
-                    self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
+                    self.dialog =
+                        Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
                 }
                 WizardAction::ImportPutty => {
                     let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.egui_ctx);
@@ -811,7 +844,8 @@ impl App {
                 WizardAction::CreateKey => {
                     if let Some(core) = &self.core {
                         let path = self.ssh_dir.join("id_ed25519").display().to_string();
-                        if let Err(e) = core.terminal().open_tool(&t!("key-create-tab"), &["--create-key".into(), path]) {
+                        if let Err(e) = core.terminal().open_tool(&t!("key-create-tab"), &["--create-key".into(), path])
+                        {
                             self.notices.push(e.to_string());
                         }
                     }
@@ -861,7 +895,9 @@ impl App {
                             Some((_, host)) => self.editor.update_host(host, &draft).map_err(|e| e.to_string()),
                             None => Err(t!("error-host-gone", alias = alias.as_str())),
                         },
-                        (None, Some(file)) => self.editor.create_host(&self.tree, file, &draft).map(|_| ()).map_err(|e| e.to_string()),
+                        (None, Some(file)) => {
+                            self.editor.create_host(&self.tree, file, &draft).map(|_| ()).map_err(|e| e.to_string())
+                        }
                         (None, None) => Ok(()),
                     };
                     match result {
@@ -879,14 +915,20 @@ impl App {
                 Outcome::Submit(()) => {
                     let result = match (d.alias.clone(), d.file.clone()) {
                         (Some(alias), _) => match self.tree.find(&alias) {
-                            Some((_, host)) => {
-                                d.session(&alias).and_then(|s| self.editor.update_plink(host, &s).map_err(|e| e.to_string()))
-                            }
+                            Some((_, host)) => d
+                                .session(&alias)
+                                .and_then(|s| self.editor.update_plink(host, &s).map_err(|e| e.to_string())),
                             None => Err(t!("error-host-gone", alias = alias.as_str())),
                         },
                         (None, Some(file)) => {
-                            let folder = self.tree.folders().find(|f| f.file == file).map(|f| f.name.clone()).unwrap_or_default();
-                            let name = native_term_config::alias::unique(&d.name_base(), &folder, &self.tree.taken_aliases());
+                            let folder = self
+                                .tree
+                                .folders()
+                                .find(|f| f.file == file)
+                                .map(|f| f.name.clone())
+                                .unwrap_or_default();
+                            let name =
+                                native_term_config::alias::unique(&d.name_base(), &folder, &self.tree.taken_aliases());
                             d.session(&name).and_then(|mut s| {
                                 s.id = Some(native_term_config::new_id());
                                 self.editor.add_plink(&file, &s).map_err(|e| e.to_string())
@@ -1074,12 +1116,20 @@ impl App {
                 core.clear_finished();
             }
             let unlocated = core.unlocated();
-            if unlocated > 0 && ui.small_button(t!("sessions-locate", count = unlocated)).on_hover_text(t!("sessions-locate-hint")).clicked() {
+            if unlocated > 0
+                && ui
+                    .small_button(t!("sessions-locate", count = unlocated))
+                    .on_hover_text(t!("sessions-locate-hint"))
+                    .clicked()
+            {
                 core.locate();
             }
             let logged_in = sessions.iter().filter(|s| s.state == State::Connected).count();
-            if ui.add_enabled(logged_in > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked() && self.dialog.is_none() {
-                self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[], &self.data_dir, &self.no_group_send()))));
+            if ui.add_enabled(logged_in > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked()
+                && self.dialog.is_none()
+            {
+                self.dialog =
+                    Some(Dialog::Send(Box::new(SendDialog::new(&core, &[], &self.data_dir, &self.no_group_send()))));
             }
         });
         // after a restart or a Terminal restore: reconnect all, some, or none
@@ -1126,7 +1176,8 @@ impl App {
             }
         });
         if let (Some(id), None) = (send, &self.dialog) {
-            self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(&core, &[id], &self.data_dir, &self.no_group_send()))));
+            self.dialog =
+                Some(Dialog::Send(Box::new(SendDialog::new(&core, &[id], &self.data_dir, &self.no_group_send()))));
         }
         if let (Some(target), None) = (save, &self.dialog) {
             let draft = HostDraft {
@@ -1232,7 +1283,9 @@ fn state_color(ui: &egui::Ui, state: &State) -> egui::Color32 {
         State::Opening | State::Connecting | State::Detached | State::Waiting => {
             egui::Color32::from_rgb(0xd0, 0x9a, 0x1a)
         }
-        State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Failed(_) => egui::Color32::from_rgb(0xd0, 0x3a, 0x3a),
+        State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Failed(_) => {
+            egui::Color32::from_rgb(0xd0, 0x3a, 0x3a)
+        }
         _ => ui.visuals().weak_text_color(),
     }
 }
@@ -1326,7 +1379,11 @@ fn session_card(
             if button(ui, SessionCommand::Close, t!("button-close")).clicked() {
                 core.run(&s.id, SessionCommand::Close);
             }
-            let lock = if s.locked { icons::with(icons::UNLOCK, t!("session-unlock")) } else { icons::with(icons::LOCK, t!("session-lock")) };
+            let lock = if s.locked {
+                icons::with(icons::UNLOCK, t!("session-unlock"))
+            } else {
+                icons::with(icons::LOCK, t!("session-lock"))
+            };
             if button(ui, SessionCommand::ToggleLock, lock).on_hover_text(t!("session-lock-hint")).clicked() {
                 core.run(&s.id, SessionCommand::ToggleLock);
             }
@@ -1334,7 +1391,9 @@ fn session_card(
                 action = Some(CardAction::Send);
             }
             if SessionCommand::SendBreak.offered(s)
-                && button(ui, SessionCommand::SendBreak, t!("button-break")).on_hover_text(t!("session-break-hint")).clicked()
+                && button(ui, SessionCommand::SendBreak, t!("button-break"))
+                    .on_hover_text(t!("session-break-hint"))
+                    .clicked()
             {
                 core.run(&s.id, SessionCommand::SendBreak);
             }
@@ -1393,10 +1452,16 @@ impl crate::window::Ui for App {
                         }
                     }
                 }
-                if ui.button(icons::with(icons::IMPORT, t!("import-securecrt-button"))).clicked() && self.dialog.is_none() {
-                    self.dialog = Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
+                if ui.button(icons::with(icons::IMPORT, t!("import-securecrt-button"))).clicked()
+                    && self.dialog.is_none()
+                {
+                    self.dialog =
+                        Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
                 }
-                if self.putty_sessions && ui.button(icons::with(icons::IMPORT, t!("import-putty-button"))).clicked() && self.dialog.is_none() {
+                if self.putty_sessions
+                    && ui.button(icons::with(icons::IMPORT, t!("import-putty-button"))).clicked()
+                    && self.dialog.is_none()
+                {
                     let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.egui_ctx);
                     self.dialog = Some(Dialog::Import(Box::new(dialog)));
                 }
@@ -1411,7 +1476,9 @@ impl crate::window::Ui for App {
                             core.set_auto_reconnect(auto);
                         }
                         let mut close = core.close_on_exit();
-                        let response = ui.checkbox(&mut close, t!("close-on-exit-setting")).on_hover_text(t!("close-on-exit-hint"));
+                        let response = ui
+                            .checkbox(&mut close, t!("close-on-exit-setting"))
+                            .on_hover_text(t!("close-on-exit-hint"));
                         if response.changed() {
                             core.set_setting(native_term_app::CLOSE_ON_EXIT_SETTING, if close { "1" } else { "0" });
                         }
@@ -1457,20 +1524,16 @@ impl crate::window::Ui for App {
         }
         let mut actions = Vec::new();
         let no_group_send = self.no_group_send();
-        egui::Panel::left("tree")
-            .resizable(true)
-            .default_size(320.0)
-            .size_range(220.0..=640.0)
-            .show_inside(ui, |ui| {
-                if let Some(core) = &self.core {
-                    egui::Panel::bottom("send-line").show_inside(ui, |ui| {
-                        ui.add_space(4.0);
-                        self.send_line.show(ui, core, &no_group_send);
-                        ui.add_space(2.0);
-                    });
-                }
-                actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity);
-            });
+        egui::Panel::left("tree").resizable(true).default_size(320.0).size_range(220.0..=640.0).show_inside(ui, |ui| {
+            if let Some(core) = &self.core {
+                egui::Panel::bottom("send-line").show_inside(ui, |ui| {
+                    ui.add_space(4.0);
+                    self.send_line.show(ui, core, &no_group_send);
+                    ui.add_space(2.0);
+                });
+            }
+            actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity);
+        });
         for action in actions {
             self.handle(action);
         }

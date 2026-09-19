@@ -5,9 +5,8 @@ use std::sync::LazyLock;
 
 use i18n_embed::fluent::FluentLanguageLoader;
 
-pub static LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
-    native_term_i18n::loader("native_term_shim", std::env::var("NATIVETERM_LANG").ok().as_deref())
-});
+pub static LOADER: LazyLock<FluentLanguageLoader> =
+    LazyLock::new(|| native_term_i18n::loader("native_term_shim", std::env::var("NATIVETERM_LANG").ok().as_deref()));
 
 /// A message in the current language (`fl!`, keys checked at compile time).
 #[macro_export]

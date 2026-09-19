@@ -122,14 +122,7 @@ fn values(key: &Key) -> io::Result<Vec<(String, RegValue)>> {
         name.truncate(name_len as usize);
         let mut data = vec![0u8; size as usize];
         let status = unsafe {
-            RegQueryValueExW(
-                key.0,
-                &HSTRING::from_wide(&name),
-                None,
-                None,
-                Some(data.as_mut_ptr()),
-                Some(&mut size),
-            )
+            RegQueryValueExW(key.0, &HSTRING::from_wide(&name), None, None, Some(data.as_mut_ptr()), Some(&mut size))
         };
         check(status)?;
         data.truncate(size as usize);
@@ -207,8 +200,11 @@ mod tests {
     fn write_read_delete() {
         let root = format!(r"Software\NativeTerm-Tests-registry-{}", std::process::id());
         let sub = format!(r"{root}\one%20two");
-        write_user_values(&sub, &[("HostName", RegValue::Str("节点.example".into())), ("PortNumber", RegValue::Dword(2222))])
-            .unwrap();
+        write_user_values(
+            &sub,
+            &[("HostName", RegValue::Str("节点.example".into())), ("PortNumber", RegValue::Dword(2222))],
+        )
+        .unwrap();
         write_user_values(&format!(r"{root}\other"), &[]).unwrap();
         let mut keys = user_subkeys(&root).unwrap();
         keys.sort();

@@ -6,17 +6,19 @@ use std::time::Duration;
 
 use windows::core::{w, BOOL, HSTRING};
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, WAIT_OBJECT_0};
-use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
-use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOTOWNER};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
 use windows::Win32::System::Console::{
-    GetConsoleMode, GetConsoleWindow, ReadConsoleInputW, ReadConsoleW, SetConsoleCtrlHandler, SetConsoleMode, WriteConsoleInputW,
-    WriteConsoleW, CONSOLE_MODE, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT, ENABLE_ECHO_INPUT, INPUT_RECORD, INPUT_RECORD_0,
-    KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
+    GetConsoleMode, GetConsoleWindow, ReadConsoleInputW, ReadConsoleW, SetConsoleCtrlHandler, SetConsoleMode,
+    WriteConsoleInputW, WriteConsoleW, CONSOLE_MODE, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
+    ENABLE_ECHO_INPUT, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0,
 };
 use windows::Win32::System::Threading::{
     CreateEventW, OpenEventW, ResetEvent, SetEvent, WaitForMultipleObjects, WaitForSingleObject, EVENT_MODIFY_STATE,
     INFINITE,
 };
+use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOTOWNER};
 
 struct OwnedHandle(HANDLE);
 
@@ -156,7 +158,9 @@ pub fn read_line(prompt: &str, echo: bool) -> io::Result<String> {
     let result: io::Result<()> = loop {
         let mut buffer = [0u16; 512];
         let mut read = 0u32;
-        if let Err(e) = unsafe { ReadConsoleW(input.0, buffer.as_mut_ptr().cast(), buffer.len() as u32, &mut read, None) } {
+        if let Err(e) =
+            unsafe { ReadConsoleW(input.0, buffer.as_mut_ptr().cast(), buffer.len() as u32, &mut read, None) }
+        {
             break Err(e.into());
         }
         if read == 0 {
@@ -390,7 +394,9 @@ pub fn terminate(pid: u32) {
 /// anything is written. `None` without a console.
 pub fn screen_fingerprint() -> Option<u64> {
     use std::hash::{Hash, Hasher};
-    use windows::Win32::System::Console::{GetConsoleScreenBufferInfo, ReadConsoleOutputCharacterW, CONSOLE_SCREEN_BUFFER_INFO, COORD};
+    use windows::Win32::System::Console::{
+        GetConsoleScreenBufferInfo, ReadConsoleOutputCharacterW, CONSOLE_SCREEN_BUFFER_INFO, COORD,
+    };
     let output = open_console(w!("CONOUT$")).ok()?;
     let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
     unsafe { GetConsoleScreenBufferInfo(output.0, &mut info) }.ok()?;
@@ -482,7 +488,8 @@ impl ControlPipe {
         use std::sync::atomic::Ordering;
         use windows::Win32::Storage::FileSystem::{WriteFile, FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_OUTBOUND};
         use windows::Win32::System::Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
+            ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, PIPE_REJECT_REMOTE_CLIENTS,
+            PIPE_TYPE_BYTE, PIPE_WAIT,
         };
         let name = format!(r"\\.\pipe\nativeterm-control-{tag}");
         let handle = unsafe {
@@ -507,7 +514,8 @@ impl ControlPipe {
         std::thread::spawn(move || {
             let pipe = pipe;
             // ERROR_PIPE_CONNECTED: the client came before this call
-            let connected = unsafe { ConnectNamedPipe(pipe.0, None) }.is_ok() || io::Error::last_os_error().raw_os_error() == Some(535);
+            let connected = unsafe { ConnectNamedPipe(pipe.0, None) }.is_ok()
+                || io::Error::last_os_error().raw_os_error() == Some(535);
             let mut pid = 0u32;
             let known = connected && unsafe { GetNamedPipeClientProcessId(pipe.0, &mut pid) }.is_ok();
             // ntplink may open it before `started` has been called

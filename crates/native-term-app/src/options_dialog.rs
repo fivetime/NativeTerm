@@ -109,7 +109,13 @@ fn explicit_list(text: &str, effective: &[String]) -> Vec<String> {
 }
 
 impl OptionsDialog {
-    pub fn new(target: OptionsTarget, label: &str, values: &Values, effective: Vec<(String, String)>, ssh: &Path) -> OptionsDialog {
+    pub fn new(
+        target: OptionsTarget,
+        label: &str,
+        values: &Values,
+        effective: Vec<(String, String)>,
+        ssh: &Path,
+    ) -> OptionsDialog {
         let text = options::SPECS
             .iter()
             .map(|s| (s.keyword, values.get(s.keyword).map(|v| v.join("\n")).unwrap_or_default()))
@@ -159,7 +165,8 @@ impl OptionsDialog {
             }
             Kind::Choice(choices) => {
                 let value = self.text.entry(keyword).or_default();
-                let shown = if value.is_empty() { t!("options-default", value = current.clone()) } else { value.clone() };
+                let shown =
+                    if value.is_empty() { t!("options-default", value = current.clone()) } else { value.clone() };
                 egui::ComboBox::from_id_salt(keyword).selected_text(shown).width(320.0).show_ui(ui, |ui| {
                     ui.selectable_value(value, String::new(), t!("options-default", value = current.clone()));
                     for choice in choices {
@@ -246,7 +253,10 @@ impl OptionsDialog {
                         egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
                             egui::Grid::new("session-options").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                                 let category = self.category;
-                                for spec in options::SPECS.iter().filter(|s| s.category == category && (folder || !s.folder_only)) {
+                                for spec in options::SPECS
+                                    .iter()
+                                    .filter(|s| s.category == category && (folder || !s.folder_only))
+                                {
                                     self.field(ui, spec.keyword, spec.kind);
                                 }
                             });
@@ -310,7 +320,8 @@ mod tests {
         let mut values = options::empty();
         values.insert("LocalForward", vec!["1 a:1".into(), "2 b:2".into()]);
         values.insert("Ciphers", vec!["aes256-ctr".into()]);
-        let dialog = OptionsDialog::new(OptionsTarget::Host("web".into()), "Web", &values, Vec::new(), Path::new("ssh"));
+        let dialog =
+            OptionsDialog::new(OptionsTarget::Host("web".into()), "Web", &values, Vec::new(), Path::new("ssh"));
         assert_eq!(dialog.values(), values);
     }
 }

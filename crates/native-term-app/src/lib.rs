@@ -9,8 +9,8 @@ mod connect_queue;
 pub mod data_dir;
 pub mod fuzzy;
 pub mod i18n;
-pub mod quick;
 pub mod import;
+pub mod quick;
 pub mod registry;
 pub mod tab_menu;
 
@@ -531,7 +531,9 @@ impl Core {
             refresh(&refresher);
         })?;
         let replacer = Arc::clone(&shared);
-        std::thread::Builder::new().name("replace-restored".into()).spawn(move || replace_placeholders(&replacer, queued))?;
+        std::thread::Builder::new()
+            .name("replace-restored".into())
+            .spawn(move || replace_placeholders(&replacer, queued))?;
         let grace = Arc::clone(&shared);
         std::thread::Builder::new().name("detached-grace".into()).spawn(move || {
             std::thread::sleep(DETACHED_GRACE);
@@ -700,7 +702,10 @@ impl Core {
     /// Sessions whose tab NativeTerm hasn't found (a split tab that isn't
     /// selected shows no pane titles, for example).
     pub fn unlocated(&self) -> usize {
-        lock(&self.shared.sessions).iter().filter(|s| s.state.is_open() && s.link.is_some() && s.location.is_none()).count()
+        lock(&self.shared.sessions)
+            .iter()
+            .filter(|s| s.state.is_open() && s.link.is_some() && s.location.is_none())
+            .count()
     }
 
     /// Look for them: only the selected tab shows its panes, so each
@@ -837,9 +842,10 @@ impl Core {
         let mut report = SendReport::default();
         let mut audit = Vec::new();
         for id in ids {
-            let target = lock(&self.shared.sessions).iter().find(|s| &s.id == id).map(|s| {
-                (s.label.clone(), s.alias.clone(), s.state == State::Connected, s.link.clone())
-            });
+            let target = lock(&self.shared.sessions)
+                .iter()
+                .find(|s| &s.id == id)
+                .map(|s| (s.label.clone(), s.alias.clone(), s.state == State::Connected, s.link.clone()));
             let Some((label, alias, connected, link)) = target else { continue };
             let Some(link) = link.filter(|_| connected) else {
                 report.skipped.push(label);
@@ -887,7 +893,8 @@ impl Core {
             .or_else(|| snapshot.windows.iter().find(|w| w.foreground))?;
         let tab = window.tabs.iter().find(|t| t.selected)?;
         self.sessions().into_iter().find(|s| {
-            s.state.is_open() && s.location.as_ref().is_some_and(|l| l.window == window.handle && l.tab_index == tab.index)
+            s.state.is_open()
+                && s.location.as_ref().is_some_and(|l| l.window == window.handle && l.tab_index == tab.index)
         })
     }
 
@@ -1143,7 +1150,8 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
             let mut specs = Vec::new();
             for p in &group {
                 let taken = shared.labels();
-                let look = shared.update(&p.session, |s| s.alias.clone()).map(|alias| shared.look(&alias)).unwrap_or_default();
+                let look =
+                    shared.update(&p.session, |s| s.alias.clone()).map(|alias| shared.look(&alias)).unwrap_or_default();
                 let spec = shared.update(&p.session, |s| {
                     // a host renamed since: the new tab gets the new name
                     let fresh = shared.fresh_label(&s.alias, &s.label);
@@ -1237,9 +1245,7 @@ fn refresh(shared: &Shared) -> Snapshot {
         }
     }
     for (id, position) in moved {
-        shared.db("position", |r| {
-            r.moved(&id, position.map(|p| p.0 as i64), position.map(|p| p.1 as i64))
-        });
+        shared.db("position", |r| r.moved(&id, position.map(|p| p.0 as i64), position.map(|p| p.1 as i64)));
     }
     if let Some(menu) = lock(&shared.menu).as_ref() {
         let tabs = snapshot
@@ -1298,7 +1304,8 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
         // the LocalCommand helper: one message, then it's gone
         if let Ok(Some(ShimMessage::Authenticated)) = conn.recv::<ShimMessage>(Duration::from_secs(5)) {
             if let Some(guid) = wt_session {
-                let id = lock(&shared.sessions).iter().find(|s| s.matches_terminal_session(&guid)).map(|s| s.id.clone());
+                let id =
+                    lock(&shared.sessions).iter().find(|s| s.matches_terminal_session(&guid)).map(|s| s.id.clone());
                 if let Some(id) = id {
                     shared.update(&id, |s| {
                         s.authenticated = true;
@@ -1364,7 +1371,8 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     let known = lock(&shared.sessions)
         .iter()
         .find(|s| {
-            session.as_deref() == Some(s.id.as_str()) || wt_session.as_deref().is_some_and(|g| s.matches_terminal_session(g))
+            session.as_deref() == Some(s.id.as_str())
+                || wt_session.as_deref().is_some_and(|g| s.matches_terminal_session(g))
         })
         .map(|s| s.id.clone());
     let id = match known {
@@ -1577,10 +1585,7 @@ fn utc(secs: i64) -> (String, String) {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    (
-        format!("{year:04}-{month:02}-{day:02}"),
-        format!("{:02}:{:02}:{:02}", rest / 3600, rest / 60 % 60, rest % 60),
-    )
+    (format!("{year:04}-{month:02}-{day:02}"), format!("{:02}:{:02}:{:02}", rest / 3600, rest / 60 % 60, rest % 60))
 }
 
 /// Watch, while the tab's shim is ending, whether its window goes too.

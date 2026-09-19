@@ -31,7 +31,8 @@ pub enum CloudState {
 
 /// The state from a file's attributes and reparse tag.
 pub fn classify(attributes: u32, reparse_tag: u32) -> CloudState {
-    if attributes & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_OFFLINE) != 0 {
+    if attributes & (FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN | FILE_ATTRIBUTE_OFFLINE) != 0
+    {
         return CloudState::CloudOnly;
     }
     let cloud = attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 && reparse_tag & CLOUD_TAG_MASK == CLOUD_TAG;
@@ -62,7 +63,9 @@ pub fn cloud_state(path: &Path) -> Option<CloudState> {
 pub fn sync_roots() -> Vec<(String, std::path::PathBuf)> {
     use std::path::PathBuf;
     let mut roots: Vec<(String, PathBuf)> = Vec::new();
-    for (var, name) in [("OneDriveConsumer", "OneDrive"), ("OneDriveCommercial", "OneDrive (work)"), ("OneDrive", "OneDrive")] {
+    for (var, name) in
+        [("OneDriveConsumer", "OneDrive"), ("OneDriveCommercial", "OneDrive (work)"), ("OneDrive", "OneDrive")]
+    {
         if let Some(dir) = std::env::var_os(var).map(PathBuf::from).filter(|d| d.is_dir()) {
             if !roots.iter().any(|(_, d)| d == &dir) {
                 roots.push((name.to_string(), dir));

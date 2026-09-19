@@ -64,10 +64,8 @@ impl Claimer {
     pub fn claim(&mut self, key: isize, tabs: &WindowTabs, labels: &HashSet<String>) -> Vec<TabView> {
         let names = &tabs.names;
         let previous = self.windows.get(&key).map(Vec::as_slice).unwrap_or(&[]);
-        let mut claims: Vec<Option<Claim>> = carry(previous, names)
-            .into_iter()
-            .map(|c| c.filter(|c| labels.contains(&c.label)))
-            .collect();
+        let mut claims: Vec<Option<Claim>> =
+            carry(previous, names).into_iter().map(|c| c.filter(|c| labels.contains(&c.label))).collect();
 
         // rule 1: the exact name is the strongest evidence
         for (k, name) in names.iter().enumerate() {

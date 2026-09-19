@@ -220,7 +220,11 @@ impl Wizard {
         if facts.data_movable {
             ui.horizontal(|ui| {
                 ui.label(t!("wizard-data-move"));
-                ui.add(egui::TextEdit::singleline(&mut self.new_data_dir).hint_text(r"D:\Sync\NativeTerm").desired_width(260.0));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.new_data_dir)
+                        .hint_text(r"D:\Sync\NativeTerm")
+                        .desired_width(260.0),
+                );
                 let ready = !self.new_data_dir.trim().is_empty();
                 if ui.add_enabled(ready, egui::Button::new(t!("data-dir-move"))).clicked() {
                     actions.push(WizardAction::MoveData(PathBuf::from(self.new_data_dir.trim())));

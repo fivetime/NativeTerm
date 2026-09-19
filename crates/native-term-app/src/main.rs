@@ -14,19 +14,19 @@ mod app;
 mod commands_import;
 mod dialogs;
 mod dock;
-mod send_dialog;
-mod send_line;
-mod server_sessions;
 mod fab;
 mod files_window;
 mod icons;
+mod import_dialog;
 mod key_dialog;
 mod options_dialog;
 mod plink_dialog;
+mod send_dialog;
+mod send_line;
+mod server_sessions;
 mod shell;
 mod storage;
 mod tab_list;
-mod import_dialog;
 mod terminal_profile;
 mod tree_view;
 mod window;
@@ -74,7 +74,9 @@ fn options() -> Result<Options, String> {
 fn choose_install(dir: Option<&PathBuf>) -> Result<Install, String> {
     match dir {
         Some(dir) => Install::from_dir(dir).map_err(|e| format!("{}: {e}", dir.display())),
-        None => Install::discover(&[]).into_iter().next().ok_or_else(|| "Windows Terminal is not installed".to_string()),
+        None => {
+            Install::discover(&[]).into_iter().next().ok_or_else(|| "Windows Terminal is not installed".to_string())
+        }
     }
 }
 
@@ -92,7 +94,9 @@ pub struct Setup {
 enum Start {
     Run(Box<Setup>),
     /// Another NativeTerm serves the pipe.
-    AlreadyRunning { quiet: bool },
+    AlreadyRunning {
+        quiet: bool,
+    },
 }
 
 fn setup() -> Result<Start, String> {
@@ -105,7 +109,11 @@ fn setup() -> Result<Start, String> {
         Ok((dir, source)) => match Registry::open(&dir.join("state.db")) {
             Ok(registry) => (dir, source, Some(registry)),
             Err(e) => {
-                notices.push(t!("notice-db-unavailable", path = dir.join("state.db").display().to_string(), error = e.to_string()));
+                notices.push(t!(
+                    "notice-db-unavailable",
+                    path = dir.join("state.db").display().to_string(),
+                    error = e.to_string()
+                ));
                 (dir, source, None)
             }
         },
@@ -173,11 +181,9 @@ fn main() {
         }
     });
     let button = floating_button(settings_core.clone());
-    let result = window::run(viewport, placement, save, Some(button), move |ctx| {
-        match setup {
-            Ok(setup) => Box::new(App::new(ctx, setup)),
-            Err(e) => Box::new(Fatal(e)),
-        }
+    let result = window::run(viewport, placement, save, Some(button), move |ctx| match setup {
+        Ok(setup) => Box::new(App::new(ctx, setup)),
+        Err(e) => Box::new(Fatal(e)),
     });
     if let Err(e) = result {
         native_term_win::desktop::message_box("NativeTerm", &t!("fatal-window", error = e));

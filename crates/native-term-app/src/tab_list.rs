@@ -101,8 +101,9 @@ impl TabList {
                 ui.label(icons::SEARCH.to_string());
                 let clear_width = ui.spacing().interact_size.y + ui.spacing().item_spacing.x + 4.0;
                 let width = ui.available_width() - if self.query.is_empty() { 0.0 } else { clear_width };
-                let search =
-                    ui.add(egui::TextEdit::singleline(&mut self.query).hint_text(t!("tabs-search-hint")).desired_width(width));
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut self.query).hint_text(t!("tabs-search-hint")).desired_width(width),
+                );
                 if !self.query.is_empty() && ui.small_button(icons::CLEAR.to_string()).clicked() {
                     clear = true;
                 }
@@ -150,7 +151,9 @@ impl TabList {
 fn state_color(state: &State) -> egui::Color32 {
     match state {
         State::Connected => egui::Color32::from_rgb(0x2e, 0xa0, 0x43),
-        State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Failed(_) => egui::Color32::from_rgb(0xd0, 0x3a, 0x3a),
+        State::LoginFailed(_) | State::Unreachable(_) | State::Disconnected(_) | State::Failed(_) => {
+            egui::Color32::from_rgb(0xd0, 0x3a, 0x3a)
+        }
         _ => egui::Color32::from_rgb(0xd0, 0x9a, 0x1a),
     }
 }
@@ -223,7 +226,13 @@ mod tests {
     fn snapshot() -> Snapshot {
         Snapshot {
             windows: vec![
-                WindowView { handle: 20, pid: 1, foreground: false, unresponsive: false, tabs: vec![tab(0, "claude", true)] },
+                WindowView {
+                    handle: 20,
+                    pid: 1,
+                    foreground: false,
+                    unresponsive: false,
+                    tabs: vec![tab(0, "claude", true)],
+                },
                 WindowView {
                     handle: 10,
                     pid: 1,

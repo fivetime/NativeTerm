@@ -180,9 +180,12 @@ pub fn query(ssh: &Path, what: &str) -> Vec<String> {
         command.creation_flags(0x0800_0000); // no console window
     }
     match command.arg("-Q").arg(what).stdin(Stdio::null()).stderr(Stdio::null()).output() {
-        Ok(output) if output.status.success() => {
-            String::from_utf8_lossy(&output.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect()
-        }
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(String::from)
+            .collect(),
         _ => Vec::new(),
     }
 }

@@ -22,11 +22,20 @@ pub fn key_line(text: &str) -> Option<(String, String)> {
     let line = text.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with('#'))?;
     let mut fields = line.split_whitespace();
     let (key_type, blob) = (fields.next()?, fields.next()?);
-    let plain = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '+' | '/' | '='));
-    if !plain(key_type) || !plain(blob) || !(key_type.starts_with("ssh-") || key_type.starts_with("ecdsa-") || key_type.starts_with("sk-")) {
+    let plain =
+        |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@' | '+' | '/' | '='));
+    if !plain(key_type)
+        || !plain(blob)
+        || !(key_type.starts_with("ssh-") || key_type.starts_with("ecdsa-") || key_type.starts_with("sk-"))
+    {
         return None;
     }
-    let comment: String = fields.collect::<Vec<_>>().join("_").chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@')).collect();
+    let comment: String = fields
+        .collect::<Vec<_>>()
+        .join("_")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '@'))
+        .collect();
     let comment = if comment.is_empty() { "nativeterm".to_string() } else { comment };
     Some((format!("{key_type} {blob} {comment}"), blob.to_string()))
 }
@@ -327,11 +336,7 @@ mod tests {
     fn a_windows_shell_is_recognized() {
         let script = remote_script("ssh-ed25519 AAAA c", "AAAA");
         let output = Command::new("cmd.exe").arg("/c").arg(&script).output().unwrap();
-        let text = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let text = format!("{}{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
         assert!(is_windows_shell(&text), "{text}");
         assert!(!is_windows_shell("NATIVETERM-KEY-OK"));
         assert!(!is_windows_shell("Permission denied (publickey,password)."));
@@ -372,7 +377,10 @@ mod tests {
             assert!(run_windows_script(&unlocked, dir.path()).contains(OK_MARK));
             let second = run_windows_script(&unlocked, dir.path());
             assert!(second.contains(PRESENT_MARK), "{second}");
-            let text = std::fs::read_to_string(dir.path().join("programdata").join("ssh").join("administrators_authorized_keys")).unwrap();
+            let text = std::fs::read_to_string(
+                dir.path().join("programdata").join("ssh").join("administrators_authorized_keys"),
+            )
+            .unwrap();
             assert_eq!(text, "ssh-ed25519 AAAAtest nativeterm\r\n");
         } else {
             let second = run_windows_script(&script, dir.path());

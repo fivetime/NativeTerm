@@ -67,7 +67,8 @@ fn mouse(flags: MOUSE_EVENT_FLAGS) -> INPUT {
 }
 
 fn key(vk: VIRTUAL_KEY) {
-    let down = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, ..Default::default() } } };
+    let down =
+        INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, ..Default::default() } } };
     let up = INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: KEYEVENTF_KEYUP, ..Default::default() } },
@@ -97,9 +98,10 @@ fn tab_rect(core: &Core, name: &str) -> (isize, Rect) {
     let started = Instant::now();
     loop {
         let snapshot = core.snapshot();
-        let found = snapshot.windows.iter().find_map(|w| {
-            w.tabs.iter().find(|t| t.name == name).and_then(|t| t.rect.map(|r| (w.handle, r)))
-        });
+        let found = snapshot
+            .windows
+            .iter()
+            .find_map(|w| w.tabs.iter().find(|t| t.name == name).and_then(|t| t.rect.map(|r| (w.handle, r))));
         if let Some(found) = found {
             return found;
         }
@@ -113,10 +115,8 @@ fn tab_rect(core: &Core, name: &str) -> (isize, Rect) {
 fn tab_menu_on_nativeterm_tabs_only() {
     let core = core();
     core.start_tab_menu(|_| {}).unwrap();
-    let hosts: Vec<HostRequest> = ["m a", "m b", "m c"]
-        .iter()
-        .map(|l| HostRequest::new("nativeterm-test.invalid", *l))
-        .collect();
+    let hosts: Vec<HostRequest> =
+        ["m a", "m b", "m c"].iter().map(|l| HostRequest::new("nativeterm-test.invalid", *l)).collect();
     core.open(&hosts, Target::NewWindow);
     wait_until("three tabs failed to log in and were located", || {
         let s = core.sessions();
@@ -166,7 +166,10 @@ fn tab_menu_on_nativeterm_tabs_only() {
     let s = core.sessions();
     assert!(session(&s, "m a").state.is_open(), "the tab itself stays");
     std::thread::sleep(Duration::from_secs(1));
-    let names: Vec<String> = core.terminal().snapshot(&["m a".to_string()].into_iter().collect()).windows
+    let names: Vec<String> = core
+        .terminal()
+        .snapshot(&["m a".to_string()].into_iter().collect())
+        .windows
         .iter()
         .filter(|w| w.handle == window)
         .flat_map(|w| w.tabs.iter().map(|t| t.name.clone()))
@@ -176,7 +179,9 @@ fn tab_menu_on_nativeterm_tabs_only() {
     // clean up: our tab through the core, the user's tab with its close button
     core.close(&session(&s, "m a").id);
     let snapshot = core.terminal().snapshot(&Default::default());
-    if let Some((w, t)) = snapshot.windows.iter().find_map(|w| w.tabs.iter().find(|t| t.name == "user tab").map(|t| (w, t))) {
+    if let Some((w, t)) =
+        snapshot.windows.iter().find_map(|w| w.tabs.iter().find(|t| t.name == "user tab").map(|t| (w, t)))
+    {
         let _ = core.terminal().close(w.handle, t);
     }
     wait_until("window closed", || !core.terminal().windows().iter().any(|w| w.handle == window));

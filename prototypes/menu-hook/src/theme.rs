@@ -217,8 +217,17 @@ pub fn look_for(window: HWND) -> Look {
     let (dark, description) = match &resolved {
         Some((name, app)) if app == "light" => (false, format!("light (Terminal theme {name:?})")),
         Some((name, app)) if app == "dark" => (true, format!("dark (Terminal theme {name:?})")),
-        Some((name, _)) => (windows_dark, format!("{} (Terminal theme {name:?} follows Windows)", if windows_dark { "dark" } else { "light" })),
-        None => (windows_dark, format!("{} (Windows; Terminal settings unreadable: {path:?})", if windows_dark { "dark" } else { "light" })),
+        Some((name, _)) => (
+            windows_dark,
+            format!("{} (Terminal theme {name:?} follows Windows)", if windows_dark { "dark" } else { "light" }),
+        ),
+        None => (
+            windows_dark,
+            format!(
+                "{} (Windows; Terminal settings unreadable: {path:?})",
+                if windows_dark { "dark" } else { "light" }
+            ),
+        ),
     };
     // WinUI flyout colors (acrylic approximated by its solid fallback)
     let palette = if dark {

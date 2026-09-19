@@ -18,9 +18,9 @@
 
 mod args;
 mod askpass;
-mod keys;
-mod i18n;
 mod debug;
+mod i18n;
+mod keys;
 mod link;
 mod look;
 mod persistent;
@@ -121,7 +121,11 @@ fn authenticated(shim_pid: u32) {
 }
 
 fn run(session: Option<String>, alias: Option<String>, flags: args::Flags) -> i32 {
-    debug::log(format!("start session={session:?} alias={alias:?} {flags:?} wt_session={:?} pipe={:?}", wt_session(), pipe_name()));
+    debug::log(format!(
+        "start session={session:?} alias={alias:?} {flags:?} wt_session={:?} pipe={:?}",
+        wt_session(),
+        pipe_name()
+    ));
     let hello = ShimMessage::Hello {
         protocol: PROTOCOL_VERSION,
         role: Role::Shim,
@@ -296,7 +300,12 @@ enum Supervised {
 /// can replay it. Sleeps on handles: ssh's process, the link's arrivals and
 /// the login event.
 /// `control`: where `AppMessage::Special` goes (ntplink's control pipe).
-fn supervise(child: &mut Child, link: Option<&Link>, auth: Option<&win::AuthEvent>, control: Option<&win::ControlPipe>) -> Supervised {
+fn supervise(
+    child: &mut Child,
+    link: Option<&Link>,
+    auth: Option<&win::AuthEvent>,
+    control: Option<&win::ControlPipe>,
+) -> Supervised {
     let mut reported = false;
     let process = windows::Win32::Foundation::HANDLE(child.as_raw_handle() as _);
     loop {

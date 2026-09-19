@@ -99,8 +99,10 @@ pub fn snap_edge(frame: Bounds, work: Bounds, neighbour: impl Fn(i32, i32) -> bo
 pub fn docked_position(edge: Edge, window: Bounds, frame: Bounds, work: Bounds, hidden: bool) -> (i32, i32) {
     let inset_left = frame.left - window.left;
     let inset_top = frame.top - window.top;
-    let clamp_x = |x: i32| x.clamp(work.left - inset_left, (work.right - frame.width() - inset_left).max(work.left - inset_left));
-    let clamp_y = |y: i32| y.clamp(work.top - inset_top, (work.bottom - frame.height() - inset_top).max(work.top - inset_top));
+    let clamp_x =
+        |x: i32| x.clamp(work.left - inset_left, (work.right - frame.width() - inset_left).max(work.left - inset_left));
+    let clamp_y =
+        |y: i32| y.clamp(work.top - inset_top, (work.bottom - frame.height() - inset_top).max(work.top - inset_top));
     let away = |size: i32| if hidden { size - STRIP } else { 0 };
     match edge {
         Edge::Top => (clamp_x(window.left), work.top - inset_top - away(frame.height())),

@@ -63,7 +63,11 @@ thread_local! {
 /// front. Called from a window's UI (the event loop's thread); the window
 /// appears once the current frame is done. It ends when closed (its `Ui`
 /// is dropped then) or with the main window.
-pub fn open(key: impl Into<String>, viewport: egui::ViewportBuilder, factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static) {
+pub fn open(
+    key: impl Into<String>,
+    viewport: egui::ViewportBuilder,
+    factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
+) {
     let request = Request { key: key.into(), viewport, factory: Box::new(factory) };
     REQUESTS.with(|r| r.borrow_mut().push(request));
 }
@@ -238,7 +242,13 @@ impl Pane {
         self.state.handle_platform_output(&self.window, std::mem::take(&mut output.platform_output));
         if let Some(viewport) = output.viewport_output.remove(&ViewportId::ROOT) {
             let mut actions = Vec::new();
-            egui_winit::process_viewport_commands(&self.ctx, &mut self.info, viewport.commands, &self.window, &mut actions);
+            egui_winit::process_viewport_commands(
+                &self.ctx,
+                &mut self.info,
+                viewport.commands,
+                &self.window,
+                &mut actions,
+            );
             for action in actions {
                 let event = match action {
                     egui_winit::ActionRequested::Cut => Some(egui::Event::Cut),
@@ -257,7 +267,8 @@ impl Pane {
         let tessellated = started.elapsed();
         // the size may have changed through a viewport command
         let size = self.window.inner_size();
-        let (Some(width), Some(height)) = (NonZeroU32::new(size.width).or(Some(width)), NonZeroU32::new(size.height).or(Some(height)))
+        let (Some(width), Some(height)) =
+            (NonZeroU32::new(size.width).or(Some(width)), NonZeroU32::new(size.height).or(Some(height)))
         else {
             return Ok(false);
         };
@@ -559,7 +570,11 @@ impl Runner {
         dock::publish_edge(edge);
         if let Some(r) = &self.main {
             // through winit, which otherwise resets the level on its own
-            let level = if edge.is_some() { winit::window::WindowLevel::AlwaysOnTop } else { winit::window::WindowLevel::Normal };
+            let level = if edge.is_some() {
+                winit::window::WindowLevel::AlwaysOnTop
+            } else {
+                winit::window::WindowLevel::Normal
+            };
             r.window.set_window_level(level);
             // the top bar shows "Pin" only while docked
             r.window.request_redraw();
@@ -633,7 +648,8 @@ impl Runner {
                     (Some((x, y)), Some(b)) => b.contains(x, y),
                     _ => true,
                 };
-                let typing = self.main.as_ref().is_some_and(|r| r.ctx.egui_wants_keyboard_input() && r.window.has_focus());
+                let typing =
+                    self.main.as_ref().is_some_and(|r| r.ctx.egui_wants_keyboard_input() && r.window.has_focus());
                 // a move by the user is still being settled: it may undock
                 let moving = self.docking.settle_check.is_some();
                 if (self.docking.cursor_in_client && !moving) || dock::pinned() {

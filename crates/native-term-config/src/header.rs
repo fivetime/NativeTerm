@@ -46,7 +46,8 @@ fn ignore_unknown(doc: &mut Document) -> (bool, usize) {
     let ignore_line = match first_line(doc, "IgnoreUnknown") {
         Some(line) => {
             let d = doc.lines[line].directive().expect("directive");
-            let mut patterns: Vec<String> = d.value().split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
+            let mut patterns: Vec<String> =
+                d.value().split(',').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
             if !patterns.iter().any(|p| p.eq_ignore_ascii_case(IGNORE_PATTERN)) {
                 patterns.push(IGNORE_PATTERN.to_string());
                 doc.set(global, "IgnoreUnknown", &patterns.join(","));
@@ -121,7 +122,9 @@ mod tests {
 
     #[test]
     fn include_moves_elsewhere() {
-        let mut doc = Document::parse("IgnoreUnknown NativeTerm*\nInclude ~/.ssh/config.d/*.conf other/*.conf\n\nHost a\n    HostName x\n");
+        let mut doc = Document::parse(
+            "IgnoreUnknown NativeTerm*\nInclude ~/.ssh/config.d/*.conf other/*.conf\n\nHost a\n    HostName x\n",
+        );
         assert!(replace_include(&mut doc, DEFAULT_INCLUDE, "D:/Sync/ssh folders/*.conf"));
         assert_eq!(
             doc.render(),

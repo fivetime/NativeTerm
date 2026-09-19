@@ -78,12 +78,8 @@ fn main() {
     // the remote command through cmd.exe, like a Windows sshd's default shell
     if std::env::var("FAKE_SSH_WINDOWS").as_deref() == Ok("1") {
         let command = args.last().cloned().unwrap_or_default();
-        let code = Command::new("cmd.exe")
-            .arg("/c")
-            .raw_arg(command)
-            .status()
-            .map(|s| s.code().unwrap_or(-1))
-            .unwrap_or(-1);
+        let code =
+            Command::new("cmd.exe").arg("/c").raw_arg(command).status().map(|s| s.code().unwrap_or(-1)).unwrap_or(-1);
         std::process::exit(code);
     }
     // an interactive shell as the "remote side" (manual checks in a tab)
@@ -131,7 +127,9 @@ fn control_log(pipe: &str) {
 fn console_lines() -> impl Iterator<Item = String> {
     use windows::core::w;
     use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
-    use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
     use windows::Win32::System::Console::{ReadConsoleInputW, INPUT_RECORD, KEY_EVENT};
     // the console itself: in the tests stdin is the test runner's
     let input = unsafe {

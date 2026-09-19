@@ -12,12 +12,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::alias;
+use crate::appearance;
 use crate::document::{BlockKind, Document, LineKind};
 use crate::effective;
 use crate::folder_options;
 use crate::header;
 use crate::options;
-use crate::appearance;
 use crate::persistent;
 use crate::plink::{self, PlinkSession};
 use crate::securecrt::{self, Plan};
@@ -183,7 +183,9 @@ fn is_folder_file(path: &Path) -> bool {
 /// A folder's files in `dir` (`.conf` and `.nt.toml`), sorted.
 fn folder_files(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map(|entries| entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_file() && is_folder_file(p)).collect())
+        .map(|entries| {
+            entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_file() && is_folder_file(p)).collect()
+        })
         .unwrap_or_default();
     files.sort();
     files
@@ -384,11 +386,14 @@ impl Editor {
 
     /// `ssh -G <alias>` must succeed; with `expect`, the host name must match.
     fn validate(&self, alias: &str, expect: Option<&str>) -> Result<(), String> {
-        let settings = effective::effective_with(&self.ssh, self.config.as_deref(), alias).map_err(|e| e.to_string())?;
+        let settings =
+            effective::effective_with(&self.ssh, self.config.as_deref(), alias).map_err(|e| e.to_string())?;
         if let Some(expected) = expect {
             let actual = settings.iter().find(|(k, _)| k == "hostname").map(|(_, v)| v.as_str()).unwrap_or("");
             if !actual.eq_ignore_ascii_case(expected) {
-                return Err(format!("ssh resolves {alias} to {actual:?}, not {expected:?} (another block takes precedence?)"));
+                return Err(format!(
+                    "ssh resolves {alias} to {actual:?}, not {expected:?} (another block takes precedence?)"
+                ));
             }
         }
         Ok(())
@@ -412,9 +417,14 @@ impl Editor {
     /// key (and the change is rolled back). A config NativeTerm didn't set
     /// up (hand-written, or older) may lack it.
     fn ensure_ignore_unknown(&self) -> Result<(), EditError> {
-        edit_file(&self.writer, &self.main_config(), |doc| {
-            header::ensure_ignore(doc);
-        }, || self.validate(PARSE_CHECK_HOST, None))?;
+        edit_file(
+            &self.writer,
+            &self.main_config(),
+            |doc| {
+                header::ensure_ignore(doc);
+            },
+            || self.validate(PARSE_CHECK_HOST, None),
+        )?;
         Ok(())
     }
 
@@ -572,7 +582,12 @@ impl Editor {
                 let label = draft.label.trim();
                 set_or_remove(doc, block, "NativeTermLabel", (label != alias).then_some(label));
                 set_or_remove(doc, block, "NativeTermNote", draft.note.as_deref().filter(|n| !n.trim().is_empty()));
-                set_or_remove(doc, block, "NativeTermOnLogin", draft.on_login.as_deref().filter(|n| !n.trim().is_empty()));
+                set_or_remove(
+                    doc,
+                    block,
+                    "NativeTermOnLogin",
+                    draft.on_login.as_deref().filter(|n| !n.trim().is_empty()),
+                );
                 set_or_remove(doc, block, "NativeTermPersistent", draft.persistent.as_deref());
                 set_or_remove(doc, block, "NativeTermTabColor", draft.tab_color.as_deref());
                 set_or_remove(doc, block, "NativeTermColorScheme", draft.color_scheme.as_deref());
@@ -769,8 +784,7 @@ impl Editor {
         let alias = host.alias().to_string();
         let (text, _) = write::read(&host.file)?;
         let source = Document::parse(&text);
-        let block_index =
-            source.find_host_block(&alias).ok_or_else(|| EditError::NotFound(format!("host {alias}")))?;
+        let block_index = source.find_host_block(&alias).ok_or_else(|| EditError::NotFound(format!("host {alias}")))?;
         let block = source.blocks().swap_remove(block_index);
         // trailing blank lines stay behind
         let mut end = block.end;
@@ -879,7 +893,13 @@ impl Editor {
                 let path = folder.existing.clone().unwrap_or_else(|| {
                     let stem = securecrt::folder_stem(&folder.label);
                     (1..)
-                        .map(|n| if n == 1 { dir.join(format!("{stem}.conf")) } else { dir.join(format!("{stem}-{n}.conf")) })
+                        .map(|n| {
+                            if n == 1 {
+                                dir.join(format!("{stem}.conf"))
+                            } else {
+                                dir.join(format!("{stem}-{n}.conf"))
+                            }
+                        })
                         .find(|p| !p.exists() && !plink::sibling(p).exists() && !used.contains(p))
                         .expect("unbounded")
                 });
@@ -1040,9 +1060,10 @@ impl Editor {
         }
         folder_options::arrange(&mut doc, &folder_options::tag_for(path));
         let checks = || {
-            folder.hosts.iter().try_for_each(|h| {
-                self.validate(&h.alias, Some(&h.hostname)).map_err(|e| format!("{}: {e}", h.alias))
-            })
+            folder
+                .hosts
+                .iter()
+                .try_for_each(|h| self.validate(&h.alias, Some(&h.hostname)).map_err(|e| format!("{}: {e}", h.alias)))
         };
         self.writer.write(path, &doc.render(), fingerprint, checks).map(|_| ()).map_err(|e| e.to_string())
     }
@@ -1306,7 +1327,10 @@ mod tests {
         let api = editor.create_host(&tree(&editor), &prod, &draft("api", "10.0.0.3")).unwrap();
         assert_eq!(setting(&api, "user"), "ops");
         let text = std::fs::read_to_string(&prod).unwrap();
-        assert!(text.trim_end().ends_with("Match tagged nativeterm-shengchan\n    ServerAliveInterval 15\n    User ops"), "options stay last: {text}");
+        assert!(
+            text.trim_end().ends_with("Match tagged nativeterm-shengchan\n    ServerAliveInterval 15\n    User ops"),
+            "options stay last: {text}"
+        );
         let t = tree(&editor);
         editor.move_host(t.find(&web).unwrap().1, &lab).unwrap();
         assert_eq!(setting(&web, "serveraliveinterval"), "0");
@@ -1521,9 +1545,13 @@ mod tests {
         // so the new host wouldn't resolve to what the user entered
         let web = editor.create_folder("Web").unwrap();
         let earlier = editor.folders_dir().join("aaa.conf");
-        std::fs::write(&earlier, "Host web
+        std::fs::write(
+            &earlier,
+            "Host web
     HostName 10.9.9.9
-").unwrap();
+",
+        )
+        .unwrap();
         crate::acl::restrict_to_owner(&earlier).unwrap();
         let before = std::fs::read_to_string(&web).unwrap();
         let mut t = tree(&editor);
@@ -1635,9 +1663,13 @@ mod tests {
         // meanwhile a file read earlier defines b1 differently
         let earlier = editor.folders_dir().join("0-mine.conf");
         std::fs::create_dir_all(editor.folders_dir()).unwrap();
-        std::fs::write(&earlier, "Host b1
+        std::fs::write(
+            &earlier,
+            "Host b1
     HostName 10.9.9.9
-").unwrap();
+",
+        )
+        .unwrap();
         crate::acl::restrict_to_owner(&earlier).unwrap();
         let outcome = editor.import(&plan, &|_, _| {}).unwrap();
         assert_eq!(outcome.written.len(), 1);

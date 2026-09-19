@@ -69,10 +69,7 @@ pub fn unique(label: &str, folder: &str, taken: &HashSet<String>) -> String {
     if !taken.contains(&prefixed) {
         return prefixed;
     }
-    (2..)
-        .map(|n| format!("{prefixed}-{n}"))
-        .find(|candidate| !taken.contains(candidate))
-        .expect("unbounded range")
+    (2..).map(|n| format!("{prefixed}-{n}")).find(|candidate| !taken.contains(candidate)).expect("unbounded range")
 }
 
 #[cfg(test)]

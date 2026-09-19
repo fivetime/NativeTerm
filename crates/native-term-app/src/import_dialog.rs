@@ -24,11 +24,24 @@ enum Step {
     /// Reading the configuration in the background: a folder on OneDrive
     /// may have to be downloaded first, which took long enough to freeze
     /// the window when it was read on the UI thread.
-    Scanning { rx: Receiver<Scanned> },
+    Scanning {
+        rx: Receiver<Scanned>,
+    },
     /// `commands`: SecureCRT's send-string buttons, for the command library.
-    Preview { plan: Box<Plan>, lines: Vec<Line>, commands: Vec<crate::commands_import::Imported> },
-    Running { rx: Receiver<(Result<ImportOutcome, String>, Option<String>)>, done: Arc<AtomicUsize>, total: usize },
-    Finished { text: Vec<String>, wrote: bool },
+    Preview {
+        plan: Box<Plan>,
+        lines: Vec<Line>,
+        commands: Vec<crate::commands_import::Imported>,
+    },
+    Running {
+        rx: Receiver<(Result<ImportOutcome, String>, Option<String>)>,
+        done: Arc<AtomicUsize>,
+        total: usize,
+    },
+    Finished {
+        text: Vec<String>,
+        wrote: bool,
+    },
 }
 
 pub struct ImportDialog {
@@ -52,7 +65,8 @@ impl ImportDialog {
     /// PuTTY's saved sessions, previewed right away.
     pub fn putty(ssh_dir: PathBuf, data_dir: PathBuf, ctx: &egui::Context) -> ImportDialog {
         let path = format!(r"HKEY_CURRENT_USER\{}", putty::sessions_key());
-        let mut dialog = ImportDialog { origin: Origin::Putty, path, step: Step::Choose, error: None, ssh_dir, data_dir };
+        let mut dialog =
+            ImportDialog { origin: Origin::Putty, path, step: Step::Choose, error: None, ssh_dir, data_dir };
         dialog.preview(ctx);
         dialog
     }
@@ -141,9 +155,9 @@ impl ImportDialog {
                         if let Some(e) = &o.keys_failed {
                             text.push(t!("import-keys-failed", error = e.as_str()));
                         }
-                        text.extend(
-                            o.failed.iter().map(|(label, why)| t!("import-folder-failed", folder = label.as_str(), error = why.as_str())),
-                        );
+                        text.extend(o.failed.iter().map(|(label, why)| {
+                            t!("import-folder-failed", folder = label.as_str(), error = why.as_str())
+                        }));
                         text.extend(commands);
                         Step::Finished { text, wrote: o.hosts() > 0 || o.keys_added > 0 }
                     }
@@ -216,7 +230,9 @@ impl ImportDialog {
                     }
                     Step::Running { done, total, .. } => {
                         let n = done.load(Ordering::Relaxed);
-                        ui.add(egui::ProgressBar::new(n as f32 / (*total).max(1) as f32).text(format!("{n} / {total}")));
+                        ui.add(
+                            egui::ProgressBar::new(n as f32 / (*total).max(1) as f32).text(format!("{n} / {total}")),
+                        );
                         ui.weak(t!("import-checking"));
                     }
                     Step::Finished { text, .. } => {
@@ -228,7 +244,10 @@ impl ImportDialog {
                 ui.separator();
                 ui.horizontal(|ui| match &self.step {
                     Step::Choose | Step::Preview { .. } => {
-                        if ui.add_enabled(!self.path.trim().is_empty(), egui::Button::new(t!("import-preview"))).clicked() {
+                        if ui
+                            .add_enabled(!self.path.trim().is_empty(), egui::Button::new(t!("import-preview")))
+                            .clicked()
+                        {
                             self.preview(ctx);
                         }
                         if let Step::Preview { plan, commands, .. } = &self.step {
@@ -239,7 +258,8 @@ impl ImportDialog {
                             } else {
                                 t!("import-run-commands", count = n, commands = commands.len())
                             };
-                            if ui.add_enabled(n > 0 || keys || !commands.is_empty(), egui::Button::new(label)).clicked() {
+                            if ui.add_enabled(n > 0 || keys || !commands.is_empty(), egui::Button::new(label)).clicked()
+                            {
                                 start = Some((Plan::clone(plan), commands.clone()));
                             }
                         }

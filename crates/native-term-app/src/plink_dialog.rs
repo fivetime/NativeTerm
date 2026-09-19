@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use native_term_app::t;
 use native_term_config::plink::{
-    self, Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_LINE, PUTTY_LOG,
-    PUTTY_SUPDUP, PUTTY_TELNET,
+    self, Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_LINE,
+    PUTTY_LOG, PUTTY_SUPDUP, PUTTY_TELNET,
 };
 
 use crate::dialogs::Outcome;
@@ -66,7 +66,8 @@ impl PlinkDialog {
     fn from_session(title: String, alias: Option<String>, file: Option<PathBuf>, s: &PlinkSession) -> PlinkDialog {
         let serial = s.serial.clone().unwrap_or_else(|| Serial::new(""));
         let ports = native_term_win::registry::serial_ports();
-        let line = if serial.line.is_empty() { ports.first().cloned().unwrap_or_default() } else { serial.line.clone() };
+        let line =
+            if serial.line.is_empty() { ports.first().cloned().unwrap_or_default() } else { serial.line.clone() };
         PlinkDialog {
             title,
             alias,
@@ -186,7 +187,8 @@ impl PlinkDialog {
         };
         let serial = (self.protocol == Protocol::Serial)
             .then(|| -> Result<Serial, String> {
-                let speed = self.speed.trim().parse::<u32>().map_err(|_| t!("plink-bad-speed", speed = self.speed.trim()))?;
+                let speed =
+                    self.speed.trim().parse::<u32>().map_err(|_| t!("plink-bad-speed", speed = self.speed.trim()))?;
                 Ok(Serial {
                     line: self.line.trim().to_uppercase(),
                     speed,
@@ -234,7 +236,12 @@ impl PlinkDialog {
 
     /// What a new session's alias is made from.
     pub fn name_base(&self) -> String {
-        [&self.label, &self.host, &self.line].into_iter().map(|s| s.trim()).find(|s| !s.is_empty()).unwrap_or("session").to_string()
+        [&self.label, &self.host, &self.line]
+            .into_iter()
+            .map(|s| s.trim())
+            .find(|s| !s.is_empty())
+            .unwrap_or("session")
+            .to_string()
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
@@ -254,20 +261,25 @@ impl PlinkDialog {
                     };
                     field(ui, t!("field-name"), &mut self.label, t!("plink-name-hint"));
                     ui.label(t!("field-protocol"));
-                    egui::ComboBox::from_id_salt("plink-protocol")
-                        .selected_text(protocol_text(self.protocol))
-                        .show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("plink-protocol").selected_text(protocol_text(self.protocol)).show_ui(
+                        ui,
+                        |ui| {
                             for p in Protocol::ALL {
                                 ui.selectable_value(&mut self.protocol, p, protocol_text(p));
                             }
-                        });
+                        },
+                    );
                     ui.end_row();
                     if self.protocol == Protocol::Serial {
                         ui.label(t!("field-serial-line"));
                         ui.horizontal(|ui| {
                             ui.add(egui::TextEdit::singleline(&mut self.line).hint_text("COM3").desired_width(120.0));
                             egui::ComboBox::from_id_salt("plink-ports")
-                                .selected_text(if self.ports.is_empty() { t!("plink-no-ports") } else { t!("plink-ports") })
+                                .selected_text(if self.ports.is_empty() {
+                                    t!("plink-no-ports")
+                                } else {
+                                    t!("plink-ports")
+                                })
                                 .show_ui(ui, |ui| {
                                     for port in &self.ports {
                                         ui.selectable_value(&mut self.line, port.clone(), port);
@@ -278,48 +290,60 @@ impl PlinkDialog {
                         ui.label(t!("field-serial-speed"));
                         ui.horizontal(|ui| {
                             ui.add(egui::TextEdit::singleline(&mut self.speed).desired_width(120.0));
-                            egui::ComboBox::from_id_salt("plink-speeds").selected_text(t!("plink-common")).show_ui(ui, |ui| {
-                                for speed in SPEEDS {
-                                    ui.selectable_value(&mut self.speed, speed.to_string(), speed.to_string());
-                                }
-                            });
+                            egui::ComboBox::from_id_salt("plink-speeds").selected_text(t!("plink-common")).show_ui(
+                                ui,
+                                |ui| {
+                                    for speed in SPEEDS {
+                                        ui.selectable_value(&mut self.speed, speed.to_string(), speed.to_string());
+                                    }
+                                },
+                            );
                         });
                         ui.end_row();
                         ui.label(t!("field-serial-format"));
                         ui.horizontal(|ui| {
-                            egui::ComboBox::from_id_salt("plink-data").selected_text(self.data_bits.to_string()).width(48.0).show_ui(
-                                ui,
-                                |ui| {
+                            egui::ComboBox::from_id_salt("plink-data")
+                                .selected_text(self.data_bits.to_string())
+                                .width(48.0)
+                                .show_ui(ui, |ui| {
                                     for bits in 5..=8u8 {
                                         ui.selectable_value(&mut self.data_bits, bits, bits.to_string());
                                     }
-                                },
-                            );
-                            egui::ComboBox::from_id_salt("plink-parity").selected_text(parity_text(self.parity)).show_ui(ui, |ui| {
-                                for p in Parity::ALL {
-                                    ui.selectable_value(&mut self.parity, p, parity_text(p));
-                                }
-                            });
-                            egui::ComboBox::from_id_salt("plink-stop").selected_text(self.stop_bits.clone()).width(48.0).show_ui(
-                                ui,
-                                |ui| {
+                                });
+                            egui::ComboBox::from_id_salt("plink-parity")
+                                .selected_text(parity_text(self.parity))
+                                .show_ui(ui, |ui| {
+                                    for p in Parity::ALL {
+                                        ui.selectable_value(&mut self.parity, p, parity_text(p));
+                                    }
+                                });
+                            egui::ComboBox::from_id_salt("plink-stop")
+                                .selected_text(self.stop_bits.clone())
+                                .width(48.0)
+                                .show_ui(ui, |ui| {
                                     for s in STOP_BITS {
                                         ui.selectable_value(&mut self.stop_bits, s.to_string(), s);
                                     }
-                                },
-                            );
+                                });
                         });
                         ui.end_row();
                         ui.label(t!("field-serial-flow"));
-                        egui::ComboBox::from_id_salt("plink-flow").selected_text(flow_text(self.flow)).show_ui(ui, |ui| {
-                            for f in Flow::ALL {
-                                ui.selectable_value(&mut self.flow, f, flow_text(f));
-                            }
-                        });
+                        egui::ComboBox::from_id_salt("plink-flow").selected_text(flow_text(self.flow)).show_ui(
+                            ui,
+                            |ui| {
+                                for f in Flow::ALL {
+                                    ui.selectable_value(&mut self.flow, f, flow_text(f));
+                                }
+                            },
+                        );
                         ui.end_row();
                     } else {
                         field(ui, t!("field-host"), &mut self.host, t!("field-host-hint"));
-                        let default_port = self.protocol.default_port().map(|p| p.to_string()).unwrap_or_else(|| t!("plink-port-needed"));
+                        let default_port = self
+                            .protocol
+                            .default_port()
+                            .map(|p| p.to_string())
+                            .unwrap_or_else(|| t!("plink-port-needed"));
                         field(ui, t!("field-port"), &mut self.port, default_port);
                         if matches!(self.protocol, Protocol::Telnet | Protocol::Rlogin) {
                             field(ui, t!("field-user"), &mut self.user, t!("plink-user-hint"));
@@ -328,11 +352,14 @@ impl PlinkDialog {
                     ui.label(t!("field-charset"));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut self.charset).desired_width(120.0));
-                        egui::ComboBox::from_id_salt("plink-charsets").selected_text(t!("plink-common")).show_ui(ui, |ui| {
-                            for c in CHARSETS {
-                                ui.selectable_value(&mut self.charset, c.to_string(), c);
-                            }
-                        });
+                        egui::ComboBox::from_id_salt("plink-charsets").selected_text(t!("plink-common")).show_ui(
+                            ui,
+                            |ui| {
+                                for c in CHARSETS {
+                                    ui.selectable_value(&mut self.charset, c.to_string(), c);
+                                }
+                            },
+                        );
                     });
                     ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
@@ -492,7 +519,10 @@ mod tests {
         d.host = "10.0.0.1".into();
         d.charset = "GBK".into();
         let s = d.session("core-sw").unwrap();
-        assert_eq!((s.protocol, s.host.as_deref(), s.port, s.charset.as_deref()), (Protocol::Telnet, Some("10.0.0.1"), None, Some("GBK")));
+        assert_eq!(
+            (s.protocol, s.host.as_deref(), s.port, s.charset.as_deref()),
+            (Protocol::Telnet, Some("10.0.0.1"), None, Some("GBK"))
+        );
         assert_eq!(d.name_base(), "核心交换机");
 
         d.protocol = Protocol::Serial;
@@ -543,7 +573,8 @@ mod tests {
 
     #[test]
     fn editing_keeps_what_the_dialog_does_not_show() {
-        let mut original = PlinkSession { name: "sw".into(), host: Some("h".into()), favorite: true, ..Default::default() };
+        let mut original =
+            PlinkSession { name: "sw".into(), host: Some("h".into()), favorite: true, ..Default::default() };
         original.putty.insert("PassiveTelnet".into(), native_term_config::plink::PuttyValue::Number(1));
         original.id = Some("id-1".into());
         let d = PlinkDialog::edit(&original);

@@ -31,7 +31,11 @@ fn terminal() -> WindowsTerminal {
     let install = Install::from_dir(dir.as_ref()).unwrap();
     assert_eq!(install.kind, Kind::Portable, "only a portable Terminal is used for tests");
     let settings = std::fs::read_to_string(install.settings_json()).unwrap();
-    assert!(settings.contains(command::PROFILE_NAME), "add the NativeTerm SSH profile to {}", install.settings_json().display());
+    assert!(
+        settings.contains(command::PROFILE_NAME),
+        "add the NativeTerm SSH profile to {}",
+        install.settings_json().display()
+    );
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf();
     let shim = root.join("target").join("debug").join("nativeterm-shim.exe");
     assert!(shim.exists(), "build the shim first: {}", shim.display());
@@ -91,7 +95,8 @@ fn hellos(rx: &Receiver<Shim>, tabs: &[TabSpec]) -> OpenTabs {
     let mut out = HashMap::new();
     while out.len() < tabs.len() {
         let left = deadline.saturating_duration_since(Instant::now());
-        let shim = rx.recv_timeout(left).unwrap_or_else(|_| panic!("only {} of {} shims said hello", out.len(), tabs.len()));
+        let shim =
+            rx.recv_timeout(left).unwrap_or_else(|_| panic!("only {} of {} shims said hello", out.len(), tabs.len()));
         let key = shim.wt_session.clone().unwrap_or_default().to_lowercase();
         if wanted.contains(key.as_str()) {
             out.insert(key, shim);
@@ -108,7 +113,15 @@ fn guid(n: u32) -> String {
 }
 
 fn spec(n: u32, label: &str) -> TabSpec {
-    TabSpec { terminal_session: guid(n), label: label.to_string(), session: format!("s-{n}"), alias: HOST.to_string(), wait: false, no_forwards: false, tab_color: None }
+    TabSpec {
+        terminal_session: guid(n),
+        label: label.to_string(),
+        session: format!("s-{n}"),
+        alias: HOST.to_string(),
+        wait: false,
+        no_forwards: false,
+        tab_color: None,
+    }
 }
 
 /// Closes its tabs when dropped, also when an assertion failed.
@@ -226,7 +239,8 @@ fn batches_through_the_shell() {
     let windows: HashSet<isize> = expected.iter().map(|l| snapshot.find(l).unwrap().0.handle).collect();
     assert_eq!(windows, HashSet::from([window]), "all batches in the new window");
     // strip order is the requested order
-    let order: Vec<&str> = snapshot.windows.iter().find(|w| w.handle == window).unwrap().tabs.iter().map(|t| t.name.as_str()).collect();
+    let order: Vec<&str> =
+        snapshot.windows.iter().find(|w| w.handle == window).unwrap().tabs.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(order, expected.iter().map(String::as_str).collect::<Vec<_>>());
 
     drop(shims);

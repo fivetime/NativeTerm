@@ -200,7 +200,8 @@ mod tests {
         let mut t = tab(1, "a");
         t.wait = true;
         t.no_forwards = true;
-        let args: Vec<String> = new_tab(&t, Path::new("shim.exe"), &[]).iter().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<String> =
+            new_tab(&t, Path::new("shim.exe"), &[]).iter().map(|a| a.to_string_lossy().to_string()).collect();
         assert_eq!(args[args.len() - 3..], ["--wait", "--no-forwards", "host1"]);
     }
 

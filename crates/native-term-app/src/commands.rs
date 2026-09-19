@@ -58,7 +58,9 @@ impl Library {
     pub fn load(path: &Path) -> io::Result<Library> {
         let commands = match std::fs::read_to_string(path) {
             Ok(text) => {
-                toml::from_str::<File>(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?.commands
+                toml::from_str::<File>(&text)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
+                    .commands
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e),
@@ -159,12 +161,22 @@ mod tests {
     fn merging_imported_commands() {
         let dir = tempfile::tempdir().unwrap();
         let mut library = Library::load(&dir.path().join("commands.toml")).unwrap();
-        let cmd = |name: &str, text: &str, group: &str| Command { name: name.into(), text: text.into(), enter: true, group: Some(group.into()) };
+        let cmd = |name: &str, text: &str, group: &str| Command {
+            name: name.into(),
+            text: text.into(),
+            enter: true,
+            group: Some(group.into()),
+        };
         library.put(cmd("uptime", "uptime", "mine"));
         library.put(cmd("disk", "df -h", "mine"));
         let merged = merge(
             &mut library,
-            vec![cmd("uptime", "uptime", "Cisco"), cmd("disk", "df -hT", "Linux"), cmd("ip br", "sh ip int br", "Cisco"), cmd("disk", "df -hT", "Linux")],
+            vec![
+                cmd("uptime", "uptime", "Cisco"),
+                cmd("disk", "df -hT", "Linux"),
+                cmd("ip br", "sh ip int br", "Cisco"),
+                cmd("disk", "df -hT", "Linux"),
+            ],
         );
         assert_eq!(merged.added, 2);
         assert_eq!(merged.present, 2, "the same uptime, and the second disk once renamed");

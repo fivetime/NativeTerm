@@ -298,7 +298,9 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
     }
     let encoding = ini
         .str("Output Transformer Name")
-        .filter(|e| !e.eq_ignore_ascii_case("default") && !e.eq_ignore_ascii_case("utf-8") && !e.eq_ignore_ascii_case("utf8"))
+        .filter(|e| {
+            !e.eq_ignore_ascii_case("default") && !e.eq_ignore_ascii_case("utf-8") && !e.eq_ignore_ascii_case("utf8")
+        })
         .map(str::to_string);
     let logon_actions = ini.num("Use Login Script").is_some_and(|n| n != 0)
         || ini.secrets.iter().any(|(k, v)| *v && k.to_ascii_lowercase().contains("login script"));
@@ -464,7 +466,9 @@ pub enum Skip {
     Protocol(String),
     NoHostname,
     /// Imported earlier (its `NativeTermSource` is in the config).
-    AlreadyImported { alias: String },
+    AlreadyImported {
+        alias: String,
+    },
 }
 
 /// A host to write.
@@ -749,9 +753,13 @@ fn plink_session(
     notes: &mut Notes,
 ) -> Option<crate::plink::PlinkSession> {
     use crate::plink::{PlinkSession, Protocol};
-    let plain = |v: &Option<String>| v.clone().map(|x| x.trim().to_string()).filter(|x| !x.is_empty() && !x.contains(char::is_whitespace));
+    let plain = |v: &Option<String>| {
+        v.clone().map(|x| x.trim().to_string()).filter(|x| !x.is_empty() && !x.contains(char::is_whitespace))
+    };
     let (host, serial) = match protocol {
-        Protocol::Serial => (None, Some(s.serial.clone().or_else(|| plain(&s.com_port).map(crate::plink::Serial::new))?)),
+        Protocol::Serial => {
+            (None, Some(s.serial.clone().or_else(|| plain(&s.com_port).map(crate::plink::Serial::new))?))
+        }
         _ => (Some(plain(&s.hostname)?), None),
     };
     let charset = match s.encoding.as_deref().and_then(crate::plink::charset_from) {
@@ -811,7 +819,8 @@ pub(crate) fn folder_stem(label: &str) -> String {
 /// Aliases in the plan must not collide with each other either.
 pub fn check_unique(plan: &Plan) -> Result<(), String> {
     let mut seen = HashSet::new();
-    let names = plan.folders.iter().flat_map(|f| f.hosts.iter().map(|h| &h.alias).chain(f.plink.iter().map(|p| &p.name)));
+    let names =
+        plan.folders.iter().flat_map(|f| f.hosts.iter().map(|h| &h.alias).chain(f.plink.iter().map(|p| &p.name)));
     for name in names {
         if !seen.insert(name.to_lowercase()) {
             return Err(format!("alias {name} planned twice"));
@@ -891,7 +900,13 @@ mod tests {
         write(
             &s,
             "测试/dup.ini",
-            &["S:\"Protocol Name\"=SSH2", "S:\"Hostname\"=10.32.16.66", "S:\"Username\"=root", "S:\"Firewall Name\"=Corp Proxy", "S:\"Output Transformer Name\"=GBK"],
+            &[
+                "S:\"Protocol Name\"=SSH2",
+                "S:\"Hostname\"=10.32.16.66",
+                "S:\"Username\"=root",
+                "S:\"Firewall Name\"=Corp Proxy",
+                "S:\"Output Transformer Name\"=GBK",
+            ],
         );
         write(
             &s,
@@ -921,7 +936,11 @@ mod tests {
         );
         write(&s, "测试/desk.ini", &["S:\"Protocol Name\"=RDP", "S:\"Hostname\"=pc1"]);
         write(&s, "测试/empty.ini", &["S:\"Protocol Name\"=SSH2", "S:\"Hostname\"="]);
-        write(&s, "root-host.ini", &["S:\"Protocol Name\"=SSH2", "S:\"Hostname\"=10.0.0.1", "S:\"Firewall Name\"=Session:gone/away"]);
+        write(
+            &s,
+            "root-host.ini",
+            &["S:\"Protocol Name\"=SSH2", "S:\"Hostname\"=10.0.0.1", "S:\"Firewall Name\"=Session:gone/away"],
+        );
         fs::create_dir_all(s.join("空文件夹")).unwrap();
         dir
     }
@@ -1008,11 +1027,18 @@ mod tests {
         let test = plan.folders.iter().find(|f| f.label == "测试").unwrap();
         let switch = test.plink.iter().find(|p| p.label() == "switch").unwrap();
         assert_eq!(switch.protocol, crate::plink::Protocol::Telnet);
-        assert_eq!((switch.host.as_deref(), switch.port, switch.user.as_deref()), (Some("10.1.1.1"), None, Some("admin")));
+        assert_eq!(
+            (switch.host.as_deref(), switch.port, switch.user.as_deref()),
+            (Some("10.1.1.1"), None, Some("admin"))
+        );
         assert_eq!(switch.charset.as_deref(), Some("gbk"));
         assert_eq!(switch.source.as_deref(), Some("securecrt:测试/switch"));
         let console = test.plink.iter().find(|p| p.label() == "console").unwrap();
-        assert_eq!(console.serial.as_ref().unwrap().sercfg(), "115200,7,e,2,R", "DTR/RTS are line states, CTS flow is RTS/CTS");
+        assert_eq!(
+            console.serial.as_ref().unwrap().sercfg(),
+            "115200,7,e,2,R",
+            "DTR/RTS are line states, CTS flow is RTS/CTS"
+        );
         assert!(console.host.is_none());
         assert_eq!(skipped["测试/desk"], &Skip::Protocol("RDP".into()));
         assert_eq!(skipped["测试/empty"], &Skip::NoHostname);

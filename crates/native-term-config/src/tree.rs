@@ -94,7 +94,9 @@ impl Folder {
     /// `NativeTermNoGroupSend yes` on the folder: its sessions are left
     /// out of sends to several sessions.
     pub fn no_group_send(&self) -> bool {
-        self.defaults.get("nogroupsend").is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1"))
+        self.defaults
+            .get("nogroupsend")
+            .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1"))
     }
 }
 
@@ -252,7 +254,11 @@ impl Loader<'_> {
                 user: first("User"),
                 port,
                 proxy_jump: first("ProxyJump"),
-                identity_files: doc.directives(&block).filter(|(_, d)| d.is("IdentityFile")).map(|(_, d)| d.value()).collect(),
+                identity_files: doc
+                    .directives(&block)
+                    .filter(|(_, d)| d.is("IdentityFile"))
+                    .map(|(_, d)| d.value())
+                    .collect(),
                 nt,
                 file: path.to_path_buf(),
                 line: header,
@@ -410,10 +416,17 @@ mod tests {
         // shared settings: wildcard block (main config) and a block naming a
         // host defined elsewhere (k8s.conf)
         let shared: Vec<Vec<String>> = tree.shared.iter().map(|s| s.patterns.clone()).collect();
-        assert_eq!(shared, vec![vec!["node01".to_string(), "node02".into(), "incus-node-*".into()], vec!["node01".into()]]);
+        assert_eq!(
+            shared,
+            vec![vec!["node01".to_string(), "node02".into(), "incus-node-*".into()], vec!["node01".into()]]
+        );
 
         let k8s: Vec<&str> = tree.folders[1].hosts.iter().map(|h| h.alias()).collect();
-        assert_eq!(k8s, vec!["k8s-master", "k8s-worker1", "ceph-cluster.osd1"], "no HostName and not defined elsewhere: a session");
+        assert_eq!(
+            k8s,
+            vec!["k8s-master", "k8s-worker1", "ceph-cluster.osd1"],
+            "no HostName and not defined elsewhere: a session"
+        );
 
         let names: Vec<&str> = tree.folders.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(names, vec!["ceph-cluster", "k8s"], "only *.conf, sorted");

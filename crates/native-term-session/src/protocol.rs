@@ -69,7 +69,9 @@ pub enum ShimMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AppMessage {
-    Welcome { protocol: u32 },
+    Welcome {
+        protocol: u32,
+    },
     /// Start (or restart) the client.
     Connect,
     /// End the client, keep the tab.
@@ -77,7 +79,10 @@ pub enum AppMessage {
     /// End everything and exit with 0, which closes the tab.
     Close,
     /// Type text into the tab's console, then Enter if `enter`.
-    SendText { text: String, enter: bool },
+    SendText {
+        text: String,
+        enter: bool,
+    },
     /// Clear the tab's scrollback, and its screen: after login by typing
     /// Ctrl+L for the remote side, otherwise directly.
     ClearScreen,
@@ -88,7 +93,9 @@ pub enum AppMessage {
     Hold,
     /// Send one of the client's special commands (see
     /// `ShimMessage::Specials`) over the connection.
-    Special { name: String },
+    Special {
+        name: String,
+    },
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
@@ -137,7 +144,8 @@ mod tests {
             assert_eq!(decode::<ShimMessage>(&line).unwrap(), m);
         }
         // older shims don't send the window
-        let old = r#"{"type":"hello","protocol":1,"role":"shim","pid":1,"wt_session":null,"session":null,"alias":null}"#;
+        let old =
+            r#"{"type":"hello","protocol":1,"role":"shim","pid":1,"wt_session":null,"session":null,"alias":null}"#;
         assert!(matches!(decode::<ShimMessage>(old).unwrap(), ShimMessage::Hello { terminal_window: None, .. }));
         let text = AppMessage::SendText { text: "echo 你好\n😀".into(), enter: true };
         assert_eq!(decode::<AppMessage>(&encode(&text)).unwrap(), text);

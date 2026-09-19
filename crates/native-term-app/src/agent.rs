@@ -159,7 +159,12 @@ mod tests {
     fn hint_only_for_protected_keys_without_agent() {
         let key = |p: Option<bool>| (PathBuf::from("id"), p);
         let status = |service, keys| Status { service, keys, agent: AgentKeys::Unreachable, other_agent: false };
-        let other = Status { service: ServiceState::Disabled, keys: vec![key(Some(true))], agent: AgentKeys::None, other_agent: true };
+        let other = Status {
+            service: ServiceState::Disabled,
+            keys: vec![key(Some(true))],
+            agent: AgentKeys::None,
+            other_agent: true,
+        };
         assert!(!other.needs_agent(), "SSH_AUTH_SOCK names an agent that answers");
         assert!(status(ServiceState::Disabled, vec![key(Some(true))]).needs_agent());
         assert!(!status(ServiceState::Running, vec![key(Some(true))]).needs_agent());

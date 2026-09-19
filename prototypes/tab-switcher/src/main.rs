@@ -24,8 +24,8 @@ use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, CreateFontW, CreateSolidBrush, DeleteDC,
     DeleteObject, DrawTextW, EndPaint, FillRect, GetDC, InvalidateRect, ReleaseDC, SelectObject, SetBkMode,
     SetBrushOrgEx, SetStretchBltMode, SetTextColor, StretchBlt, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
-    DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_NORMAL, HALFTONE,
-    HBITMAP, HDC, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
+    DEFAULT_CHARSET, DT_CENTER, DT_END_ELLIPSIS, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, FW_NORMAL, HALFTONE, HBITMAP,
+    HDC, HGDIOBJ, OUT_DEFAULT_PRECIS, PAINTSTRUCT, SRCCOPY, TRANSPARENT,
 };
 use windows::Win32::Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -39,12 +39,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CreateWindowExW, DefWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW,
-    GetForegroundWindow, GetMessageW, GetWindowRect, GetWindowThreadProcessId, PostMessageW, PostQuitMessage,
-    RegisterClassW, SetForegroundWindow, SetTimer, SetWindowPos, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    UnhookWindowsHookEx, HC_ACTION, HWND_TOPMOST, KBDLLHOOKSTRUCT, MSG, SWP_NOACTIVATE, SW_HIDE, SW_SHOWNOACTIVATE,
-    WH_KEYBOARD_LL, WM_APP, WM_KEYDOWN, WM_KEYUP, WM_PAINT, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW,
-    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CallNextHookEx, CreateWindowExW, DefWindowProcW, DispatchMessageW, EnumWindows, GetClassNameW, GetForegroundWindow,
+    GetMessageW, GetWindowRect, GetWindowThreadProcessId, PostMessageW, PostQuitMessage, RegisterClassW,
+    SetForegroundWindow, SetTimer, SetWindowPos, SetWindowsHookExW, ShowWindow, TranslateMessage, UnhookWindowsHookEx,
+    HC_ACTION, HWND_TOPMOST, KBDLLHOOKSTRUCT, MSG, SWP_NOACTIVATE, SW_HIDE, SW_SHOWNOACTIVATE, WH_KEYBOARD_LL, WM_APP,
+    WM_KEYDOWN, WM_KEYUP, WM_PAINT, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_TIMER, WNDCLASSW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const TEST_TERMINAL_DIR: &str = r"C:\MyProjects\RustProjects\terminal-1.26.2581.0";
@@ -409,8 +409,20 @@ unsafe fn draw_tiles(dc: HDC, g: &Grid) {
     let (columns, tile_h, _, _) = layout(g.names.len());
     let font = unsafe {
         CreateFontW(
-            -18, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, 0, w!("Segoe UI"),
+            -18,
+            0,
+            0,
+            0,
+            FW_NORMAL.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            CLEARTYPE_QUALITY,
+            0,
+            w!("Segoe UI"),
         )
     };
     unsafe {
@@ -607,7 +619,14 @@ fn selftest() {
         // Ctrl+Tab, Tab, release: two tabs further
         &[(VK_CONTROL, false), (VK_TAB, false), (VK_TAB, true), (VK_TAB, false), (VK_TAB, true), (VK_CONTROL, true)],
         // Ctrl+Tab, Esc: nothing changes
-        &[(VK_CONTROL, false), (VK_TAB, false), (VK_TAB, true), (VK_ESCAPE, false), (VK_ESCAPE, true), (VK_CONTROL, true)],
+        &[
+            (VK_CONTROL, false),
+            (VK_TAB, false),
+            (VK_TAB, true),
+            (VK_ESCAPE, false),
+            (VK_ESCAPE, true),
+            (VK_CONTROL, true),
+        ],
         // Ctrl+Shift+Tab, release: one tab back
         &[
             (VK_CONTROL, false),

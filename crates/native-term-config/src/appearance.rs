@@ -44,112 +44,160 @@ pub const SCHEMES: [Scheme; 16] = [
         foreground: "#BAB7B6",
         background: "#141414",
         cursor: "#37E57B",
-        palette: ["#000000", "#CF494C", "#60B442", "#DB9C11", "#0575D8", "#AF5ED2", "#1DB6BB", "#BAB7B6", "#817E7E", "#FF643B", "#37E57B", "#FCCD1A", "#688DFD", "#ED6FE9", "#32E0FB", "#DEE3E4"],
+        palette: [
+            "#000000", "#CF494C", "#60B442", "#DB9C11", "#0575D8", "#AF5ED2", "#1DB6BB", "#BAB7B6", "#817E7E",
+            "#FF643B", "#37E57B", "#FCCD1A", "#688DFD", "#ED6FE9", "#32E0FB", "#DEE3E4",
+        ],
     },
     Scheme {
         name: "Ottosson",
         foreground: "#bebebe",
         background: "#000000",
         cursor: "#ffffff",
-        palette: ["#000000", "#be2c21", "#3fae3a", "#be9a4a", "#204dbe", "#bb54be", "#00a7b2", "#bebebe", "#808080", "#ff3e30", "#58ea51", "#ffc944", "#2f6aff", "#fc74ff", "#00e1f0", "#ffffff"],
+        palette: [
+            "#000000", "#be2c21", "#3fae3a", "#be9a4a", "#204dbe", "#bb54be", "#00a7b2", "#bebebe", "#808080",
+            "#ff3e30", "#58ea51", "#ffc944", "#2f6aff", "#fc74ff", "#00e1f0", "#ffffff",
+        ],
     },
     Scheme {
         name: "Campbell",
         foreground: "#CCCCCC",
         background: "#0C0C0C",
         cursor: "#FFFFFF",
-        palette: ["#0C0C0C", "#C50F1F", "#13A10E", "#C19C00", "#0037DA", "#881798", "#3A96DD", "#CCCCCC", "#767676", "#E74856", "#16C60C", "#F9F1A5", "#3B78FF", "#B4009E", "#61D6D6", "#F2F2F2"],
+        palette: [
+            "#0C0C0C", "#C50F1F", "#13A10E", "#C19C00", "#0037DA", "#881798", "#3A96DD", "#CCCCCC", "#767676",
+            "#E74856", "#16C60C", "#F9F1A5", "#3B78FF", "#B4009E", "#61D6D6", "#F2F2F2",
+        ],
     },
     Scheme {
         name: "Campbell Powershell",
         foreground: "#CCCCCC",
         background: "#012456",
         cursor: "#FFFFFF",
-        palette: ["#0C0C0C", "#C50F1F", "#13A10E", "#C19C00", "#0037DA", "#881798", "#3A96DD", "#CCCCCC", "#767676", "#E74856", "#16C60C", "#F9F1A5", "#3B78FF", "#B4009E", "#61D6D6", "#F2F2F2"],
+        palette: [
+            "#0C0C0C", "#C50F1F", "#13A10E", "#C19C00", "#0037DA", "#881798", "#3A96DD", "#CCCCCC", "#767676",
+            "#E74856", "#16C60C", "#F9F1A5", "#3B78FF", "#B4009E", "#61D6D6", "#F2F2F2",
+        ],
     },
     Scheme {
         name: "Vintage",
         foreground: "#C0C0C0",
         background: "#000000",
         cursor: "#FFFFFF",
-        palette: ["#000000", "#800000", "#008000", "#808000", "#000080", "#800080", "#008080", "#C0C0C0", "#808080", "#FF0000", "#00FF00", "#FFFF00", "#0000FF", "#FF00FF", "#00FFFF", "#FFFFFF"],
+        palette: [
+            "#000000", "#800000", "#008000", "#808000", "#000080", "#800080", "#008080", "#C0C0C0", "#808080",
+            "#FF0000", "#00FF00", "#FFFF00", "#0000FF", "#FF00FF", "#00FFFF", "#FFFFFF",
+        ],
     },
     Scheme {
         name: "One Half Dark",
         foreground: "#DCDFE4",
         background: "#282C34",
         cursor: "#FFFFFF",
-        palette: ["#282C34", "#E06C75", "#98C379", "#E5C07B", "#61AFEF", "#C678DD", "#56B6C2", "#DCDFE4", "#5A6374", "#E06C75", "#98C379", "#E5C07B", "#61AFEF", "#C678DD", "#56B6C2", "#DCDFE4"],
+        palette: [
+            "#282C34", "#E06C75", "#98C379", "#E5C07B", "#61AFEF", "#C678DD", "#56B6C2", "#DCDFE4", "#5A6374",
+            "#E06C75", "#98C379", "#E5C07B", "#61AFEF", "#C678DD", "#56B6C2", "#DCDFE4",
+        ],
     },
     Scheme {
         name: "One Half Light",
         foreground: "#383A42",
         background: "#FAFAFA",
         cursor: "#4F525D",
-        palette: ["#383A42", "#E45649", "#50A14F", "#C18301", "#0184BC", "#A626A4", "#0997B3", "#FAFAFA", "#4F525D", "#DF6C75", "#98C379", "#E4C07A", "#61AFEF", "#C577DD", "#56B5C1", "#FFFFFF"],
+        palette: [
+            "#383A42", "#E45649", "#50A14F", "#C18301", "#0184BC", "#A626A4", "#0997B3", "#FAFAFA", "#4F525D",
+            "#DF6C75", "#98C379", "#E4C07A", "#61AFEF", "#C577DD", "#56B5C1", "#FFFFFF",
+        ],
     },
     Scheme {
         name: "Solarized Dark",
         foreground: "#839496",
         background: "#002B36",
         cursor: "#FFFFFF",
-        palette: ["#002B36", "#DC322F", "#859900", "#B58900", "#268BD2", "#D33682", "#2AA198", "#EEE8D5", "#073642", "#CB4B16", "#586E75", "#657B83", "#839496", "#6C71C4", "#93A1A1", "#FDF6E3"],
+        palette: [
+            "#002B36", "#DC322F", "#859900", "#B58900", "#268BD2", "#D33682", "#2AA198", "#EEE8D5", "#073642",
+            "#CB4B16", "#586E75", "#657B83", "#839496", "#6C71C4", "#93A1A1", "#FDF6E3",
+        ],
     },
     Scheme {
         name: "Solarized Light",
         foreground: "#657B83",
         background: "#FDF6E3",
         cursor: "#002B36",
-        palette: ["#002B36", "#DC322F", "#859900", "#B58900", "#268BD2", "#D33682", "#2AA198", "#EEE8D5", "#073642", "#CB4B16", "#586E75", "#657B83", "#839496", "#6C71C4", "#93A1A1", "#FDF6E3"],
+        palette: [
+            "#002B36", "#DC322F", "#859900", "#B58900", "#268BD2", "#D33682", "#2AA198", "#EEE8D5", "#073642",
+            "#CB4B16", "#586E75", "#657B83", "#839496", "#6C71C4", "#93A1A1", "#FDF6E3",
+        ],
     },
     Scheme {
         name: "Tango Dark",
         foreground: "#D3D7CF",
         background: "#000000",
         cursor: "#FFFFFF",
-        palette: ["#000000", "#CC0000", "#4E9A06", "#C4A000", "#3465A4", "#75507B", "#06989A", "#D3D7CF", "#555753", "#EF2929", "#8AE234", "#FCE94F", "#729FCF", "#AD7FA8", "#34E2E2", "#EEEEEC"],
+        palette: [
+            "#000000", "#CC0000", "#4E9A06", "#C4A000", "#3465A4", "#75507B", "#06989A", "#D3D7CF", "#555753",
+            "#EF2929", "#8AE234", "#FCE94F", "#729FCF", "#AD7FA8", "#34E2E2", "#EEEEEC",
+        ],
     },
     Scheme {
         name: "Tango Light",
         foreground: "#555753",
         background: "#FFFFFF",
         cursor: "#000000",
-        palette: ["#000000", "#CC0000", "#4E9A06", "#C4A000", "#3465A4", "#75507B", "#06989A", "#D3D7CF", "#555753", "#EF2929", "#8AE234", "#FCE94F", "#729FCF", "#AD7FA8", "#34E2E2", "#EEEEEC"],
+        palette: [
+            "#000000", "#CC0000", "#4E9A06", "#C4A000", "#3465A4", "#75507B", "#06989A", "#D3D7CF", "#555753",
+            "#EF2929", "#8AE234", "#FCE94F", "#729FCF", "#AD7FA8", "#34E2E2", "#EEEEEC",
+        ],
     },
     Scheme {
         name: "Dark+",
         foreground: "#cccccc",
         background: "#1e1e1e",
         cursor: "#808080",
-        palette: ["#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5", "#666666", "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#e5e5e5"],
+        palette: [
+            "#000000", "#cd3131", "#0dbc79", "#e5e510", "#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5", "#666666",
+            "#f14c4c", "#23d18b", "#f5f543", "#3b8eea", "#d670d6", "#29b8db", "#e5e5e5",
+        ],
     },
     Scheme {
         name: "VSCode Dark Modern",
         foreground: "#CCCCCC",
         background: "#1F1F1F",
         cursor: "#FFFFFF",
-        palette: ["#000000", "#CD3131", "#0DBC79", "#E5E510", "#2472C8", "#BC3FBC", "#11A8CD", "#E5E5E5", "#666666", "#F14C4C", "#23D18B", "#F5F543", "#3B8EEA", "#D670D6", "#29B8DB", "#E5E5E5"],
+        palette: [
+            "#000000", "#CD3131", "#0DBC79", "#E5E510", "#2472C8", "#BC3FBC", "#11A8CD", "#E5E5E5", "#666666",
+            "#F14C4C", "#23D18B", "#F5F543", "#3B8EEA", "#D670D6", "#29B8DB", "#E5E5E5",
+        ],
     },
     Scheme {
         name: "VSCode Light Modern",
         foreground: "#3B3B3B",
         background: "#FFFFFF",
         cursor: "#000000",
-        palette: ["#000000", "#CD3131", "#00BC00", "#949800", "#0451A5", "#BC05BC", "#0598BC", "#555555", "#666666", "#CD3131", "#14CE14", "#B5BA00", "#0451A5", "#BC05BC", "#0598BC", "#A5A5A5"],
+        palette: [
+            "#000000", "#CD3131", "#00BC00", "#949800", "#0451A5", "#BC05BC", "#0598BC", "#555555", "#666666",
+            "#CD3131", "#14CE14", "#B5BA00", "#0451A5", "#BC05BC", "#0598BC", "#A5A5A5",
+        ],
     },
     Scheme {
         name: "CGA",
         foreground: "#AAAAAA",
         background: "#000000",
         cursor: "#00AA00",
-        palette: ["#000000", "#AA0000", "#00AA00", "#AA5500", "#0000AA", "#AA00AA", "#00AAAA", "#AAAAAA", "#555555", "#FF5555", "#55FF55", "#FFFF55", "#5555FF", "#FF55FF", "#55FFFF", "#FFFFFF"],
+        palette: [
+            "#000000", "#AA0000", "#00AA00", "#AA5500", "#0000AA", "#AA00AA", "#00AAAA", "#AAAAAA", "#555555",
+            "#FF5555", "#55FF55", "#FFFF55", "#5555FF", "#FF55FF", "#55FFFF", "#FFFFFF",
+        ],
     },
     Scheme {
         name: "IBM 5153",
         foreground: "#AAAAAA",
         background: "#000000",
         cursor: "#00AA00",
-        palette: ["#000000", "#AA0000", "#00AA00", "#C47E00", "#0000AA", "#AA00AA", "#00AAAA", "#AAAAAA", "#555555", "#FF5555", "#55FF55", "#FFFF55", "#5555FF", "#FF55FF", "#55FFFF", "#FFFFFF"],
+        palette: [
+            "#000000", "#AA0000", "#00AA00", "#C47E00", "#0000AA", "#AA00AA", "#00AAAA", "#AAAAAA", "#555555",
+            "#FF5555", "#55FF55", "#FFFF55", "#5555FF", "#FF55FF", "#55FFFF", "#FFFFFF",
+        ],
     },
 ];
 
@@ -167,7 +215,10 @@ pub fn osc(scheme: Option<&Scheme>) -> String {
     match scheme {
         Some(s) => {
             let mut out: String = s.palette.iter().enumerate().map(|(i, c)| format!("{ESC}]4;{i};{c}{BEL}")).collect();
-            out.push_str(&format!("{ESC}]10;{}{BEL}{ESC}]11;{}{BEL}{ESC}]12;{}{BEL}", s.foreground, s.background, s.cursor));
+            out.push_str(&format!(
+                "{ESC}]10;{}{BEL}{ESC}]11;{}{BEL}{ESC}]12;{}{BEL}",
+                s.foreground, s.background, s.cursor
+            ));
             out
         }
         None => format!("{ESC}]104{BEL}{ESC}]110{BEL}{ESC}]111{BEL}{ESC}]112{BEL}"),

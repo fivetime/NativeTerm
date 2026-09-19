@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use native_term_app::{t, Core, HostRequest};
-use native_term_platform::Target;
 use native_term_config::persistent::{self, RemoteSession};
+use native_term_platform::Target;
 
 use crate::dialogs::Outcome;
 
@@ -93,7 +93,8 @@ impl ServerSessionsDialog {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let command = persistent::log_tail_command(&name, TAIL);
-            let text = persistent::run_remote_bytes(&ssh, config.as_deref(), &alias, &command).map(|b| persistent::log_text(&b));
+            let text = persistent::run_remote_bytes(&ssh, config.as_deref(), &alias, &command)
+                .map(|b| persistent::log_text(&b));
             *arriving.lock().unwrap_or_else(|e| e.into_inner()) = Some((name, text));
             ctx.request_repaint();
         });
@@ -108,15 +109,19 @@ impl ServerSessionsDialog {
         let ctx = ctx.clone();
         self.note = Some(t!("server-log-copying", name = name.as_str()));
         std::thread::spawn(move || {
-            let copied = persistent::run_remote_bytes(&ssh, config.as_deref(), &alias, &persistent::log_cat_command(&name))
-                .and_then(|bytes| {
-                    let file = folder.join(format!("{name}.log"));
-                    std::fs::create_dir_all(&folder).and_then(|()| std::fs::write(&file, bytes)).map_err(|e| e.to_string())?;
-                    Ok(file)
-                });
+            let copied =
+                persistent::run_remote_bytes(&ssh, config.as_deref(), &alias, &persistent::log_cat_command(&name))
+                    .and_then(|bytes| {
+                        let file = folder.join(format!("{name}.log"));
+                        std::fs::create_dir_all(&folder)
+                            .and_then(|()| std::fs::write(&file, bytes))
+                            .map_err(|e| e.to_string())?;
+                        Ok(file)
+                    });
             let note = match copied {
                 Ok(file) => {
-                    let _ = std::process::Command::new("explorer.exe").arg(format!("/select,{}", file.display())).spawn();
+                    let _ =
+                        std::process::Command::new("explorer.exe").arg(format!("/select,{}", file.display())).spawn();
                     t!("server-log-copied", file = file.display().to_string())
                 }
                 Err(e) => t!("server-log-failed", error = e),
@@ -260,7 +265,8 @@ impl ServerSessionsDialog {
                                         && persistent::session_name(&s.alias, &s.id) == session.name
                                 });
                                 match (tab, session.attached) {
-                                    (Some(tab), _) => ui.colored_label(GREEN, t!("server-sessions-in-tab", label = tab.label.as_str())),
+                                    (Some(tab), _) => ui
+                                        .colored_label(GREEN, t!("server-sessions-in-tab", label = tab.label.as_str())),
                                     (None, true) => ui.label(t!("server-sessions-attached")),
                                     (None, false) => ui.weak(t!("server-sessions-detached")),
                                 };
@@ -275,17 +281,24 @@ impl ServerSessionsDialog {
                                         self.reopen(core, &session.name);
                                     }
                                     if self.confirm_end.as_deref() == Some(session.name.as_str()) {
-                                        let button = egui::Button::new(egui::RichText::new(t!("server-sessions-end-now")).color(RED));
+                                        let button = egui::Button::new(
+                                            egui::RichText::new(t!("server-sessions-end-now")).color(RED),
+                                        );
                                         if ui.add(button.small()).clicked() {
                                             end = Some(session.clone());
                                         }
                                         if ui.small_button(t!("server-sessions-keep")).clicked() {
                                             self.confirm_end = None;
                                         }
-                                    } else if ui.small_button(t!("server-sessions-end")).on_hover_text(t!("server-sessions-end-hint")).clicked() {
+                                    } else if ui
+                                        .small_button(t!("server-sessions-end"))
+                                        .on_hover_text(t!("server-sessions-end-hint"))
+                                        .clicked()
+                                    {
                                         self.confirm_end = Some(session.name.clone());
                                     }
-                                    if logs.contains(&session.name) && ui.small_button(t!("server-log-view")).clicked() {
+                                    if logs.contains(&session.name) && ui.small_button(t!("server-log-view")).clicked()
+                                    {
                                         read = Some(session.name.clone());
                                     }
                                 });
@@ -293,7 +306,9 @@ impl ServerSessionsDialog {
                             }
                             // the logs of ended sessions (this host's)
                             for name in logs {
-                                if sessions.iter().any(|s| &s.name == name) || !persistent::belongs_to(&self.alias, name) {
+                                if sessions.iter().any(|s| &s.name == name)
+                                    || !persistent::belongs_to(&self.alias, name)
+                                {
                                     continue;
                                 }
                                 ui.label(name);
@@ -343,8 +358,11 @@ impl ServerSessionsDialog {
     /// names the server-side session `name` again.
     fn reopen(&mut self, core: &Core, name: &str) {
         let Some(id) = persistent::session_id_for(&self.alias, name, &native_term_config::new_id()) else { return };
-        let request =
-            HostRequest { session: Some(id), on_login: self.on_login.clone(), ..HostRequest::new(&self.alias, &self.label) };
+        let request = HostRequest {
+            session: Some(id),
+            on_login: self.on_login.clone(),
+            ..HostRequest::new(&self.alias, &self.label)
+        };
         core.open(&[request], Target::Recent);
         self.note = Some(t!("server-sessions-opened", name = name));
     }

@@ -210,7 +210,10 @@ impl Registry {
     /// may bring its pane back.
     pub fn closed_with_window(&self, id: &str) -> Result<()> {
         self.with(|c| {
-            c.execute("UPDATE sessions SET closed_at = COALESCE(closed_at, ?2), restorable = 1 WHERE id = ?1", params![id, now()])?;
+            c.execute(
+                "UPDATE sessions SET closed_at = COALESCE(closed_at, ?2), restorable = 1 WHERE id = ?1",
+                params![id, now()],
+            )?;
             Ok(())
         })
     }
@@ -286,7 +289,8 @@ impl Registry {
     /// Most recently opened hosts first.
     pub fn recent(&self, limit: usize) -> Result<Vec<Usage>> {
         self.with(|c| {
-            let mut stmt = c.prepare("SELECT alias, count, last_opened FROM usage ORDER BY last_opened DESC, alias LIMIT ?1")?;
+            let mut stmt =
+                c.prepare("SELECT alias, count, last_opened FROM usage ORDER BY last_opened DESC, alias LIMIT ?1")?;
             let rows = stmt.query_map([limit as i64], |r| {
                 Ok(Usage { alias: r.get(0)?, count: r.get(1)?, last_opened: r.get(2)? })
             })?;

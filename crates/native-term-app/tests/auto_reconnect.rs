@@ -26,7 +26,8 @@ fn core() -> Core {
     let dir = std::env::var("NATIVETERM_TEST_WT_DIR").expect("set NATIVETERM_TEST_WT_DIR to a portable Terminal");
     let install = Install::from_dir(dir.as_ref()).unwrap();
     let shim = target_dir().join("nativeterm-shim.exe");
-    Core::start(WindowsTerminal::new(install, &shim), Some(Registry::in_memory().unwrap())).expect("is a NativeTerm running?")
+    Core::start(WindowsTerminal::new(install, &shim), Some(Registry::in_memory().unwrap()))
+        .expect("is a NativeTerm running?")
 }
 
 struct Shim(Child);

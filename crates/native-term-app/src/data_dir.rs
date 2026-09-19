@@ -197,7 +197,11 @@ mod tests {
     use super::*;
 
     fn inputs(program_dir: &Path) -> Inputs {
-        Inputs { program_dir: program_dir.to_path_buf(), app_data: Some(PathBuf::from(r"C:\AppData")), ..Default::default() }
+        Inputs {
+            program_dir: program_dir.to_path_buf(),
+            app_data: Some(PathBuf::from(r"C:\AppData")),
+            ..Default::default()
+        }
     }
 
     #[test]

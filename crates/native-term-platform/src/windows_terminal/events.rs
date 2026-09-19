@@ -24,8 +24,8 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Accessibility::{
     CUIAutomation8, IUIAutomation, IUIAutomationElement, IUIAutomationEventHandler, IUIAutomationEventHandler_Impl,
     IUIAutomationStructureChangedEventHandler, IUIAutomationStructureChangedEventHandler_Impl, SetWinEventHook,
-    StructureChangeType, UnhookWinEvent, HWINEVENTHOOK, TreeScope_Subtree, UIA_EVENT_ID,
-    UIA_SelectionItem_ElementSelectedEventId,
+    StructureChangeType, TreeScope_Subtree, UIA_SelectionItem_ElementSelectedEventId, UnhookWinEvent, HWINEVENTHOOK,
+    UIA_EVENT_ID,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, GetClassNameW, GetMessageW, GetWindowThreadProcessId, PostThreadMessageW, TranslateMessage,
@@ -359,8 +359,13 @@ impl IUIAutomationStructureChangedEventHandler_Impl for OnStructure_Impl {
             None => (0, String::new()),
         };
         if std::env::var_os("NATIVETERM_EVENT_SENDERS").is_some() {
-            *self.1.senders.lock().unwrap_or_else(|e| e.into_inner()).entry((change.0, kind, class.clone())).or_default() +=
-                1;
+            *self
+                .1
+                .senders
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry((change.0, kind, class.clone()))
+                .or_default() += 1;
         }
         (self.0)(classify_structure_change(kind, &class));
         Ok(())
@@ -426,7 +431,11 @@ fn uia_event_loop(
                 return true;
             }
             unsafe {
-                let _ = automation.RemoveAutomationEventHandler(UIA_SelectionItem_ElementSelectedEventId, &*element, &selected);
+                let _ = automation.RemoveAutomationEventHandler(
+                    UIA_SelectionItem_ElementSelectedEventId,
+                    &*element,
+                    &selected,
+                );
                 let _ = automation.RemoveStructureChangedEventHandler(&*element, &structure);
             }
             false

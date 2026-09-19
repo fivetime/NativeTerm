@@ -123,7 +123,15 @@ mod tests {
 
     #[test]
     fn full_command_line() {
-        let args = arguments("web01", Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe"), 77, &[], false, None, None);
+        let args = arguments(
+            "web01",
+            Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe"),
+            77,
+            &[],
+            false,
+            None,
+            None,
+        );
         assert_eq!(
             strings(&args),
             vec![
@@ -144,7 +152,8 @@ mod tests {
     #[test]
     fn user_keepalive_is_respected() {
         let effective = vec![("serveraliveinterval".to_string(), "60".to_string())];
-        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &effective, false, None, None));
+        let args =
+            strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &effective, false, None, None));
         assert!(!args.iter().any(|a| a.starts_with("ServerAlive")), "{args:?}");
     }
 
@@ -160,7 +169,8 @@ mod tests {
     #[test]
     fn another_folder_is_passed_with_dash_f() {
         let config = Path::new(r"C:\nt-test\ssh\config");
-        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &[], false, Some(config), None));
+        let args =
+            strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &[], false, Some(config), None));
         assert_eq!(args[..2], ["-F", r"C:\nt-test\ssh\config"]);
         assert_eq!(args.last().unwrap(), "web01");
     }
@@ -168,7 +178,15 @@ mod tests {
     /// A persistent session: the command, with a terminal, before `--`.
     #[test]
     fn remote_command_with_a_terminal() {
-        let args = strings(&arguments("web01", Path::new(r"C:\nt\nativeterm-shim.exe"), 1, &[], false, None, Some("sh -c 'x'")));
+        let args = strings(&arguments(
+            "web01",
+            Path::new(r"C:\nt\nativeterm-shim.exe"),
+            1,
+            &[],
+            false,
+            None,
+            Some("sh -c 'x'"),
+        ));
         let at = args.iter().position(|a| a == "RemoteCommand=sh -c 'x'").expect("command");
         assert_eq!(args[at - 2..at], ["RequestTTY=yes", "-o"]);
         assert_eq!(args[at + 1..], ["--", "web01"]);

@@ -195,7 +195,8 @@ mod tests {
         let install = Install::from_dir(tmp.path()).unwrap();
         assert!(!install.has_saved_workspace("NativeTerm", false), "no state file");
         std::fs::create_dir(&install.settings_dir).unwrap();
-        std::fs::write(install.state_json(false), r#"{"persistedWorkspaces": {"nativeterm": {"tabLayout": []}}}"#).unwrap();
+        std::fs::write(install.state_json(false), r#"{"persistedWorkspaces": {"nativeterm": {"tabLayout": []}}}"#)
+            .unwrap();
         assert!(install.has_saved_workspace("NativeTerm", false));
         assert!(!install.has_saved_workspace("other", false));
         assert!(!install.has_saved_workspace("NativeTerm", true), "elevated state is separate");

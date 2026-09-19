@@ -231,7 +231,12 @@ impl WindowsTerminal {
 
     /// Wait until every label in `expected` is claimed; returns the last
     /// snapshot and the labels still missing.
-    pub fn wait_for(&self, labels: &HashSet<String>, expected: &[String], timeout: Duration) -> (Snapshot, Vec<String>) {
+    pub fn wait_for(
+        &self,
+        labels: &HashSet<String>,
+        expected: &[String],
+        timeout: Duration,
+    ) -> (Snapshot, Vec<String>) {
         let started = Instant::now();
         loop {
             let snapshot = self.snapshot(labels);

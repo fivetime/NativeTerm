@@ -224,7 +224,12 @@ mod tests {
 
     #[test]
     fn attributes_round_trip() {
-        let a = Attrs { size: Some(5_000_000_000), uid_gid: Some((0, 10)), permissions: Some(0o100644), atime_mtime: Some((1, 2)) };
+        let a = Attrs {
+            size: Some(5_000_000_000),
+            uid_gid: Some((0, 10)),
+            permissions: Some(0o100644),
+            atime_mtime: Some((1, 2)),
+        };
         let body = Body::default().attrs(&a).string("名字".as_bytes());
         let mut f = Fields::new(&body.0);
         assert_eq!(f.attrs().unwrap(), a);

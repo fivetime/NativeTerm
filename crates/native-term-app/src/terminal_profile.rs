@@ -124,12 +124,9 @@ impl ProfileSetup {
             }
             _ => {
                 ui.colored_label(red, t!("profile-banner-missing"));
-                let path = self.root.as_ref().map(|r| profile::fragment_path(r).display().to_string()).unwrap_or_default();
-                if ui
-                    .button(t!("profile-install"))
-                    .on_hover_text(t!("profile-install-hint", path = path))
-                    .clicked()
-                {
+                let path =
+                    self.root.as_ref().map(|r| profile::fragment_path(r).display().to_string()).unwrap_or_default();
+                if ui.button(t!("profile-install")).on_hover_text(t!("profile-install-hint", path = path)).clicked() {
                     if let Err(e) = self.install_fragment() {
                         notices.push(t!("profile-install-failed", error = e));
                     }
@@ -139,11 +136,18 @@ impl ProfileSetup {
     }
 
     pub fn settings_ui(&mut self, ui: &mut egui::Ui, notices: &mut Vec<String>) {
-        ui.label(t!("settings-terminal", dir = self.install.dir.display().to_string(), kind = kind_name(&self.install.kind)));
+        ui.label(t!(
+            "settings-terminal",
+            dir = self.install.dir.display().to_string(),
+            kind = kind_name(&self.install.kind)
+        ));
         ui.label(t!("settings-profile", status = self.describe()));
         ui.horizontal(|ui| {
             let installed = matches!(self.status, Status::Installed | Status::Outdated { .. } | Status::Disabled);
-            if ui.add_enabled(!matches!(self.status, Status::Installed), egui::Button::new(t!("profile-install-update"))).clicked() {
+            if ui
+                .add_enabled(!matches!(self.status, Status::Installed), egui::Button::new(t!("profile-install-update")))
+                .clicked()
+            {
                 if let Err(e) = self.install_fragment() {
                     notices.push(t!("profile-install-failed", error = e));
                 }
@@ -162,7 +166,9 @@ impl ProfileSetup {
             let response = ui.checkbox(&mut hide, t!("settings-hide-terminal-ssh"));
             if response.on_hover_text(t!("settings-hide-terminal-ssh-hint")).changed() {
                 match self.set_ssh_hidden(hide) {
-                    Ok(Some(backup)) => notices.push(t!("settings-terminal-changed", backup = backup.display().to_string())),
+                    Ok(Some(backup)) => {
+                        notices.push(t!("settings-terminal-changed", backup = backup.display().to_string()))
+                    }
                     Ok(None) => {}
                     Err(e) => notices.push(t!("settings-terminal-change-failed", error = e)),
                 }
