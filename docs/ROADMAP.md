@@ -444,8 +444,9 @@
 - [x] Persistent tmux sessions look plain: status bar off for
       NativeTerm's sessions (the card says "kept on the server"), 50,000
       lines of history
-- [ ] Persistent sessions (rest): the list per folder; tmux mouse mode
-      (wheel scrolls the history) as an option, if wanted
+- [ ] Persistent sessions (rest): the list per folder. (tmux's mouse
+      mode stays off: Windows Terminal's own selecting, copying and
+      right-click paste come first; decided 2026-09-19.)
 - [x] Optional saved passwords (Windows Credential Manager + per-process
       `SSH_ASKPASS=force`, shim as helper): answers only the session's own
       password prompt and handles every other prompt in the console, one

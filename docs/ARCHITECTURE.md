@@ -2296,7 +2296,8 @@ What persistence enables beyond reconnecting:
   tmux's mouse mode would let the wheel scroll the history (tried: it
   does), but it takes the mouse from Windows Terminal (right click opens
   tmux's menu instead of pasting, dragging selects in tmux; Shift gives
-  it back), so it is left to the user. Live: a new session had one
+  it back), so it stays off: Windows Terminal's own selecting, copying
+  and right-click paste come first (the user's decision). Live: a new session had one
   window, history 50,000, the log pipe on and no status bar; after a
   disconnect and reconnect the tab showed the same shell and its output,
   still without the bar.
