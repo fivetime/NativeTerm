@@ -103,8 +103,101 @@ fn free_name(dir: &Path, name: &str) -> PathBuf {
     (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).expect("a free name")
 }
 
-/// Receive what the server's `sz` sends into `dir`.
-pub fn receive<W: Write>(mut wire: Wire<W>, dir: &Path, watch: &mut dyn Watch, cancel: &AtomicBool) -> Outcome {
+/// CRC-16/XMODEM, as ZMODEM's hex headers carry it.
+fn crc16(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0;
+    for &b in data {
+        crc ^= u16::from(b) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
+        }
+    }
+    crc
+}
+
+/// The receiver's ZRINIT (a hex header) with ESCCTL added: the sender then
+/// escapes every control character. Telnet without its binary mode changes
+/// CR, NUL and 0xFF (NVT rules, not always undone: busybox's telnetd keeps
+/// the NUL of a CR NUL split between two reads), which breaks lrzsz's raw
+/// data; zmodem2 has no way to ask for ESCCTL, so its header is rewritten
+/// on the way out. Anything else is left as it is.
+pub fn with_escctl(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    const START: &[u8] = b"**\x18B01";
+    let Some(at) = bytes.windows(START.len()).position(|w| w == START) else { return bytes.into() };
+    let hex = at + START.len();
+    let Some(fields) = bytes.get(hex..hex + 12) else { return bytes.into() };
+    let value = |s: &[u8]| std::str::from_utf8(s).ok().and_then(|s| u8::from_str_radix(s, 16).ok());
+    let parsed: Option<Vec<u8>> = (0..4).map(|i| value(&fields[i * 2..i * 2 + 2])).collect();
+    let Some(mut data) = parsed else { return bytes.into() };
+    data[3] |= 0x40;
+    let mut crc_input = vec![0x01];
+    crc_input.extend_from_slice(&data);
+    let crc = crc16(&crc_input);
+    let mut out = bytes.to_vec();
+    let text = format!("{:02x}{:02x}{:02x}{:02x}{crc:04x}", data[0], data[1], data[2], data[3]);
+    out[hex..hex + 12].copy_from_slice(text.as_bytes());
+    out.into()
+}
+
+/// The sender's side of ESCCTL (see `with_escctl`), which zmodem2 can't do:
+/// its output with every control character (C0 and C1), DEL and 0xFF sent
+/// as ZDLE plus a printable byte, as receivers decode any escaped byte.
+/// Hex headers stay as they are (receivers read them raw). The state spans
+/// writes.
+#[derive(Default)]
+pub struct EscapeAll {
+    /// the byte after a ZDLE: its escaped form or a frame end, as it is
+    after_zdle: bool,
+    /// a hex header's bytes still to come after its ZDLE 'B' (14 hex
+    /// digits, then CR, LF and XON)
+    hex_left: u8,
+}
+
+impl EscapeAll {
+    pub fn apply(&mut self, bytes: &[u8]) -> Vec<u8> {
+        const ZDLE: u8 = 0x18;
+        let mut out = Vec::with_capacity(bytes.len() + bytes.len() / 4);
+        for &b in bytes {
+            if self.after_zdle {
+                self.after_zdle = false;
+                if b == b'B' {
+                    self.hex_left = 17;
+                }
+                out.push(b);
+                continue;
+            }
+            if self.hex_left > 0 {
+                self.hex_left -= 1;
+                if b.is_ascii_hexdigit() || matches!(b, 0x0d | 0x0a | 0x8a | 0x8d | 0x11) {
+                    out.push(b);
+                    continue;
+                }
+                self.hex_left = 0;
+            }
+            match b {
+                ZDLE => {
+                    self.after_zdle = true;
+                    out.push(b);
+                }
+                0x7f => out.extend_from_slice(&[ZDLE, b'l']),
+                0xff => out.extend_from_slice(&[ZDLE, b'm']),
+                _ if b & 0x60 == 0 => out.extend_from_slice(&[ZDLE, b ^ 0x40]),
+                _ => out.push(b),
+            }
+        }
+        out
+    }
+}
+
+/// Receive what the server's `sz` sends into `dir`; `escape`: ask it to
+/// escape control characters (see `with_escctl`).
+pub fn receive<W: Write>(
+    mut wire: Wire<W>,
+    dir: &Path,
+    watch: &mut dyn Watch,
+    cancel: &AtomicBool,
+    escape: bool,
+) -> Outcome {
     let Ok(mut receiver) = zmodem2::Receiver::new() else { return Outcome::Failed("zmodem".into()) };
     // where each file starts is ours to say: after its partial file
     receiver.set_manual_file_accept(true);
@@ -121,7 +214,8 @@ pub fn receive<W: Write>(mut wire: Wire<W>, dir: &Path, watch: &mut dyn Watch, c
         match receiver.poll() {
             Action::WriteWire(data) => {
                 let n = data.len();
-                if wire.output.write_all(data).and_then(|()| wire.output.flush()).is_err() {
+                let data = if escape { with_escctl(data) } else { data.into() };
+                if wire.output.write_all(&data).and_then(|()| wire.output.flush()).is_err() {
                     return Outcome::Failed(t!("zmodem-gone"));
                 }
                 receiver.wire_written(n);
@@ -260,7 +354,16 @@ fn cancel_other_side<W: Write>(wire: &mut Wire<W>) {
 
 /// Send `files` to the server's `rz`. Files over 4 GB (ZMODEM's limit) are
 /// left out with a note.
-pub fn send<W: Write>(mut wire: Wire<W>, files: &[PathBuf], watch: &mut dyn Watch, cancel: &AtomicBool) -> Outcome {
+/// Send `files` to the server's `rz`; `escape`: escape every control
+/// character (see `EscapeAll`).
+pub fn send<W: Write>(
+    mut wire: Wire<W>,
+    files: &[PathBuf],
+    watch: &mut dyn Watch,
+    cancel: &AtomicBool,
+    escape: bool,
+) -> Outcome {
+    let mut escaper = escape.then(EscapeAll::default);
     let Ok(mut sender) = zmodem2::Sender::new() else { return Outcome::Failed("zmodem".into()) };
     // a reliable transport: no pause for acknowledgements
     sender.set_streaming_window(usize::MAX);
@@ -290,10 +393,28 @@ pub fn send<W: Write>(mut wire: Wire<W>, files: &[PathBuf], watch: &mut dyn Watc
         match sender.poll() {
             Action::WriteWire(data) => {
                 let n = data.len();
-                if wire.output.write_all(data).is_err() {
+                let data = match escaper.as_mut() {
+                    Some(e) => e.apply(data).into(),
+                    None => std::borrow::Cow::Borrowed(data),
+                };
+                if wire.output.write_all(&data).is_err() {
                     return Outcome::Failed(t!("zmodem-gone"));
                 }
                 sender.wire_written(n);
+                // with no window the sender only idles at the end: what the
+                // receiver says meanwhile (ZRPOS after an error, a cancel)
+                // is taken as it comes
+                while let Ok(more) = wire.input.try_recv() {
+                    input.extend_from_slice(&more);
+                }
+                if !input.is_empty() {
+                    match sender.submit_wire(&input) {
+                        Ok(used) => {
+                            input.drain(..used);
+                        }
+                        Err(e) => return Outcome::Failed(format!("{e:?}")),
+                    }
+                }
             }
             Action::ReadFile { offset, max_len } => {
                 let Some((file, _)) = current.as_mut() else { return Outcome::Failed("no file".into()) };
@@ -331,7 +452,11 @@ pub fn send<W: Write>(mut wire: Wire<W>, files: &[PathBuf], watch: &mut dyn Watc
                 // the closing "OO" may still be queued
                 while let Action::WriteWire(data) = sender.poll() {
                     let n = data.len();
-                    if wire.output.write_all(data).is_err() {
+                    let data = match escaper.as_mut() {
+                        Some(e) => e.apply(data).into(),
+                        None => std::borrow::Cow::Borrowed(data),
+                    };
+                    if wire.output.write_all(&data).is_err() {
                         break;
                     }
                     sender.wire_written(n);
@@ -474,9 +599,74 @@ impl Watch for Console {
     }
 }
 
+/// `NATIVETERM_ZMODEM_DEBUG=<file>`: the first 64 KB each way of the wire,
+/// in hex, to `<file>.wire` (for diagnosing a transport that changes data).
+#[derive(Clone)]
+struct Tap(Option<Arc<std::sync::Mutex<(File, usize)>>>);
+
+impl Tap {
+    fn open() -> Tap {
+        let file = std::env::var_os("NATIVETERM_ZMODEM_DEBUG").and_then(|p| {
+            let mut p = std::path::PathBuf::from(p).into_os_string();
+            p.push(".wire");
+            OpenOptions::new().create(true).append(true).open(p).ok()
+        });
+        Tap(file.map(|f| Arc::new(std::sync::Mutex::new((f, 0)))))
+    }
+
+    fn log(&self, way: &str, bytes: &[u8]) {
+        let Some(tap) = &self.0 else { return };
+        let mut tap = tap.lock().unwrap_or_else(|e| e.into_inner());
+        if tap.1 > 128 * 1024 {
+            return;
+        }
+        tap.1 += bytes.len();
+        let hex: String = bytes.iter().take(4096).map(|b| format!("{b:02x}")).collect();
+        let _ = writeln!(tap.0, "{way} {}: {hex}", bytes.len());
+    }
+}
+
+/// A writer that logs what it writes (see `Tap`).
+struct Tapped<W: Write> {
+    inner: W,
+    tap: Tap,
+}
+
+impl<W: Write> Write for Tapped<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.tap.log("out", &buf[..n]);
+        Ok(n)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// ntplink reads the keyboard itself (PuTTY's reader thread takes every
+/// key): on Esc or Ctrl+C it sets this event, named after our pid.
+fn watch_cancel_event(cancel: Arc<AtomicBool>) {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
+    let name = HSTRING::from(format!("Local\\NativeTermZmodemCancel-{}", std::process::id()));
+    // SAFETY: the name is an HSTRING alive through the call; the event is
+    // ours, waited on by the thread it is moved to, and never closed (the
+    // process ends with the transfer).
+    let Ok(event) = (unsafe { CreateEventW(None, true, false, &name) }) else { return };
+    let event = event.0 as isize;
+    std::thread::spawn(move || {
+        // SAFETY: a valid event handle of this process (see above).
+        unsafe {
+            WaitForSingleObject(windows::Win32::Foundation::HANDLE(event as *mut _), INFINITE);
+        }
+        cancel.store(true, Ordering::Relaxed);
+    });
+}
+
 /// Esc or Ctrl+C in the tab cancels (ssh doesn't read the keyboard while
 /// the transfer has the session).
 fn watch_keys(cancel: Arc<AtomicBool>) {
+    watch_cancel_event(Arc::clone(&cancel));
     use windows::core::w;
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -564,8 +754,10 @@ fn ask_for_files() -> bool {
 /// ran `rz`), or `tmux` (one of them in tmux, which changes the data both
 /// ways: it is stopped, and the files window offered instead). Exit code 0
 /// when done, 1 when cancelled or failed.
-pub fn run(mode: &str) -> i32 {
+pub fn run(mode: &str, escape: bool) -> i32 {
     let (tx, input) = mpsc::channel();
+    let tap = Tap::open();
+    let tap_in = tap.clone();
     std::thread::spawn(move || {
         let mut stdin = io::stdin().lock();
         let mut buf = vec![0u8; 64 * 1024];
@@ -573,6 +765,7 @@ pub fn run(mode: &str) -> i32 {
             match stdin.read(&mut buf) {
                 Ok(0) | Err(_) => return,
                 Ok(n) => {
+                    tap_in.log("in", &buf[..n]);
                     if tx.send(buf[..n].to_vec()).is_err() {
                         return;
                     }
@@ -580,7 +773,8 @@ pub fn run(mode: &str) -> i32 {
             }
         }
     });
-    let wire = Wire { input, output: io::BufWriter::with_capacity(64 * 1024, io::stdout().lock()) };
+    let output = Tapped { inner: io::BufWriter::with_capacity(64 * 1024, io::stdout().lock()), tap };
+    let wire = Wire { input, output };
     let cancel = Arc::new(AtomicBool::new(false));
     let mut console = Console::new();
     if mode == "tmux" {
@@ -607,7 +801,7 @@ pub fn run(mode: &str) -> i32 {
                 Some(dir) => {
                     eprint!("\r\n[NativeTerm] {}", t!("zmodem-receiving", folder = dir.display().to_string()));
                     watch_keys(Arc::clone(&cancel));
-                    receive(wire, &dir, &mut console, &cancel)
+                    receive(wire, &dir, &mut console, &cancel, escape)
                 }
                 None => {
                     let mut wire = wire;
@@ -633,7 +827,7 @@ pub fn run(mode: &str) -> i32 {
                 Some(files) => {
                     eprint!("\r\n[NativeTerm] {}", t!("zmodem-sending", count = files.len()));
                     watch_keys(Arc::clone(&cancel));
-                    send(wire, &files, &mut console, &cancel)
+                    send(wire, &files, &mut console, &cancel, escape)
                 }
                 None => {
                     let mut wire = wire;
@@ -695,6 +889,52 @@ mod tests {
     }
 
     #[test]
+    fn escctl_in_the_receivers_zrinit() {
+        // lrzsz's own hex header with ESCCTL: CRC 0c47 over 02 00 00 00 40
+        assert_eq!(crc16(&[0x02, 0, 0, 0, 0x40]), 0x0c47);
+        let zrinit = b"**\x18B0100000023be50\r\x8a\x11";
+        let patched = with_escctl(zrinit);
+        let mut expected = b"**\x18B0100000063".to_vec();
+        expected.extend(format!("{:04x}", crc16(&[1, 0, 0, 0, 0x63])).as_bytes());
+        expected.extend(b"\r\x8a\x11");
+        assert_eq!(&*patched, &expected[..]);
+        // anything else untouched
+        assert_eq!(&*with_escctl(b"**\x18B0400000000"), b"**\x18B0400000000");
+    }
+
+    #[test]
+    fn escape_all_leaves_no_control_characters() {
+        let mut e = EscapeAll::default();
+        // a hex header stays as it is; ZDLE pairs stay; the rest is escaped
+        let hex = b"**\x18B0100000023be50\r\x8a\x11";
+        assert_eq!(e.apply(hex), hex.to_vec());
+        let data = [b'a', 0x0d, 0x00, 0xff, 0x7f, 0x8d, 0x18, b'X', 0x18, b'h', 0x20, 0xc0];
+        let want =
+            [b'a', 0x18, 0x4d, 0x18, 0x40, 0x18, b'm', 0x18, b'l', 0x18, 0xcd, 0x18, b'X', 0x18, b'h', 0x20, 0xc0];
+        assert_eq!(e.apply(&data), want.to_vec());
+        // a ZDLE at the end of one write, its byte in the next
+        assert_eq!(e.apply(&[0x18]), vec![0x18]);
+        assert_eq!(e.apply(&[0x4d, 0x0d]), vec![0x4d, 0x18, 0x4d]);
+    }
+
+    #[test]
+    fn upload_escaped_for_telnet() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let file = src.path().join("all.bin");
+        // every byte value, often
+        let content: Vec<u8> = (0..200_000u32).map(|i| (i.wrapping_mul(7919) % 256) as u8).collect();
+        std::fs::write(&file, &content).unwrap();
+        let (ours, theirs) = pair();
+        let files = vec![file];
+        let sender = std::thread::spawn(move || send(theirs, &files, &mut Quiet, &AtomicBool::new(false), true));
+        let got = receive(ours, dst.path(), &mut Quiet, &AtomicBool::new(false), false);
+        assert!(matches!(sender.join().unwrap(), Outcome::Done { files: 1, .. }));
+        assert_eq!(got, Outcome::Done { files: 1, bytes: 200_000 });
+        assert_eq!(std::fs::read(dst.path().join("all.bin")).unwrap(), content);
+    }
+
+    #[test]
     fn zfile_fields_for_lrzsz() {
         let t = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         assert_eq!(zfile_name("a.bin", 42, Some(t)), b"a.bin\x0042 14524770400 100644");
@@ -729,8 +969,8 @@ mod tests {
         let (ours, theirs) = pair();
         let files = vec![big.clone(), cn.clone(), empty.clone()];
         let never = AtomicBool::new(false);
-        let sender = std::thread::spawn(move || send(theirs, &files, &mut Quiet, &AtomicBool::new(false)));
-        let got = receive(ours, dst.path(), &mut Quiet, &never);
+        let sender = std::thread::spawn(move || send(theirs, &files, &mut Quiet, &AtomicBool::new(false), false));
+        let got = receive(ours, dst.path(), &mut Quiet, &never, false);
         let sent = sender.join().unwrap();
         assert_eq!(got, Outcome::Done { files: 3, bytes: 300_000 - 120_000 + 12 });
         assert!(matches!(sent, Outcome::Done { files: 3, .. }), "{sent:?}");
@@ -763,8 +1003,8 @@ mod tests {
             fn note(&mut self, _: &str) {}
         }
         let files = vec![big];
-        let sender = std::thread::spawn(move || send(theirs, &files, &mut CancelSoon(stop), &cancel));
-        let got = receive(ours, dst.path(), &mut Quiet, &AtomicBool::new(false));
+        let sender = std::thread::spawn(move || send(theirs, &files, &mut CancelSoon(stop), &cancel, true));
+        let got = receive(ours, dst.path(), &mut Quiet, &AtomicBool::new(false), true);
         assert_eq!(sender.join().unwrap(), Outcome::Cancelled);
         assert!(!matches!(got, Outcome::Done { .. }), "{got:?}");
         // the partial file stays for a later resume

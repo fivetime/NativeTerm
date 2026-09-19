@@ -42,9 +42,11 @@ pub enum Mode {
         port: String,
     },
     /// A ZMODEM transfer on stdin / stdout: the server ran `sz`
-    /// (`download`) or `rz` (`upload`).
+    /// (`download`) or `rz` (`upload`); `escape`: ask the sender to escape
+    /// every control character (`--escape-control`, for Telnet).
     Zmodem {
         mode: String,
+        escape: bool,
     },
 }
 
@@ -84,7 +86,8 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
             "--zmodem" => {
                 let mode = args.next().filter(|m| matches!(m.as_str(), "download" | "upload" | "tmux"));
                 let mode = mode.ok_or("--zmodem needs download, upload or tmux")?;
-                return Ok(Mode::Zmodem { mode });
+                let escape = args.next().is_some_and(|a| a == "--escape-control");
+                return Ok(Mode::Zmodem { mode, escape });
             }
             "--proxy" => {
                 let rest: Vec<String> = args.collect();
@@ -119,7 +122,9 @@ mod tests {
 
     #[test]
     fn zmodem_helper() {
-        assert_eq!(p(&["--zmodem", "upload"]).unwrap(), Mode::Zmodem { mode: "upload".into() });
+        assert_eq!(p(&["--zmodem", "upload"]).unwrap(), Mode::Zmodem { mode: "upload".into(), escape: false });
+        let escaped = p(&["--zmodem", "download", "--escape-control"]).unwrap();
+        assert_eq!(escaped, Mode::Zmodem { mode: "download".into(), escape: true });
         assert!(p(&["--zmodem", "sideways"]).is_err());
         assert!(p(&["--zmodem"]).is_err());
     }

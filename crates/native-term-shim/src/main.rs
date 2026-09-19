@@ -84,7 +84,7 @@ fn main() {
         // nothing else may be printed or waited for
         Mode::Proxy { url, host, port } => std::process::exit(proxy::run(&url, &host, &port)),
         // rz / sz: stdin and stdout are the session's data
-        Mode::Zmodem { mode } => std::process::exit(zmodem::run(&mode)),
+        Mode::Zmodem { mode, escape } => std::process::exit(zmodem::run(&mode, escape)),
         Mode::CreateKey { path } => {
             let code = keys::create(&path);
             wait_for_any_key();

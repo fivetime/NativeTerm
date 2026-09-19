@@ -182,9 +182,44 @@ says so in the tab. Verified live: `sz small.bin` and `rz` in a tmux tab
 both stopped on the server (no rz / sz left running) and opened the files
 window at `/srv/zt` with the file listed.
 
+**ntplink (Telnet, serial, raw)**: the same handover in PuTTY's frontend
+(`patches/ntplink.c` in the PuTTY fork; the shim sets `NATIVETERM_ZMODEM`
+for it). The device's output is watched for the hex header; from there the
+helper (`--zmodem download|upload --escape-control`) runs with pipes, the
+device's output goes to it and its output to the device until its end
+marker; the `rz` line and the closing `OO` are hidden the same way. Things
+that differ from ssh:
+
+- Flow control both ways: the backend is unthrottled when the helper's
+  pipe drains (PuTTY's Telnet stops reading past 4 KB of backlog, which
+  first stalled the transfer at ~5 KB), and the helper's output is read
+  only while the connection keeps up.
+- Telnet without binary mode changes CR, NUL and 0xFF, and busybox's
+  telnetd leaves a NUL in when a CR NUL is split between two reads (rz
+  reported "Bad CRC" at ~350 KB). So every control character is escaped:
+  on download the receiver's ZRINIT gets ESCCTL (the header rewritten, CRC
+  recomputed); on upload zmodem2 can't escape everything, so its output
+  gets C0 / C1, DEL and 0xFF as ZDLE plus a printable byte (hex headers
+  left alone).
+- The sender takes the receiver's input while streaming (it only idled at
+  the end before), so a ZRPOS after an error or a cancel is acted on at
+  once; for ssh too.
+- ntplink reads the keyboard itself (PuTTY's reader thread): during a
+  transfer keys aren't sent; Esc (alone) or Ctrl+C sets the helper's named
+  event `Local\NativeTermZmodemCancel-<pid>`.
+- The console is now read with VT input: before, arrows, Home, F-keys sent
+  nothing, and through ConPTY Esc was lost too (so vim, shell history and
+  device CLIs over Telnet / serial missed them). A console without VT
+  input falls back to the old mode.
+
+Verified live (busybox telnetd, lrzsz): `sz` 3 MB and 30 MB with the
+server's SHA-256 (~1.1 MB/s); `rz` 20 MB (SHA-256, mode 644, no retries in
+`rz -vv`); Esc during `sz` (30 MB) and during `rz` (150 MB): both stopped
+on the server, `rz` removed its partial file; Up recalled the shell's last
+command. `rz` 150 MB over ssh again after the sender change: SHA-256 equal.
+
 Not yet: shipping the fork's ssh with NativeTerm (packaging), macOS / Linux
-builds, ntplink (serial / Telnet) handing over to the same helper, and the
-zmodem2 fixes upstream.
+builds, and the zmodem2 fixes upstream.
 
 ## Build (Windows)
 

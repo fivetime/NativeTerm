@@ -241,8 +241,13 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
     // its own process group: Ctrl+C never ends plink (see `Watch`)
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x200;
-    let mut child = match Command::new(client.path()).args(&arguments).creation_flags(CREATE_NEW_PROCESS_GROUP).spawn()
-    {
+    let mut command = Command::new(client.path());
+    command.args(&arguments).creation_flags(CREATE_NEW_PROCESS_GROUP);
+    // ntplink hands rz / sz to the shim (`--zmodem`); plink ignores it
+    if let Ok(shim) = std::env::current_exe() {
+        command.env("NATIVETERM_ZMODEM", shim);
+    }
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
             let path = client.path().display().to_string();

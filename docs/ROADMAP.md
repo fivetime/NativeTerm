@@ -552,10 +552,14 @@
       `zmodem2`): pickers, progress, Esc cancels, `.ntpart` resume.
       Verified live against lrzsz installed on the spot (see
       `docs/RZSZ.md`)
+- [x] rz / sz in ntplink sessions (Telnet, serial, raw): the same helper,
+      with flow control both ways and every control character escaped
+      (Telnet changes CR / NUL / 0xFF); Esc / Ctrl+C cancel through a
+      named event. ntplink also reads the keyboard with VT input now
+      (arrows, Esc and F-keys were lost before)
 - [ ] rz / sz (rest): ship the fork's ssh with NativeTerm (packaging),
-      ntplink sessions through the same helper, macOS / Linux builds,
-      zmodem2 fixes upstream (abort sends nothing; ZFILE without time /
-      mode)
+      macOS / Linux builds, zmodem2 fixes upstream (abort sends nothing;
+      ZFILE without time / mode; no ESCCTL for sending)
 - [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions
 - [ ] Optional `plink -ssh` for GBK SSH hosts (host/port/user/key from
       `ssh -G`, `.ppk` key, Pageant)
