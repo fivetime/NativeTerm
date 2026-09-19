@@ -418,7 +418,10 @@
       one command file from the user); preview on a real button bar file
 - [x] Editable keyboard shortcuts; defaults avoid keys missing on laptop /
       Mac keyboards
-- [ ] Throttle snapshots, previews, and sync on battery power
+- [x] Nothing to throttle on battery: idle CPU is 0 ms (window open or
+      minimized); previews are snapshots taken on events (tab switched
+      away, switcher opened), never on a timer; a future timer-driven
+      feature is off by default and pauses on battery / minimized
 - [x] Active-session tracking (last Terminal window in front + its
       selected tab; used by the floating button)
 - [x] Send commands to one or several logged-in sessions (shim injection,
@@ -458,7 +461,9 @@
       too) with live titles, grouped by window, search, Enter / click
       switches (Ctrl+T)
 - [ ] Tab switcher (rest): last-seen text (UIA `TextPattern`) or image
-      snapshots; tmux text preview for persistent sessions
+      snapshots, taken when a tab is switched away from or the switcher
+      opens (no live thumbnails, no timer); tmux text preview for
+      persistent sessions
 - [ ] Tiled thumbnail switcher on Ctrl+Tab (off by default): the existing
       low-level keyboard hook swallows Ctrl+Tab while a Terminal window
       with NativeTerm tabs is in front, a non-activating grid follows

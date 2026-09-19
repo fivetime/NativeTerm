@@ -3069,14 +3069,17 @@ NativeTerm ever does.
   state) and, optionally, a preview:
   - a **last-seen text preview** with its capture time: the terminal
     control implements UIA `TextPattern`, so the visible text of the
-    selected tab can be read periodically while it is selected — cheaper
-    than an image and searchable; or
+    selected tab can be read once when it is switched away from (and when
+    the switcher opens) — cheaper than an image and searchable; or
   - a **last-seen snapshot** image (`PrintWindow` with
     `PW_RENDERFULLCONTENT` while that tab is selected; kept in memory only,
     a few hundred KB each); or
   - for persistent sessions, **current screen text** via
     `tmux capture-pane`.
   No live image thumbnails: Windows Terminal only renders the selected tab.
+  Nor are they needed: previews are snapshots, taken only on events (a
+  tab switched away from, the switcher opening), never on a timer — so
+  there is nothing to throttle on battery (decided 2026-09-19).
 - A search box filters by title; clicking an entry selects that tab via
   UIA and brings its window to the front.
 - Opened from the sidebar, the FAB, or the optional shortcut.
@@ -3352,8 +3355,12 @@ on a laptop:
 - **Shim**: a small native Rust binary with no runtime: ≈ 1 MB private
   memory, 6.6 MB working set per tab (release, waiting at its prompt), on
   top of `ssh.exe` and the console host.
-- Battery-sensitive features (snapshots, previews, periodic sync) are
-  throttled or paused on battery power.
+- Nothing runs on a timer while idle: measured 0 ms CPU over 60 s with
+  the window open and 60 s minimized (debug build, no sessions). Features
+  that could (previews, sync) work from events instead: snapshots are
+  taken when a tab is switched away from or the switcher opens, and sync
+  runs when asked. A future feature that needs a timer is off by default
+  and pauses on battery power and while minimized.
 
 ## Sidebar auto-hide / pin (QQ-style drawer)
 
