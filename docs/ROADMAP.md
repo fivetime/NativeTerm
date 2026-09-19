@@ -427,8 +427,9 @@
 - [x] Send line at the bottom of the sidebar (active session or all
       logged-in ones, confirmation for several, history) and per-folder
       "No group send"
-- [ ] Send commands (rest): `tmux send-keys` fallback for persistent
-      sessions
+- [x] Send commands to persistent sessions that aren't logged in (tab
+      disconnected or closed) through `tmux send-keys` over their own ssh
+      connection (key/agent login), results as they arrive, audit log
 - [x] Persistent sessions via tmux or screen (`NativeTermPersistent`, per
       host or folder default, `off` per host): attach-or-create via
       `-o RemoteCommand` (hosts with their own `RemoteCommand` are

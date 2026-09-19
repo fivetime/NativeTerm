@@ -2726,6 +2726,29 @@ In order of preference:
      asks first), "Send Command…" in the tab menu, and a line on the
      floating button for the active session.
 2. **`tmux send-keys`** for persistent sessions (see above).
+
+   Implemented (`native_term_app::tmux_send`, the send dialog): a session
+   of a host kept in tmux (`NativeTermPersistent tmux` / `tmux-log`)
+   that isn't logged in (disconnected, reconnecting, ended, restored and
+   not yet connected, or its tab closed) can be ticked, marked "through
+   tmux on the server"; the card's "Send…" and "Send to several…" are on
+   for such sessions too. Logged-in sessions still get the text in their
+   tab; the others each get one `ssh <alias> <command>` on a thread
+   (BatchMode: key or agent login; `RequestTTY=no`,
+   `ClearAllForwardings`, `PermitLocalCommand=no`, `RemoteCommand=none`,
+   no console window). The command checks the session exists (`tmux
+   has-session -t =<name>`, else a marker and exit 3), then one tmux
+   invocation types every line literally (`send-keys -t =<name>: -l --
+   '<line>'`, POSIX single quotes, so key names, `$`, quotes and
+   backticks stay text) with `Enter` where asked. Results come back as
+   they arrive: sent, "its tmux session isn't on the server", or ssh's
+   last message; sends through tmux are in the audit log as
+   `<label> (tmux)`. Tests: the command for several lines (quotes, a
+   leading `-`, an empty line), and the quoting through Git's `sh`. Live:
+   with the tab disconnected (then after a restart, the session "ended"),
+   `echo "it's 经 tmux: $((6*7))" > /tmp/nt-proof` reached the tmux pane
+   as typed and the file held `it's 经 tmux: 42`; with the tmux session
+   killed on the server, the dialog said it isn't there.
 3. **Fallback: focus + synthetic keystrokes.** Select the tab via UIA,
    `SetForegroundWindow`, then `SendInput`. Single target only.
 

@@ -147,6 +147,8 @@ pub struct App {
     open_files: Option<String>,
     /// Hosts of folders marked "No group send", per tree generation.
     no_group_cache: std::cell::RefCell<(u64, std::collections::HashSet<String>)>,
+    /// Hosts kept in tmux on the server, per tree generation.
+    tmux_cache: std::cell::RefCell<(u64, std::collections::HashSet<String>)>,
     dialog: Option<Dialog>,
     profile: ProfileSetup,
     show_settings: bool,
@@ -256,6 +258,7 @@ impl App {
             recent_cache: std::cell::RefCell::new((None, Vec::new())),
             open_files: std::env::var("NATIVETERM_OPEN_FILES").ok().filter(|a| !a.is_empty()),
             no_group_cache: std::cell::RefCell::new((u64::MAX, std::collections::HashSet::new())),
+            tmux_cache: std::cell::RefCell::new((u64::MAX, std::collections::HashSet::new())),
             dialog: None,
             profile,
             show_settings: false,
@@ -344,6 +347,33 @@ impl App {
     }
 
     /// Hosts in folders marked "No group send".
+    /// The send dialog, with the hosts kept in tmux (their sessions can be
+    /// sent to through tmux on the server when not logged in).
+    fn send_dialog(&self, core: &Core, chosen: &[String]) -> SendDialog {
+        let route = crate::send_dialog::TmuxRoute {
+            ssh: self.editor.ssh().to_path_buf(),
+            config: self.editor.config().map(Path::to_path_buf),
+            hosts: self.tmux_hosts(),
+        };
+        SendDialog::new(core, chosen, &self.data_dir, &self.no_group_send()).with_tmux(route, chosen)
+    }
+
+    /// The hosts (aliases) whose sessions run in tmux on the server.
+    fn tmux_hosts(&self) -> std::collections::HashSet<String> {
+        use native_term_config::persistent::{for_host, Persistence};
+        let mut cache = self.tmux_cache.borrow_mut();
+        if cache.0 != self.generation {
+            let hosts = self
+                .tree
+                .hosts()
+                .filter(|(f, h)| h.plink.is_none() && for_host(f, h) == Some(Persistence::Tmux))
+                .map(|(_, h)| h.alias().to_string())
+                .collect();
+            *cache = (self.generation, hosts);
+        }
+        cache.1.clone()
+    }
+
     fn no_group_send(&self) -> std::collections::HashSet<String> {
         let mut cache = self.no_group_cache.borrow_mut();
         if cache.0 != self.generation {
@@ -790,12 +820,7 @@ impl App {
         match request {
             MenuRequest::Send(id) => {
                 if let Some(core) = &self.core {
-                    self.dialog = Some(Dialog::Send(Box::new(SendDialog::new(
-                        core,
-                        &[id],
-                        &self.data_dir,
-                        &self.no_group_send(),
-                    ))));
+                    self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(core, &[id]))));
                 }
             }
             MenuRequest::Rename(alias) => match self.tree.find(&alias) {
@@ -1151,12 +1176,13 @@ impl App {
             {
                 core.locate();
             }
-            let logged_in = sessions.iter().filter(|s| s.state == State::Connected).count();
-            if ui.add_enabled(logged_in > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked()
+            // logged in, or kept in tmux on the server (sent there through it)
+            let tmux = self.tmux_hosts();
+            let reachable = sessions.iter().filter(|s| s.state == State::Connected || tmux.contains(&s.alias)).count();
+            if ui.add_enabled(reachable > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked()
                 && self.dialog.is_none()
             {
-                self.dialog =
-                    Some(Dialog::Send(Box::new(SendDialog::new(&core, &[], &self.data_dir, &self.no_group_send()))));
+                self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(&core, &[]))));
             }
         });
         // after a restart or a Terminal restore: reconnect all, some, or none
@@ -1185,6 +1211,7 @@ impl App {
         }
         let mut save = None;
         let mut send = None;
+        let tmux = self.tmux_hosts();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for s in &sessions {
                 // typed by hand, not in the tree: offer to save it
@@ -1194,7 +1221,7 @@ impl App {
                     .is_none()
                     .then(|| native_term_app::quick::from_destination(&s.alias))
                     .flatten();
-                match session_card(ui, &core, s, typed) {
+                match session_card(ui, &core, s, typed, tmux.contains(&s.alias)) {
                     Some(CardAction::Save(target)) => save = Some(target),
                     Some(CardAction::Send) => send = Some(s.id.clone()),
                     None => {}
@@ -1203,8 +1230,7 @@ impl App {
             }
         });
         if let (Some(id), None) = (send, &self.dialog) {
-            self.dialog =
-                Some(Dialog::Send(Box::new(SendDialog::new(&core, &[id], &self.data_dir, &self.no_group_send()))));
+            self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(&core, &[id]))));
         }
         if let (Some(target), None) = (save, &self.dialog) {
             let draft = HostDraft {
@@ -1329,6 +1355,7 @@ fn session_card(
     core: &Core,
     s: &SessionView,
     typed: Option<native_term_app::quick::QuickTarget>,
+    tmux: bool,
 ) -> Option<CardAction> {
     let mut action = None;
     let color = state_color(ui, &s.state);
@@ -1414,7 +1441,12 @@ fn session_card(
             if button(ui, SessionCommand::ToggleLock, lock).on_hover_text(t!("session-lock-hint")).clicked() {
                 core.run(&s.id, SessionCommand::ToggleLock);
             }
-            if button(ui, SessionCommand::Send, icons::with(icons::SEND, t!("session-send"))).clicked() {
+            // a session kept in tmux can be sent to through it, logged in or not
+            let send = ui.add_enabled(
+                SessionCommand::Send.applies(s) || tmux,
+                egui::Button::new(icons::with(icons::SEND, t!("session-send"))).small(),
+            );
+            if send.clicked() {
                 action = Some(CardAction::Send);
             }
             if SessionCommand::SendBreak.offered(s)

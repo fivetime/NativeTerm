@@ -13,6 +13,7 @@ pub mod import;
 pub mod quick;
 pub mod registry;
 pub mod tab_menu;
+pub mod tmux_send;
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -867,6 +868,14 @@ impl Core {
             }
         }
         report
+    }
+
+    /// Records a send made some other way (tmux on the server) in the
+    /// audit log, like `send_text`'s own.
+    pub fn record_send(&self, targets: &[String], text: &str) {
+        if let Err(e) = self.audit(targets, text) {
+            self.shared.notice(format!("audit log: {e}"));
+        }
     }
 
     fn audit(&self, targets: &[String], text: &str) -> io::Result<()> {
