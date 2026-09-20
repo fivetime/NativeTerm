@@ -224,8 +224,17 @@ server's SHA-256 (~1.1 MB/s); `rz` 20 MB (SHA-256, mode 644, no retries in
 on the server, `rz` removed its partial file; Up recalled the shell's last
 command. `rz` 150 MB over ssh again after the sender change: SHA-256 equal.
 
-Not yet: shipping the fork's ssh with NativeTerm (packaging), macOS / Linux
-builds, and the zmodem2 fixes upstream.
+**Offered upstream** (codeberg.org/jarkko/zmodem2, one branch each from
+`fivetime/zmodem2`, every one with tests against lrzsz): #8 `abort()`
+sends the cancel sequence (ten CAN, ten backspaces), #9 ZFILE carries the
+modification time and mode (`FileInfo::with_modified` / `with_mode`), #10
+ESCCTL (`Receiver::set_escape_control`, and the sender escaping every
+control character when asked). The workarounds here stay until those are
+released; then `zfile_name`, `with_escctl`, `EscapeAll` and the CANCEL
+sequence can go.
+
+Not yet: shipping the fork's ssh with NativeTerm (packaging) and
+macOS / Linux builds.
 
 ## Build (Windows)
 

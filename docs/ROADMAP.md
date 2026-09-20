@@ -557,9 +557,13 @@
       (Telnet changes CR / NUL / 0xFF); Esc / Ctrl+C cancel through a
       named event; in tmux the transfer is stopped with a note. ntplink also reads the keyboard with VT input now
       (arrows, Esc and F-keys were lost before)
+- [x] zmodem2 fixes offered upstream (codeberg.org/jarkko/zmodem2, from
+      `fivetime/zmodem2`), one branch each, with tests against lrzsz:
+      #8 `abort()` sends the cancel sequence, #9 ZFILE carries the
+      modification time and mode, #10 ESCCTL. Our own workarounds stay
+      until they are released
 - [ ] rz / sz (rest): ship the fork's ssh with NativeTerm (packaging),
-      macOS / Linux builds, zmodem2 fixes upstream (abort sends nothing;
-      ZFILE without time / mode; no ESCCTL for sending)
+      macOS / Linux builds
 - [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions
 - [ ] Optional `plink -ssh` for GBK SSH hosts (host/port/user/key from
       `ssh -G`, `.ppk` key, Pageant)
