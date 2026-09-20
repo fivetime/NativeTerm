@@ -103,94 +103,10 @@ fn free_name(dir: &Path, name: &str) -> PathBuf {
     (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).expect("a free name")
 }
 
-/// CRC-16/XMODEM, as ZMODEM's hex headers carry it.
-fn crc16(data: &[u8]) -> u16 {
-    let mut crc: u16 = 0;
-    for &b in data {
-        crc ^= u16::from(b) << 8;
-        for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
-        }
-    }
-    crc
-}
-
-/// The receiver's ZRINIT (a hex header) with ESCCTL added: the sender then
-/// escapes every control character. Telnet without its binary mode changes
-/// CR, NUL and 0xFF (NVT rules, not always undone: busybox's telnetd keeps
-/// the NUL of a CR NUL split between two reads), which breaks lrzsz's raw
-/// data; zmodem2 has no way to ask for ESCCTL, so its header is rewritten
-/// on the way out. Anything else is left as it is.
-pub fn with_escctl(bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
-    const START: &[u8] = b"**\x18B01";
-    let Some(at) = bytes.windows(START.len()).position(|w| w == START) else { return bytes.into() };
-    let hex = at + START.len();
-    let Some(fields) = bytes.get(hex..hex + 12) else { return bytes.into() };
-    let value = |s: &[u8]| std::str::from_utf8(s).ok().and_then(|s| u8::from_str_radix(s, 16).ok());
-    let parsed: Option<Vec<u8>> = (0..4).map(|i| value(&fields[i * 2..i * 2 + 2])).collect();
-    let Some(mut data) = parsed else { return bytes.into() };
-    data[3] |= 0x40;
-    let mut crc_input = vec![0x01];
-    crc_input.extend_from_slice(&data);
-    let crc = crc16(&crc_input);
-    let mut out = bytes.to_vec();
-    let text = format!("{:02x}{:02x}{:02x}{:02x}{crc:04x}", data[0], data[1], data[2], data[3]);
-    out[hex..hex + 12].copy_from_slice(text.as_bytes());
-    out.into()
-}
-
-/// The sender's side of ESCCTL (see `with_escctl`), which zmodem2 can't do:
-/// its output with every control character (C0 and C1), DEL and 0xFF sent
-/// as ZDLE plus a printable byte, as receivers decode any escaped byte.
-/// Hex headers stay as they are (receivers read them raw). The state spans
-/// writes.
-#[derive(Default)]
-pub struct EscapeAll {
-    /// the byte after a ZDLE: its escaped form or a frame end, as it is
-    after_zdle: bool,
-    /// a hex header's bytes still to come after its ZDLE 'B' (14 hex
-    /// digits, then CR, LF and XON)
-    hex_left: u8,
-}
-
-impl EscapeAll {
-    pub fn apply(&mut self, bytes: &[u8]) -> Vec<u8> {
-        const ZDLE: u8 = 0x18;
-        let mut out = Vec::with_capacity(bytes.len() + bytes.len() / 4);
-        for &b in bytes {
-            if self.after_zdle {
-                self.after_zdle = false;
-                if b == b'B' {
-                    self.hex_left = 17;
-                }
-                out.push(b);
-                continue;
-            }
-            if self.hex_left > 0 {
-                self.hex_left -= 1;
-                if b.is_ascii_hexdigit() || matches!(b, 0x0d | 0x0a | 0x8a | 0x8d | 0x11) {
-                    out.push(b);
-                    continue;
-                }
-                self.hex_left = 0;
-            }
-            match b {
-                ZDLE => {
-                    self.after_zdle = true;
-                    out.push(b);
-                }
-                0x7f => out.extend_from_slice(&[ZDLE, b'l']),
-                0xff => out.extend_from_slice(&[ZDLE, b'm']),
-                _ if b & 0x60 == 0 => out.extend_from_slice(&[ZDLE, b ^ 0x40]),
-                _ => out.push(b),
-            }
-        }
-        out
-    }
-}
-
-/// Receive what the server's `sz` sends into `dir`; `escape`: ask it to
-/// escape control characters (see `with_escctl`).
+/// Receive what the server's `sz` sends into `dir`; `escape`: ask the
+/// sender to escape every control character (ESCCTL), which a link that
+/// is not transparent needs (Telnet without binary mode changes CR, NUL
+/// and 0xFF).
 pub fn receive<W: Write>(
     mut wire: Wire<W>,
     dir: &Path,
@@ -201,9 +117,15 @@ pub fn receive<W: Write>(
     let Ok(mut receiver) = zmodem2::Receiver::new() else { return Outcome::Failed("zmodem".into()) };
     // where each file starts is ours to say: after its partial file
     receiver.set_manual_file_accept(true);
+    if escape && receiver.set_escape_control(true).is_err() {
+        return Outcome::Failed("zmodem".into());
+    }
     let mut input = Vec::new();
     let mut quiet = Instant::now();
     let mut open: Option<(File, PathBuf, String)> = None;
+    // what the server says the file was last changed (ZFILE), kept on the
+    // file here
+    let mut modified: Option<std::time::SystemTime> = None;
     let (mut files, mut bytes) = (0usize, 0u64);
     let mut done = 0u64;
     let mut gone = false;
@@ -214,8 +136,7 @@ pub fn receive<W: Write>(
         match receiver.poll() {
             Action::WriteWire(data) => {
                 let n = data.len();
-                let data = if escape { with_escctl(data) } else { data.into() };
-                if wire.output.write_all(&data).and_then(|()| wire.output.flush()).is_err() {
+                if wire.output.write_all(data).and_then(|()| wire.output.flush()).is_err() {
                     return Outcome::Failed(t!("zmodem-gone"));
                 }
                 receiver.wire_written(n);
@@ -237,6 +158,7 @@ pub fn receive<W: Write>(
             Action::Event(Event::FileStarted(info)) => {
                 let name = local_name(info.name);
                 let size = info.size.map(|s| u64::from(s.get()));
+                modified = info.modified.map(|secs| std::time::UNIX_EPOCH + Duration::from_secs(u64::from(secs)));
                 let part = dir.join(format!("{name}{PART}"));
                 let have = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
                 let resume = size.is_some_and(|s| have > 0 && have < s);
@@ -258,6 +180,9 @@ pub fn receive<W: Write>(
             }
             Action::Event(Event::FileCompleted) => {
                 if let Some((file, part, name)) = open.take() {
+                    if let Some(modified) = modified.take() {
+                        let _ = file.set_modified(modified);
+                    }
                     drop(file);
                     let path = free_name(dir, &name);
                     let placed = std::fs::rename(&part, &path).map(|()| path);
@@ -311,20 +236,31 @@ pub fn receive<W: Write>(
     }
 }
 
-/// ZMODEM's cancel, as lrzsz sends it: CAN (ZDLE) ten times, then as many
-/// backspaces to wipe them from a terminal. zmodem2's `abort()` only stops
-/// its own side, so this is what makes the server's rz / sz give up.
-const CANCEL: &[u8] = b"";
-
 fn abort_receiver<W: Write>(receiver: &mut zmodem2::Receiver, wire: &mut Wire<W>) -> Outcome {
     let _ = receiver.abort();
-    cancel_other_side(wire);
+    // the cancel abort() queued (ten CAN, ten backspaces): out it goes,
+    // and it is what makes the server's sz give up
+    while let Action::WriteWire(data) = receiver.poll() {
+        let n = data.len();
+        if wire.output.write_all(data).and_then(|()| wire.output.flush()).is_err() {
+            break;
+        }
+        receiver.wire_written(n);
+    }
+    drain_other_side(wire);
     Outcome::Cancelled
 }
 
 fn abort_sender<W: Write>(sender: &mut zmodem2::Sender, wire: &mut Wire<W>) -> Outcome {
     sender.abort();
-    cancel_other_side(wire);
+    while let Action::WriteWire(data) = sender.poll() {
+        let n = data.len();
+        if wire.output.write_all(data).and_then(|()| wire.output.flush()).is_err() {
+            break;
+        }
+        sender.wire_written(n);
+    }
+    drain_other_side(wire);
     Outcome::Cancelled
 }
 
@@ -337,12 +273,11 @@ const DRAIN_AT_MOST: Duration = Duration::from_secs(15);
 /// shell's prompt after it may have gone with that data.
 static DRAINED: AtomicBool = AtomicBool::new(false);
 
-/// Sends the cancel, then takes in what the other side still sends until it
-/// is quiet (as lrzsz does): a sender streams ahead of what it knows, and
+/// Takes in what the other side still sends after a cancel, until it is
+/// quiet (as lrzsz does): a sender streams ahead of what it knows, and
 /// that data, left for the terminal, would show as garbage (and its escape
 /// sequences would make the terminal answer into the shell).
-fn cancel_other_side<W: Write>(wire: &mut Wire<W>) {
-    let _ = wire.output.write_all(CANCEL).and_then(|()| wire.output.flush());
+fn drain_other_side<W: Write>(wire: &mut Wire<W>) {
     let until = Instant::now() + DRAIN_AT_MOST;
     while Instant::now() < until {
         match wire.input.recv_timeout(QUIET) {
@@ -355,7 +290,8 @@ fn cancel_other_side<W: Write>(wire: &mut Wire<W>) {
 /// Send `files` to the server's `rz`. Files over 4 GB (ZMODEM's limit) are
 /// left out with a note.
 /// Send `files` to the server's `rz`; `escape`: escape every control
-/// character (see `EscapeAll`).
+/// character, which a link that is not transparent needs (the server's
+/// `rz` asks for it only when started with `-e`).
 pub fn send<W: Write>(
     mut wire: Wire<W>,
     files: &[PathBuf],
@@ -363,10 +299,10 @@ pub fn send<W: Write>(
     cancel: &AtomicBool,
     escape: bool,
 ) -> Outcome {
-    let mut escaper = escape.then(EscapeAll::default);
     let Ok(mut sender) = zmodem2::Sender::new() else { return Outcome::Failed("zmodem".into()) };
     // a reliable transport: no pause for acknowledgements
     sender.set_streaming_window(usize::MAX);
+    sender.set_escape_control(escape);
     let mut queue: Vec<&PathBuf> = Vec::new();
     for path in files {
         let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(u64::MAX);
@@ -393,11 +329,7 @@ pub fn send<W: Write>(
         match sender.poll() {
             Action::WriteWire(data) => {
                 let n = data.len();
-                let data = match escaper.as_mut() {
-                    Some(e) => e.apply(data).into(),
-                    None => std::borrow::Cow::Borrowed(data),
-                };
-                if wire.output.write_all(&data).is_err() {
+                if wire.output.write_all(data).is_err() {
                     return Outcome::Failed(t!("zmodem-gone"));
                 }
                 sender.wire_written(n);
@@ -452,11 +384,7 @@ pub fn send<W: Write>(
                 // the closing "OO" may still be queued
                 while let Action::WriteWire(data) = sender.poll() {
                     let n = data.len();
-                    let data = match escaper.as_mut() {
-                        Some(e) => e.apply(data).into(),
-                        None => std::borrow::Cow::Borrowed(data),
-                    };
-                    if wire.output.write_all(&data).is_err() {
+                    if wire.output.write_all(data).is_err() {
                         break;
                     }
                     sender.wire_written(n);
@@ -499,21 +427,6 @@ pub fn send<W: Write>(
     }
 }
 
-/// The ZFILE name field: the name, then (after a NUL) "size mtime mode" as
-/// lrzsz reads them. zmodem2 writes only "name\0size\0", which leaves rz's
-/// time and mode unset (a file dated 2486, mode 0600); the fields ride in
-/// the name instead, where zmodem2 passes them through. A name too long for
-/// zmodem2's 256 bytes goes without them.
-pub fn zfile_name(name: &str, size: u64, modified: Option<std::time::SystemTime>) -> Vec<u8> {
-    let mtime = modified.and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
-    let mut field = name.as_bytes().to_vec();
-    let extra = format!("\0{size} {mtime:o} 100644");
-    if field.len() + extra.len() + 12 <= 256 {
-        field.extend_from_slice(extra.as_bytes());
-    }
-    field
-}
-
 /// Offers the next file of `queue` that opens (or ends the session when
 /// there is none): the file and its name.
 fn start_next<'a>(
@@ -526,10 +439,18 @@ fn start_next<'a>(
         match File::open(path).and_then(|f| f.metadata().map(|m| (f, m))) {
             Ok((file, meta)) => {
                 let size = meta.len();
-                let field = zfile_name(&name, size, meta.modified().ok());
-                sender
-                    .start_file(FileInfo::new(&field, Some(Position::new(size as u32))))
-                    .map_err(|e| format!("{e:?}"))?;
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .and_then(|d| u32::try_from(d.as_secs()).ok());
+                // 0o100_644: a regular file, read by all, written by its
+                // owner (Windows has no Unix mode of its own)
+                let mut info = FileInfo::new(name.as_bytes(), Some(Position::new(size as u32))).with_mode(0o100_644);
+                if let Some(modified) = modified {
+                    info = info.with_modified(modified);
+                }
+                sender.start_file(info).map_err(|e| format!("{e:?}"))?;
                 watch.file(&name, Some(size), 0);
                 return Ok(Some((file, name)));
             }
@@ -779,7 +700,9 @@ pub fn run(mode: &str, escape: bool, files: bool) -> i32 {
     let mut console = Console::new();
     if mode == "tmux" {
         let mut wire = wire;
-        cancel_other_side(&mut wire);
+        if let Ok(mut receiver) = zmodem2::Receiver::new() {
+            abort_receiver(&mut receiver, &mut wire);
+        }
         let text = if !files {
             t!("zmodem-tmux-stopped")
         } else if ask_for_files() {
@@ -895,35 +818,6 @@ mod tests {
     }
 
     #[test]
-    fn escctl_in_the_receivers_zrinit() {
-        // lrzsz's own hex header with ESCCTL: CRC 0c47 over 02 00 00 00 40
-        assert_eq!(crc16(&[0x02, 0, 0, 0, 0x40]), 0x0c47);
-        let zrinit = b"**\x18B0100000023be50\r\x8a\x11";
-        let patched = with_escctl(zrinit);
-        let mut expected = b"**\x18B0100000063".to_vec();
-        expected.extend(format!("{:04x}", crc16(&[1, 0, 0, 0, 0x63])).as_bytes());
-        expected.extend(b"\r\x8a\x11");
-        assert_eq!(&*patched, &expected[..]);
-        // anything else untouched
-        assert_eq!(&*with_escctl(b"**\x18B0400000000"), b"**\x18B0400000000");
-    }
-
-    #[test]
-    fn escape_all_leaves_no_control_characters() {
-        let mut e = EscapeAll::default();
-        // a hex header stays as it is; ZDLE pairs stay; the rest is escaped
-        let hex = b"**\x18B0100000023be50\r\x8a\x11";
-        assert_eq!(e.apply(hex), hex.to_vec());
-        let data = [b'a', 0x0d, 0x00, 0xff, 0x7f, 0x8d, 0x18, b'X', 0x18, b'h', 0x20, 0xc0];
-        let want =
-            [b'a', 0x18, 0x4d, 0x18, 0x40, 0x18, b'm', 0x18, b'l', 0x18, 0xcd, 0x18, b'X', 0x18, b'h', 0x20, 0xc0];
-        assert_eq!(e.apply(&data), want.to_vec());
-        // a ZDLE at the end of one write, its byte in the next
-        assert_eq!(e.apply(&[0x18]), vec![0x18]);
-        assert_eq!(e.apply(&[0x4d, 0x0d]), vec![0x4d, 0x18, 0x4d]);
-    }
-
-    #[test]
     fn upload_escaped_for_telnet() {
         let src = tempfile::tempdir().unwrap();
         let dst = tempfile::tempdir().unwrap();
@@ -938,14 +832,6 @@ mod tests {
         assert!(matches!(sender.join().unwrap(), Outcome::Done { files: 1, .. }));
         assert_eq!(got, Outcome::Done { files: 1, bytes: 200_000 });
         assert_eq!(std::fs::read(dst.path().join("all.bin")).unwrap(), content);
-    }
-
-    #[test]
-    fn zfile_fields_for_lrzsz() {
-        let t = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        assert_eq!(zfile_name("a.bin", 42, Some(t)), b"a.bin\x0042 14524770400 100644");
-        let long = "长".repeat(80);
-        assert_eq!(zfile_name(&long, 1, Some(t)), long.as_bytes(), "no room: the name alone");
     }
 
     #[test]

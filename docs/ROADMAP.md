@@ -560,8 +560,10 @@
 - [x] zmodem2 fixes offered upstream (codeberg.org/jarkko/zmodem2, from
       `fivetime/zmodem2`), one branch each, with tests against lrzsz:
       #8 `abort()` sends the cancel sequence, #9 ZFILE carries the
-      modification time and mode, #10 ESCCTL. Our own workarounds stay
-      until they are released
+      modification time and mode, #10 ESCCTL. Used through
+      `[patch.crates-io]` (the fork, pinned) until they are released,
+      with the shim's workarounds dropped; received files now keep the
+      server's modification time
 - [ ] rz / sz (rest): ship the fork's ssh with NativeTerm (packaging),
       macOS / Linux builds
 - [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions

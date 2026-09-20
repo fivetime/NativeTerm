@@ -21,6 +21,14 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/fivetime/NativeTerm"
 
+# zmodem2 from our fork until the fixes are in a release: the cancel
+# sequence on abort(), the ZFILE modification time and mode, and ESCCTL
+# (offered upstream as codeberg.org/jarkko/zmodem2 pulls 8, 9 and 10).
+# Pinned to a commit, as the fork goes away once they are merged; then
+# this section goes too and the version below is raised.
+[patch.crates-io]
+zmodem2 = { git = "https://codeberg.org/fivetime/zmodem2.git", rev = "94aec18" }
+
 [profile.release]
 lto = true
 strip = true

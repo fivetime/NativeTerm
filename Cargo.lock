@@ -4365,8 +4365,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 [[package]]
 name = "zmodem2"
 version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2ac5e85856f619f7d6c15cbf915448147607f31d028f54b08a0a3ea7ff632e5"
+source = "git+https://codeberg.org/fivetime/zmodem2.git?rev=94aec18#94aec1807b5af15d74d7ebdc167ff3b02e57ccb9"
 dependencies = [
  "bitflags 2.13.2",
  "hex",

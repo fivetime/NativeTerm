@@ -224,14 +224,23 @@ server's SHA-256 (~1.1 MB/s); `rz` 20 MB (SHA-256, mode 644, no retries in
 on the server, `rz` removed its partial file; Up recalled the shell's last
 command. `rz` 150 MB over ssh again after the sender change: SHA-256 equal.
 
-**Offered upstream** (codeberg.org/jarkko/zmodem2, one branch each from
-`fivetime/zmodem2`, every one with tests against lrzsz): #8 `abort()`
-sends the cancel sequence (ten CAN, ten backspaces), #9 ZFILE carries the
-modification time and mode (`FileInfo::with_modified` / `with_mode`), #10
-ESCCTL (`Receiver::set_escape_control`, and the sender escaping every
-control character when asked). The workarounds here stay until those are
-released; then `zfile_name`, `with_escctl`, `EscapeAll` and the CANCEL
-sequence can go.
+**The fixes are in the library now.** They are offered upstream
+(codeberg.org/jarkko/zmodem2, one branch each, every one with tests
+against lrzsz): #8 `abort()` sends the cancel sequence (ten CAN, ten
+backspaces), #9 ZFILE carries the modification time and mode
+(`FileInfo::with_modified` / `with_mode`), #10 ESCCTL
+(`Receiver::set_escape_control`, the sender escaping when asked, and
+`Sender::set_escape_control` to escape unasked, which is what a plain
+`rz` over Telnet needs). Until they are released, the workspace's
+`[patch.crates-io]` takes zmodem2 from `fivetime/zmodem2` (the three
+branches merged), pinned to a commit. When upstream releases them the
+patch goes and the version is raised; the fork is then deleted.
+
+What that removed from the shim (114 lines): `zfile_name` (the fields
+smuggled in the file name), `with_escctl` (the rewritten ZRINIT and its
+CRC), `EscapeAll` (the sender's own escaping) and the CANCEL constant.
+What it added: the server's modification time is kept on the received
+file (`File::set_modified`), which the fields never reached before.
 
 Not yet: shipping the fork's ssh with NativeTerm (packaging) and
 macOS / Linux builds.
