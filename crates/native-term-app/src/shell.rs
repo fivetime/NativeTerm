@@ -31,6 +31,9 @@ pub struct HostEntry {
     pub hostname: String,
     pub folder: String,
     pub on_login: Option<String>,
+    /// Its folder is marked "No group send": it is left out when a
+    /// command goes to every connected session.
+    pub no_group_send: bool,
 }
 
 impl HostEntry {

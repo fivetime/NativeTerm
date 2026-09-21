@@ -11,6 +11,12 @@
 //! while the docked main window is hidden), and windows opened while
 //! running (`open`, e.g. a host's files). Each has its own egui context,
 //! so they paint independently.
+//!
+//! The floating button's window is shown a second way: its frame carries
+//! its own transparency (`native_term_win::layered`), so the button can
+//! be a round, slightly see-through shape instead of a rectangle. The
+//! renderer is the same; only the way the pixels reach the screen
+//! differs.
 
 use std::cell::RefCell;
 use std::num::NonZeroU32;
@@ -165,6 +171,8 @@ struct Pane {
     state: egui_winit::State,
     info: egui::ViewportInfo,
     ui: Box<dyn Ui>,
+    /// Shown with its own transparency (the floating button).
+    layered: Option<native_term_win::layered::Layered>,
     shown: bool,
     last_paint: Option<Instant>,
     repaint_at: Option<Instant>,
@@ -178,6 +186,7 @@ impl Pane {
         which: Which,
         viewport: &egui::ViewportBuilder,
         factory: Factory,
+        layered: bool,
         before_show: impl FnOnce(&Window),
     ) -> Result<Pane, String> {
         let ctx = egui::Context::default();
@@ -207,6 +216,7 @@ impl Pane {
         let mut info = egui::ViewportInfo::default();
         egui_winit::update_viewport_info(&mut info, &ctx, &window, true);
         let ui = factory(&ctx);
+        let layered = layered.then(|| native_term_win::layered::Layered::take_over(hwnd));
         Ok(Pane {
             ctx,
             window,
@@ -216,6 +226,7 @@ impl Pane {
             state,
             info,
             ui,
+            layered,
             shown: false,
             last_paint: None,
             repaint_at: None,
@@ -272,18 +283,35 @@ impl Pane {
         else {
             return Ok(false);
         };
-        self.surface.resize(width, height).map_err(|e| e.to_string())?;
-        let mut buffer = self.surface.buffer_mut().map_err(|e| e.to_string())?;
-        buffer.fill(0);
-        let pixels: &mut [u32] = &mut buffer;
-        // softbuffer's 0RGB u32 in little-endian bytes is B, G, R, 0.
-        // SAFETY: same size, [u8; 4] has no alignment requirement, and the
-        // slice borrows `buffer` for its whole life.
-        let bytes = unsafe { std::slice::from_raw_parts_mut(pixels.as_mut_ptr().cast::<[u8; 4]>(), pixels.len()) };
-        let mut target = BufferMutRef::new(bytes, width.get() as usize, height.get() as usize);
-        self.renderer.render(&mut target, &primitives, &output.textures_delta, output.pixels_per_point);
+        let (renderer, hwnd) = (&mut self.renderer, self.hwnd);
+        let mut paint = |bytes: &mut [[u8; 4]]| {
+            let mut target = BufferMutRef::new(bytes, width.get() as usize, height.get() as usize);
+            renderer.render(&mut target, &primitives, &output.textures_delta, output.pixels_per_point);
+        };
+        // its own transparency: the whole surface at once, premultiplied
+        // (which is how egui paints), so the shape it drew is the window
+        let shown = match self.layered.as_mut() {
+            Some(layered) => layered.present(hwnd, width.get(), height.get(), &mut paint),
+            None => false,
+        };
+        if !shown {
+            if self.layered.take().is_some() {
+                // it could not be handed over with its transparency: from
+                // here on this window is shown the ordinary way, square
+                eprintln!("the floating button is shown without transparency: {}", std::io::Error::last_os_error());
+            }
+            self.surface.resize(width, height).map_err(|e| e.to_string())?;
+            let mut buffer = self.surface.buffer_mut().map_err(|e| e.to_string())?;
+            buffer.fill(0);
+            let pixels: &mut [u32] = &mut buffer;
+            // softbuffer's 0RGB u32 in little-endian bytes is B, G, R, 0.
+            // SAFETY: same size, [u8; 4] has no alignment requirement, and
+            // the slice borrows `buffer` for its whole life.
+            let bytes = unsafe { std::slice::from_raw_parts_mut(pixels.as_mut_ptr().cast::<[u8; 4]>(), pixels.len()) };
+            paint(bytes);
+            buffer.present().map_err(|e| e.to_string())?;
+        }
         let rendered = started.elapsed();
-        buffer.present().map_err(|e| e.to_string())?;
         if let Some(log) = frame_log {
             use std::io::Write;
             let _ = writeln!(
@@ -418,7 +446,7 @@ impl Runner {
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
         let factory = self.factory.take().ok_or("the window was already started")?;
         let placement = self.placement;
-        let main = Pane::create(event_loop, &self.proxy, Which::Main, &self.viewport, factory, |window| {
+        let main = Pane::create(event_loop, &self.proxy, Which::Main, &self.viewport, factory, false, |window| {
             if let Some(p) = placement {
                 // only if it is still on a monitor
                 if win::on_a_monitor(p.x + p.width as i32 / 2, p.y + 16) {
@@ -431,26 +459,26 @@ impl Runner {
         if let Some(spec) = self.button_spec.take() {
             let viewport = spec.viewport.with_visible(false);
             let position = spec.position;
-            let button = Pane::create(event_loop, &self.proxy, Which::Button, &viewport, spec.factory, |window| {
-                match position.filter(|(x, y)| win::on_a_monitor(*x, *y)) {
-                    Some((x, y)) => window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y)),
-                    None => {
-                        // bottom right of the main window's monitor
-                        let hwnd = window_handle(window).unwrap_or_default();
-                        if let Some(work) = win::work_area(hwnd) {
-                            let size = window.outer_size();
-                            let margin = (32.0 * window.scale_factor()) as i32;
-                            window.set_outer_position(winit::dpi::PhysicalPosition::new(
-                                work.right - size.width as i32 - margin,
-                                work.bottom - size.height as i32 - margin,
-                            ));
+            let button =
+                Pane::create(event_loop, &self.proxy, Which::Button, &viewport, spec.factory, true, |window| {
+                    match position.filter(|(x, y)| win::on_a_monitor(*x, *y)) {
+                        Some((x, y)) => window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y)),
+                        None => {
+                            // bottom right of the main window's monitor
+                            let hwnd = window_handle(window).unwrap_or_default();
+                            if let Some(work) = win::work_area(hwnd) {
+                                let size = window.outer_size();
+                                let margin = (32.0 * window.scale_factor()) as i32;
+                                window.set_outer_position(winit::dpi::PhysicalPosition::new(
+                                    work.right - size.width as i32 - margin,
+                                    work.bottom - size.height as i32 - margin,
+                                ));
+                            }
                         }
                     }
-                }
-            });
+                });
             match button {
                 Ok(mut pane) => {
-                    native_term_win::dock::round_corners(pane.hwnd);
                     // painted once, hidden, so it can appear without a flash
                     pane.paint(None, false)?;
                     self.button = Some(pane);
@@ -491,7 +519,7 @@ impl Runner {
             let n = self.next_extra;
             self.next_extra += 1;
             let viewport = request.viewport.with_visible(false);
-            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, |_| {}) {
+            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, false, |_| {}) {
                 Ok(mut pane) => {
                     // painted at once: a hidden window gets no redraw
                     if let Err(e) = pane.paint(self.frame_log.as_ref(), true) {

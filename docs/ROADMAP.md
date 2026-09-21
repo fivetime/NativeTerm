@@ -594,7 +594,16 @@
 - [x] Floating action button, shown only while the docked window is hidden:
       host search / quick connect, active session reconnect and clone, all
       tabs, close disconnected, show NativeTerm; draggable, position kept
-- [ ] Floating action button (rest): round/transparent shape, send command
+- [x] Floating action button (rest): the window carries its own
+      transparency (`native_term_win::layered`, `UpdateLayeredWindow` from
+      the frame the software renderer already paints), so the button is a
+      round, slightly see-through disc with a soft shadow and the corners
+      are not part of the window — a click there reaches what is behind
+      it. The panel draws its own rounded face the same way. The command
+      line for the active session is the sidebar's own `SendLine`, so it
+      has the same history (↑ / ↓), the same "all connected" target with
+      its confirmation, the same hosts left out by "No group send", and
+      the same audit trail
 - [x] Optional global shortcuts (`RegisterHotKey`), off by default, checked
       against Windows Terminal's bindings
 - [x] Per-host/folder tab color (`--tabColor`) and color scheme (applied by

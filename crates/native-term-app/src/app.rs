@@ -1576,12 +1576,14 @@ fn publish_hosts(tree: &SessionTree, core: Option<&Core>) {
         .folders()
         .flat_map(|f| {
             let folder = if f.name.is_empty() { String::new() } else { f.label().to_string() };
+            let no_group_send = f.no_group_send();
             f.hosts.iter().map(move |h| crate::shell::HostEntry {
                 alias: h.alias().to_string(),
                 label: h.label().to_string(),
                 hostname: h.target().to_string(),
                 folder: folder.clone(),
                 on_login: f.nt(h, "onlogin").map(str::to_string),
+                no_group_send,
             })
         })
         .collect();

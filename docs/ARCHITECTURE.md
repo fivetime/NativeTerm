@@ -3716,13 +3716,33 @@ Implemented (first version):
 - **Bringing the main window out** from the button slides it back and
   keeps it out until the pointer has been over it or it loses the focus
   (otherwise it would hide at once: the pointer is still at the button).
+- **Its own shape** (`native_term_win::layered`): the button's window is
+  a layered one (`WS_EX_LAYERED`), and its frame is handed to Windows
+  whole with `UpdateLayeredWindow` instead of being blitted through the
+  window's device context. The software renderer already paints
+  premultiplied colours with an alpha channel, which is exactly what that
+  call wants, so nothing about the drawing changes — only the way the
+  pixels reach the screen. The button is therefore a round disc with a
+  soft shadow, a little see-through at rest and solid under the pointer,
+  and its corners are not part of the window at all: a click there lands
+  on whatever is behind it. The panel paints its own rounded face the
+  same way (DWM's rounding is for rectangles).
+  - winit rewrites the window's styles when it is shown, moved or put on
+    top, and a style bit it doesn't know about doesn't survive that, so
+    the layered bit is put back before every frame (one call).
+  - If the frame ever can't be handed over that way, the window falls
+    back to the ordinary path (a square, opaque button) instead of
+    disappearing.
+- **The command line** in the panel is the sidebar's own `SendLine`, so
+  the button has the same history (↑ / ↓), the same choice between the
+  active session and every connected one (with its second-Enter
+  confirmation), the same hosts left out by "No group send" — published
+  with the host list — and the same audit trail.
 - Measured: idle 0 ms CPU with the button shown; 22.7 MB private for
   both windows. Scripted check `fab_test.ps1` (scratch): shown only while
-  docked-hidden, the panel opens from the button's corner, host search,
-  "Show NativeTerm" brings the window out and hides the button, the
-  button returns to its place.
-- Not yet: transparency / a round shape (needs a layered window), a
-  "send command" entry (needs the command layer).
+  docked-hidden, the panel opens from the button's corner and fits its
+  height to the content, host search, "Show NativeTerm" brings the window
+  out and hides the button, the button returns to its place.
 
 All UI surfaces invoke one shared app-level command layer
 (`native_term_app::actions`), implemented:

@@ -45,7 +45,7 @@ impl From<RECT> for Bounds {
     }
 }
 
-fn hwnd(handle: isize) -> HWND {
+pub(crate) fn hwnd(handle: isize) -> HWND {
     HWND(handle as *mut _)
 }
 

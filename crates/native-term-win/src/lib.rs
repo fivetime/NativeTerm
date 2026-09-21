@@ -8,6 +8,7 @@ pub mod credentials;
 pub mod desktop;
 pub mod dock;
 pub mod hotkey;
+pub mod layered;
 pub mod picker;
 pub mod registry;
 pub mod service;
