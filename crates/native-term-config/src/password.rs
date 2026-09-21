@@ -21,7 +21,7 @@ pub const KEY: &str = "credential";
 
 /// The entries' common start (tests: `NATIVETERM_CRED_PREFIX` keeps
 /// theirs apart).
-pub(crate) fn prefix() -> String {
+pub fn prefix() -> String {
     std::env::var("NATIVETERM_CRED_PREFIX").ok().filter(|p| !p.is_empty()).unwrap_or_else(|| "NativeTerm".into())
 }
 

@@ -865,3 +865,27 @@ tabs-text-preview = 文字预览
 tabs-hover-setting = 鼠标停在标签页上显示预览卡片
 tabs-hover-hint = 停留约半秒后，在标签下方显示该标签的画面和会话状态。Terminal 自带的标题气泡仍会出现。
 config-paths-repaired = 程序位置变了：已把 ssh 配置里 { $count } 处代理命令指向当前程序（原为 { $old }）
+
+# 清理（删除程序之前）
+cleanup-button = 清理…
+cleanup-title = 清理
+cleanup-intro = 删除 NativeTerm 之前，先让它收回装进 Windows Terminal 的配置。下面其余的东西都会留在原处，这里列出来让你知道有哪些。
+cleanup-fragment-title = 只有 NativeTerm 能收回的
+cleanup-fragment-there = “NativeTerm SSH”配置已装进 Windows Terminal。删除程序前请先移除，否则 Terminal 里会留下一个启动不存在程序的配置。
+cleanup-fragment-gone = “NativeTerm SSH”配置未安装。
+cleanup-in-settings = 这份 Windows Terminal 的 settings.json 里另外还写着一个“NativeTerm SSH”配置。不是 NativeTerm 写的，所以它不动；要清掉请自己删。
+cleanup-remove-fragment = 移除配置
+cleanup-left-title = 会留下的
+cleanup-data = 数据目录：{ $path }
+cleanup-registry = 数据目录的位置也写在注册表里（HKCU\Software\NativeTerm\DataDir = { $value }）。
+cleanup-credentials = Windows 凭据管理器里有 { $count } 条保存的密码。
+cleanup-credentials-gone = 已删除 { $count } 条保存的密码。
+cleanup-remove-credentials = 删除它们
+cleanup-remove-registry = 删除它
+cleanup-registry-gone = 注册表值已删除。
+cleanup-really = 确定？
+cleanup-ssh = NativeTerm 在你的 ssh 配置里写了 { $count } 行：
+cleanup-ssh-hint = 这些无害：ssh 会跳过 NativeTerm 开头的键，而 Include 那行正是让你的会话文件夹生效的。删掉它们等于把会话从 ssh 里拿走，所以 NativeTerm 不动它们。
+cleanup-ssh-none = NativeTerm 没有往你的 ssh 配置里写过东西。
+cleanup-files = 会话本身是会话文件夹里的 { $count } 个文件；它们是你的，会保留。
+cleanup-copy = 复制这份清单

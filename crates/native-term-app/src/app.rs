@@ -44,6 +44,7 @@ enum Dialog {
     Drop(Box<DropDialog>),
     ServerSessions(Box<ServerSessionsDialog>),
     CredentialSets(Box<crate::credential_sets::CredentialSetsDialog>),
+    Cleanup(Box<crate::cleanup::CleanupDialog>),
 }
 
 /// Opening at least this many hosts that forward the ssh-agent is pointed out.
@@ -1087,6 +1088,20 @@ impl App {
         let Some(dialog) = self.dialog.as_mut() else { return };
         let done = match dialog {
             Dialog::CredentialSets(d) => matches!(d.show(ctx), Outcome::Cancel),
+            Dialog::Cleanup(d) => {
+                let mut actions = Vec::new();
+                let done = matches!(d.show(ctx, &self.profile.status, &mut actions), Outcome::Cancel);
+                for action in actions {
+                    match action {
+                        crate::cleanup::CleanupAction::RemoveFragment => {
+                            if let Err(e) = self.profile.remove_fragment() {
+                                d.message = Some(t!("profile-remove-failed", error = e));
+                            }
+                        }
+                    }
+                }
+                done
+            }
             Dialog::Host(d) => match d.show(ctx) {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
@@ -1749,9 +1764,24 @@ impl crate::window::Ui for App {
                     self.folders_ui(ui);
                     self.data_dir_ui(ui);
                     ui.separator();
-                    if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {
-                        self.wizard = Some(crate::wizard::Wizard::new(ui.ctx()));
-                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {
+                            self.wizard = Some(crate::wizard::Wizard::new(ui.ctx()));
+                        }
+                        // before the program folder is deleted
+                        if ui.button(t!("cleanup-button")).on_hover_text(t!("cleanup-intro")).clicked()
+                            && self.dialog.is_none()
+                        {
+                            let cleanup = crate::cleanup::Cleanup::new(
+                                &self.ssh_dir,
+                                &self.editor.folders_dir(),
+                                self.profile.shim_path(),
+                                self.data_dir.clone(),
+                            );
+                            let dialog = crate::cleanup::CleanupDialog::new(cleanup);
+                            self.dialog = Some(Dialog::Cleanup(Box::new(dialog)));
+                        }
+                    });
                 });
             }
             self.profile.banner(ui, &mut self.notices);

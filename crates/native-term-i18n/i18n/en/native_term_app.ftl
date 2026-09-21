@@ -891,3 +891,27 @@ tabs-text-preview = text preview
 tabs-hover-setting = Show a card when the mouse rests on a tab
 tabs-hover-hint = After about half a second, the tab's picture and the session's state appear under it. Terminal's own title tooltip still shows.
 config-paths-repaired = The program moved: { $count } proxy command(s) in the ssh config now point at this copy (they named { $old })
+
+# Clean up (before the program is deleted)
+cleanup-button = Clean up…
+cleanup-title = Clean up
+cleanup-intro = Before deleting NativeTerm, let it take back the Windows Terminal profile it installed. Everything else below stays where it is; it is listed so you know what is there.
+cleanup-fragment-title = What only NativeTerm can remove
+cleanup-fragment-there = The "NativeTerm SSH" profile is installed in Windows Terminal. Remove it before deleting the program, or Terminal keeps a profile that starts something that isn't there.
+cleanup-fragment-gone = The "NativeTerm SSH" profile is not installed.
+cleanup-in-settings = This Windows Terminal also has a "NativeTerm SSH" profile written into its own settings.json. NativeTerm did not put it there and leaves it alone; remove it yourself if you want it gone.
+cleanup-remove-fragment = Remove the profile
+cleanup-left-title = What stays behind
+cleanup-data = Data folder: { $path }
+cleanup-registry = The data folder is also written in the registry (HKCU\Software\NativeTerm\DataDir = { $value }).
+cleanup-credentials = { $count } saved password(s) in Windows Credential Manager.
+cleanup-credentials-gone = { $count } saved password(s) removed.
+cleanup-remove-credentials = Remove them
+cleanup-remove-registry = Remove it
+cleanup-registry-gone = The registry value is gone.
+cleanup-really = Really?
+cleanup-ssh = { $count } line(s) NativeTerm wrote in your ssh configuration:
+cleanup-ssh-hint = These do no harm: ssh skips the NativeTerm keys, and the Include line is what makes your session folder count. Removing them takes your sessions away from ssh too, so NativeTerm leaves them.
+cleanup-ssh-none = NativeTerm has written nothing into your ssh configuration.
+cleanup-files = Your sessions themselves are { $count } file(s) in the session folder; they are yours and stay.
+cleanup-copy = Copy this list

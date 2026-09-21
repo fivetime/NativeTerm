@@ -11,6 +11,7 @@
 
 mod agent;
 mod app;
+mod cleanup;
 mod commands_import;
 mod credential_sets;
 mod dialogs;

@@ -76,6 +76,13 @@ impl Status {
     pub fn usable(&self) -> bool {
         matches!(self, Status::Installed | Status::InSettings)
     }
+
+    /// Whether NativeTerm's own fragment file is there (whatever it says).
+    /// A profile written into the Terminal's own `settings.json` is not
+    /// one: NativeTerm didn't put it there and doesn't take it away.
+    pub fn is_fragment(&self) -> bool {
+        matches!(self, Status::Installed | Status::Outdated { .. } | Status::Disabled)
+    }
 }
 
 pub fn status(install: &Install, root: Option<&Path>, shim: &Path) -> Status {

@@ -7,9 +7,9 @@ use windows::core::{HSTRING, PWSTR};
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::Globalization::{MultiByteToWideChar, CP_ACP, MULTI_BYTE_TO_WIDE_CHAR_FLAGS};
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW,
-    RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_DWORD, REG_EXPAND_SZ, REG_OPTION_NON_VOLATILE,
-    REG_SZ, REG_VALUE_TYPE,
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegDeleteValueW, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW,
+    RegQueryValueExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, KEY_WRITE, REG_DWORD, REG_EXPAND_SZ,
+    REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,6 +169,24 @@ pub fn write_user_values(subkey: &str, values: &[(&str, RegValue)]) -> io::Resul
         check(unsafe { RegSetValueExW(key.0, &HSTRING::from(*name), None, kind, Some(&bytes)) })?;
     }
     Ok(())
+}
+
+/// Delete one value, leaving the key and every other value alone; fine
+/// if it isn't there. This is how NativeTerm takes back the pointer it
+/// wrote to its data directory ("Clean up").
+pub fn delete_user_value(subkey: &str, name: &str) -> io::Result<()> {
+    let mut key = HKEY::default();
+    let status = unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, &HSTRING::from(subkey), None, KEY_WRITE, &mut key) };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(());
+    }
+    check(status)?;
+    let key = Key(key);
+    let status = unsafe { RegDeleteValueW(key.0, &HSTRING::from(name)) };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(());
+    }
+    check(status)
 }
 
 /// Delete a key and everything under it; fine if it doesn't exist. For tests.

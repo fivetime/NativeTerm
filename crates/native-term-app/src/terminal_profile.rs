@@ -119,7 +119,7 @@ impl ProfileSetup {
         Ok(())
     }
 
-    fn remove_fragment(&mut self) -> Result<(), String> {
+    pub fn remove_fragment(&mut self) -> Result<(), String> {
         let root = self.root.clone().ok_or_else(|| t!("profile-no-localappdata"))?;
         profile::uninstall(&root, &self.settings_files()).map_err(|e| e.to_string())?;
         self.refresh();
@@ -160,6 +160,12 @@ impl ProfileSetup {
                 }
             }
         });
+    }
+
+    /// The helper every tab runs (what NativeTerm wrote into the profile
+    /// and into the `ProxyCommand` lines).
+    pub fn shim_path(&self) -> &PathBuf {
+        &self.shim
     }
 
     /// The Terminal's own `settings.json` (its key bindings, among others).

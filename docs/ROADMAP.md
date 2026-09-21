@@ -691,8 +691,16 @@
       windows filtered by process image path
 - [ ] Optional bundled portable Windows Terminal (stable ZIP, `.portable`,
       license text) as a fallback package
-- [ ] "Clean up" (remove the Windows Terminal fragment) before deleting
-      the folder; tell the user about the lines left in `~/.ssh`
+- [x] "Clean up" (Settings → Clean up…): the Windows Terminal profile,
+      which only NativeTerm can take back, is removed from there; and
+      everything that stays is listed with its place — the data folder,
+      the registry value that points at it, the saved passwords in
+      Credential Manager, and every line NativeTerm wrote in the ssh
+      configuration, each with its file and line number. The ssh lines
+      are never removed (they are what makes the sessions work for
+      `ssh` itself) and the passwords and the registry value only on a
+      second click. The list can be copied
+      (`cleanup.rs`, `native-term-config/src/traces.rs`)
 - [ ] State "no telemetry" in README and the About page
 - [ ] Third-party license texts and busybox-w32 source pointer in the release
 - [ ] Integration test suite against a real Windows Terminal, including an

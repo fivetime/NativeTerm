@@ -3966,6 +3966,21 @@ Implemented (English, Simplified Chinese):
   Terminal fragment first ("Clean up" in settings). The `IgnoreUnknown` /
   `Include` lines and `NativeTerm*` keys in `~/.ssh` are harmless to `ssh`
   and are left in place; the user is told they exist.
+  Implemented (`cleanup.rs`, `traces.rs`). The dialog has two halves.
+  What only NativeTerm can take back: the fragment profile, with the
+  button that removes it. And what stays, each with its place: the data
+  folder (with a button that opens it), the registry value that points
+  at the data folder, the saved passwords in Credential Manager, and
+  every line NativeTerm wrote in the ssh configuration — the
+  `IgnoreUnknown` and `Include` lines of the main config (an `Include`
+  is recognised however it is written: `~`, relative, or the folder
+  itself), the `NativeTerm*` keys, and the `ProxyCommand` lines that run
+  the shim — each as `file:line text`, with the user's own lines left
+  out. The ssh lines are never removed: they are what makes the sessions
+  work for `ssh` itself. The passwords and the registry value are
+  removed only on a second click of the same button, and a profile
+  someone wrote into Terminal's own `settings.json` is pointed out but
+  left alone. The whole list can be copied as text.
   Windows Terminal also keeps a stub (`"source": "NativeTerm"`, the GUID,
   the name, and any user edits to that profile) in its own
   `settings.json` for every fragment profile it has seen. After the
