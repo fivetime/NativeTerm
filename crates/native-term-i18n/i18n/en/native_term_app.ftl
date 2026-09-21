@@ -221,6 +221,7 @@ proxy-password-none = No password saved for this proxy login yet: connections fa
 proxy-password-saved = The password is saved in Windows Credential Manager; the ssh config has the user name only.
 proxy-password-refused = The proxy refused this password, so it isn't sent again (an account could be locked). Save the right one.
 proxy-basic-note = An HTTP proxy's password is sent as Basic: encoded, not encrypted, so it can be seen on the network to the proxy.
+proxy-windows-note = A proxy that asks for a Windows login (NTLM or Negotiate) gets one without a password here: Windows answers with the account you are signed in with. Fill in a user name and password only if the proxy wants a different account.
 opt-preferred-authentications = Methods, in order
 opt-pubkey-authentication = Public key
 opt-password-authentication = Password

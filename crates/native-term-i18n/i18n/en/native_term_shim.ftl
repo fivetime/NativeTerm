@@ -64,7 +64,11 @@ proxy-login-refused = The proxy refused the user name or password (marked, so it
 proxy-password-refused = This proxy password was refused before and isn't sent again: save a new one under Proxy in the session options
 proxy-no-password = No password is saved for the proxy { $proxy }: save one under Proxy in the session options
 proxy-login-too-long = A SOCKS5 user name or password can't be longer than 255 bytes
-proxy-schemes = The proxy only takes these logins: { $schemes }; NativeTerm supports Basic only for now
+proxy-windows-login = The proxy asked for a Windows login and it could not be made: { $error }
+sspi-no-credentials = Windows has no credentials to offer (an account signed in with a Microsoft account or a PIN has none for a proxy). Set the proxy user name and password in the session options instead.
+sspi-denied = Windows refused the login.
+sspi-bad-token = the proxy sent something this login did not understand
+proxy-schemes = The proxy only takes these logins: { $schemes }; NativeTerm supports Basic, NTLM and Negotiate
 
 ## rz / sz (--zmodem)
 zmodem-pick-folder = The server is sending files (sz): choose a folder to save them in…

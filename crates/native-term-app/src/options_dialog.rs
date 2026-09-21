@@ -276,6 +276,7 @@ impl OptionsDialog {
         }
         if kind == proxy::Kind::Http {
             ui.weak(t!("proxy-basic-note"));
+            ui.weak(t!("proxy-windows-note"));
         }
         ui.weak(t!("password-warning"));
     }

@@ -218,6 +218,7 @@ proxy-password-none = 还没有保存这个代理登录的密码：连接会失�
 proxy-password-saved = 密码已保存在 Windows 凭据管理器，ssh 配置里只有用户名。
 proxy-password-refused = 代理拒绝过这个密码，所以不再发送（以免账号被锁）。请保存正确的密码。
 proxy-basic-note = HTTP 代理的密码以 Basic 方式发送：只做了编码、没有加密，和代理之间的网络上可以看到。
+proxy-windows-note = 要求 Windows 登录（NTLM 或 Negotiate）的代理不需要在这里填密码：Windows 会用你当前登录的账户应答。只有当代理要用另一个账户时才填用户名和密码。
 opt-preferred-authentications = 认证方式及顺序
 opt-pubkey-authentication = 公钥
 opt-password-authentication = 密码

@@ -62,7 +62,11 @@ proxy-login-refused = 代理拒绝了用户名或密码（已标记，不会再�
 proxy-password-refused = 这个代理密码之前被拒绝过，不会再发送：请在会话选项的"代理"里保存新密码
 proxy-no-password = 没有保存代理 { $proxy } 的密码：请在会话选项的"代理"里保存
 proxy-login-too-long = SOCKS5 的用户名和密码各不能超过 255 字节
-proxy-schemes = 代理只接受这些登录方式：{ $schemes }；NativeTerm 目前只支持 Basic
+proxy-windows-login = 代理要求 Windows 登录，但登录无法建立：{ $error }
+sspi-no-credentials = Windows 没有可用的登录凭据（用 Microsoft 账户或 PIN 登录的账户没有能给代理用的密码）。请改在会话选项里填代理的用户名和密码。
+sspi-denied = Windows 拒绝了这次登录。
+sspi-bad-token = 代理发来的内容这个登录方式看不懂
+proxy-schemes = 代理只接受这些登录方式：{ $schemes }；NativeTerm 支持 Basic、NTLM 和 Negotiate
 
 ## rz / sz (--zmodem)
 zmodem-pick-folder = 服务器要发送文件（sz）：请选择保存到哪个文件夹…

@@ -631,7 +631,15 @@
 - [x] Proxy logins: user name in the URL, password in Credential Manager
       (`NativeTerm/proxy/<url>`); SOCKS5 RFC 1929, HTTP Basic, SOCKS4 user
       id; a refused password is marked and not retried
-- [ ] NTLM / Negotiate proxy logins
+- [x] NTLM / Negotiate proxy logins (`shim/sspi.rs`): a proxy that
+      asks for a Windows login gets one, over the three rounds NTLM needs
+      on one connection. Windows makes the tokens, from the credentials
+      the person is signed in with when nothing is configured (no
+      password to type or store) or from the proxy user name and password
+      when there is one. Negotiate is preferred over NTLM where both are
+      offered. Where Windows has no credentials to offer — an account
+      signed in with a Microsoft account or a PIN — the tab says so and
+      what to do instead, rather than a number
 - [x] rz / sz (ZMODEM) in every SSH tab: our fork of Win32-OpenSSH
       (`fivetime/openssh-portable`, branch `nativeterm`: a session channel
       filter) hands transfers to `nativeterm-shim --zmodem` (crate

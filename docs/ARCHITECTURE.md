@@ -530,7 +530,27 @@ shim `proxy.rs`).
   until a new one is saved: tabs reconnecting and background checks
   retrying it could lock a directory account. Buffers holding the
   password are zeroed after sending.
-- **Not yet:** NTLM / Negotiate (Kerberos) proxy logins.
+- **Windows logins (NTLM, Negotiate):** a proxy that answers a
+  `CONNECT` with `Proxy-Authenticate: NTLM` or `Negotiate` wants a
+  handshake rather than a password — two or three requests on **one**
+  connection, each carrying a token base64 in `Proxy-Authorization`.
+  Implemented (`shim/sspi.rs`) with SSPI (`AcquireCredentialsHandleW`,
+  `InitializeSecurityContextW` against `HTTP/<proxy host>`): Windows
+  makes the tokens, from the credentials the person is signed in with
+  when nothing is configured, or from the proxy user name and password
+  when there is one. Negotiate is preferred where both are offered. The
+  refusal page a proxy sends with each 407 is read and discarded, or it
+  would be taken for the next answer. A proxy that goes on refusing
+  after the last token, or answers without one, has refused the person:
+  that is a refused login, not a broken handshake. Where Windows has no
+  credentials to offer (`SEC_E_NO_CREDENTIALS` — an account signed in
+  with a Microsoft account or a PIN), the tab says so and points at the
+  user name and password fields instead of printing a number. No crate:
+  the `sspi` crate carries its own NTLM and Kerberos and a large
+  dependency tree for what is a handful of calls into `secur32.dll`.
+  Tested with real tokens against a scripted proxy in unit tests, and
+  end to end with the shim binary against a local fake proxy: Basic,
+  then NTLM type 1, then type 3, then the relay.
 - **No crate:** the `socks` crate (sync, SOCKS4/5) last released in 2022
   and pulls in the old `winapi`; the three handshakes are a few dozen
   lines each, tested against in-memory proxies, and end to end against a

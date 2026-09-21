@@ -120,7 +120,7 @@ fn connect(proxy: &Proxy, host: &str, port: u16) -> Result<TcpStream, Fail> {
     let done = match proxy.kind {
         Kind::Socks5 => socks5(&mut stream, host, port, login),
         Kind::Socks4 => socks4(&mut stream, host, port, user),
-        Kind::Http => http(&mut stream, host, port, login),
+        Kind::Http => http(&mut stream, &proxy.host, host, port, login),
     };
     drop(secret);
     if done == Err(Fail::Login) && proxy.takes_password() {
@@ -254,23 +254,43 @@ pub(crate) fn socks4(stream: &mut (impl Read + Write), host: &str, port: u16, us
     }
 }
 
-/// HTTP `CONNECT`, with `Basic` authorization if a login is given. The
-/// answer is read a byte at a time so nothing after its headers (the
-/// server's first bytes) is taken from ssh.
-pub(crate) fn http(stream: &mut (impl Read + Write), host: &str, port: u16, login: Login) -> Result<(), Fail> {
-    let target = if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") };
-    let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
-    if let Some((user, password)) = login {
-        let mut pair = format!("{user}:{password}");
-        request.push_str(&format!("Proxy-Authorization: Basic {}\r\n", base64(pair.as_bytes())));
-        // SAFETY: zeros are valid UTF-8
-        unsafe { pair.as_bytes_mut().fill(0) };
+/// At most this many requests on one connection: a Windows login takes
+/// three (the empty one, the challenge, the answer).
+const ROUNDS: usize = 4;
+
+/// What the proxy said to a `CONNECT`.
+struct Answer {
+    /// The first line, as it stands.
+    status: String,
+    code: Option<u16>,
+    /// Whether it looks like HTTP at all.
+    http: bool,
+    /// The logins it offers, in its own order.
+    schemes: Vec<String>,
+    /// The token of `scheme`, if it sent one.
+    token: Option<(String, Vec<u8>)>,
+    /// `Content-Length` of the page it sent with a refusal.
+    body: usize,
+    chunked: bool,
+}
+
+impl Answer {
+    /// Whether `Basic` is on offer (a proxy that names nothing takes it).
+    fn takes_basic(&self) -> bool {
+        self.schemes.is_empty() || self.schemes.iter().any(|s| s.eq_ignore_ascii_case("basic"))
     }
-    request.push_str("\r\n");
-    let written = stream.write_all(request.as_bytes());
-    // SAFETY: zeros are valid UTF-8
-    unsafe { request.as_bytes_mut().fill(0) };
-    written.map_err(io_error)?;
+
+    /// Its token for `scheme`, if that is the one it answered with.
+    fn token_for(&self, scheme: &str) -> Option<&[u8]> {
+        let (named, token) = self.token.as_ref()?;
+        named.eq_ignore_ascii_case(scheme).then_some(token.as_slice())
+    }
+}
+
+/// Reads the head of one answer a byte at a time, so nothing after it
+/// (the server's first bytes) is taken from ssh, then the page it sent
+/// with a refusal, which would otherwise be read as the next answer.
+fn answer(stream: &mut (impl Read + Write)) -> Result<Answer, Fail> {
     let mut head = Vec::new();
     let mut byte = [0u8; 1];
     while !head.ends_with(b"\r\n\r\n") {
@@ -284,26 +304,132 @@ pub(crate) fn http(stream: &mut (impl Read + Write), host: &str, port: u16, logi
     }
     let text = String::from_utf8_lossy(&head);
     let status = text.lines().next().unwrap_or_default().trim().to_string();
-    let code = status.split_whitespace().nth(1).and_then(|c| c.parse::<u16>().ok());
-    // the ways the proxy accepts a login
-    let schemes: Vec<String> = text
-        .lines()
-        .filter_map(|l| l.split_once(':'))
-        .filter(|(name, _)| name.trim().eq_ignore_ascii_case("proxy-authenticate"))
-        .filter_map(|(_, value)| value.split_whitespace().next().map(str::to_string))
-        .collect();
-    let basic = schemes.is_empty() || schemes.iter().any(|s| s.eq_ignore_ascii_case("basic"));
-    match code {
-        _ if !status.starts_with("HTTP/") => Err(Fail::Other(t!("proxy-not-http"))),
-        Some(200..=299) => Ok(()),
-        Some(407) if !basic => Err(Fail::Other(t!("proxy-schemes", schemes = schemes.join(", ")))),
-        Some(407) if login.is_some() => Err(Fail::Login),
-        Some(407) => Err(Fail::Other(t!("proxy-needs-login"))),
-        _ => Err(Fail::Other(t!("proxy-refused", reason = status))),
+    let header = |name: &str| -> Vec<String> {
+        text.lines()
+            .filter_map(|l| l.split_once(':'))
+            .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.trim().to_string())
+            .collect()
+    };
+    let offers = header("proxy-authenticate");
+    let mut answer = Answer {
+        code: status.split_whitespace().nth(1).and_then(|c| c.parse().ok()),
+        http: status.starts_with("HTTP/"),
+        status,
+        schemes: offers.iter().filter_map(|o| o.split_whitespace().next().map(str::to_string)).collect(),
+        token: offers.iter().find_map(|offer| {
+            let (scheme, token) = offer.split_once(' ')?;
+            Some((scheme.to_string(), unbase64(token.trim())?))
+        }),
+        body: header("content-length").first().and_then(|v| v.trim().parse().ok()).unwrap_or(0),
+        chunked: header("transfer-encoding").iter().any(|v| v.to_lowercase().contains("chunked")),
+    };
+    if answer.code != Some(200) && answer.body > 0 && answer.body < 1024 * 1024 {
+        let mut page = vec![0u8; answer.body];
+        if stream.read_exact(&mut page).is_err() {
+            answer.body = 0;
+        }
     }
+    Ok(answer)
 }
 
-/// Standard base64 with padding.
+/// HTTP `CONNECT`, with a login if the proxy wants one: `Basic` when a
+/// user name and password are configured, or a Windows login (NTLM,
+/// Negotiate) through SSPI, which needs nothing configured — Windows
+/// answers with the credentials the person is signed in with. Both are
+/// kept to one connection, as NTLM requires.
+pub(crate) fn http(
+    stream: &mut (impl Read + Write),
+    proxy: &str,
+    host: &str,
+    port: u16,
+    login: Login,
+) -> Result<(), Fail> {
+    let target = if host.contains(':') { format!("[{host}]:{port}") } else { format!("{host}:{port}") };
+    let mut authorization = login.map(|(user, password)| {
+        let mut pair = format!("{user}:{password}");
+        let header = format!("Basic {}", base64(pair.as_bytes()));
+        // SAFETY: zeros are valid UTF-8
+        unsafe { pair.as_bytes_mut().fill(0) };
+        header
+    });
+    let mut windows: Option<crate::sspi::Handshake> = None;
+    let mut sent_token = false;
+    for _ in 0..ROUNDS {
+        let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
+        if let Some(header) = authorization.take() {
+            request.push_str(&format!("Proxy-Authorization: {header}\r\n"));
+        }
+        request.push_str("\r\n");
+        let written = stream.write_all(request.as_bytes());
+        // SAFETY: zeros are valid UTF-8
+        unsafe { request.as_bytes_mut().fill(0) };
+        written.map_err(io_error)?;
+
+        let answer = answer(stream)?;
+        match answer.code {
+            _ if !answer.http => return Err(Fail::Other(t!("proxy-not-http"))),
+            Some(200..=299) => return Ok(()),
+            Some(407) => {}
+            _ => return Err(Fail::Other(t!("proxy-refused", reason = answer.status))),
+        }
+        // a login Windows can answer itself, with or without a user name
+        if let Some(scheme) = crate::sspi::supported(&answer.schemes) {
+            if answer.chunked {
+                return Err(Fail::Other(t!("proxy-schemes", schemes = answer.schemes.join(", "))));
+            }
+            if windows.is_none() {
+                windows = Some(
+                    crate::sspi::Handshake::start(scheme, proxy, login)
+                        .map_err(|e| Fail::Other(t!("proxy-windows-login", error = e)))?,
+                );
+            }
+            let handshake = windows.as_mut().expect("just made");
+            let token = answer.token_for(scheme);
+            // the login was made, or we sent a token and it came back
+            // with nothing to carry on with: it has refused the person
+            if handshake.finished() || (sent_token && token.is_none()) {
+                return Err(Fail::Login);
+            }
+            match handshake.next(token) {
+                // nothing more to send and still refused: it said no
+                Ok(None) => return Err(Fail::Login),
+                Ok(Some(token)) => {
+                    authorization = Some(format!("{scheme} {}", base64(&token)));
+                    sent_token = true;
+                    continue;
+                }
+                Err(e) => return Err(Fail::Other(t!("proxy-windows-login", error = e))),
+            }
+        }
+        return match (answer.takes_basic(), login.is_some()) {
+            (false, _) => Err(Fail::Other(t!("proxy-schemes", schemes = answer.schemes.join(", ")))),
+            (true, true) => Err(Fail::Login),
+            (true, false) => Err(Fail::Other(t!("proxy-needs-login"))),
+        };
+    }
+    Err(Fail::Login)
+}
+
+/// base64 back to bytes; `None` if it isn't base64.
+fn unbase64(text: &str) -> Option<Vec<u8>> {
+    const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let text = text.trim_end_matches('=');
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let mut bits = 0u32;
+    let mut have = 0u32;
+    for c in text.bytes() {
+        let value = ABC.iter().position(|a| *a == c)? as u32;
+        bits = (bits << 6) | value;
+        have += 6;
+        if have >= 8 {
+            have -= 8;
+            out.push((bits >> have) as u8);
+        }
+    }
+    Some(out)
+}
+
 fn base64(data: &[u8]) -> String {
     const ABC: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
@@ -360,12 +486,38 @@ mod tests {
     /// A proxy's side of a handshake: what it answers, and what it got.
     struct Fake {
         answer: io::Cursor<Vec<u8>>,
+        /// What it answers to each further request, in order.
+        more: std::collections::VecDeque<Vec<u8>>,
         got: Vec<u8>,
+        /// Requests seen (a request ends with a blank line).
+        requests: usize,
     }
 
     impl Fake {
         fn new(answer: &[u8]) -> Fake {
-            Fake { answer: io::Cursor::new(answer.to_vec()), got: Vec::new() }
+            Fake {
+                answer: io::Cursor::new(answer.to_vec()),
+                more: std::collections::VecDeque::new(),
+                got: Vec::new(),
+                requests: 0,
+            }
+        }
+
+        /// A proxy that answers the first request with the first of
+        /// `answers`, the second with the second, and so on.
+        fn talking(answers: &[&[u8]]) -> Fake {
+            let mut fake = Fake::new(b"");
+            fake.more = answers.iter().map(|a| a.to_vec()).collect();
+            fake
+        }
+
+        /// The requests it was sent, as text.
+        fn sent(&self) -> Vec<String> {
+            String::from_utf8_lossy(&self.got)
+                .split("\r\n\r\n")
+                .filter(|r| !r.trim().is_empty())
+                .map(str::to_string)
+                .collect()
         }
     }
 
@@ -378,6 +530,12 @@ mod tests {
     impl Write for Fake {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             self.got.extend_from_slice(buf);
+            if self.got.ends_with(b"\r\n\r\n") {
+                self.requests += 1;
+                if let Some(next) = self.more.pop_front() {
+                    self.answer = io::Cursor::new(next);
+                }
+            }
             Ok(buf.len())
         }
         fn flush(&mut self) -> io::Result<()> {
@@ -458,34 +616,118 @@ mod tests {
     #[test]
     fn http_connect() {
         let mut fake = Fake::new(b"HTTP/1.1 200 Connection established\r\nProxy-Agent: x\r\n\r\nSSH-2.0");
-        http(&mut fake, "db.lan", 22, None).unwrap();
+        http(&mut fake, "gw", "db.lan", 22, None).unwrap();
         assert_eq!(fake.got, b"CONNECT db.lan:22 HTTP/1.1\r\nHost: db.lan:22\r\n\r\n");
         let mut left = Vec::new();
         fake.read_to_end(&mut left).unwrap();
         assert_eq!(left, b"SSH-2.0");
         let mut fake = Fake::new(b"HTTP/1.0 200 OK\r\n\r\n");
-        http(&mut fake, "fe80::1", 22, None).unwrap();
+        http(&mut fake, "gw", "fe80::1", 22, None).unwrap();
         assert!(String::from_utf8_lossy(&fake.got).starts_with("CONNECT [fe80::1]:22 "));
         let mut fake = Fake::new(b"HTTP/1.1 407 Proxy Authentication Required\r\n\r\n");
-        assert_eq!(http(&mut fake, "db", 22, None), other(t!("proxy-needs-login")));
+        assert_eq!(http(&mut fake, "gw", "db", 22, None), other(t!("proxy-needs-login")));
         let mut fake = Fake::new(b"HTTP/1.1 403 Forbidden\r\n\r\n");
-        assert!(http(&mut fake, "db", 22, None).unwrap_err().to_string().contains("403 Forbidden"));
+        assert!(http(&mut fake, "gw", "db", 22, None).unwrap_err().to_string().contains("403 Forbidden"));
         let mut fake = Fake::new(&[5, 0]);
-        assert_eq!(http(&mut fake, "db", 22, None), other(t!("proxy-not-http")));
+        assert_eq!(http(&mut fake, "gw", "db", 22, None), other(t!("proxy-not-http")));
     }
 
     #[test]
     fn http_with_a_login() {
         let mut fake = Fake::new(b"HTTP/1.1 200 OK\r\n\r\n");
-        http(&mut fake, "db", 22, Some(("Aladdin", "open sesame"))).unwrap();
+        http(&mut fake, "gw", "db", 22, Some(("Aladdin", "open sesame"))).unwrap();
         let sent = String::from_utf8(fake.got).unwrap();
         assert!(sent.contains("\r\nProxy-Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==\r\n\r\n"), "{sent}");
         let refused = b"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"x\"\r\n\r\n";
-        assert_eq!(http(&mut Fake::new(refused), "db", 22, Some(("a", "b"))), Err(Fail::Login));
-        // a proxy that only takes Windows logins
-        let ntlm = b"HTTP/1.1 407 Denied\r\nProxy-Authenticate: NTLM\r\nProxy-Authenticate: Negotiate\r\n\r\n";
-        let error = http(&mut Fake::new(ntlm), "db", 22, Some(("a", "b"))).unwrap_err().to_string();
-        assert_eq!(error, t!("proxy-schemes", schemes = "NTLM, Negotiate"));
+        assert_eq!(http(&mut Fake::new(refused), "gw", "db", 22, Some(("a", "b"))), Err(Fail::Login));
+        // a proxy that takes neither Basic nor anything Windows answers
+        let digest = b"HTTP/1.1 407 Denied\r\nProxy-Authenticate: Digest realm=\"x\"\r\n\r\n";
+        let error = http(&mut Fake::new(digest), "gw", "db", 22, Some(("a", "b"))).unwrap_err().to_string();
+        assert_eq!(error, t!("proxy-schemes", schemes = "Digest"));
+    }
+
+    /// A `Proxy-Authenticate: NTLM` challenge as a proxy sends it: a
+    /// type 2 message with a target name, the challenge and a target
+    /// info block (NTLMv2 needs one).
+    fn ntlm_challenge() -> Vec<u8> {
+        let target: Vec<u8> = "GW".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let info = [0u8; 4]; // MsvAvEOL
+        let target_at = 56u32;
+        let mut message = Vec::new();
+        message.extend(b"NTLMSSP\0");
+        message.extend(2u32.to_le_bytes()); // type 2
+        message.extend((target.len() as u16).to_le_bytes());
+        message.extend((target.len() as u16).to_le_bytes());
+        message.extend(target_at.to_le_bytes());
+        // unicode | request target | NTLM | always sign | target type
+        // server | extended session security | target info
+        message.extend(0x0088_8205u32.to_le_bytes());
+        message.extend([1, 2, 3, 4, 5, 6, 7, 8]); // the challenge
+        message.extend([0u8; 8]); // reserved
+        message.extend((info.len() as u16).to_le_bytes());
+        message.extend((info.len() as u16).to_le_bytes());
+        message.extend((target_at + target.len() as u32).to_le_bytes());
+        message.extend([6, 1, 0, 0, 0, 0, 0, 15]); // version
+        message.extend(target);
+        message.extend(info);
+        message
+    }
+
+    /// NTLM: three requests on one connection, the tokens made by
+    /// Windows. A user name and password are given here because the
+    /// machine this runs on may have no credentials of its own to offer
+    /// (`sspi::tests`); the path through the proxy is the same either
+    /// way.
+    #[test]
+    fn a_windows_login_is_answered_by_windows() {
+        let challenge = format!(
+            "HTTP/1.1 407 Denied\r\nProxy-Authenticate: NTLM {}\r\nContent-Length: 5\r\n\r\nhello",
+            base64(&ntlm_challenge())
+        );
+        let mut fake = Fake::talking(&[
+            b"HTTP/1.1 407 Denied\r\nProxy-Authenticate: NTLM\r\nProxy-Authenticate: Basic realm=\"x\"\r\nContent-Length: 3\r\n\r\nno!",
+            challenge.as_bytes(),
+            b"HTTP/1.1 200 Connection established\r\n\r\nSSH-2.0",
+        ]);
+        http(&mut fake, "gw.corp", "db.lan", 22, Some((r"CORP\alice", "secret"))).expect("the proxy let us through");
+        let sent = fake.sent();
+        assert_eq!(sent.len(), 3, "{sent:?}");
+        assert!(sent[0].contains("Proxy-Authorization: Basic "), "what was configured, first: {}", sent[0]);
+        let first = sent[1].lines().find_map(|l| l.strip_prefix("Proxy-Authorization: NTLM ")).expect(&sent[1]);
+        assert!(unbase64(first).unwrap().starts_with(b"NTLMSSP\0"), "a real token");
+        let second = sent[2].lines().find_map(|l| l.strip_prefix("Proxy-Authorization: NTLM ")).expect(&sent[2]);
+        let answer = unbase64(second).unwrap();
+        assert!(answer.starts_with(b"NTLMSSP\0"), "a real token");
+        assert_eq!(answer[8..12], 3u32.to_le_bytes(), "the answer to the challenge (type 3)");
+        // the page the proxy sent with each refusal was read, not left
+        // in the stream
+        let mut left = Vec::new();
+        fake.read_to_end(&mut left).unwrap();
+        assert_eq!(left, b"SSH-2.0");
+    }
+
+    /// The same, but the proxy says no at the end.
+    #[test]
+    fn a_windows_login_the_proxy_refuses_is_a_refusal() {
+        let challenge =
+            format!("HTTP/1.1 407 Denied\r\nProxy-Authenticate: NTLM {}\r\n\r\n", base64(&ntlm_challenge()));
+        let mut fake = Fake::talking(&[
+            b"HTTP/1.1 407 Denied\r\nProxy-Authenticate: NTLM\r\n\r\n",
+            challenge.as_bytes(),
+            b"HTTP/1.1 407 Denied\r\nProxy-Authenticate: NTLM\r\n\r\n",
+            b"HTTP/1.1 407 Denied\r\nProxy-Authenticate: NTLM\r\n\r\n",
+        ]);
+        let login = Some((r"CORP\alice", "secret"));
+        assert_eq!(http(&mut fake, "gw.corp", "db.lan", 22, login), Err(Fail::Login));
+    }
+
+    #[test]
+    fn base64_decodes_what_it_encodes() {
+        for text in [b"".as_slice(), b"f", b"fo", b"foo", b"foob", "用户:密".as_bytes()] {
+            assert_eq!(unbase64(&base64(text)).as_deref(), Some(text), "{text:?}");
+        }
+        assert_eq!(unbase64("TlRMTVNTUAABAAAA").unwrap(), b"NTLMSSP\0\x01\0\0\0");
+        assert_eq!(unbase64("not base64!"), None);
     }
 
     #[test]

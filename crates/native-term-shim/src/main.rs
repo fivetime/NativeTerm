@@ -30,6 +30,7 @@ mod preconnect;
 mod proxy;
 mod saved;
 mod ssh;
+mod sspi;
 mod win;
 mod zmodem;
 
