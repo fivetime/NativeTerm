@@ -313,6 +313,10 @@ state-closed = 已关闭
 
 ## 提示
 
+lost-banner = 上次运行的 { $count } 个会话已经没有标签页了。
+lost-banner-moved = 上次运行的 { $count } 个会话已经没有标签页了：程序目录变了，Windows Terminal 恢复的标签页启动的是已经不在的旧助手。
+lost-reopen = 重新打开
+lost-ignore = 不用了
 notice-lost-sessions = 上次运行的 { $count } 个会话已找不到标签
 notice-tab-not-found = { $label }：没有找到它的标签（拆分的标签被选中后才能找到）
 notice-tab-gone = 标签“{ $title }”已不在

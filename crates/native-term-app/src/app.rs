@@ -470,6 +470,32 @@ impl App {
         folder.defaults.get(native_term_config::persistent::KEY).map(str::to_string)
     }
 
+    /// Sessions of the last run whose tabs never turned up: Terminal was
+    /// restarted without them, or it restored them from a program folder
+    /// that has moved, in which case those tabs could not start at all.
+    /// Opening them again is one click.
+    fn lost_banner(&mut self, ui: &mut egui::Ui) {
+        let Some(core) = self.core.clone() else { return };
+        let lost = core.lost_at_start();
+        if lost.is_empty() {
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            let text = match self.profile.moved {
+                true => t!("lost-banner-moved", count = lost.len()),
+                false => t!("lost-banner", count = lost.len()),
+            };
+            ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), text);
+            if ui.button(t!("lost-reopen")).clicked() {
+                self.handle(TreeAction::Open(lost, native_term_platform::Target::Recent));
+                core.forget_lost(true);
+            }
+            if ui.small_button(t!("lost-ignore")).clicked() {
+                core.forget_lost(false);
+            }
+        });
+    }
+
     fn handle(&mut self, action: TreeAction) {
         match action {
             TreeAction::Open(hosts, target) => {
@@ -1787,6 +1813,7 @@ impl crate::window::Ui for App {
             self.profile.banner(ui, &mut self.notices);
             self.agent.banner(ui, self.core.as_ref(), &mut self.show_settings);
             self.storage.banner(ui);
+            self.lost_banner(ui);
             if !self.notices.is_empty() {
                 let mut clear = false;
                 ui.horizontal_wrapped(|ui| {

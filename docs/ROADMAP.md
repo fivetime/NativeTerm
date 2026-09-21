@@ -227,8 +227,14 @@
       wrote are pointed at this copy. A line whose helper **is** on this
       computer is left alone, so a config synced between computers keeps
       working on both (`native-term-config/src/repair.rs`)
-- [ ] The rest of it: tabs restored from an old path detected and
-      reopened (with "resend a missing tab once" below)
+- [x] The rest of it: sessions of the last run whose tabs are not there
+      any more are offered back. NativeTerm used to drop them quietly
+      when their helper was gone; now a line says how many there are,
+      with "Open them again" and "Leave them". After a move it says why:
+      the tabs Terminal restored started a helper that is no longer
+      there. Opening them again also marks the old records as not worth
+      restoring, so a pane Terminal brings back later is not a duplicate
+      (`Core::lost_at_start`, `App::lost_banner`)
 - [x] Startup checks (part): Windows Terminal found (packages, portable,
       unpackaged; `--terminal-dir`), single instance (second start brings
       the first to the front), data folder writable (fallbacks)

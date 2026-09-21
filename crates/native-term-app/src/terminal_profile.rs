@@ -23,13 +23,16 @@ pub struct ProfileSetup {
     backups: PathBuf,
     /// Terminal's own SSH profiles are turned off (`None`: unreadable).
     ssh_hidden: Option<bool>,
+    /// The fragment named another helper at start and was put right: the
+    /// program folder moved (or a second copy had it).
+    pub moved: bool,
 }
 
 impl ProfileSetup {
     pub fn new(install: Install, shim: PathBuf, backups: PathBuf) -> ProfileSetup {
         let root = profile::fragments_root();
         let status = profile::status(&install, root.as_deref(), &shim);
-        let mut setup = ProfileSetup { install, shim, root, status, backups, ssh_hidden: None };
+        let mut setup = ProfileSetup { install, shim, root, status, backups, ssh_hidden: None, moved: false };
         setup.refresh();
         setup
     }
@@ -76,6 +79,7 @@ impl ProfileSetup {
         let Status::Outdated { shim: old } = &self.status else { return None };
         let old = old.clone();
         let root = self.root.clone()?;
+        self.moved = true;
         let result = profile::install(&root, &self.shim, &self.settings_files());
         self.refresh();
         match result {

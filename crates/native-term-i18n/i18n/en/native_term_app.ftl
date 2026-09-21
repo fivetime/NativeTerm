@@ -324,6 +324,10 @@ state-closed = closed
 
 ## Notices
 
+lost-banner = { $count } session(s) from the last run have no tab any more.
+lost-banner-moved = { $count } session(s) from the last run have no tab any more: the program folder moved, so the tabs Windows Terminal restored started a helper that is no longer there.
+lost-reopen = Open them again
+lost-ignore = Leave them
 notice-lost-sessions =
     { $count ->
         [one] One session from the last run has no tab any more

@@ -337,6 +337,10 @@ pub(crate) struct Shared {
     host_labels: Mutex<HashMap<String, String>>,
     /// Each saved host's tab look, by alias (from the app's tree).
     host_looks: Mutex<HashMap<String, native_term_config::appearance::Appearance>>,
+    /// Sessions of the last run whose tabs never turned up, ready to be
+    /// opened again: what to open, and which record it came from (see
+    /// `Core::lost_at_start`).
+    lost_at_start: Mutex<Vec<(String, HostRequest)>>,
     /// Sessions to connect, in order (see `connect_queue`).
     connect_queue: Mutex<Sender<String>>,
 }
@@ -459,6 +463,8 @@ impl Core {
         let mut sessions = Vec::new();
         let mut restorable = Vec::new();
         let mut notices = Vec::new();
+        // sessions of the last run whose tabs are not there any more
+        let mut lost: Vec<(String, HostRequest)> = Vec::new();
         if let Some(registry) = &registry {
             let to_session = |r: Record, state: State| {
                 let mut s = Session::new(r.id, r.terminal_session, r.label, r.alias, state);
@@ -478,6 +484,10 @@ impl Core {
                             if let Err(e) = registry.closed_with_window(&r.id) {
                                 notices.push(format!("state.db: {e}"));
                             }
+                            // NativeTerm didn't close them itself (it was
+                            // killed, or Terminal took them with it), so
+                            // they can be offered back
+                            lost.push((r.id.clone(), HostRequest::new(r.alias.clone(), r.label.clone())));
                             continue;
                         }
                         sessions.push(to_session(r, State::Detached));
@@ -516,6 +526,7 @@ impl Core {
             host_labels: Mutex::new(HashMap::new()),
             host_looks: Mutex::new(HashMap::new()),
             connect_queue: Mutex::new(to_connect),
+            lost_at_start: Mutex::new(lost),
         });
         let queue = Arc::downgrade(&shared);
         std::thread::Builder::new()
@@ -583,9 +594,12 @@ impl Core {
         let grace = Arc::clone(&shared);
         std::thread::Builder::new().name("detached-grace".into()).spawn(move || {
             std::thread::sleep(DETACHED_GRACE);
-            let lost: Vec<String> =
-                lock(&grace.sessions).iter().filter(|s| s.state == State::Detached).map(|s| s.id.clone()).collect();
-            for id in &lost {
+            let lost: Vec<(String, String, String)> = lock(&grace.sessions)
+                .iter()
+                .filter(|s| s.state == State::Detached)
+                .map(|s| (s.id.clone(), s.alias.clone(), s.label.clone()))
+                .collect();
+            for (id, _, _) in &lost {
                 grace.update(id, |s| {
                     if s.state == State::Detached {
                         s.state = State::Gone;
@@ -593,7 +607,13 @@ impl Core {
                 });
             }
             if !lost.is_empty() {
+                // their tabs never came back: Terminal was restarted, or
+                // restored them from a program folder that has moved
+                lock(&grace.lost_at_start).extend(
+                    lost.iter().map(|(id, alias, label)| (id.clone(), HostRequest::new(alias.clone(), label.clone()))),
+                );
                 grace.notice(t!("notice-lost-sessions", count = lost.len()));
+                grace.changed();
             }
         })?;
         Ok(Core { shared })
@@ -881,6 +901,26 @@ impl Core {
     /// Set (or clear) what is typed after each login of a session.
     pub fn set_login_command(&self, id: &str, command: Option<String>) {
         self.shared.update(id, |s| s.on_login = command.filter(|c| !c.trim().is_empty()));
+    }
+
+    /// The sessions of the last run whose tabs never turned up. They can
+    /// be opened again as they were, which is what a moved program folder
+    /// or a restarted Terminal calls for.
+    pub fn lost_at_start(&self) -> Vec<HostRequest> {
+        lock(&self.shared.lost_at_start).iter().map(|(_, request)| request.clone()).collect()
+    }
+
+    /// Forget them. `reopened`: they were just opened again, so a pane
+    /// Terminal brings back later would be a duplicate.
+    pub fn forget_lost(&self, reopened: bool) {
+        let lost = std::mem::take(&mut *lock(&self.shared.lost_at_start));
+        if reopened {
+            for (id, _) in &lost {
+                let id = id.clone();
+                self.shared.db("reopened", move |r| r.not_restorable(&id));
+            }
+        }
+        self.clear_finished();
     }
 
     /// Record sent commands in `dir` (one file per month).

@@ -218,6 +218,15 @@ impl Registry {
         })
     }
 
+    /// No longer worth restoring: its session was opened again by hand,
+    /// so a pane Terminal brings back would only be a duplicate.
+    pub fn not_restorable(&self, id: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("UPDATE sessions SET restorable = 0 WHERE id = ?1", [id])?;
+            Ok(())
+        })
+    }
+
     pub fn open_sessions(&self) -> Result<Vec<Record>> {
         self.query("closed_at IS NULL", [])
     }

@@ -3052,6 +3052,17 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   fail to launch and are reopened from the registry.
 - **Multi-monitor / DPI**: per-monitor DPI awareness (PerMonitorV2 in the
   manifest); sidebar docking and FAB position computed per monitor.
+- **Sessions whose tabs are gone.** At start, a session from `state.db`
+  whose helper process is no longer running had its tab taken with it:
+  NativeTerm marks the record closed-with-window (Terminal may restore
+  the pane) and used to say nothing else. It now offers them back, as a
+  line above the session list with "Open them again" and "Leave them".
+  The same offer covers sessions whose helpers never connect within the
+  grace period. When the fragment had to be put right at start, the line
+  says why: the program folder moved, so the tabs Terminal restored ran
+  a helper that is not there any more. Opening them again marks the old
+  records as no longer restorable, so a pane Terminal brings back later
+  becomes a local shell rather than a second copy of the session.
 - **Resume from sleep**: many sessions reconnect at once; reconnects go
   through the same queue and rate limit as opening a folder, to avoid
   hammering jump hosts.
