@@ -322,6 +322,7 @@ notice-terminal-failed = 无法启动 Windows Terminal：{ $error }
 notice-tabs-pending = { $count } 个标签没有打开：另一个 Terminal 窗口成了活动窗口
 notice-tabs-resent = { $count } 个标签页没有出现在 Windows Terminal 里，已重新打开一次：{ $labels }
 notice-tabs-missing = { $count } 个标签没有出现在 Windows Terminal 中：{ $labels }
+notice-pipe-stranger = 一个不是 NativeTerm 助手的程序试图与 NativeTerm 通信，已拒绝：{ $program }
 notice-pipe-stopped = NativeTerm 的管道服务已停止：{ $error }
 notice-old-shim = 连接进来的 shim 协议版本是 { $protocol }（应为 { $expected }），请更新
 notice-gave-up = { $label }：已重连 { $tries } 次，不再重试

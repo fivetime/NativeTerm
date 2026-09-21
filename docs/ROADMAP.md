@@ -160,8 +160,16 @@
       remote clients rejected, single instance, non-blocking duplex;
       versioned JSON-lines protocol; exit classification (255 and -1 are
       connection-level)
-- [ ] `native-term-session` (rest): session records; verifying the
-      client process path
+- [x] `native-term-session` (rest): the connecting process is checked
+      before a word is exchanged — it must be the very
+      `nativeterm-shim.exe` NativeTerm starts its tabs with
+      (`GetNamedPipeClientProcessId`, then the process image, compared
+      without case and through both paths' real names). Anything else is
+      closed at once and said once, so a program of this user cannot
+      claim a session's GUID and be handed what was meant for that tab.
+      Session records live in `native-term-app::registry` instead of this
+      crate: they are rows of `state.db` and follow the app's session
+      model, while this crate stays the protocol and the pipe
 - [x] `native-term-app` (first slice): core without UI (in-memory
       session registry, pipe server, tab refresh, open / focus /
       reconnect / disconnect / close, adoption of tabs from an earlier
@@ -179,8 +187,13 @@
       user/note/folder, recent hosts first, Enter opens, Esc clears),
       recent hosts, virtualized rows (2000 hosts: 78 MB, idle 0 CPU),
       new/rename folder, new/edit/move/delete host dialogs
-- [ ] `native-term-app` (rest): connection pacing; drag and drop in the
-      tree; multi-select
+- [x] Connection pacing (see the queue above), including a `Connect`
+      that goes down with a link breaking: the shim replays "waiting"
+      when it comes back, and a session that was told to connect is told
+      again rather than waiting forever. It used to make one tab in six
+      hang in "waiting" about half the time
+      (`connect_queue.rs`, `core_portable.rs`)
+- [ ] `native-term-app` (rest): drag and drop in the tree
 - [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
       CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
       6.6 MB working set)

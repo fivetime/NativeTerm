@@ -325,6 +325,8 @@ pub(crate) struct Shared {
     titles_only: std::sync::atomic::AtomicBool,
     /// The Terminal window that was last in front.
     last_terminal: std::sync::atomic::AtomicIsize,
+    /// A program that isn't our helper tried the pipe: said once.
+    told_of_stranger: std::sync::atomic::AtomicBool,
     /// Where sent commands are recorded (`<data dir>\\audit`).
     audit_dir: Mutex<Option<PathBuf>>,
     /// `settings.toml`, once the data directory is known. Without it
@@ -508,6 +510,7 @@ impl Core {
             previews: Default::default(),
             titles_only: Default::default(),
             last_terminal: Default::default(),
+            told_of_stranger: Default::default(),
             audit_dir: Mutex::new(None),
             settings: Mutex::new(None),
             host_labels: Mutex::new(HashMap::new()),
@@ -1471,7 +1474,46 @@ fn serve(shared: Arc<Shared>, mut listener: PipeListener) {
     }
 }
 
+/// Whether two paths name the same program. Windows compares paths
+/// without case, and a program started through a short (8.3) name or a
+/// link still runs the same file, so both are resolved when they can be.
+fn same_program(one: &Path, two: &Path) -> bool {
+    if one.as_os_str().eq_ignore_ascii_case(two.as_os_str()) {
+        return true;
+    }
+    match (std::fs::canonicalize(one), std::fs::canonicalize(two)) {
+        (Ok(one), Ok(two)) => one == two,
+        _ => false,
+    }
+}
+
+/// Only NativeTerm's own helper may speak on the pipe.
+///
+/// The pipe's ACL already keeps other users out (and remote clients are
+/// refused), but any program of this user could otherwise open it, claim
+/// a session's GUID and be handed what was meant for that tab. The
+/// connecting process must therefore be the very `nativeterm-shim.exe`
+/// NativeTerm starts its tabs with (see "Named pipe access" in
+/// `docs/ARCHITECTURE.md`).
+fn our_shim(shared: &Shared, conn: &PipeConnection) -> Result<(), String> {
+    let pid = conn.client_pid().map_err(|e| e.to_string())?;
+    let image = native_term_win::desktop::process_image(pid).ok_or_else(|| format!("pid {pid}"))?;
+    match same_program(&image, shared.terminal.shim()) {
+        true => Ok(()),
+        false => Err(image.display().to_string()),
+    }
+}
+
 fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
+    if let Err(what) = our_shim(shared, &conn) {
+        crate::diag::line(&format!("a program that is not our helper spoke on the pipe: {what}"));
+        // said once: a program that loops must not fill the window
+        if !shared.told_of_stranger.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            shared.notice(t!("notice-pipe-stranger", program = what));
+        }
+        conn.close();
+        return;
+    }
     let Ok(Some(ShimMessage::Hello { protocol, role, pid, wt_session, session, alias, terminal_window })) =
         conn.recv::<ShimMessage>(Duration::from_secs(10))
     else {
@@ -1635,9 +1677,11 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     loop {
         match conn.recv::<ShimMessage>(Duration::from_secs(3600)) {
             Ok(Some(message)) => {
-                let (window, retry, login) = shared
+                let (window, retry, login, lost_connect) = shared
                     .update(&id, |s| {
                         let was_connected = s.state == State::Connected;
+                        // we had told it to connect (see below)
+                        let was_connecting = s.state == State::Connecting;
                         apply(s, &message);
                         let logged_in = s.state == State::Connected && !was_connected;
                         let login = if logged_in { s.on_login.clone() } else { None };
@@ -1647,9 +1691,17 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                             _ if exited && s.retrying() => Some(Retry::AfterFailedRetry),
                             _ => None,
                         };
-                        (s.location.as_ref().map(|l| l.window), retry.map(|r| (s.attempt, r)), login)
+                        // it says it is waiting although it was told to
+                        // connect: the message went down with a link that
+                        // broke (the shim replays its state when it comes
+                        // back), so it has to be told again
+                        let lost = was_connecting && matches!(message, ShimMessage::Waiting);
+                        (s.location.as_ref().map(|l| l.window), retry.map(|r| (s.attempt, r)), login, lost)
                     })
-                    .map_or((None, None, None), |(w, r, l)| (Some(w), Some(r), l));
+                    .map_or((None, None, None, false), |(w, r, l, lost)| (Some(w), Some(r), l, lost));
+                if lost_connect {
+                    shared.queue_connect(std::slice::from_ref(&id));
+                }
                 if let Some(command) = login {
                     Core { shared: Arc::clone(shared) }.send_text(std::slice::from_ref(&id), &command, true);
                 }

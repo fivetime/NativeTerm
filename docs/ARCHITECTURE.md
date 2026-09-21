@@ -2954,6 +2954,14 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   the current user, and NativeTerm verifies the connecting process
   (`GetNamedPipeClientProcessId`) is a `nativeterm-shim` from its own
   install directory.
+  Implemented (`Core::our_shim`): the check runs before the first message
+  is read. The peer's image path must be the shim NativeTerm opens its
+  tabs with — compared without case, and, when that differs, through
+  both paths' real names, so a short (8.3) name or a link still matches.
+  Anything else has its connection closed at once; the program is named
+  in the log every time and in a notice the first time, so a loop cannot
+  fill the window. Live-tested by having the test program itself say
+  hello (`core_portable.rs`).
 - **Pipe name per user and logon session**:
   `\\.\pipe\nativeterm-<user SID>-<logon session id>`. With several
   Windows users signed in (or fast user switching), each shim reaches only
@@ -3057,6 +3065,15 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
     automatic reconnects queue too. When a batch of tabs has been opened,
     its first tab is selected. Live test: six hosts through the queue
     (1.5 s), then "Connect all" on them.
+  - **A `Connect` can be lost.** A shim whose pipe connection breaks
+    reconnects and replays the state it last reported, so a session that
+    was told to connect can come back saying "waiting" — the message went
+    down with the link. Two things make sure it is told again: the queue
+    puts a session back in its place when the link is gone or the send
+    fails between choosing it and telling it, and a "waiting" that
+    arrives while NativeTerm believes the session is connecting puts it
+    back in the queue. Without this, one tab in six hung in "waiting"
+    about half the time when six were opened at once.
 - **Elevation decides which Terminal instance a tab joins** (verified,
   2026-09-17):
   - `wt` started from an elevated process joins (or starts) the

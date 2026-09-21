@@ -337,6 +337,7 @@ notice-terminal-failed = Windows Terminal could not be started: { $error }
 notice-tabs-pending = { $count } tabs were not opened: another Terminal window became active
 notice-tabs-resent = { $count } tabs didn't appear in Windows Terminal and were asked for again: { $labels }
 notice-tabs-missing = { $count } tabs didn't appear in Windows Terminal: { $labels }
+notice-pipe-stranger = A program that is not NativeTerm's helper tried to talk to NativeTerm and was refused: { $program }
 notice-pipe-stopped = NativeTerm's pipe server stopped: { $error }
 notice-old-shim = A shim with protocol { $protocol } connected (expected { $expected }); update it
 notice-gave-up = { $label }: gave up reconnecting after { $tries } tries

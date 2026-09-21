@@ -166,6 +166,41 @@ fn a_tab_that_never_appeared_is_asked_for_again() {
     wait_until(&core, &all, "both closed", |s| s.iter().all(|s| s.state == State::Closed));
 }
 
+/// Only NativeTerm's own helper may speak on the pipe: this test program
+/// is not it, so its Hello is refused (see "Named pipe access").
+#[test]
+#[ignore = "needs a portable Windows Terminal"]
+fn a_program_that_is_not_the_helper_is_refused() {
+    let core = core();
+    let name = native_term_session::pipe::pipe_name().unwrap();
+    let conn = native_term_session::pipe::connect(&name, Duration::from_secs(2)).expect("the pipe is there");
+    let hello = native_term_session::protocol::ShimMessage::Hello {
+        protocol: native_term_session::PROTOCOL_VERSION,
+        role: native_term_session::protocol::Role::Shim,
+        pid: std::process::id(),
+        wt_session: None,
+        session: Some("nt-not-a-shim".to_string()),
+        alias: Some("nativeterm-test.invalid".to_string()),
+        terminal_window: None,
+    };
+    let _ = conn.send(&hello);
+    let answer = conn.recv::<native_term_session::protocol::AppMessage>(Duration::from_secs(2));
+    assert!(matches!(answer, Ok(None) | Err(_)), "a stranger was welcomed onto the pipe: {answer:?}");
+    assert!(!core.sessions().iter().any(|s| s.id == "nt-not-a-shim"), "and no session was made for it");
+    let started = Instant::now();
+    let told = loop {
+        let notices = core.take_notices();
+        if notices.iter().any(|n| n.contains("core_portable")) {
+            break true;
+        }
+        if started.elapsed() > Duration::from_secs(5) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(told, "the user is told which program it was");
+}
+
 /// Tab titles of a window, now.
 fn tab_names(core: &Core, window: isize) -> Vec<String> {
     let snapshot = core.terminal().snapshot(&Default::default());

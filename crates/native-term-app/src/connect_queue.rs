@@ -65,14 +65,14 @@ pub(crate) fn run(shared: Weak<Shared>, ids: Receiver<String>) {
             }
             match ready(&shared, id) {
                 Ready::Yes => {
-                    chosen = Some(id.clone());
+                    chosen = Some((id.clone(), *since));
                     false
                 }
                 Ready::NotYet => since.elapsed() < SHIM_WAIT,
                 Ready::Never => false,
             }
         });
-        let Some(id) = chosen else {
+        let Some((id, since)) = chosen else {
             drop(shared);
             std::thread::sleep(POLL);
             continue;
@@ -82,16 +82,20 @@ pub(crate) fn run(shared: Weak<Shared>, ids: Receiver<String>) {
             std::thread::sleep(POLL);
         }
         let link = lock(&shared.sessions).iter().find(|s| s.id == id).and_then(|s| s.link.clone());
-        if let Some(link) = link {
-            if link.send(&AppMessage::Connect).is_ok() {
-                // counted as connecting right away, not only when the shim says so
-                if let Some(s) = lock(&shared.sessions).iter_mut().find(|s| s.id == id) {
-                    if s.state.can_connect() {
-                        s.state = State::Connecting;
-                    }
+        let told = link.is_some_and(|link| link.send(&AppMessage::Connect).is_ok());
+        if told {
+            // counted as connecting right away, not only when the shim says so
+            if let Some(s) = lock(&shared.sessions).iter_mut().find(|s| s.id == id) {
+                if s.state.can_connect() {
+                    s.state = State::Connecting;
                 }
-                shared.changed();
             }
+            shared.changed();
+        } else if since.elapsed() < SHIM_WAIT {
+            // the link went away between looking and telling (a shim whose
+            // connection broke comes back): it keeps its place in the queue
+            // instead of waiting for a word that will never come
+            pending.insert(0, (id, since));
         }
         drop(shared);
         std::thread::sleep(SPACING);

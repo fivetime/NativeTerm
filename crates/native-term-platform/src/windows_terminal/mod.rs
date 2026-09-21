@@ -101,6 +101,11 @@ impl WindowsTerminal {
         &self.install
     }
 
+    /// The helper every tab runs (what a client on the pipe must be).
+    pub fn shim(&self) -> &Path {
+        &self.shim
+    }
+
     pub fn windows(&self) -> Vec<TerminalWindow> {
         window::terminal_windows(&self.install)
     }
