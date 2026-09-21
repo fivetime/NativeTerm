@@ -584,7 +584,13 @@ impl Runner {
         if !hide {
             self.docking.hidden = false;
         }
-        self.docking.slide = Some((Slide { from, to, started: Instant::now() }, hide));
+        // someone who turned Windows' animations off gets none of ours:
+        // the window arrives at once (the same path, already over)
+        let started = match native_term_win::desktop::animations() {
+            true => Instant::now(),
+            false => Instant::now().checked_sub(dock::SLIDE).unwrap_or_else(Instant::now),
+        };
+        self.docking.slide = Some((Slide { from, to, started }, hide));
         self.docking.leave_check = None;
     }
 

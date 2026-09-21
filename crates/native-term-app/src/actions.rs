@@ -151,7 +151,12 @@ impl Core {
     /// Close these sessions (after a confirmation); locked ones stay.
     pub fn close_ids(&self, ids: &[String]) {
         let locked: Vec<String> = self.sessions().into_iter().filter(|s| s.locked).map(|s| s.id).collect();
-        for id in ids.iter().filter(|id| !locked.contains(id)) {
+        let closing: Vec<&String> = ids.iter().filter(|id| !locked.contains(id)).collect();
+        // closing several tabs at once leaves nothing on screen to say so
+        if closing.len() > 1 {
+            crate::toast::done(crate::t!("toast-closed", count = closing.len()));
+        }
+        for id in closing {
             self.close(id);
         }
     }

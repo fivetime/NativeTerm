@@ -940,3 +940,22 @@ cleanup-ssh-hint = These do no harm: ssh skips the NativeTerm keys, and the Incl
 cleanup-ssh-none = NativeTerm has written nothing into your ssh configuration.
 cleanup-files = Your sessions themselves are { $count } file(s) in the session folder; they are yours and stay.
 cleanup-copy = Copy this list
+
+# short messages in the corner of the window
+toast-closed = Closed { $count } { $count ->
+        [one] tab
+       *[other] tabs
+    }
+toast-connecting = Connecting { $count } sessions
+
+# the look on top of light and dark
+theme-look-label = Look
+theme-look-hint = Colours and spacing on top of light and dark. Every NativeTerm window follows it.
+theme-look-plain = Standard
+theme-look-accent = Windows accent colour
+theme-look-dim = Soft
+theme-look-compact = Compact
+toast-cleared = Cleared { $count } finished { $count ->
+        [one] session
+       *[other] sessions
+    }

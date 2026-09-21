@@ -20,6 +20,7 @@ pub mod settings;
 pub mod shortcuts;
 pub mod tab_menu;
 pub mod tmux_send;
+pub mod toast;
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -1107,6 +1108,9 @@ impl Core {
     /// Connect several sessions through the connection queue, so jump
     /// hosts and the machine aren't hit all at once.
     pub fn connect_all(&self, ids: Vec<String>) {
+        if ids.len() > 1 {
+            toast::info(t!("toast-connecting", count = ids.len()));
+        }
         self.shared.queue_connect(&ids);
     }
 
@@ -1247,7 +1251,15 @@ impl Core {
 
     /// Forget sessions that are no longer open.
     pub fn clear_finished(&self) {
-        lock(&self.shared.sessions).retain(|s| s.state.is_open());
+        let mut sessions = lock(&self.shared.sessions);
+        let before = sessions.len();
+        sessions.retain(|s| s.state.is_open());
+        let gone = before - sessions.len();
+        drop(sessions);
+        // the rows simply vanish; this says how many did
+        if gone > 0 {
+            toast::done(t!("toast-cleared", count = gone));
+        }
         self.shared.changed();
     }
 

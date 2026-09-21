@@ -67,9 +67,8 @@ fn read_dword(key: PCWSTR, value: PCWSTR) -> Option<u32> {
 /// itself uses a lighter shade of the palette there, so that a dark
 /// accent still shows against a dark popup.
 fn accent(dark: bool) -> COLORREF {
-    let color = read_dword(w!(r"Software\Microsoft\Windows\DWM"), w!("AccentColor"))
-        .map(|abgr| COLORREF(abgr & 0x00ff_ffff))
-        .unwrap_or_else(|| rgb(0x00, 0x5f, 0xb8));
+    let color =
+        native_term_win::desktop::accent().map(|(r, g, b)| rgb(r, g, b)).unwrap_or_else(|| rgb(0x00, 0x5f, 0xb8));
     if dark {
         lighter(color)
     } else {

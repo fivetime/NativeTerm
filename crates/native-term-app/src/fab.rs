@@ -50,6 +50,8 @@ pub struct Fab {
     /// The command line for the active session: the sidebar's own, so it
     /// has the same history, targets and audit trail.
     send: SendLine,
+    /// The look this window is already showing.
+    look: Option<crate::looks::Preset>,
 }
 
 impl Fab {
@@ -62,6 +64,7 @@ impl Fab {
             focus_search: false,
             was_focused: false,
             send: SendLine::default(),
+            look: None,
         }
     }
 
@@ -297,6 +300,13 @@ impl crate::window::Ui for Fab {
         if let Some(theme) = *crate::app::THEME.lock().unwrap_or_else(|e| e.into_inner()) {
             if ui.ctx().options(|o| o.theme_preference) != theme {
                 ui.ctx().set_theme(theme);
+            }
+        }
+        // the main window keeps the chosen look; this one follows
+        if let Some(look) = crate::looks::chosen() {
+            if self.look != Some(look) {
+                look.apply(ui.ctx());
+                self.look = Some(look);
             }
         }
         if self.open {

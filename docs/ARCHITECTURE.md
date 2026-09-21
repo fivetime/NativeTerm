@@ -3828,6 +3828,14 @@ All UI surfaces invoke one shared app-level command layer
 - **Implemented so far:**
   - **Theme:** Settings → Appearance: system default, light or dark
     (`settings.theme`); the window's title bar follows.
+  - **Look** (`looks.rs`, Settings → Look, `settings.theme.preset`): on
+    top of light and dark — standard (egui's own), the Windows accent
+    colour for what is selected (read from DWM, lightened on a dark
+    theme so a dark accent still shows, with black or white on it by
+    brightness), soft (less contrast, quieter lines, no page-white
+    window) and compact (the same colours, less room per row: more hosts
+    on screen). It is only `egui` style, so switching costs nothing; the
+    floating button has its own egui context and follows the choice.
   - **Icons:** Segoe Fluent Icons (Windows 11) or Segoe MDL2 Assets
     (Windows 10), memory-mapped like the CJK font and added as the last
     fallback font, so a glyph (private use area) can sit in any label.
@@ -3848,10 +3856,31 @@ All UI surfaces invoke one shared app-level command layer
     the second click of a double click is ignored (it closed the folder
     that had just been opened, which looked like the tree collapsing by
     itself).
-- **Windows 11 materials**: Mica/Acrylic backdrops via the
-  `window-vibrancy` crate on a transparent window; rounded corners for
-  borderless windows (drawer, FAB) via `DwmSetWindowAttribute`
-  (`DWMWA_WINDOW_CORNER_PREFERENCE`).
+- **Windows 11 materials**: tried, and they don't fit this renderer
+  (measured on Windows 11 26200, 2026-09-22).
+  - DWM draws Mica or Acrylic *behind* a window, so they only show where
+    the window itself is see-through. NativeTerm paints on the CPU and
+    presents with GDI (`softbuffer`), which writes opaque pixels: there
+    is nothing for a material to show through.
+  - Handing the frame over with `UpdateLayeredWindow` instead (what the
+    floating button does) gives real per-pixel alpha, but the material is
+    still not drawn: with `DWMWA_SYSTEMBACKDROP_TYPE` accepted
+    (`DwmSetWindowAttribute` returned success) the see-through parts of
+    the window showed the desktop behind it plainly, not blurred or
+    tinted. `SetWindowCompositionAttribute` with an acrylic accent policy
+    was accepted as well, with the same result.
+  - A window with a title bar cannot be presented that way at all:
+    `UpdateLayeredWindow` also sets the window's size, so passing the
+    client size shrinks the window by its frame on every frame (the frame
+    log showed 1440x960 -> 1418x904 -> 1396x848 ...). It works for the
+    floating button because that window is borderless.
+  - So a material would mean presenting through DirectComposition (a
+    swap chain with alpha) — a change of renderer, not a setting. Not
+    done; the CPU renderer's own advantages (20 MB, no GPU memory, works
+    over Remote Desktop) were the reason for choosing it.
+  - Rounded corners for borderless windows are separate and are done
+    (`DWMWA_WINDOW_CORNER_PREFERENCE` for the drawer's menus; the
+    floating button draws its own round shape).
 
 ### Terminal tabs
 Rendering belongs to Windows Terminal, but each tab can be opened with:
@@ -4023,6 +4052,25 @@ Implemented (English, Simplified Chinese):
 - Used for: drawer slide, FAB speed-dial expand, tab switcher fade-in,
   hover highlights, status changes, result toasts ("Closed 5 disconnected
   sessions").
+
+Implemented:
+
+- **Toasts** (`toast.rs`): short messages in the bottom right corner of
+  the main window for what an action just did, when nothing else on
+  screen says it — closing several tabs at once, clearing finished
+  sessions, connecting a group. They fade in, wait four seconds, fade
+  out; a click takes one away; at most four are on screen and the newest
+  win. Anything, on any thread, can ask for one (`toast::done`,
+  `toast::info`), which wakes the window. Problems are deliberately *not*
+  toasts: they stay in the notice line at the top until they are cleared,
+  because a message that disappears by itself is the wrong place for
+  something that went wrong.
+- **The system setting**: `desktop::animations` reads
+  `SPI_GETCLIENTAREAANIMATION` (Settings → Accessibility → Visual effects
+  → Animation effects, asked at most once a second). With it off the
+  toasts simply appear and disappear, and the docked window arrives
+  without sliding (the slide is started already finished, so the same
+  code path still sets everything).
 - **Battery**: egui repaints only when something changes, but continuously
   while an animation runs. Animations are short; persistent states use
   static indicators, never endless pulsing.

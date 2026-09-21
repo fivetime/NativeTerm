@@ -914,3 +914,16 @@ cleanup-ssh-hint = 这些无害：ssh 会跳过 NativeTerm 开头的键，而 In
 cleanup-ssh-none = NativeTerm 没有往你的 ssh 配置里写过东西。
 cleanup-files = 会话本身是会话文件夹里的 { $count } 个文件；它们是你的，会保留。
 cleanup-copy = 复制这份清单
+
+# 窗口角落里的短提示
+toast-closed = 已关闭 { $count } 个标签
+toast-connecting = 正在连接 { $count } 个会话
+
+# 在浅色/深色之上的外观
+theme-look-label = 风格
+theme-look-hint = 在浅色 / 深色之上再调配色和疏密，NativeTerm 的所有窗口都跟随。
+theme-look-plain = 标准
+theme-look-accent = Windows 强调色
+theme-look-dim = 柔和
+theme-look-compact = 紧凑
+toast-cleared = 已清除 { $count } 条结束的会话记录

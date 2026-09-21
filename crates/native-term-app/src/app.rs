@@ -161,6 +161,8 @@ pub struct App {
     profile: ProfileSetup,
     show_settings: bool,
     notices: Vec<String>,
+    /// Short messages in the corner: what an action just did.
+    toasts: native_term_app::toast::Toasts,
     /// What was written about each host, by its `NativeTermId`
     /// (`notes.rs`); changes go to `state.db` and `notes.toml` at once.
     notes: std::collections::BTreeMap<String, native_term_app::registry::Note>,
@@ -217,7 +219,10 @@ impl App {
         if let Some(core) = &core {
             crate::dock::set_pinned(core.setting(PINNED_SETTING).as_deref() == Some("1"));
             apply_theme(ctx, core.setting(THEME_SETTING).as_deref());
+            crate::looks::Preset::from_setting(core.setting(crate::looks::SETTING).as_deref()).choose(ctx);
             let repaint = ctx.clone();
+            let woken = ctx.clone();
+            native_term_app::toast::wake_with(move || woken.request_repaint());
             let ctx = ctx.clone();
             core.set_repaint(move || ctx.request_repaint());
             let ask = move |request| {
@@ -297,6 +302,7 @@ impl App {
             profile,
             show_settings: false,
             notices,
+            toasts: Default::default(),
             notes,
             notes_generation: 0,
             sync_roots: native_term_win::cloud::sync_roots(),
@@ -1625,6 +1631,25 @@ fn theme_choice(ui: &mut egui::Ui, core: &Core) {
     });
 }
 
+/// The look on top of light and dark (see `looks.rs`).
+fn look_choice(ui: &mut egui::Ui, core: &Core) {
+    use crate::looks::Preset;
+    let chosen = Preset::from_setting(core.setting(crate::looks::SETTING).as_deref());
+    ui.horizontal(|ui| {
+        ui.label(t!("theme-look-label"));
+        egui::ComboBox::from_id_salt("look").selected_text(chosen.label()).show_ui(ui, |ui| {
+            for preset in Preset::ALL {
+                if ui.selectable_label(preset == chosen, preset.label()).clicked() {
+                    core.set_setting(crate::looks::SETTING, preset.setting());
+                    preset.choose(ui.ctx());
+                }
+            }
+        });
+    })
+    .response
+    .on_hover_text(t!("theme-look-hint"));
+}
+
 /// Language: the system's, or one of NativeTerm's.
 fn language_choice(ui: &mut egui::Ui, core: &Core) {
     let setting = core.language_setting();
@@ -1893,6 +1918,7 @@ impl crate::window::Ui for App {
                         }
                         language_choice(ui, core);
                         theme_choice(ui, core);
+                        look_choice(ui, core);
                     }
                     ui.separator();
                     self.agent.settings_ui(ui, &self.ssh_dir, self.core.as_ref());
@@ -1980,5 +2006,7 @@ impl crate::window::Ui for App {
         egui::CentralPanel::default().show_inside(ui, |ui| self.right_panel(ui));
         self.show_dialog(ctx);
         self.show_wizard(ctx);
+        // over everything else, in the corner
+        self.toasts.show(ctx, native_term_win::desktop::animations());
     }
 }

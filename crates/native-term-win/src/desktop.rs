@@ -5,14 +5,79 @@ use std::path::{Path, PathBuf};
 
 use windows::core::{BOOL, HSTRING, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, HWND, LPARAM};
-use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ};
+use windows::Win32::System::Registry::{
+    RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ,
+};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible, MessageBoxW, PostMessageW,
-    SetForegroundWindow, ShowWindow, GW_OWNER, MB_ICONERROR, MB_OK, SW_RESTORE, WM_CLOSE,
+    SetForegroundWindow, ShowWindow, SystemParametersInfoW, GW_OWNER, MB_ICONERROR, MB_OK, SPI_GETCLIENTAREAANIMATION,
+    SW_RESTORE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, WM_CLOSE,
 };
+
+/// The Windows accent colour (Settings -> Personalisation -> Colours),
+/// as red, green and blue. DWM keeps it as 0xAABBGGRR under
+/// `HKCU\Software\Microsoft\Windows\DWM\AccentColor`. `None` when it
+/// isn't there (a very old build, or a policy).
+#[must_use]
+pub fn accent() -> Option<(u8, u8, u8)> {
+    let abgr = user_registry_dword(r"Software\Microsoft\Windows\DWM", "AccentColor")?;
+    Some((abgr as u8, (abgr >> 8) as u8, (abgr >> 16) as u8))
+}
+
+/// A `DWORD` value under `HKEY_CURRENT_USER`.
+#[must_use]
+pub fn user_registry_dword(subkey: &str, value: &str) -> Option<u32> {
+    let (subkey, value) = (HSTRING::from(subkey), HSTRING::from(value));
+    let mut data = 0u32;
+    let mut size = std::mem::size_of::<u32>() as u32;
+    // SAFETY: the buffer and its size are this `u32`; the strings live
+    // for the call.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            &subkey,
+            &value,
+            RRF_RT_REG_DWORD,
+            None,
+            Some(&mut data as *mut u32 as *mut _),
+            Some(&mut size),
+        )
+    };
+    (status == ERROR_SUCCESS).then_some(data)
+}
+
+/// Whether Windows' animation effects are on (Settings -> Accessibility
+/// -> Visual effects -> Animation effects). Something that moves or
+/// fades asks this first, so a person who turned animations off doesn't
+/// get ours. Asked at most once a second; the answer only changes when
+/// they change the setting.
+#[must_use]
+pub fn animations() -> bool {
+    static LAST: std::sync::Mutex<Option<(std::time::Instant, bool)>> = std::sync::Mutex::new(None);
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((when, on)) = *last {
+        if when.elapsed() < std::time::Duration::from_secs(1) {
+            return on;
+        }
+    }
+    let mut on = BOOL(1);
+    // SAFETY: asks for one BOOL and is given one.
+    let asked = unsafe {
+        SystemParametersInfoW(
+            SPI_GETCLIENTAREAANIMATION,
+            0,
+            Some(&mut on as *mut BOOL as *mut _),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+    };
+    // if Windows doesn't say, animate (that is its own default)
+    let on = asked.is_err() || on.as_bool();
+    *last = Some((std::time::Instant::now(), on));
+    on
+}
 
 /// A string value under `HKEY_CURRENT_USER` (`REG_SZ`, or `REG_EXPAND_SZ`
 /// expanded). `None` if the key or value doesn't exist.

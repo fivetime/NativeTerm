@@ -612,12 +612,35 @@
       keeps the title fixed)
 - [x] Light / dark / system theme (title bar included), Fluent/MDL2 icons,
       nested folders in the tree, status dots on hosts
-- [ ] NativeTerm themes (rest): presets, Mica/Acrylic
+- [x] NativeTerm themes (rest): looks on top of light and dark
+      (`looks.rs`, Settings -> Look): standard, the Windows accent colour
+      for what is selected, soft (less contrast, for a dark room) and
+      compact (more hosts on screen). Kept in `settings.toml`, applied to
+      every NativeTerm window.
+      Mica and Acrylic were tried and don't fit this renderer, which is
+      the point of it: the window is painted on the CPU and presented
+      with GDI, which has no alpha, and DWM only draws a material behind
+      a window that is see-through. Handing the frame over with
+      `UpdateLayeredWindow` (as the floating button does) gives alpha but
+      no material either: measured on Windows 11 26200, the backdrop is
+      simply not drawn behind a layered window, and a window with a title
+      bar shrinks by its frame every frame, because that call also sets
+      the window's size. A material would mean presenting through
+      DirectComposition — a renderer change, not a setting; see
+      "Windows 11 materials" in ARCHITECTURE.md
 - [x] Localization (English, Simplified Chinese) with runtime switching:
       `native-term-i18n` (Fluent, keys checked at compile time), setting
       in `state.db`, shim follows the system language / `NATIVETERM_LANG`
 - [ ] Localization (rest): config library errors; more languages
-- [ ] Animations (respecting the system animation setting) and toasts
+- [x] Animations (respecting the system animation setting) and toasts:
+      short messages in the corner of the window for what an action did
+      when nothing else says it ("closed 5 tabs", "cleared 3 finished
+      sessions", "connecting 4 sessions"), fading in and out, a click
+      takes one away; problems still stay in the notice line until they
+      are cleared. Everything that moves asks Windows first
+      (`SPI_GETCLIENTAREAANIMATION`, `desktop::animations`): with
+      animation effects off the messages simply appear, and the docked
+      window arrives without sliding
 - [x] Built-in file transfer over SFTP (`native_term_sftp` over `ssh -s
       sftp`): one SecureFX-style window, local and server sides with a tab
       per session moving together; from a host's or a terminal tab's menu

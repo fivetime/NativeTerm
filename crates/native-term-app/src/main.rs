@@ -22,6 +22,7 @@ mod files_window;
 mod icons;
 mod import_dialog;
 mod key_dialog;
+mod looks;
 mod options_dialog;
 mod plink_dialog;
 mod send_dialog;
