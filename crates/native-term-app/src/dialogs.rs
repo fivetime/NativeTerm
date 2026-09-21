@@ -687,3 +687,75 @@ impl ConfirmDelete {
         outcome
     }
 }
+
+/// What to do with files dropped into a tab: Terminal pasted their names
+/// and the client held the text back.
+pub struct DropDialog {
+    pub alias: String,
+    pub session: String,
+    pub label: String,
+    pub paths: Vec<PathBuf>,
+    /// The text Terminal pasted, sent to the session when that is chosen.
+    pub text: String,
+    /// The answer is remembered and this dialog skipped from then on.
+    pub remember: bool,
+    /// The session's files are on a server we can reach over SFTP.
+    pub can_upload: bool,
+}
+
+/// What the person chose for dropped files.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropChoice {
+    Upload,
+    Text,
+}
+
+impl DropDialog {
+    pub fn show(&mut self, ctx: &egui::Context) -> Outcome<(DropChoice, bool)> {
+        let mut outcome = Outcome::Open;
+        let mut open = true;
+        let total: u64 = self.paths.iter().filter_map(|p| p.metadata().ok()).map(|m| m.len()).sum();
+        egui::Window::new(t!("drop-title"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(t!("drop-what", count = self.paths.len(), label = self.label.as_str()));
+                egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
+                    for path in &self.paths {
+                        let name = path.file_name().unwrap_or(path.as_os_str()).to_string_lossy().to_string();
+                        if path.is_dir() {
+                            ui.label(format!("{name}  ·  {}", t!("drop-folder")));
+                        } else {
+                            ui.label(name);
+                        }
+                    }
+                });
+                if total > 0 {
+                    ui.weak(t!("drop-size", size = crate::files_window::size_text(total)));
+                }
+                ui.weak(t!("drop-where"));
+                ui.checkbox(&mut self.remember, t!("drop-remember"));
+                ui.horizontal(|ui| {
+                    let upload = ui.add_enabled(self.can_upload, egui::Button::new(t!("drop-upload")));
+                    if upload.clicked() {
+                        outcome = Outcome::Submit((DropChoice::Upload, self.remember));
+                    }
+                    if ui.button(t!("drop-text")).clicked() {
+                        outcome = Outcome::Submit((DropChoice::Text, self.remember));
+                    }
+                    if ui.button(t!("button-cancel")).clicked() {
+                        outcome = Outcome::Cancel;
+                    }
+                });
+                if !self.can_upload {
+                    ui.weak(t!("drop-no-sftp"));
+                }
+            });
+        if !open {
+            outcome = Outcome::Cancel;
+        }
+        outcome
+    }
+}

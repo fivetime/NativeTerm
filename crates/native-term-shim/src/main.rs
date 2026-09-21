@@ -19,6 +19,7 @@
 mod args;
 mod askpass;
 mod debug;
+mod drop;
 mod i18n;
 mod keys;
 mod link;
@@ -85,6 +86,7 @@ fn main() {
         Mode::Proxy { url, host, port } => std::process::exit(proxy::run(&url, &host, &port)),
         // rz / sz: stdin and stdout are the session's data
         Mode::Zmodem { mode, escape, files } => std::process::exit(zmodem::run(&mode, escape, files)),
+        Mode::Drop { paths } => std::process::exit(drop::run(&paths)),
         Mode::CreateKey { path } => {
             let code = keys::create(&path);
             wait_for_any_key();

@@ -41,6 +41,11 @@ pub enum Mode {
         host: String,
         port: String,
     },
+    /// Files dropped into a tab: hand their names to NativeTerm
+    /// (`--drop <path>...`), which asks what to do with them.
+    Drop {
+        paths: Vec<String>,
+    },
     /// A ZMODEM transfer on stdin / stdout: the server ran `sz`
     /// (`download`) or `rz` (`upload`); `escape`: ask the sender to escape
     /// every control character (`--escape-control`, for Telnet); `files`:
@@ -99,6 +104,13 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 }
                 return Ok(Mode::Zmodem { mode, escape, files });
             }
+            "--drop" => {
+                let paths: Vec<String> = args.collect();
+                if paths.is_empty() {
+                    return Err("--drop needs a path".into());
+                }
+                return Ok(Mode::Drop { paths });
+            }
             "--proxy" => {
                 let rest: Vec<String> = args.collect();
                 let [url, host, port] = rest.as_slice() else {
@@ -141,6 +153,13 @@ mod tests {
         assert!(p(&["--zmodem", "tmux", "--sideways"]).is_err());
         assert!(p(&["--zmodem", "sideways"]).is_err());
         assert!(p(&["--zmodem"]).is_err());
+    }
+
+    #[test]
+    fn drop_helper() {
+        let dropped = p(&["--drop", "C:/a.txt", "C:/b c.txt"]).unwrap();
+        assert_eq!(dropped, Mode::Drop { paths: vec!["C:/a.txt".into(), "C:/b c.txt".into()] });
+        assert!(p(&["--drop"]).is_err());
     }
 
     #[test]

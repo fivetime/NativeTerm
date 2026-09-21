@@ -19,6 +19,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
@@ -301,6 +302,40 @@ fn hit_test(s: &Shared, pt: POINT) -> Option<MenuTab> {
     tabs.iter().find(|t| t.window == root && contains(&t.rect, pt)).cloned()
 }
 
+/// Since when this hook has been running.
+static HOOKED_AT: OnceLock<Instant> = OnceLock::new();
+/// When the left button was last released over a window other than the one
+/// it went down on, in milliseconds since `HOOKED_AT`: that is how a drag
+/// from Explorer ends, while a click has both in the same window. Text that
+/// arrives right after one came from a drop, not from typing or a paste.
+/// Zero until it happens.
+static DRAG_UP_AT: AtomicU32 = AtomicU32::new(0);
+/// The window the left button last went down on (its root).
+static LEFT_DOWN_ON: AtomicIsize = AtomicIsize::new(0);
+
+/// The root window at this point.
+fn window_at(pt: POINT) -> isize {
+    // SAFETY: both take a point or a window handle and return one; a
+    // window that is gone gives a null handle, which is what we store.
+    unsafe {
+        let hwnd = WindowFromPoint(pt);
+        GetAncestor(hwnd, GA_ROOT).0 as isize
+    }
+}
+
+/// How long ago a drag ended (the button released over another window than
+/// it went down on), or `None` when none has since the hook was put on.
+#[must_use]
+pub fn since_drag_release() -> Option<Duration> {
+    let at = DRAG_UP_AT.load(Ordering::Relaxed);
+    let started = HOOKED_AT.get()?;
+    if at == 0 {
+        return None;
+    }
+    let now = u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX);
+    Some(Duration::from_millis(u64::from(now.saturating_sub(at))))
+}
+
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         if let Some(s) = shared() {
@@ -334,9 +369,25 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         return LRESULT(1);
                     }
                 }
+                WM_LBUTTONUP => {
+                    // a drag ends over another window than it started on
+                    let from = LEFT_DOWN_ON.swap(0, Ordering::Relaxed);
+                    if from != 0 && from != window_at(info.pt) {
+                        let started = HOOKED_AT.get_or_init(Instant::now);
+                        let now = u32::try_from(started.elapsed().as_millis()).unwrap_or(u32::MAX);
+                        DRAG_UP_AT.store(now.max(1), Ordering::Relaxed);
+                    }
+                }
+                WM_LBUTTONDOWN if !open => {
+                    HOOKED_AT.get_or_init(Instant::now);
+                    LEFT_DOWN_ON.store(window_at(info.pt), Ordering::Relaxed);
+                }
                 WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN | WM_MOUSEWHEEL | WM_MOUSEHWHEEL
                     if open && !inside_menu(s, info.pt) =>
                 {
+                    if wparam.0 as u32 == WM_LBUTTONDOWN {
+                        LEFT_DOWN_ON.store(window_at(info.pt), Ordering::Relaxed);
+                    }
                     // an outside click closes the popup and still happens
                     post(WM_CLOSE_MENU, 0);
                 }

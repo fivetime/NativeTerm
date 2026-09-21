@@ -11,7 +11,9 @@ use native_term_config::ops::{Editor, HostDraft};
 use native_term_config::write::Writer;
 use native_term_config::SessionTree;
 
-use crate::dialogs::{ConfirmCloseMixed, ConfirmDelete, ConfirmForget, FolderDialog, HostDialog, Outcome};
+use crate::dialogs::{
+    ConfirmCloseMixed, ConfirmDelete, ConfirmForget, DropChoice, DropDialog, FolderDialog, HostDialog, Outcome,
+};
 use crate::icons;
 use crate::import_dialog::ImportDialog;
 use crate::key_dialog::KeyDialog;
@@ -39,6 +41,7 @@ enum Dialog {
     Options(Box<OptionsDialog>),
     Import(Box<ImportDialog>),
     Send(Box<SendDialog>),
+    Drop(Box<DropDialog>),
     ServerSessions(Box<ServerSessionsDialog>),
     CredentialSets(Box<crate::credential_sets::CredentialSetsDialog>),
 }
@@ -860,12 +863,89 @@ impl App {
         });
     }
 
+    /// Files dropped into a tab: upload them, or send the text Terminal
+    /// pasted (the client held it back). The answer can be remembered,
+    /// and then this happens without asking.
+    fn dropped(&mut self, alias: &str, session: &str, paths: Vec<PathBuf>, text: &str) {
+        let can_upload = self.tree.find(alias).is_some_and(|(_, host)| host.plink.is_none());
+        // A drop ends with the mouse button released over the tab, having
+        // gone down in another window (Explorer). Text that arrives
+        // without that was typed or pasted, and is never acted on without
+        // asking, however the question was answered before.
+        let dropped_by_mouse = native_term_platform::windows_terminal::menu::since_drag_release()
+            .is_some_and(|since| since < std::time::Duration::from_millis(2000));
+        match self.remembered_drop().filter(|_| dropped_by_mouse) {
+            Some(DropChoice::Upload) if can_upload => {
+                self.upload_dropped(alias, session, &paths);
+                return;
+            }
+            Some(DropChoice::Text) => {
+                self.send_dropped_text(session, text);
+                return;
+            }
+            _ => {}
+        }
+        if self.dialog.is_some() {
+            // a dialog is already up: the text goes to the session, which
+            // is what would have happened without us
+            self.send_dropped_text(session, text);
+            return;
+        }
+        let label = self
+            .core
+            .as_ref()
+            .and_then(|c| c.sessions().into_iter().find(|s| s.id == session).map(|s| s.label))
+            .unwrap_or_else(|| alias.to_string());
+        self.dialog = Some(Dialog::Drop(Box::new(DropDialog {
+            alias: alias.to_string(),
+            session: session.to_string(),
+            label,
+            paths,
+            text: text.to_string(),
+            remember: false,
+            can_upload,
+        })));
+    }
+
+    /// The remembered answer for dropped files, if there is one.
+    fn remembered_drop(&self) -> Option<DropChoice> {
+        match self.core.as_ref()?.setting("drop.action")?.as_str() {
+            "upload" => Some(DropChoice::Upload),
+            "text" => Some(DropChoice::Text),
+            _ => None,
+        }
+    }
+
+    /// Uploads dropped files to the session's folder (the files window,
+    /// which starts at the tab's folder for a tmux session).
+    fn upload_dropped(&mut self, alias: &str, session: &str, paths: &[PathBuf]) {
+        self.open_files(alias, Some(&session.to_string()));
+        crate::files_window::upload_into(alias, paths);
+    }
+
+    /// Sends the text Terminal pasted to the session after all. It goes
+    /// with the marker the client strips (`nt_drop.c`), so that the names
+    /// are not read as another drop.
+    fn send_dropped_text(&mut self, session: &str, text: &str) {
+        if let Some(core) = &self.core {
+            let marked = format!("\u{1b}_nt\u{1b}\\{text}");
+            let report = core.send_text(&[session.to_string()], &marked, false);
+            if !report.failed.is_empty() || !report.skipped.is_empty() {
+                self.notices.push(t!("notice-drop-not-sent"));
+            }
+        }
+    }
+
     /// What the tab menu asked for: it has no dialogs of its own.
     fn handle_menu_request(&mut self, request: native_term_app::tab_menu::MenuRequest) {
         use native_term_app::tab_menu::MenuRequest;
         // the files window is a window of its own: no dialog in the way
         if let MenuRequest::Files { alias, session } = &request {
             self.open_files(alias, Some(session));
+            return;
+        }
+        if let MenuRequest::Dropped { alias, session, paths, text } = request {
+            self.dropped(&alias, &session, paths, &text);
             return;
         }
         if self.dialog.is_some() {
@@ -887,7 +967,7 @@ impl App {
                 None => self.notices.push(t!("notice-not-saved", alias = alias.as_str())),
             },
             // handled above
-            MenuRequest::Files { .. } => {}
+            MenuRequest::Files { .. } | MenuRequest::Dropped { .. } => {}
             MenuRequest::ConfirmClose(ids) => {
                 let labels = self
                     .core
@@ -1157,6 +1237,28 @@ impl App {
                             false
                         }
                     }
+                }
+            },
+            Dialog::Drop(d) => match d.show(ctx) {
+                Outcome::Open => false,
+                Outcome::Cancel => true,
+                Outcome::Submit((choice, remember)) => {
+                    if remember {
+                        if let Some(core) = &self.core {
+                            let value = match choice {
+                                DropChoice::Upload => "upload",
+                                DropChoice::Text => "text",
+                            };
+                            core.set_setting("drop.action", value);
+                        }
+                    }
+                    let (alias, session, paths, text) =
+                        (d.alias.clone(), d.session.clone(), d.paths.clone(), d.text.clone());
+                    match choice {
+                        DropChoice::Upload => self.upload_dropped(&alias, &session, &paths),
+                        DropChoice::Text => self.send_dropped_text(&session, &text),
+                    }
+                    true
                 }
             },
             Dialog::CloseMixed(d) => match d.show(ctx) {
@@ -1596,6 +1698,11 @@ impl crate::window::Ui for App {
                             .on_hover_text(t!("close-on-exit-hint"));
                         if response.changed() {
                             core.set_setting(native_term_app::CLOSE_ON_EXIT_SETTING, if close { "1" } else { "0" });
+                        }
+                        let mut ask = self.remembered_drop().is_none();
+                        let response = ui.checkbox(&mut ask, t!("drop-ask-setting")).on_hover_text(t!("drop-ask-hint"));
+                        if response.changed() && ask {
+                            core.set_setting("drop.action", "");
                         }
                         language_choice(ui, core);
                         theme_choice(ui, core);

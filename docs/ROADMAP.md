@@ -557,6 +557,16 @@
       (Telnet changes CR / NUL / 0xFF); Esc / Ctrl+C cancel through a
       named event; in tmux the transfer is stopped with a note. ntplink also reads the keyboard with VT input now
       (arrows, Esc and F-keys were lost before)
+- [x] Files dropped into a tab (`docs/DROP.md`): Terminal owns the drop
+      and answers it by pasting the names, so our ssh spots a paste that
+      is nothing but paths of this machine, holds it back and asks what to
+      do — upload them (the files window, at the tab's folder), or type
+      the names after all. The answer can be kept; it is then used only
+      when the mouse says a drag ended over the tab, so a pasted path is
+      never uploaded behind one's back. Not for ntplink or plink sessions
+      (no SFTP there)
+- [ ] Dropping onto NativeTerm's own windows (a session in the list, a tab
+      picture) as a second way in
 - [x] zmodem2 fixes offered upstream (codeberg.org/jarkko/zmodem2, from
       `fivetime/zmodem2`), one branch each, with tests against lrzsz:
       #8 `abort()` sends the cancel sequence, #9 ZFILE carries the

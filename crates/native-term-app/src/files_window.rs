@@ -74,6 +74,9 @@ pub struct Spec {
 thread_local! {
     /// Sessions asked for since the window last looked.
     static PENDING: RefCell<Vec<Spec>> = const { RefCell::new(Vec::new()) };
+    /// Files to upload to a host (its alias) as soon as its side is
+    /// connected: dropped into a terminal tab, uploaded here.
+    static PENDING_UPLOADS: RefCell<Vec<(String, Vec<PathBuf>)>> = const { RefCell::new(Vec::new()) };
     /// The open window's context (to wake it).
     static WINDOW: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
 }
@@ -91,6 +94,19 @@ pub fn open(spec: Spec) {
         .with_min_inner_size([760.0, 420.0])
         .with_drag_and_drop(true);
     crate::window::open("files", viewport, |ctx| Box::new(FilesWindow::new(ctx)));
+}
+
+/// Uploads `files` to `alias`'s current folder, once its side of the
+/// window is connected (`open` it first). Files dropped into a terminal
+/// tab come this way.
+pub fn upload_into(alias: &str, files: &[PathBuf]) {
+    if files.is_empty() {
+        return;
+    }
+    PENDING_UPLOADS.with(|p| p.borrow_mut().push((alias.to_string(), files.to_vec())));
+    if let Some(ctx) = WINDOW.with(|w| w.borrow().clone()) {
+        ctx.request_repaint();
+    }
 }
 
 /// A server's directory entry as shown.
@@ -453,6 +469,34 @@ impl FilesWindow {
 
     /// Sessions asked for: a new tab, or the host's tab shown (and moved
     /// to the terminal's folder, if it says one).
+    /// Starts the uploads asked for with `upload_into`, once the host's
+    /// side is connected and its folder known. Anything for a host that
+    /// isn't there (or isn't connected yet) waits.
+    fn take_pending_uploads(&mut self, ctx: &egui::Context) {
+        let waiting = PENDING_UPLOADS.with(|p| std::mem::take(&mut *p.borrow_mut()));
+        if waiting.is_empty() {
+            return;
+        }
+        let mut keep = Vec::new();
+        for (alias, files) in waiting {
+            let ready = self
+                .tabs
+                .iter()
+                .find(|t| t.spec.alias == alias)
+                .filter(|t| t.remote.sftp.is_some() && !t.remote.path.is_empty())
+                .map(|t| t.id);
+            match ready {
+                Some(id) => self.upload_to(id, files, None),
+                None => keep.push((alias, files)),
+            }
+        }
+        if !keep.is_empty() {
+            // the host is still connecting: look again in a moment
+            PENDING_UPLOADS.with(|p| p.borrow_mut().extend(keep));
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
+
     fn take_pending(&mut self) {
         let pending = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
         for spec in pending {
@@ -2543,6 +2587,8 @@ impl crate::window::Ui for FilesWindow {
             self.handle(event);
         }
         let ctx = ui.ctx().clone();
+        // after the events: a tab that has just connected is ready here
+        self.take_pending_uploads(&ctx);
         // files dropped from Explorer onto the server's side: uploaded there
         let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
         if !dropped.is_empty() {

@@ -1353,16 +1353,24 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
 
     if role == Role::Request {
         // a helper in a tab: one request, then it's gone
-        if let Ok(Some(ShimMessage::OpenFiles)) = conn.recv::<ShimMessage>(Duration::from_secs(5)) {
-            let found = wt_session.as_deref().and_then(|guid| {
-                lock(&shared.sessions)
-                    .iter()
-                    .find(|s| s.state.is_open() && s.matches_terminal_session(guid))
-                    .map(|s| (s.alias.clone(), s.id.clone()))
-            });
-            let ask = lock(&shared.ask).clone();
-            if let (Some((alias, session)), Some(ask)) = (found, ask) {
-                ask(tab_menu::MenuRequest::Files { alias, session });
+        let asked = conn.recv::<ShimMessage>(Duration::from_secs(5));
+        let found = wt_session.as_deref().and_then(|guid| {
+            lock(&shared.sessions)
+                .iter()
+                .find(|s| s.state.is_open() && s.matches_terminal_session(guid))
+                .map(|s| (s.alias.clone(), s.id.clone()))
+        });
+        let ask = lock(&shared.ask).clone();
+        if let (Ok(Some(message)), Some((alias, session)), Some(ask)) = (asked, found, ask) {
+            match message {
+                ShimMessage::OpenFiles => ask(tab_menu::MenuRequest::Files { alias, session }),
+                ShimMessage::Dropped { paths, text } => ask(tab_menu::MenuRequest::Dropped {
+                    alias,
+                    session,
+                    paths: paths.into_iter().map(std::path::PathBuf::from).collect(),
+                    text,
+                }),
+                _ => {}
             }
         }
         return;
@@ -1690,6 +1698,8 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         s.quiet_since = None;
     }
     match message {
+        // only from a `Request` helper, never on a session link
+        ShimMessage::OpenFiles | ShimMessage::Dropped { .. } => {}
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {
             s.authenticated = false;
@@ -1717,9 +1727,8 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         ShimMessage::Specials { names } => s.specials = names.clone(),
         ShimMessage::Unreachable => s.unreachable = true,
         ShimMessage::PasswordRefused => {}
-        // Hello is the connection's start; OpenFiles comes from `Request`
-        // helpers only
-        ShimMessage::Heard | ShimMessage::Hello { .. } | ShimMessage::OpenFiles => {}
+        // Hello is the connection's start
+        ShimMessage::Heard | ShimMessage::Hello { .. } => {}
     }
 }
 

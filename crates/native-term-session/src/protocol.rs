@@ -69,6 +69,10 @@ pub enum ShimMessage {
     /// From a `Request` helper: open the files window (SFTP) of the tab's
     /// session (found by `wt_session`), at its tmux pane's folder.
     OpenFiles,
+    /// From a `Request` helper: files were dropped into the tab (Terminal
+    /// pastes their names, which the client held back). NativeTerm asks
+    /// what to do with them: upload them, or send the text after all.
+    Dropped { paths: Vec<String>, text: String },
 }
 
 /// NativeTerm → shim.

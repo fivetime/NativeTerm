@@ -1,6 +1,7 @@
 //! What NativeTerm's tab menu offers and does. Only NativeTerm's own tabs
 //! are ever touched; the user's other tabs never are.
 
+use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use native_term_platform::windows_terminal::menu::{Entry, MenuTab, Provider};
@@ -33,6 +34,10 @@ pub enum MenuRequest {
     ConfirmClose(Vec<String>),
     /// This session's files (SFTP): alias, session id.
     Files { alias: String, session: String },
+    /// Files dropped into this session's tab: the client held back the
+    /// text Terminal pasted, so either they are uploaded or the text is
+    /// sent after all.
+    Dropped { alias: String, session: String, paths: Vec<PathBuf>, text: String },
 }
 
 pub(crate) struct Actions {
