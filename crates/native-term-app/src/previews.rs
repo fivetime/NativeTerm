@@ -3,6 +3,11 @@
 //! change notifications: a tab or window switched, opened, closed), never
 //! on a timer. Terminal renders only the selected tab, so a tab's picture
 //! is how it looked when it was last seen selected. Kept in memory only.
+//!
+//! The text on that screen is taken at the same moment (UIA
+//! `TextPattern`, ~2 ms), so a tab NativeTerm doesn't run — a local
+//! shell, an AI session — can be read and searched by what is on it,
+//! and not only by its title.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +22,9 @@ const FRESH: Duration = Duration::from_secs(3);
 /// Pictures this wide (physical pixels).
 const WIDTH: i32 = 360;
 
+/// Lines of the screen kept with a picture.
+pub const TEXT_LINES: usize = 30;
+
 #[derive(Clone, Debug)]
 pub struct Preview {
     /// The tab's title then.
@@ -24,6 +32,9 @@ pub struct Preview {
     pub taken: SystemTime,
     at: Instant,
     pub image: Arc<Image>,
+    /// What was on that screen, last line last (empty when the window
+    /// didn't answer).
+    pub text: Arc<Vec<String>>,
 }
 
 /// By window and tab position.
@@ -70,20 +81,37 @@ impl Previews {
             .collect()
     }
 
-    pub fn insert(&mut self, window: isize, index: usize, title: String, image: Image) {
-        let preview = Preview { title, taken: SystemTime::now(), at: Instant::now(), image: Arc::new(image) };
+    pub fn insert(&mut self, window: isize, index: usize, title: String, image: Image, text: Vec<String>) {
+        let preview = Preview {
+            title,
+            taken: SystemTime::now(),
+            at: Instant::now(),
+            image: Arc::new(image),
+            text: Arc::new(text),
+        };
         self.map.insert((window, index), preview);
+    }
+
+    /// What was on a tab, for the search.
+    pub fn text(&self, window: isize, index: usize) -> Option<Arc<Vec<String>>> {
+        self.map.get(&(window, index)).map(|p| Arc::clone(&p.text))
     }
 }
 
 /// Picture what `wanted` asks for (on the scanning thread; ~25 ms a
-/// window). Minimized windows are skipped. Whether any was taken.
-pub fn take(previews: &std::sync::Mutex<Previews>, snapshot: &Snapshot) -> bool {
+/// window), and read the text of the same screen. Minimized windows are
+/// skipped. Whether any was taken.
+pub fn take(
+    previews: &std::sync::Mutex<Previews>,
+    terminal: &native_term_platform::windows_terminal::WindowsTerminal,
+    snapshot: &Snapshot,
+) -> bool {
     let wanted = crate::lock(previews).wanted(snapshot);
     let mut taken = false;
     for (window, index, title, strip) in wanted {
         if let Some(image) = capture::capture(window, strip, WIDTH) {
-            crate::lock(previews).insert(window, index, title, image);
+            let text = terminal.screen_text(window, TEXT_LINES).unwrap_or_default();
+            crate::lock(previews).insert(window, index, title, image, text);
             taken = true;
         }
     }
@@ -112,6 +140,10 @@ mod tests {
         Image { width: 1, height: 1, rgba: vec![0, 0, 0, 255] }
     }
 
+    fn insert(previews: &mut Previews, window: isize, index: usize, title: &str) {
+        previews.insert(window, index, title.to_string(), image(), Vec::new());
+    }
+
     #[test]
     fn the_selected_tabs_are_pictured_once() {
         let now = snapshot(vec![
@@ -121,7 +153,7 @@ mod tests {
         let mut previews = Previews::default();
         let wanted = previews.wanted(&now);
         assert_eq!(wanted, vec![(1, 1, "web01".into(), Some(40)), (2, 0, "claude".into(), Some(40))]);
-        previews.insert(1, 1, "web01".into(), image());
+        insert(&mut previews, 1, 1, "web01");
         assert_eq!(previews.wanted(&now).len(), 1, "web01 was just pictured");
         // a new title there: pictured again
         let renamed = snapshot(vec![window(1, vec![tab(0, "pwsh", false), tab(1, "web01: top", true)])]);
@@ -136,7 +168,7 @@ mod tests {
         ]);
         let mut previews = Previews::default();
         for (w, i, t) in [(1, 0, "pwsh"), (1, 1, "web01"), (1, 2, "db"), (2, 0, "claude")] {
-            previews.insert(w, i, t.into(), image());
+            insert(&mut previews, w, i, t);
         }
         // the title changed, same tabs: kept
         let retitled = snapshot(vec![

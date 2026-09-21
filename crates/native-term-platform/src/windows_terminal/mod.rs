@@ -134,6 +134,13 @@ impl WindowsTerminal {
         lock(&self.worker).abandoned()
     }
 
+    /// What is on the screen of `window`'s selected tab, at most
+    /// `max_lines` lines (see `uia::screen_text`). `None` when the window
+    /// didn't answer in time or has no text to give.
+    pub fn screen_text(&self, window: isize, max_lines: usize) -> Option<Vec<String>> {
+        lock(&self.worker).run(UIA_TIMEOUT, move |a| uia::screen_text(a, window, max_lines).ok())?
+    }
+
     /// All windows and tabs, claimed for the open sessions' `labels`.
     pub fn snapshot(&self, labels: &HashSet<String>) -> Snapshot {
         let foreground = window::foreground();

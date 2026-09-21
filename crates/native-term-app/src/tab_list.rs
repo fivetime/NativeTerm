@@ -49,6 +49,10 @@ pub struct Entry {
     pub session_id: Option<String>,
 }
 
+/// What was last seen on a tab, for the search: its own console (a
+/// NativeTerm session) or the screen read when it was pictured.
+pub type ScreenText<'a> = &'a dyn Fn(&Entry) -> Option<String>;
+
 /// The tabs of `snapshot`, with their sessions, filtered by `query` (best
 /// first), or in window and tab order without one.
 pub fn entries(
@@ -56,6 +60,7 @@ pub fn entries(
     sessions: &[SessionView],
     window_number: impl Fn(isize) -> Option<usize>,
     query: &str,
+    text: ScreenText,
 ) -> Vec<Entry> {
     let by_place: HashMap<(isize, usize), &SessionView> = sessions
         .iter()
@@ -89,7 +94,16 @@ pub fn entries(
         .into_iter()
         .filter_map(|e| {
             let label = e.session.as_ref().map(|(l, _)| l.as_str()).unwrap_or("");
-            fuzzy::score(query, &[&e.title, label]).map(|s| (s, e))
+            // the name first: a hit in the text is worth less than one in
+            // the title, and the text is long
+            let named = fuzzy::score(query, &[&e.title, label]);
+            let seen = named.is_none().then(|| text(&e)).flatten();
+            let score = match (named, seen) {
+                (Some(score), _) => Some(score),
+                (None, Some(text)) => fuzzy::score(query, &[&text]).map(|s| s / 4),
+                (None, None) => None,
+            };
+            score.map(|s| (s, e))
         })
         .collect();
     scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
@@ -178,7 +192,23 @@ impl TabList {
             self.query.clear();
         }
         let sessions = core.sessions();
-        let list = entries(&core.snapshot(), &sessions, |h| core.window_number(h), &self.query);
+        // what was last on each tab: its own console, else the screen
+        // read when it was pictured (a tab that isn't NativeTerm's)
+        let seen = |e: &Entry| -> Option<String> {
+            if let Some(screen) = e.session_id.as_ref().and_then(|id| core.screen(id)) {
+                return Some(screen.lines.join(
+                    "
+",
+                ));
+            }
+            core.preview_text(e.window, e.index).map(|lines| {
+                lines.join(
+                    "
+",
+                )
+            })
+        };
+        let list = entries(&core.snapshot(), &sessions, |h| core.window_number(h), &self.query, &seen);
         if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             if let Some(e) = list.first() {
                 core.select_tab(e.window, e.index, &e.title);
@@ -228,11 +258,19 @@ impl TabList {
                         let response = response.on_hover_ui(|ui| match self.texture(ui.ctx(), core, e) {
                             Some((preview, texture)) => {
                                 ui.add(egui::Image::new(&texture).max_width(CARD.x * 1.5));
+                                if !preview.text.is_empty() {
+                                    ui.weak(last_lines(&preview.text, 3));
+                                }
                                 ui.weak(taken_text(&preview));
                             }
-                            None => {
-                                ui.weak(t!("tabs-not-seen"));
-                            }
+                            None => match core.screen(e.session_id.clone().unwrap_or_default().as_str()) {
+                                Some(screen) if !screen.lines.is_empty() => {
+                                    ui.weak(last_lines(&screen.lines, 6));
+                                }
+                                _ => {
+                                    ui.weak(t!("tabs-not-seen"));
+                                }
+                            },
                         });
                         if response.clicked() {
                             core.select_tab(e.window, e.index, &e.title);
@@ -245,6 +283,12 @@ impl TabList {
 }
 
 /// "As of 14:05" for a picture.
+/// The last `count` lines that hold anything, as one block.
+fn last_lines(lines: &[String], count: usize) -> String {
+    let end = lines.iter().rposition(|l| !l.trim().is_empty()).map_or(0, |i| i + 1);
+    lines[end.saturating_sub(count)..end].join("\n")
+}
+
 fn taken_text(preview: &Preview) -> String {
     let unix = preview.taken.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     t!("tabs-seen-at", time = native_term_win::local_time_of_day(unix))
@@ -492,7 +536,8 @@ mod tests {
     fn all_tabs_in_window_order() {
         let sessions = [session("web01", 10, 1, State::Connected)];
         let number = |h: isize| Some(if h == 10 { 1 } else { 2 });
-        let list = entries(&snapshot(), &sessions, number, "");
+        let nothing = |_: &Entry| None;
+        let list = entries(&snapshot(), &sessions, number, "", &nothing);
         let titles: Vec<&str> = list.iter().map(|e| e.title.as_str()).collect();
         assert_eq!(titles, ["pwsh", "web01", "vim notes.md", "claude"]);
         assert_eq!(list[1].session, Some(("web01".into(), State::Connected)));
@@ -502,9 +547,15 @@ mod tests {
     #[test]
     fn search_ranks_and_filters() {
         let number = |h: isize| Some(if h == 10 { 1 } else { 2 });
-        let list = entries(&snapshot(), &[], number, "note");
+        let nothing = |_: &Entry| None;
+        let list = entries(&snapshot(), &[], number, "note", &nothing);
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title, "vim notes.md");
-        assert!(entries(&snapshot(), &[], number, "zzz").is_empty());
+        assert!(entries(&snapshot(), &[], number, "zzz", &nothing).is_empty());
+        // a word only on the screen of a tab finds it, below the names
+        let on_screen = |e: &Entry| (e.index == 1).then(|| "cargo build finished".to_string());
+        let found = entries(&snapshot(), &[], number, "cargo", &on_screen);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].index, 1);
     }
 }

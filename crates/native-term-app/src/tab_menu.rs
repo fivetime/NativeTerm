@@ -177,6 +177,13 @@ impl Provider for Actions {
                         card.lines = screen.lines;
                     }
                 }
+                // a tab NativeTerm doesn't run: the screen read when it
+                // was last seen (`previews`)
+                if card.lines.is_empty() {
+                    if let Some(lines) = core.preview_text(tab.window, tab.index) {
+                        card.lines = lines.as_ref().clone();
+                    }
+                }
                 if !card.lines.is_empty() {
                     note.push(t!("tabs-text-preview"));
                 }

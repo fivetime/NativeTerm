@@ -555,9 +555,13 @@
       window is focused, at most every 5 s, a few KB an answer; a
       disconnected session shows its "connection lost" screen, and a tab
       without our shim keeps the old note
-- [ ] Tab switcher (rest): last-seen text (UIA `TextPattern`), searchable;
-      tmux text preview for persistent sessions (the console text above
-      may be enough)
+- [x] Tab switcher (rest): the text of a tab NativeTerm doesn't run is
+      read with UIA `TextPattern` at the moment it is pictured (~2 ms for
+      a screenful), kept with the picture, and searched — so a local
+      shell or an AI session is found by what is on it, not only by its
+      title. A hit in the text ranks below one in the name. NativeTerm's
+      own tabs already answer with their console text, which also covers
+      the tmux preview the item asked for
 - [x] A card when the mouse rests on a tab (like a browser's): the tab's
       picture, or the text its console holds, with the session's name and
       state, under the tab after half a second. It uses what the tab menu

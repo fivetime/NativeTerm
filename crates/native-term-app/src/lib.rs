@@ -859,6 +859,12 @@ impl Core {
         lock(&self.shared.previews).get(window, index)
     }
 
+    /// What was on that tab's screen when it was last pictured (a tab
+    /// NativeTerm doesn't run has no console of its own to ask).
+    pub fn preview_text(&self, window: isize, index: usize) -> Option<std::sync::Arc<Vec<String>>> {
+        lock(&self.shared.previews).text(window, index).filter(|lines| !lines.is_empty())
+    }
+
     /// Scan Terminal's tabs again soon (titles change without a
     /// notification).
     pub fn rescan(&self) {
@@ -1493,7 +1499,7 @@ fn scan(shared: &Shared, picture: bool) -> Snapshot {
         *lock(&shared.snapshot) = snapshot.clone();
     }
     // the selected tabs, as they look now
-    let pictured = picture && previews::take(&shared.previews, &snapshot);
+    let pictured = picture && previews::take(&shared.previews, &shared.terminal, &snapshot);
     if changed || pictured {
         // only then: an idle NativeTerm doesn't repaint
         shared.changed();

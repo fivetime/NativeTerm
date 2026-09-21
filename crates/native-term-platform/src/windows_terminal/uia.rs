@@ -9,8 +9,8 @@ use windows::core::Interface;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::{
     IUIAutomationElement, IUIAutomationItemContainerPattern, IUIAutomationSelectionItemPattern,
-    IUIAutomationVirtualizedItemPattern, UIA_ItemContainerPatternId, UIA_SelectionItemPatternId,
-    UIA_VirtualizedItemPatternId, UIA_PROPERTY_ID,
+    IUIAutomationTextPattern, IUIAutomationVirtualizedItemPattern, UIA_ItemContainerPatternId,
+    UIA_SelectionItemPatternId, UIA_TextPatternId, UIA_VirtualizedItemPatternId, UIA_PROPERTY_ID,
 };
 
 use super::window::hwnd;
@@ -85,6 +85,58 @@ fn all_items(list: &UIElement) -> Result<Vec<IUIAutomationElement>> {
 
 fn name_of(item: &IUIAutomationElement) -> String {
     unsafe { item.CurrentName() }.map(|s| s.to_string()).unwrap_or_default()
+}
+
+/// The text on the screen of the window's selected tab: Terminal's
+/// control offers `TextPattern`, and only the selected tab has one (the
+/// others aren't rendered). The visible ranges are the screen, without
+/// the scrollback, which is what a preview wants; at most `max_lines`
+/// lines, the last ones, each trimmed of its trailing blanks.
+///
+/// This is how a tab NativeTerm doesn't run — a local shell, someone's
+/// AI session — can still show what was on it and be searched by it.
+pub fn screen_text(automation: &UIAutomation, handle: isize, max_lines: usize) -> Result<Vec<String>> {
+    let window = window_element(automation, handle)?;
+    let walker = automation.get_control_view_walker()?;
+    let control = find_text_control(&walker, &window).ok_or_else(|| {
+        uiautomation::Error::new(windows::Win32::Foundation::E_FAIL.0, "no terminal control with text")
+    })?;
+    let raw: &IUIAutomationElement = control.as_ref();
+    let pattern: IUIAutomationTextPattern = unsafe { raw.GetCurrentPatternAs(UIA_TextPatternId) }.map_err(to_error)?;
+    // the visible screen, one range per text buffer region
+    let ranges = unsafe { pattern.GetVisibleRanges() }.map_err(to_error)?;
+    let count = unsafe { ranges.Length() }.map_err(to_error)?;
+    let mut text = String::new();
+    for i in 0..count {
+        let range = unsafe { ranges.GetElement(i) }.map_err(to_error)?;
+        // -1: the whole range
+        if let Ok(part) = unsafe { range.GetText(-1) } {
+            text.push_str(&part.to_string());
+        }
+    }
+    let lines: Vec<String> = text.replace('\r', "\n").lines().map(|line| line.trim_end().to_string()).collect();
+    // the last lines that hold anything
+    let end = lines.iter().rposition(|l| !l.is_empty()).map_or(0, |i| i + 1);
+    let start = end.saturating_sub(max_lines);
+    Ok(lines[start..end].to_vec())
+}
+
+/// The first element under `element` that offers `TextPattern` (the
+/// selected tab's terminal control).
+fn find_text_control(walker: &UITreeWalker, element: &UIElement) -> Option<UIElement> {
+    let mut child = walker.get_first_child(element).ok();
+    while let Some(c) = child {
+        if c.get_classname().is_ok_and(|n| n == "TermControl") {
+            let raw: &IUIAutomationElement = c.as_ref();
+            if unsafe { raw.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) }.is_ok() {
+                return Some(c);
+            }
+        } else if let Some(found) = find_text_control(walker, &c) {
+            return Some(found);
+        }
+        child = walker.get_next_sibling(&c).ok();
+    }
+    None
 }
 
 pub fn read_window(automation: &UIAutomation, handle: isize) -> Result<WindowTabs> {

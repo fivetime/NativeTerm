@@ -3262,7 +3262,14 @@ NativeTerm ever does.
   - a **last-seen text preview** with its capture time: the terminal
     control implements UIA `TextPattern`, so the visible text of the
     selected tab can be read once when it is switched away from (and when
-    the switcher opens) — cheaper than an image and searchable; or
+    the switcher opens) — cheaper than an image and searchable.
+    Implemented (`uia::screen_text`, kept in `previews` beside the
+    picture): the visible ranges only, so the screen without the
+    scrollback, the last 30 lines, read on the same events as the
+    picture. It is what a tab NativeTerm doesn't run can be searched by;
+    its own tabs answer with their console text instead (`Core::screen`),
+    which is also what a tmux session shows. A hit in the text scores a
+    quarter of a hit in the name, so names still come first; or
   - a **last-seen snapshot** image (`PrintWindow` with
     `PW_RENDERFULLCONTENT` while that tab is selected; kept in memory only,
     a few hundred KB each); or
