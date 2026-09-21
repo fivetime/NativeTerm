@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime};
 
-use native_term_app::{fuzzy, t, Core, Preview, SessionView, State};
+use native_term_app::{fuzzy, t, Core, Preview, Screen, SessionView, State};
 use native_term_platform::Snapshot;
 
 use crate::icons;
@@ -14,6 +14,8 @@ use crate::icons;
 /// Titles change without a notification: while the list is on screen and
 /// NativeTerm has the focus, look again this often.
 const RESCAN: Duration = Duration::from_secs(5);
+/// How often a tab without a picture is asked what is on its screen.
+const SCREEN_EVERY: Duration = Duration::from_secs(5);
 
 /// `state.db` setting: `pictures` for the pictures view.
 const VIEW_SETTING: &str = "tabs.view";
@@ -43,6 +45,8 @@ pub struct Entry {
     pub foreground_window: bool,
     /// NativeTerm's session in this tab.
     pub session: Option<(String, State)>,
+    /// That session's id, to ask it things (its console screen).
+    pub session_id: Option<String>,
 }
 
 /// The tabs of `snapshot`, with their sessions, filtered by `query` (best
@@ -72,6 +76,7 @@ pub fn entries(
                 selected: tab.selected,
                 foreground_window: w.foreground,
                 session: by_place.get(&(w.handle, tab.index)).map(|s| (s.label.clone(), s.state.clone())),
+                session_id: by_place.get(&(w.handle, tab.index)).map(|s| s.id.clone()),
             })
         })
         .collect();
@@ -110,6 +115,18 @@ impl TabList {
                 let texture = ctx.load_texture(name, pixels, egui::TextureOptions::LINEAR);
                 self.textures.insert(key, (preview.taken, texture.clone()));
                 Some((preview, texture))
+            }
+        }
+    }
+
+    /// Tabs Terminal has never rendered have no picture; their own shim
+    /// can still say what is on them (`Core::ask_screen`). Asked for only
+    /// while the pictures are shown, and at most every `SCREEN_EVERY`.
+    fn ask_screens(&self, core: &Core, entries: &[Entry]) {
+        for e in entries {
+            let Some(id) = &e.session_id else { continue };
+            if core.preview(e.window, e.index).is_none() {
+                core.ask_screen(id, SCREEN_EVERY);
             }
         }
     }
@@ -173,6 +190,9 @@ impl TabList {
             return;
         }
         let searching = !self.query.trim().is_empty();
+        if pictures && focused {
+            self.ask_screens(core, &list);
+        }
         let row_height = ui.spacing().interact_size.y + 6.0;
         // a picture no tab has any more
         self.textures.retain(|(w, i), _| list.iter().any(|e| e.window == *w && e.index == *i));
@@ -196,7 +216,8 @@ impl TabList {
                         ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
                         for e in group {
                             let picture = self.texture(ui.ctx(), core, e);
-                            if tab_card(ui, e, searching, picture).clicked() {
+                            let screen = picture.is_none().then(|| core.screen(e.session_id.as_ref()?)).flatten();
+                            if tab_card(ui, e, searching, picture, screen).clicked() {
                                 core.select_tab(e.window, e.index, &e.title);
                             }
                         }
@@ -237,13 +258,39 @@ fn shown_name(e: &Entry) -> String {
     }
 }
 
-/// One tab in the pictures view: its picture (or a note that it hasn't
-/// been seen), then its name and where it is.
+/// A tab's console screen drawn in the card's frame: monospace, sized so
+/// that the widest line fits, clipped to the frame. It is not the tab's
+/// own font and colors, but it says what is on it — which a tab Terminal
+/// has never rendered cannot show in any other way.
+fn draw_screen(painter: &egui::Painter, frame: egui::Rect, screen: &Screen, color: egui::Color32) {
+    const PAD: f32 = 4.0;
+    // egui's monospace is about this wide for its height
+    const RATIO: f32 = 0.5;
+    let columns = f32::from(screen.columns.max(20));
+    let size = ((frame.width() - PAD * 2.0) / (columns * RATIO)).clamp(3.0, 9.0);
+    let font = egui::FontId::monospace(size);
+    let painter = painter.with_clip_rect(frame.shrink(1.0));
+    let mut y = frame.top() + PAD;
+    for line in &screen.lines {
+        if y > frame.bottom() {
+            break;
+        }
+        if !line.is_empty() {
+            let galley = painter.layout_no_wrap(line.clone(), font.clone(), color);
+            painter.galley(egui::pos2(frame.left() + PAD, y), galley, color);
+        }
+        y += size * 1.25;
+    }
+}
+
+/// One tab in the pictures view: its picture (or what its console says,
+/// or a note that it hasn't been seen), then its name and where it is.
 fn tab_card(
     ui: &mut egui::Ui,
     e: &Entry,
     searching: bool,
     picture: Option<(Preview, egui::TextureHandle)>,
+    screen: Option<Screen>,
 ) -> egui::Response {
     let body_height = ui.text_style_height(&egui::TextStyle::Body);
     let text_height = body_height + ui.text_style_height(&egui::TextStyle::Small);
@@ -277,10 +324,17 @@ fn tab_card(
             let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             painter.image(texture.id(), shown, uv, egui::Color32::WHITE);
         }
+        // no picture: what the tab's own console says is on it
         None => {
             painter.rect_stroke(frame, 2.0, egui::Stroke::new(1.0_f32, weak), egui::StrokeKind::Inside);
-            let note = painter.layout(t!("tabs-not-seen"), small.clone(), weak, CARD.x - 20.0);
-            painter.galley(frame.center() - note.size() / 2.0, note, weak);
+            let lines = screen.as_ref().filter(|s| !s.lines.is_empty());
+            match lines {
+                Some(screen) => draw_screen(&painter, frame, screen, ui.visuals().text_color()),
+                None => {
+                    let note = painter.layout(t!("tabs-not-seen"), small.clone(), weak, CARD.x - 20.0);
+                    painter.galley(frame.center() - note.size() / 2.0, note, weak);
+                }
+            }
         }
     }
     // the name, with the session's state
@@ -305,6 +359,9 @@ fn tab_card(
     }
     if let Some((preview, _)) = &picture {
         place.push(taken_text(preview));
+    } else if screen.is_some_and(|s| !s.lines.is_empty()) {
+        // not a picture of it: what its own console says is on it
+        place.push(t!("tabs-text-preview"));
     }
     let galley = painter.layout_no_wrap(place.join(" · "), small, weak);
     painter.galley(egui::pos2(frame.left(), y + body_height / 2.0 + 2.0), galley, weak);

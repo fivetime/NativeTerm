@@ -463,8 +463,18 @@
 - [x] Tab switcher pictures: "All Tabs" as a list (picture on hover) or
       as pictures, each tab as it looked when last seen selected, taken
       after Terminal's notifications only (no live thumbnails, no timer)
+- [x] A tab nobody has looked at still shows what is on it: Terminal
+      renders only the tab it shows, so its picture waits for that, but
+      the tab's own console keeps its screen either way. The shim reads it
+      (`ReadConsoleOutputCharacterW` on `CONOUT$`, `AppMessage::Screen` →
+      `ShimMessage::Screen`) and the card draws the text until a picture
+      of it exists. Asked for only while the pictures are shown and the
+      window is focused, at most every 5 s, a few KB an answer; a
+      disconnected session shows its "connection lost" screen, and a tab
+      without our shim keeps the old note
 - [ ] Tab switcher (rest): last-seen text (UIA `TextPattern`), searchable;
-      tmux text preview for persistent sessions
+      tmux text preview for persistent sessions (the console text above
+      may be enough)
 - [ ] Tiled thumbnail switcher on Ctrl+Tab (off by default): the existing
       low-level keyboard hook swallows Ctrl+Tab while a Terminal window
       with NativeTerm tabs is in front, a non-activating grid follows

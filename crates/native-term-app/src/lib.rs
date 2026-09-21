@@ -22,7 +22,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use native_term_platform::windows_terminal::events::{Change, Watcher};
 use native_term_platform::windows_terminal::menu::{MenuTab, TabMenu};
@@ -131,6 +131,17 @@ pub struct Location {
     pub mixed: bool,
 }
 
+/// A tab's console screen, as its shim read it: what a tab that Terminal
+/// has never rendered can still be shown as (`ShimMessage::Screen`).
+#[derive(Clone, Debug)]
+pub struct Screen {
+    pub columns: u16,
+    pub lines: Vec<String>,
+    pub at: SystemTime,
+    /// For not asking again too soon.
+    asked: Instant,
+}
+
 #[derive(Clone, Debug)]
 pub struct SessionView {
     pub id: String,
@@ -191,6 +202,8 @@ pub(crate) struct Session {
     last_position: Option<(usize, usize)>,
     quiet_since: Option<u64>,
     specials: Vec<String>,
+    /// The tab's console screen, and when it was last asked for.
+    pub(crate) screen: Option<Screen>,
     /// The shim said the server wasn't reached in this attempt.
     unreachable: bool,
     /// The attempt an automatic reconnect started: if it fails too, the
@@ -221,6 +234,7 @@ impl Session {
             last_position: None,
             quiet_since: None,
             specials: Vec::new(),
+            screen: None,
             unreachable: false,
             retry_attempt: None,
         }
@@ -1042,6 +1056,36 @@ impl Core {
 
     /// Send one of the connection's special commands (see
     /// `SessionView::specials`), e.g. a serial line's Break.
+    /// The tab's console screen, if it has been asked for and answered.
+    #[must_use]
+    pub fn screen(&self, id: &str) -> Option<Screen> {
+        lock(&self.shared.sessions).iter().find(|s| s.id == id).and_then(|s| s.screen.clone())
+    }
+
+    /// Asks the tab for its console screen, at most every `every`. The
+    /// answer arrives as `ShimMessage::Screen` and is kept for `screen`.
+    pub fn ask_screen(&self, id: &str, every: Duration) {
+        let link = self.shared.update(id, |s| {
+            let fresh = s.screen.as_ref().is_some_and(|screen| screen.asked.elapsed() < every);
+            if fresh || !s.state.is_open() {
+                return None;
+            }
+            // remember the moment, so that several frames ask once
+            if let Some(screen) = s.screen.as_mut() {
+                screen.asked = Instant::now();
+            }
+            s.link.clone()
+        });
+        let Some(Some(link)) = link else { return };
+        let _ = link.send(&AppMessage::Screen);
+        // the first answer has nothing to stamp: remember it here
+        self.shared.update(id, |s| {
+            if s.screen.is_none() {
+                s.screen = Some(Screen { columns: 0, lines: Vec::new(), at: SystemTime::now(), asked: Instant::now() });
+            }
+        });
+    }
+
     pub fn send_special(&self, id: &str, name: &str) {
         self.send(id, AppMessage::Special { name: name.to_string() });
     }
@@ -1725,6 +1769,10 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         ShimMessage::Closing => s.state = State::Closed,
         ShimMessage::Quiet { since } => s.quiet_since = Some(*since),
         ShimMessage::Specials { names } => s.specials = names.clone(),
+        ShimMessage::Screen { columns, lines } => {
+            let asked = s.screen.as_ref().map_or_else(Instant::now, |screen| screen.asked);
+            s.screen = Some(Screen { columns: *columns, lines: lines.clone(), at: SystemTime::now(), asked });
+        }
         ShimMessage::Unreachable => s.unreachable = true,
         ShimMessage::PasswordRefused => {}
         // Hello is the connection's start

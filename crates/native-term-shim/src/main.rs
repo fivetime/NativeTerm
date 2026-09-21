@@ -353,6 +353,7 @@ fn supervise(
                 AppMessage::SendText { text, enter } => {
                     let _ = win::inject(&text, enter);
                 }
+                AppMessage::Screen => send_screen(link),
                 AppMessage::ClearScreen => {
                     if auth.is_some_and(|a| a.is_set()) {
                         // clear here first, then let the remote side redraw
@@ -437,6 +438,7 @@ fn after_exit(link: Option<&Link>) -> Next {
                 AppMessage::SendText { text, enter } => {
                     let _ = win::inject(&text, enter);
                 }
+                AppMessage::Screen => send_screen(link),
                 AppMessage::ClearScreen => {
                     // nothing runs here: clear everything, keep the keys hint
                     write_console(CLEAR_ALL);
@@ -468,4 +470,12 @@ fn wait_for_any_key() {
         println!("{}", t!("any-key"));
         while !matches!(keys.read_key(Duration::from_secs(3600)), Ok(Some(_))) {}
     }
+}
+/// Sends the tab's console screen to NativeTerm, which shows it for a
+/// tab Terminal has never rendered (it renders only the tab it shows).
+fn send_screen(link: Option<&Link>) {
+    let Some(link) = link else { return };
+    // enough for a tall window; more than a picture of it needs
+    let Some((columns, lines)) = win::screen_text(120) else { return };
+    link.send(ShimMessage::Screen { columns, lines });
 }

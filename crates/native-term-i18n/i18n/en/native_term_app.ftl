@@ -869,3 +869,4 @@ drop-ask-hint = With it off, dropped files are dealt with as they were last time
 files-at-once = At once
 files-at-once-hint = How many files each connection copies at the same time; the rest wait their turn. More is faster for many small files; fewer is kinder to a slow link or a server that limits them.
 drop-size-folders = Folders go with everything in them ({ $size } and what they hold)
+tabs-text-preview = text preview

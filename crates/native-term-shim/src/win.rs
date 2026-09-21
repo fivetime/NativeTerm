@@ -424,6 +424,46 @@ pub fn console_size() -> Option<(u32, u32)> {
     Some((columns, rows))
 }
 
+/// The console's visible screen, line by line (trailing spaces gone,
+/// empty lines at the end left out), and how wide it is.
+///
+/// A tab's console keeps its screen whether or not Terminal is showing
+/// that tab, so this works for a tab nobody has looked at yet. It is the
+/// local screen: what the session has drawn on it, which for an ssh tab
+/// is what the server sent.
+pub fn screen_text(max_lines: usize) -> Option<(u16, Vec<String>)> {
+    use windows::Win32::System::Console::{
+        GetConsoleScreenBufferInfo, ReadConsoleOutputCharacterW, CONSOLE_SCREEN_BUFFER_INFO, COORD,
+    };
+    let output = open_console(w!("CONOUT$")).ok()?;
+    let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
+    // SAFETY: a console screen handle of this process; the struct is ours
+    unsafe { GetConsoleScreenBufferInfo(output.0, &mut info) }.ok()?;
+    let columns = (info.srWindow.Right - info.srWindow.Left + 1).max(0) as usize;
+    let rows = (info.srWindow.Bottom - info.srWindow.Top + 1).max(0) as usize;
+    if columns == 0 || rows == 0 {
+        return None;
+    }
+    let mut lines = Vec::with_capacity(rows.min(max_lines));
+    let mut buffer = vec![0u16; columns];
+    for row in 0..rows.min(max_lines) {
+        let at = COORD { X: info.srWindow.Left, Y: info.srWindow.Top + row as i16 };
+        let mut read = 0u32;
+        // SAFETY: as above; `buffer` holds `columns` cells, which is what
+        // is asked for, and `read` says how many came back.
+        let ok = unsafe { ReadConsoleOutputCharacterW(output.0, &mut buffer, at, &mut read) }.is_ok();
+        if !ok {
+            break;
+        }
+        let text = String::from_utf16_lossy(&buffer[..read as usize]);
+        lines.push(text.trim_end().to_string());
+    }
+    while lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    Some((u16::try_from(columns).unwrap_or(u16::MAX), lines))
+}
+
 /// Ctrl+C as a key (^C for the remote side) rather than a signal: takes
 /// "processed input" off the console while it reads key by key. Line
 /// input keeps it (Backspace and Enter are handled through it there).

@@ -69,6 +69,11 @@ pub enum ShimMessage {
     /// From a `Request` helper: open the files window (SFTP) of the tab's
     /// session (found by `wt_session`), at its tmux pane's folder.
     OpenFiles,
+    /// The tab's console screen, as `AppMessage::Screen` asked: the
+    /// lines as they are on it (trailing spaces gone, empty lines at the
+    /// end left out). Terminal renders only the tab it shows, so this is
+    /// how a tab nobody has looked at can still be shown.
+    Screen { columns: u16, lines: Vec<String> },
     /// From a `Request` helper: files were dropped into the tab (Terminal
     /// pastes their names, which the client held back). NativeTerm asks
     /// what to do with them: upload them, or send the text after all.
@@ -106,6 +111,8 @@ pub enum AppMessage {
     Special {
         name: String,
     },
+    /// Asks for the tab's console screen (`ShimMessage::Screen`).
+    Screen,
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
