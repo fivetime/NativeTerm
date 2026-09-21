@@ -1876,6 +1876,14 @@ impl crate::window::Ui for App {
                                 if cards { "on" } else { "off" },
                             );
                         }
+                        let mut switcher = core.ctrl_tab();
+                        if ui
+                            .checkbox(&mut switcher, t!("tabs-switcher-setting"))
+                            .on_hover_text(t!("tabs-switcher-hint"))
+                            .changed()
+                        {
+                            core.set_ctrl_tab(switcher);
+                        }
                         let mut ask = self.remembered_drop().is_none();
                         let response = ui.checkbox(&mut ask, t!("drop-ask-setting")).on_hover_text(t!("drop-ask-hint"));
                         if response.changed() && ask {

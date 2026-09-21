@@ -3354,6 +3354,34 @@ list still appears when NativeTerm isn't running or the setting is off.
 Committing selects the tab through UIA (`wt -w <id> focus-tab -t <n>`
 would also work).
 
+Implemented in `windows_terminal/switcher.rs`, with the menu's own
+machinery (`menu.rs`):
+
+- The setting (`tabs.switcher`, off by default) is pushed to the menu
+  thread as a flag, because the hook may not read settings, take a lock
+  or do anything else slow. On a Tab key-down it tests that flag, that
+  Ctrl is down and Alt and the Windows key are not, and that the
+  foreground window is one of at most eight window handles kept in
+  atomics as the tabs are scanned. That is all: one `GetForegroundWindow`
+  and a few comparisons.
+- The grid itself is a `WS_EX_NOACTIVATE | WS_EX_TOPMOST` popup of the
+  same class as the tab menu, drawn with Direct2D over the middle of the
+  Terminal window (kept on its monitor, and no bigger than 5 × 4 tiles).
+  Terminal keeps the focus the whole time and never learns about any of
+  it.
+- While it is up the hook swallows Tab, the arrows, Enter, Space and Esc
+  and hands them to the menu thread; Shift passes through (it belongs to
+  Ctrl+Shift+Tab); Ctrl's release passes through as well — Terminal saw
+  it go down — and also commits. Any other key, or a click outside,
+  leaves the tabs as they are.
+- Tiles come from what NativeTerm already keeps: the picture of a tab
+  from when it was last seen selected (`previews`), or else the text of
+  its own console (its sessions) or the screen read when it was last
+  pictured. A tab neither pictured nor read shows its name only, and is
+  asked for its screen there and then, so the next grid has it.
+- The one thing NativeTerm does to Terminal is select the tab at the end,
+  by index and title, through UIA — the same call the tab list uses.
+
 Thumbnails can only come from captures taken while a tab was selected:
 a non-selected tab's content is unparented from the XAML tree, its UIA
 peer is unreachable and its UIA renderer is disabled, so neither its text

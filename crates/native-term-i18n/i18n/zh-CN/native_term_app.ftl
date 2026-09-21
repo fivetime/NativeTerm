@@ -888,6 +888,8 @@ drop-size-folders = 文件夹连同里面的内容一起上传（共 { $size } �
 tabs-text-preview = 文字预览
 tabs-hover-setting = 鼠标停在标签页上显示预览卡片
 tabs-hover-hint = 停留约半秒后，在标签下方显示该标签的画面和会话状态。Terminal 自带的标题气泡仍会出现。
+tabs-switcher-setting = 用 Ctrl+Tab 显示标签缩略图
+tabs-switcher-hint = 在含有 NativeTerm 标签的 Terminal 窗口里，Ctrl+Tab 以缩略图平铺显示该窗口的全部标签，代替 Terminal 自带的列表。按住 Ctrl 连按 Tab（或方向键）移动，松开 Ctrl 切换，Esc 保持原样。关闭此项即恢复 Terminal 原本的 Ctrl+Tab。
 config-paths-repaired = 程序位置变了：已把 ssh 配置里 { $count } 处代理命令指向当前程序（原为 { $old }）
 
 # 清理（删除程序之前）

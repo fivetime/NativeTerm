@@ -12,6 +12,7 @@ pub mod menu;
 mod menu_draw;
 pub mod profile;
 pub mod sources;
+pub mod switcher;
 pub mod theme;
 pub mod uia;
 pub mod window;

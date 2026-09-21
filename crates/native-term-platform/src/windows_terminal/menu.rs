@@ -29,8 +29,8 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, EndPaint, GetDC, GetMonitorInfoW,
-    InvalidateRect, MonitorFromPoint, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
-    MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
+    InvalidateRect, MonitorFromPoint, MonitorFromWindow, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
+    DIB_RGB_COLORS, MONITORINFO, MONITOR_DEFAULTTONEAREST, PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::GetCurrentThreadId;
@@ -38,20 +38,24 @@ use windows::Win32::UI::HiDpi::{
     GetDpiForMonitor, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VIRTUAL_KEY, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
+    GetAsyncKeyState, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT, VIRTUAL_KEY, VK_CONTROL, VK_DOWN, VK_ESCAPE,
+    VK_LCONTROL, VK_LEFT, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+    VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetAncestor, GetMessageW,
-    KillTimer, LoadCursorW, PostMessageW, PostThreadMessageW, RegisterClassW, SetTimer, SetWindowsHookExW, ShowWindow,
-    TranslateMessage, UnhookWindowsHookEx, UpdateLayeredWindow, WindowFromPoint, CS_DROPSHADOW, GA_ROOT, HC_ACTION,
-    HHOOK, IDC_ARROW, KBDLLHOOKSTRUCT, MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT, SW_SHOWNOACTIVATE, ULW_ALPHA,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE,
-    WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
-    WM_TIMER, WM_XBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetAncestor, GetForegroundWindow,
+    GetMessageW, GetWindowRect, KillTimer, LoadCursorW, PostMessageW, PostThreadMessageW, RegisterClassW, SetTimer,
+    SetWindowsHookExW, ShowWindow, TranslateMessage, UnhookWindowsHookEx, UpdateLayeredWindow, WindowFromPoint,
+    CS_DROPSHADOW, GA_ROOT, HC_ACTION, HHOOK, IDC_ARROW, KBDLLHOOKSTRUCT, MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT,
+    SW_SHOWNOACTIVATE, ULW_ALPHA, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP,
+    WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN,
+    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_TIMER, WM_XBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 use super::hover::{self, HoverCard};
 use super::menu_draw::Painter;
+use super::switcher::{self, SwitcherTab};
 use super::theme::{self, Look};
 use crate::Rect;
 
@@ -70,6 +74,14 @@ const WM_CHOOSE_ID: u32 = WM_APP + 5;
 const WM_HOVER_MOVE: u32 = WM_APP + 6;
 /// It left the tab: no card.
 const WM_HOVER_OUT: u32 = WM_APP + 7;
+/// Ctrl+Tab went down over a Terminal window with NativeTerm tabs.
+const WM_SWITCHER_OPEN: u32 = WM_APP + 8;
+/// A key while the grid is up (the key in the low word, Shift in bit 16).
+const WM_SWITCHER_KEY: u32 = WM_APP + 9;
+/// Ctrl was let go: switch to what is picked.
+const WM_SWITCHER_COMMIT: u32 = WM_APP + 10;
+/// Leave everything as it was.
+const WM_SWITCHER_CLOSE: u32 = WM_APP + 11;
 const HOVER_TIMER: usize = 1;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
@@ -110,6 +122,17 @@ pub trait Provider: Send + Sync {
     fn hover(&self, _tab: &MenuTab) -> Option<(HoverCard, Duration)> {
         None
     }
+
+    /// Every tab of `window` in strip order, for the Ctrl+Tab grid, with
+    /// the selected one marked. Fewer than two: no grid. Called on the
+    /// menu thread: don't block.
+    fn tiles(&self, _window: isize) -> Vec<SwitcherTab> {
+        Vec::new()
+    }
+
+    /// Switch to the tab the grid picked (by index, or by title if the
+    /// strip moved under it). Called on the menu thread: don't block.
+    fn switch(&self, _window: isize, _index: usize, _title: &str) {}
 }
 
 struct Shared {
@@ -138,7 +161,28 @@ struct Shared {
     strip: [AtomicI32; 4],
     /// How many cards were shown (diagnostics, tests).
     cards: AtomicU32,
+    /// Ctrl+Tab shows NativeTerm's grid instead of Terminal's own list.
+    /// Off until the person turns it on.
+    ctrl_tab: AtomicBool,
+    /// The grid is up.
+    grid: AtomicBool,
+    /// Its rectangle, for the mouse hook's comparisons.
+    grid_rect: [AtomicI32; 4],
+    /// The windows that hold NativeTerm tabs, for the keyboard hook: it
+    /// may not take a lock, so the handles are kept here (0 for none).
+    our_windows: [AtomicIsize; WINDOWS],
+    /// What the grid has picked: window, and tab index + 1 (0 for none).
+    pick: [AtomicIsize; 2],
+    /// How many grids were shown, and how many switched a tab
+    /// (diagnostics, tests).
+    grids: AtomicU32,
+    switched: AtomicU32,
 }
+
+/// How many windows the keyboard hook can know about. A person with more
+/// Terminal windows than this open at once gets the grid in the first
+/// ones; the rest keep Terminal's own Ctrl+Tab.
+const WINDOWS: usize = 8;
 
 static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
 
@@ -174,6 +218,13 @@ impl TabMenu {
             hover_rect: [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)],
             strip: [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)],
             cards: AtomicU32::new(0),
+            ctrl_tab: AtomicBool::new(false),
+            grid: AtomicBool::new(false),
+            grid_rect: Default::default(),
+            our_windows: Default::default(),
+            pick: Default::default(),
+            grids: AtomicU32::new(0),
+            switched: AtomicU32::new(0),
         });
         if SHARED.set(Arc::clone(&shared)).is_err() {
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the tab menu is already running"));
@@ -198,6 +249,16 @@ impl TabMenu {
         ];
         for (at, v) in strip.into_iter().enumerate() {
             self.shared.strip[at].store(v, Ordering::SeqCst);
+        }
+        // the windows they are in, for the keyboard hook
+        let mut windows: Vec<isize> = Vec::new();
+        for tab in &tabs {
+            if !windows.contains(&tab.window) && windows.len() < WINDOWS {
+                windows.push(tab.window);
+            }
+        }
+        for (at, slot) in self.shared.our_windows.iter().enumerate() {
+            slot.store(windows.get(at).copied().unwrap_or(0), Ordering::Relaxed);
         }
         *self.shared.tabs.lock().unwrap_or_else(|e| e.into_inner()) = tabs;
         self.shared.stale.store(false, Ordering::SeqCst);
@@ -243,6 +304,41 @@ impl TabMenu {
     /// How many menus were opened (diagnostics, tests).
     pub fn opened(&self) -> u32 {
         self.shared.opened.load(Ordering::SeqCst)
+    }
+
+    /// Whether Ctrl+Tab over a Terminal window with NativeTerm tabs shows
+    /// NativeTerm's grid. Off until this says otherwise.
+    pub fn set_ctrl_tab(&self, on: bool) {
+        self.shared.ctrl_tab.store(on, Ordering::SeqCst);
+        if !on {
+            self.post(WM_SWITCHER_CLOSE);
+        }
+    }
+
+    pub fn ctrl_tab(&self) -> bool {
+        self.shared.ctrl_tab.load(Ordering::SeqCst)
+    }
+
+    /// Whether the grid is on screen.
+    pub fn switcher_open(&self) -> bool {
+        self.shared.grid.load(Ordering::SeqCst)
+    }
+
+    /// The tab the grid would switch to: window and index.
+    pub fn switcher_pick(&self) -> Option<(isize, usize)> {
+        let index = self.shared.pick[1].load(Ordering::SeqCst);
+        (index > 0).then(|| (self.shared.pick[0].load(Ordering::SeqCst), index as usize - 1))
+    }
+
+    /// Grids shown, and tabs switched by one (diagnostics, tests).
+    pub fn switcher_counts(&self) -> (u32, u32) {
+        (self.shared.grids.load(Ordering::SeqCst), self.shared.switched.load(Ordering::SeqCst))
+    }
+
+    /// Take the grid away (the person turned it off, or NativeTerm is
+    /// closing).
+    pub fn close_switcher(&self) {
+        self.post(WM_SWITCHER_CLOSE);
     }
 
     fn post(&self, message: u32) {
@@ -364,6 +460,72 @@ static HOOKED_AT: OnceLock<Instant> = OnceLock::new();
 static DRAG_UP_AT: AtomicU32 = AtomicU32::new(0);
 /// The window the left button last went down on (its root).
 static LEFT_DOWN_ON: AtomicIsize = AtomicIsize::new(0);
+/// The window Ctrl+Tab was pressed over, handed to the menu thread.
+static PENDING_GRID: AtomicIsize = AtomicIsize::new(0);
+
+/// Whether a key is down right now (inside the hook: one cheap call).
+fn held(vk: VIRTUAL_KEY) -> bool {
+    // SAFETY: reads the asynchronous key state, no arguments to get wrong.
+    unsafe { GetAsyncKeyState(i32::from(vk.0)) as u16 & 0x8000 != 0 }
+}
+
+/// Ctrl+Tab over a Terminal window that holds NativeTerm tabs, with the
+/// grid turned on: the window, or `None` to let the keys through.
+///
+/// Inside the hook, so: one flag, the modifier keys, the foreground
+/// window and at most eight integer comparisons. No locks.
+fn wants_grid(s: &Shared) -> Option<isize> {
+    if !s.ctrl_tab.load(Ordering::Relaxed) {
+        return None;
+    }
+    // Ctrl alone: Alt+Tab, Ctrl+Alt+Tab and the Windows key stay Windows'
+    if !held(VK_CONTROL) || held(VK_MENU) || held(VK_LWIN) || held(VK_RWIN) {
+        return None;
+    }
+    // SAFETY: takes nothing, gives a handle or none.
+    let front = unsafe { GetForegroundWindow() }.0 as isize;
+    (front != 0 && s.our_windows.iter().any(|w| w.load(Ordering::Relaxed) == front)).then_some(front)
+}
+
+/// A key while the grid is up: `Some` swallows it. Ctrl's own release
+/// passes through — Terminal saw it go down.
+fn grid_key(vk: VIRTUAL_KEY, down: bool) -> Option<LRESULT> {
+    match vk {
+        VK_TAB | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_ESCAPE | VK_RETURN | VK_SPACE => {
+            if down {
+                let shift = usize::from(held(VK_SHIFT)) << 16;
+                post(WM_SWITCHER_KEY, usize::from(vk.0) | shift);
+            }
+            Some(LRESULT(1))
+        }
+        VK_CONTROL | VK_LCONTROL | VK_RCONTROL => {
+            if !down {
+                post(WM_SWITCHER_COMMIT, 0);
+            }
+            None
+        }
+        // Shift belongs to Ctrl+Shift+Tab: it goes backwards, it doesn't
+        // mean the person is doing something else
+        VK_SHIFT | VK_LSHIFT | VK_RSHIFT => None,
+        _ => {
+            // anything else means the person is doing something else
+            if down {
+                post(WM_SWITCHER_CLOSE, 0);
+            }
+            None
+        }
+    }
+}
+
+fn inside_grid(s: &Shared, p: POINT) -> bool {
+    let r = Rect {
+        left: s.grid_rect[0].load(Ordering::Relaxed),
+        top: s.grid_rect[1].load(Ordering::Relaxed),
+        right: s.grid_rect[2].load(Ordering::Relaxed),
+        bottom: s.grid_rect[3].load(Ordering::Relaxed),
+    };
+    r.left != r.right && contains(&r, p)
+}
 
 /// The root window at this point.
 fn window_at(pt: POINT) -> isize {
@@ -457,6 +619,14 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
         if let Some(s) = shared() {
             let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
             let open = s.open.load(Ordering::SeqCst);
+            let grid = s.grid.load(Ordering::SeqCst);
+            if grid
+                && matches!(wparam.0 as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN)
+                && !inside_grid(s, info.pt)
+            {
+                // a click anywhere else leaves the tabs as they are
+                post(WM_SWITCHER_CLOSE, 0);
+            }
             match wparam.0 as u32 {
                 WM_RBUTTONDOWN => {
                     s.right_clicks.fetch_add(1, Ordering::SeqCst);
@@ -486,7 +656,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         return LRESULT(1);
                     }
                 }
-                WM_MOUSEMOVE if !open => hover_moved(s, info.pt),
+                WM_MOUSEMOVE if !open && !grid => hover_moved(s, info.pt),
                 WM_LBUTTONUP => {
                     // a drag ends over another window than it started on
                     let from = LEFT_DOWN_ON.swap(0, Ordering::Relaxed);
@@ -535,6 +705,20 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                 if down {
                     post(WM_CLOSE_MENU, 0);
                 }
+            } else if s.grid.load(Ordering::SeqCst) {
+                if let Some(swallow) = grid_key(vk, down) {
+                    s.swallowed_key.store(info.vkCode, Ordering::SeqCst);
+                    return swallow;
+                }
+            } else if down && vk == VK_TAB {
+                if let Some(window) = wants_grid(s) {
+                    PENDING_GRID.store(window, Ordering::SeqCst);
+                    s.swallowed_key.store(info.vkCode, Ordering::SeqCst);
+                    // the grid opens on the menu thread; the key never
+                    // reaches Terminal, so its own switcher stays away
+                    post(WM_SWITCHER_OPEN, usize::from(held(VK_SHIFT)));
+                    return LRESULT(1);
+                }
             } else if !down && s.swallowed_key.load(Ordering::SeqCst) == info.vkCode {
                 // the key-up of a key that closed the menu
                 s.swallowed_key.store(0, Ordering::SeqCst);
@@ -572,6 +756,7 @@ fn sync_hooks() {
                     }
                 }
                 close_menu();
+                close_grid();
             }
             _ => {}
         }
@@ -833,6 +1018,157 @@ fn menu_key(vk: VIRTUAL_KEY) {
     }
 }
 
+/// Opens the grid for the window Ctrl+Tab was pressed over, with the
+/// next tab (or the one before, holding Shift) already picked, so that a
+/// press and release switches like Terminal's own Ctrl+Tab.
+fn open_grid(back: bool) {
+    let Some(s) = shared() else { return };
+    close_menu();
+    close_card();
+    close_grid();
+    let window = PENDING_GRID.load(Ordering::SeqCst);
+    let tabs = s.provider.tiles(window);
+    if tabs.len() < 2 {
+        return; // nothing to switch between
+    }
+    let count = tabs.len();
+    let from = tabs.iter().position(|t| t.selected).unwrap_or(0);
+    let pick = if back { (from + count - 1) % count } else { (from + 1) % count };
+    // SAFETY: Win32 calls with handles this thread owns; the popup is
+    // destroyed in `close_grid`.
+    unsafe {
+        let terminal = HWND(window as *mut _);
+        let monitor = MonitorFromWindow(terminal, MONITOR_DEFAULTTONEAREST);
+        let (mut dpi, mut dpi_y) = (96u32, 96u32);
+        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
+        let scale = dpi as f32 / 96.0;
+        let (size, columns) = switcher::layout(count, scale);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(monitor, &mut info);
+        let work = info.rcWork;
+        // over the middle of the Terminal window, kept on the monitor
+        let mut rect = windows::Win32::Foundation::RECT::default();
+        let on_window = GetWindowRect(terminal, &mut rect).is_ok();
+        let center = if on_window {
+            POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 }
+        } else {
+            POINT { x: (work.left + work.right) / 2, y: (work.top + work.bottom) / 2 }
+        };
+        let x = (center.x - size.cx / 2).clamp(work.left, (work.right - size.cx).max(work.left));
+        let y = (center.y - size.cy / 2).clamp(work.top, (work.bottom - size.cy).max(work.top));
+        let owner = HWND(s.owner.load(Ordering::SeqCst) as *mut _);
+        let instance = GetModuleHandleW(None).unwrap_or_default();
+        let Ok(popup) = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            POPUP_CLASS,
+            w!("NativeTerm tab switcher"),
+            WS_POPUP,
+            x,
+            y,
+            size.cx,
+            size.cy,
+            Some(owner),
+            None,
+            Some(instance.into()),
+            None,
+        ) else {
+            return;
+        };
+        let corner = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            popup,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const _ as *const _,
+            std::mem::size_of_val(&corner) as u32,
+        );
+        let look = theme::look(&s.settings);
+        switcher::GRID.with(|g| {
+            *g.borrow_mut() = Some(switcher::Grid { popup, window, tabs, pick, look, scale, size, columns });
+        });
+        for (at, v) in [x, y, x + size.cx, y + size.cy].into_iter().enumerate() {
+            s.grid_rect[at].store(v, Ordering::Relaxed);
+        }
+        s.grid.store(true, Ordering::SeqCst);
+        s.grids.fetch_add(1, Ordering::SeqCst);
+        remember_pick(s);
+        let _ = ShowWindow(popup, SW_SHOWNOACTIVATE);
+        let _ = InvalidateRect(Some(popup), None, false);
+    }
+}
+
+/// What the grid has picked, where other threads can read it.
+fn remember_pick(s: &Shared) {
+    match switcher::picked() {
+        Some((window, index, _)) => {
+            s.pick[0].store(window, Ordering::SeqCst);
+            s.pick[1].store(index as isize + 1, Ordering::SeqCst);
+        }
+        None => s.pick[1].store(0, Ordering::SeqCst),
+    }
+}
+
+/// Takes the grid away, if one is up.
+fn close_grid() {
+    let grid = switcher::GRID.with(|g| g.borrow_mut().take());
+    if let Some(s) = shared() {
+        s.grid.store(false, Ordering::SeqCst);
+        s.pick[1].store(0, Ordering::SeqCst);
+        for slot in &s.grid_rect {
+            slot.store(0, Ordering::Relaxed);
+        }
+    }
+    if let Some(grid) = grid {
+        // SAFETY: a window this thread made, not used again.
+        unsafe {
+            let _ = DestroyWindow(grid.popup);
+        }
+    }
+}
+
+/// A key the hook handed over: move the choice, or finish.
+fn grid_key_here(word: usize) {
+    let Some(s) = shared() else { return };
+    let vk = VIRTUAL_KEY((word & 0xffff) as u16);
+    let back = word & 0x1_0000 != 0;
+    let moved = match vk {
+        VK_TAB => switcher::step(if back { -1 } else { 1 }),
+        VK_RIGHT => switcher::step(1),
+        VK_LEFT => switcher::step(-1),
+        VK_DOWN => switcher::step_row(1),
+        VK_UP => switcher::step_row(-1),
+        VK_RETURN | VK_SPACE => {
+            commit_grid();
+            return;
+        }
+        VK_ESCAPE => {
+            close_grid();
+            return;
+        }
+        _ => false,
+    };
+    if moved {
+        remember_pick(s);
+        let popup = switcher::GRID.with(|g| g.borrow().as_ref().map(|grid| grid.popup));
+        if let Some(popup) = popup {
+            // SAFETY: a window this thread made.
+            unsafe {
+                let _ = InvalidateRect(Some(popup), None, false);
+            }
+        }
+    }
+}
+
+/// Ctrl was let go (or a tile was clicked): switch to what is picked.
+fn commit_grid() {
+    let Some(s) = shared() else { return };
+    let picked = switcher::picked();
+    close_grid();
+    if let Some((window, index, title)) = picked {
+        s.switched.fetch_add(1, Ordering::SeqCst);
+        s.provider.switch(window, index, &title);
+    }
+}
+
 /// Shows the card for a tab the mouse rests on.
 fn open_card(tab: MenuTab, pt: POINT) {
     let Some(s) = shared() else { return };
@@ -915,6 +1251,10 @@ fn paint(hwnd: HWND) {
         paint_card(hwnd);
         return;
     }
+    if switcher::is_grid(hwnd) {
+        paint_grid(hwnd);
+        return;
+    }
     MENU.with(|m| {
         let menu = m.borrow();
         let Some(menu) = menu.as_ref() else { return };
@@ -943,6 +1283,23 @@ fn paint_card(hwnd: HWND) {
             let background =
                 hover::CARD.with(|c| c.borrow().as_ref().map_or(COLORREF(0), |card| card.look.palette.background));
             let _ = painter.paint(hdc, size.cx, size.cy, background, |canvas| hover::draw(canvas, &painter));
+        }
+        let _ = EndPaint(hwnd, &ps);
+    }
+}
+
+/// The switcher grid's own painting.
+fn paint_grid(hwnd: HWND) {
+    let size = switcher::GRID.with(|g| g.borrow().as_ref().map(|grid| grid.size));
+    let Some(size) = size else { return };
+    // SAFETY: painting the window the message is for.
+    unsafe {
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = BeginPaint(hwnd, &mut ps);
+        if let Some(painter) = painter() {
+            let background =
+                switcher::GRID.with(|g| g.borrow().as_ref().map_or(COLORREF(0), |grid| grid.look.palette.background));
+            let _ = painter.paint(hdc, size.cx, size.cy, background, |canvas| switcher::draw(canvas, &painter));
         }
         let _ = EndPaint(hwnd, &ps);
     }
@@ -1060,7 +1417,39 @@ fn entry_at(y: i32) -> Option<usize> {
 }
 
 unsafe extern "system" fn popup_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let x = (lparam.0 & 0xffff) as i16 as i32;
     let y = ((lparam.0 >> 16) & 0xffff) as i16 as i32;
+    if switcher::is_grid(hwnd) {
+        return match msg {
+            WM_PAINT => {
+                paint(hwnd);
+                LRESULT(0)
+            }
+            WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+            // the mouse picks a tile too, and a click on one switches
+            WM_MOUSEMOVE => {
+                if let Some(at) = switcher::tile_at(x, y) {
+                    if switcher::pick(at) {
+                        if let Some(s) = shared() {
+                            remember_pick(s);
+                        }
+                        // SAFETY: the window the message is for.
+                        unsafe {
+                            let _ = InvalidateRect(Some(hwnd), None, false);
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                if switcher::tile_at(x, y).is_some() {
+                    commit_grid();
+                }
+                LRESULT(0)
+            }
+            _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        };
+    }
     match msg {
         WM_PAINT => {
             paint(hwnd);
@@ -1137,6 +1526,22 @@ unsafe extern "system" fn owner_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             menu_key(VIRTUAL_KEY(wparam.0 as u16));
             LRESULT(0)
         }
+        WM_SWITCHER_OPEN => {
+            open_grid(wparam.0 != 0);
+            LRESULT(0)
+        }
+        WM_SWITCHER_KEY => {
+            grid_key_here(wparam.0);
+            LRESULT(0)
+        }
+        WM_SWITCHER_COMMIT => {
+            commit_grid();
+            LRESULT(0)
+        }
+        WM_SWITCHER_CLOSE => {
+            close_grid();
+            LRESULT(0)
+        }
         WM_SYNC_HOOKS => {
             sync_hooks();
             LRESULT(0)
@@ -1206,6 +1611,7 @@ fn menu_thread(ready: mpsc::Sender<u32>) {
             DispatchMessageW(&msg);
         }
         close_menu();
+        close_grid();
         HOOKS.with(|h| {
             if let Some(h) = h.borrow_mut().take() {
                 let _ = UnhookWindowsHookEx(h.mouse);

@@ -288,6 +288,18 @@ struct Placeholder {
 }
 
 type Repaint = Box<dyn Fn() + Send + Sync>;
+/// What the Ctrl+Tab grid is doing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SwitcherState {
+    /// The grid is on screen.
+    pub open: bool,
+    /// The window and tab index it would switch to.
+    pub pick: Option<(isize, usize)>,
+    /// How many grids were shown, and how many switched a tab.
+    pub shown: u32,
+    pub switched: u32,
+}
+
 /// Asks the main window for something (see `tab_menu::MenuRequest`).
 type Ask = Arc<dyn Fn(tab_menu::MenuRequest) + Send + Sync>;
 
@@ -628,6 +640,8 @@ impl Core {
         *lock(&self.shared.ask) = Some(Arc::clone(&ask));
         let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared), ask });
         let menu = TabMenu::start(settings, provider)?;
+        // the keyboard hook can't read settings: it is told
+        menu.set_ctrl_tab(self.setting(tab_menu::SWITCHER_SETTING).as_deref() == Some("on"));
         *lock(&self.shared.menu) = Some(menu);
         self.shared.refresh_soon();
         Ok(())
@@ -642,6 +656,33 @@ impl Core {
 
     pub fn tab_menu_hovered(&self) -> Option<u32> {
         lock(&self.shared.menu).as_ref().and_then(|m| m.hovered())
+    }
+
+    /// Whether Ctrl+Tab over a Terminal window with NativeTerm tabs
+    /// shows NativeTerm's grid (the setting is kept in `state.db`; the
+    /// menu thread is told so its keyboard hook needs no lookup).
+    pub fn set_ctrl_tab(&self, on: bool) {
+        self.set_setting(tab_menu::SWITCHER_SETTING, if on { "on" } else { "off" });
+        if let Some(menu) = lock(&self.shared.menu).as_ref() {
+            menu.set_ctrl_tab(on);
+        }
+    }
+
+    /// What the menu thread is doing, which is what counts; the setting
+    /// only says what to do at the next start.
+    pub fn ctrl_tab(&self) -> bool {
+        match lock(&self.shared.menu).as_ref() {
+            Some(menu) => menu.ctrl_tab(),
+            None => self.setting(tab_menu::SWITCHER_SETTING).as_deref() == Some("on"),
+        }
+    }
+
+    /// What the Ctrl+Tab grid is doing (diagnostics, tests).
+    pub fn switcher_state(&self) -> Option<SwitcherState> {
+        let menu = lock(&self.shared.menu);
+        let menu = menu.as_ref()?;
+        let (shown, switched) = menu.switcher_counts();
+        Some(SwitcherState { open: menu.switcher_open(), pick: menu.switcher_pick(), shown, switched })
     }
 
     pub fn tab_menu_debug(&self) -> String {

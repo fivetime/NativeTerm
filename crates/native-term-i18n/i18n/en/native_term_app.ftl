@@ -914,6 +914,8 @@ drop-size-folders = Folders go with everything in them ({ $size } and what they 
 tabs-text-preview = text preview
 tabs-hover-setting = Show a card when the mouse rests on a tab
 tabs-hover-hint = After about half a second, the tab's picture and the session's state appear under it. Terminal's own title tooltip still shows.
+tabs-switcher-setting = Ctrl+Tab shows a grid of tab pictures
+tabs-switcher-hint = In a Terminal window that holds NativeTerm tabs, Ctrl+Tab shows every tab of that window as a picture instead of Terminal's own list. Hold Ctrl and press Tab (or the arrow keys) to move, let Ctrl go to switch, Esc to leave things as they are. Terminal's own Ctrl+Tab comes back when this is off.
 config-paths-repaired = The program moved: { $count } proxy command(s) in the ssh config now point at this copy (they named { $old })
 
 # Clean up (before the program is deleted)

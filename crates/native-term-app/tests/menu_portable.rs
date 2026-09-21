@@ -16,7 +16,7 @@ use native_term_platform::{Rect, Target};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, MOUSEEVENTF_RIGHTDOWN,
-    MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_DOWN, VK_ESCAPE,
+    MOUSEEVENTF_RIGHTUP, MOUSEINPUT, MOUSE_EVENT_FLAGS, VIRTUAL_KEY, VK_CONTROL, VK_DOWN, VK_ESCAPE, VK_SHIFT, VK_TAB,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetForegroundWindow, SetCursorPos, SetForegroundWindow};
 
@@ -64,6 +64,32 @@ fn send(inputs: &[INPUT]) {
 
 fn mouse(flags: MOUSE_EVENT_FLAGS) -> INPUT {
     INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dwFlags: flags, ..Default::default() } } }
+}
+
+fn key_input(vk: VIRTUAL_KEY, up: bool) -> INPUT {
+    let flags = if up { KEYEVENTF_KEYUP } else { Default::default() };
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: flags, ..Default::default() } },
+    }
+}
+
+/// Holds Ctrl down until it is dropped — including while a failing test
+/// unwinds, so the key is never left stuck on the machine.
+struct CtrlHeld;
+
+impl Drop for CtrlHeld {
+    fn drop(&mut self) {
+        // no assertion here: this also runs while unwinding, and a Ctrl
+        // that stays down would be far worse than a stray key-up
+        unsafe { SendInput(&[key_input(VK_CONTROL, true)], std::mem::size_of::<INPUT>() as i32) };
+        std::thread::sleep(Duration::from_millis(60));
+    }
+}
+
+fn hold_ctrl() -> CtrlHeld {
+    send(&[key_input(VK_CONTROL, false)]);
+    CtrlHeld
 }
 
 fn key(vk: VIRTUAL_KEY) {
@@ -184,6 +210,88 @@ fn tab_menu_on_nativeterm_tabs_only() {
         snapshot.windows.iter().find_map(|w| w.tabs.iter().find(|t| t.name == "user tab").map(|t| (w, t)))
     {
         let _ = core.terminal().close(w.handle, t);
+    }
+    wait_until("window closed", || !core.terminal().windows().iter().any(|w| w.handle == window));
+}
+
+/// Ctrl+Tab shows NativeTerm's grid over the window's tabs, more presses
+/// move the choice, letting Ctrl go switches to it — and with the setting
+/// off, Terminal's own Ctrl+Tab is back.
+#[test]
+#[ignore = "needs a portable Windows Terminal; types Ctrl+Tab"]
+fn ctrl_tab_shows_the_grid_and_switches() {
+    let core = core();
+    core.start_tab_menu(|_| {}).unwrap();
+    core.set_ctrl_tab(true);
+    let hosts: Vec<HostRequest> =
+        ["s a", "s b", "s c"].iter().map(|l| HostRequest::new("nativeterm-test.invalid", *l)).collect();
+    core.open(&hosts, Target::NewWindow);
+    wait_until("three tabs located", || {
+        let s = core.sessions();
+        s.len() == 3 && s.iter().all(|s| matches!(s.state, State::Unreachable(_)) && s.location.is_some())
+    });
+    let (window, _) = tab_rect(&core, "s a");
+    unsafe {
+        let _ = SetForegroundWindow(windows::Win32::Foundation::HWND(window as *mut _));
+    }
+    std::thread::sleep(Duration::from_millis(500));
+
+    let before = core.switcher_state().expect("the menu is running").shown;
+    let picked = {
+        let _ctrl = hold_ctrl();
+        send(&[key_input(VK_TAB, false), key_input(VK_TAB, true)]);
+        wait_until("the grid is up", || core.switcher_state().is_some_and(|s| s.open));
+        let state = core.switcher_state().unwrap();
+        assert_eq!(state.shown, before + 1);
+        let first = state.pick.expect("a tab is picked");
+        assert_eq!(first.0, window, "of the window in front");
+        // a second Tab moves the choice, still without switching anything
+        send(&[key_input(VK_TAB, false), key_input(VK_TAB, true)]);
+        wait_until("the choice moved", || {
+            core.switcher_state().is_some_and(|s| s.pick.is_some() && s.pick != Some(first))
+        });
+        let state = core.switcher_state().unwrap();
+        assert_eq!(state.switched, 0, "nothing is switched while Ctrl is held");
+        let second = state.pick.unwrap();
+        // Ctrl+Shift+Tab goes back to where it was, Shift itself is not
+        // "something else is happening"
+        send(&[key_input(VK_SHIFT, false)]);
+        send(&[key_input(VK_TAB, false), key_input(VK_TAB, true)]);
+        send(&[key_input(VK_SHIFT, true)]);
+        wait_until("the choice went back", || core.switcher_state().is_some_and(|s| s.open && s.pick == Some(first)));
+        assert_ne!(second, first);
+        // and forwards again, to leave it where the rest of the test expects
+        send(&[key_input(VK_TAB, false), key_input(VK_TAB, true)]);
+        wait_until("and forward again", || core.switcher_state().is_some_and(|s| s.pick == Some(second)));
+        second
+    };
+    // Ctrl let go: the grid closes and that tab is selected
+    wait_until("the grid switched and closed", || core.switcher_state().is_some_and(|s| !s.open && s.switched == 1));
+    let labels = ["s a".to_string(), "s b".to_string(), "s c".to_string()].into_iter().collect();
+    wait_until("the picked tab is the window's own", || {
+        core.terminal()
+            .snapshot(&labels)
+            .windows
+            .iter()
+            .filter(|w| w.handle == window)
+            .any(|w| w.tabs.iter().any(|t| t.index == picked.1 && t.selected))
+    });
+
+    // turned off, the key belongs to Terminal again
+    core.set_ctrl_tab(false);
+    std::thread::sleep(Duration::from_millis(300));
+    let before = core.switcher_state().unwrap().shown;
+    {
+        let _ctrl = hold_ctrl();
+        send(&[key_input(VK_TAB, false), key_input(VK_TAB, true)]);
+        std::thread::sleep(Duration::from_millis(500));
+        let state = core.switcher_state().unwrap();
+        assert!(!state.open && state.shown == before, "no grid when the setting is off");
+    }
+    std::thread::sleep(Duration::from_millis(300));
+
+    for session in core.sessions() {
+        core.close(&session.id);
     }
     wait_until("window closed", || !core.terminal().windows().iter().any(|w| w.handle == window));
 }

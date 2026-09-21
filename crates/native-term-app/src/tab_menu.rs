@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use native_term_platform::windows_terminal::hover::HoverCard;
 use native_term_platform::windows_terminal::menu::{Entry, MenuTab, Provider};
+use native_term_platform::windows_terminal::switcher::SwitcherTab;
 
 use crate::actions::{close_set, CloseSet, Closing, SessionCommand};
 use crate::{t, Core, SessionView, Shared, State};
@@ -44,6 +45,10 @@ pub enum MenuRequest {
 
 /// `off` keeps the cards away (`state.db`).
 pub const HOVER_SETTING: &str = "tabs.hover";
+/// `on` gives Ctrl+Tab to NativeTerm's thumbnail grid (`state.db`). Off
+/// until the person asks for it: taking a key from Terminal is not
+/// something to do behind their back.
+pub const SWITCHER_SETTING: &str = "tabs.switcher";
 /// How long the mouse rests on a tab before its card appears.
 const DELAY: Duration = Duration::from_millis(500);
 /// A tab without a picture is asked what is on its screen at most this
@@ -193,6 +198,64 @@ impl Provider for Actions {
         // an empty card still waits: the screen was just asked for, and
         // the answer is there by the time the card would be shown
         (session.is_some() || !card.is_empty()).then_some((card, DELAY))
+    }
+
+    /// Every tab of the window Ctrl+Tab was pressed over, with the
+    /// picture each was last seen with. Only asked for when the grid is
+    /// turned on (the menu thread holds that flag).
+    fn tiles(&self, window: isize) -> Vec<SwitcherTab> {
+        let Some(shared) = self.core.upgrade() else { return Vec::new() };
+        let core = Core { shared };
+        let snapshot = core.snapshot();
+        let Some(view) = snapshot.windows.iter().find(|w| w.handle == window) else { return Vec::new() };
+        let sessions = core.sessions();
+        view.tabs
+            .iter()
+            .map(|tab| {
+                let session = tab
+                    .claim
+                    .as_ref()
+                    .and_then(|claim| sessions.iter().find(|s| s.state.is_open() && s.label == claim.label));
+                let mut tile = SwitcherTab {
+                    window,
+                    index: tab.index,
+                    // NativeTerm's own tabs are known by their session's
+                    // name, whatever the shell has titled them
+                    title: session.map_or_else(|| tab.name.clone(), |s| s.label.clone()),
+                    name: tab.name.clone(),
+                    selected: tab.selected,
+                    ..Default::default()
+                };
+                match core.preview(window, tab.index) {
+                    Some(preview) => {
+                        let image = &preview.image;
+                        tile.image = Some((image.width, image.height, image.rgba.clone()));
+                    }
+                    None => {
+                        // never rendered by Terminal: what its own console
+                        // holds, else the screen read when it was last seen
+                        if let Some(session) = session {
+                            core.ask_screen(&session.id, SCREEN_EVERY);
+                            if let Some(screen) = core.screen(&session.id) {
+                                tile.columns = screen.columns;
+                                tile.lines = screen.lines;
+                            }
+                        }
+                        if tile.lines.is_empty() {
+                            if let Some(lines) = core.preview_text(window, tab.index) {
+                                tile.lines = lines.as_ref().clone();
+                            }
+                        }
+                    }
+                }
+                tile
+            })
+            .collect()
+    }
+
+    fn switch(&self, window: isize, index: usize, name: &str) {
+        let Some(shared) = self.core.upgrade() else { return };
+        Core { shared }.select_tab(window, index, name);
     }
 
     fn chosen(&self, tab: &MenuTab, id: u32) {

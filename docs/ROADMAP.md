@@ -573,14 +573,18 @@
       in its code (`Tab.cpp`, `ToolTipService::SetToolTip`) with no
       setting to turn it off, and Terminal has no API for any of this
       (Monarch/Peasant was removed; only UIA is left to read from outside)
-- [ ] Tiled thumbnail switcher on Ctrl+Tab (off by default): the existing
-      low-level keyboard hook swallows Ctrl+Tab while a Terminal window
-      with NativeTerm tabs is in front, a non-activating grid follows
-      further Tab presses and commits when Ctrl is released; thumbnails
-      from captures taken while a tab was selected (see "Taking over
-      Ctrl+Tab" in ARCHITECTURE.md). Prototype done
-      (`prototypes/tab-switcher`, PROTOTYPES.md): hook ~9 µs, grid in
-      70–150 ms, switch 40–60 ms after Ctrl is released
+- [x] Tiled thumbnail switcher on Ctrl+Tab (off by default; "Ctrl+Tab
+      shows a grid of tab pictures" in the options): the low-level
+      keyboard hook the tab menu already installs swallows Ctrl+Tab while
+      a Terminal window with NativeTerm tabs is in front, a non-activating
+      grid (`windows_terminal/switcher.rs`, drawn with the same Direct2D
+      popup as the menu and the hover card) shows every tab of that window
+      with the picture it was last seen with, further Tab / Shift+Tab /
+      arrow presses move the choice, Ctrl released switches through UIA,
+      Esc (or a click elsewhere, or any other key) leaves the tabs as they
+      are. Tiles with no picture show the text the tab last had. The
+      mouse picks a tile too. Turned off, Terminal's own Ctrl+Tab is
+      untouched
 - [x] NativeTerm SSH profile with a moderate scrollback size
       (`historySize` 5000)
 - [x] Sidebar auto-hide/pin drawer (QQ-style): docks at the top, left or

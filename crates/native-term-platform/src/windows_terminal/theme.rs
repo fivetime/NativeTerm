@@ -25,6 +25,8 @@ pub struct Palette {
     pub hover_text: COLORREF,
     /// Secondary text (header rows, disabled items).
     pub dim: COLORREF,
+    /// The Windows accent, for what is picked (the switcher's frame).
+    pub accent: COLORREF,
     pub separator: COLORREF,
     pub border: COLORREF,
 }
@@ -57,6 +59,29 @@ fn read_dword(key: PCWSTR, value: PCWSTR) -> Option<u32> {
         )
     };
     status.is_ok().then_some(data)
+}
+
+/// The Windows accent color, the one window borders and the taskbar
+/// use. DWM keeps it as 0xAABBGGRR, and a `COLORREF` is 0x00BBGGRR, so
+/// the low three bytes are it. Lightened on a dark theme, as Windows
+/// itself uses a lighter shade of the palette there, so that a dark
+/// accent still shows against a dark popup.
+fn accent(dark: bool) -> COLORREF {
+    let color = read_dword(w!(r"Software\Microsoft\Windows\DWM"), w!("AccentColor"))
+        .map(|abgr| COLORREF(abgr & 0x00ff_ffff))
+        .unwrap_or_else(|| rgb(0x00, 0x5f, 0xb8));
+    if dark {
+        lighter(color)
+    } else {
+        color
+    }
+}
+
+/// Two fifths of the way to white.
+fn lighter(c: COLORREF) -> COLORREF {
+    let mix = |v: u32| (v + (255 - v) * 2 / 5) as u8;
+    let (b, g, r) = ((c.0 >> 16) & 0xff, (c.0 >> 8) & 0xff, c.0 & 0xff);
+    rgb(mix(r), mix(g), mix(b))
 }
 
 fn windows_apps_dark() -> bool {
@@ -152,6 +177,7 @@ pub fn look(settings: &Path) -> Look {
                 text: sys(COLOR_WINDOWTEXT),
                 hover_text: sys(COLOR_HIGHLIGHTTEXT),
                 dim: sys(COLOR_GRAYTEXT),
+                accent: sys(COLOR_HIGHLIGHT),
                 separator: sys(COLOR_WINDOWTEXT),
                 border: sys(COLOR_WINDOWTEXT),
             },
@@ -180,6 +206,7 @@ pub fn look(settings: &Path) -> Look {
             text: rgb(0xff, 0xff, 0xff),
             hover_text: rgb(0xff, 0xff, 0xff),
             dim: rgb(0x9e, 0x9e, 0x9e),
+            accent: accent(true),
             separator: rgb(0x40, 0x40, 0x40),
             border: rgb(0x45, 0x45, 0x45),
         }
@@ -190,6 +217,7 @@ pub fn look(settings: &Path) -> Look {
             text: rgb(0x1b, 0x1b, 0x1b),
             hover_text: rgb(0x1b, 0x1b, 0x1b),
             dim: rgb(0x6e, 0x6e, 0x6e),
+            accent: accent(false),
             separator: rgb(0xe5, 0xe5, 0xe5),
             border: rgb(0xe0, 0xe0, 0xe0),
         }
