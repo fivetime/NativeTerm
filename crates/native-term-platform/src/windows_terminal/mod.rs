@@ -40,6 +40,20 @@ const POLL: Duration = Duration::from_millis(100);
 /// The optional dedicated window's name.
 pub const DEDICATED_WINDOW_NAME: &str = "NativeTerm";
 
+/// A difference in permission level between NativeTerm and Windows
+/// Terminal. Windows keeps the two apart either way (UIPI), so neither
+/// side can be made to work from the other: it is worth saying plainly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mismatch {
+    /// NativeTerm runs elevated. A tab of a normal Terminal cannot write
+    /// to a pipe an elevated process created (no-write-up), so its shim
+    /// never connects, and nothing can be dragged onto NativeTerm's window.
+    WeAreElevated,
+    /// Terminal runs elevated and NativeTerm does not: its windows can be
+    /// seen but neither read through UI Automation nor sent anything.
+    TerminalElevated,
+}
+
 /// What `open` did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OpenReport {
@@ -91,6 +105,25 @@ impl WindowsTerminal {
         window::terminal_windows(&self.install)
     }
 
+    /// What starts Terminal now. The app execution alias a packaged
+    /// install is normally started through can be turned off at any time,
+    /// so this is asked for each launch rather than kept.
+    fn launcher(&self) -> PathBuf {
+        self.install.launcher_now().unwrap_or_else(|| self.install.launcher.clone())
+    }
+
+    /// Whether NativeTerm and Terminal run at different permission levels
+    /// (see `Mismatch`). Asked at start and worth repeating when a window
+    /// appears that cannot be read.
+    pub fn mismatch(&self) -> Option<Mismatch> {
+        if native_term_win::is_elevated() {
+            return Some(Mismatch::WeAreElevated);
+        }
+        let above =
+            |w: &TerminalWindow| !matches!(native_term_win::process_standing(w.pid), native_term_win::Standing::Normal);
+        self.windows().iter().any(above).then_some(Mismatch::TerminalElevated)
+    }
+
     /// Stuck UIA workers left behind (a Terminal hung mid-call).
     pub fn abandoned_workers(&self) -> usize {
         lock(&self.worker).abandoned()
@@ -135,7 +168,7 @@ impl WindowsTerminal {
             // a saved workspace would swallow the command: restore it first
             if self.install.has_saved_workspace(name, false) {
                 let before = self.handles();
-                launch::run(&self.install.launcher, &["-w".into(), name.into()])?;
+                launch::run(&self.launcher(), &["-w".into(), name.into()])?;
                 report.window = self.wait_for_new_window(&before, NEW_WINDOW_TIMEOUT);
             }
         }
@@ -154,7 +187,7 @@ impl WindowsTerminal {
             }
             previous = chunk;
             let before = if new_window && i == 0 { self.handles() } else { Vec::new() };
-            launch::run(&self.install.launcher, &args)?;
+            launch::run(&self.launcher(), &args)?;
             report.launched += chunk.len();
             if new_window && i == 0 {
                 report.window = self.wait_for_new_window(&before, NEW_WINDOW_TIMEOUT);
@@ -181,7 +214,7 @@ impl WindowsTerminal {
             self.shim.clone().into(),
         ];
         args.extend(shim_args.iter().map(|a| command::escape_delimiters(a).into()));
-        launch::run(&self.install.launcher, &args)
+        launch::run(&self.launcher(), &args)
     }
 
     /// Wait until tabs with all these titles exist, in any window. Reads

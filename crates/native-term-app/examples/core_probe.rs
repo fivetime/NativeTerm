@@ -85,7 +85,11 @@ fn main() {
                 args[1..].iter().filter(|a| !a.starts_with("--")).map(|l| HostRequest::new(HOST, l.clone())).collect();
             core.open(&hosts, if new_window { Target::NewWindow } else { Target::Recent });
             let ok = wait_until(&core, 30, |s| {
-                s.len() >= hosts.len() && settled(s) && s.iter().all(|s| matches!(s.state, State::LoginFailed(_)))
+                // the test host does not resolve, so ssh gives up before any
+                // login: a server never reached
+                s.len() >= hosts.len()
+                    && settled(s)
+                    && s.iter().all(|s| matches!(s.state, State::LoginFailed(_) | State::Unreachable(_)))
             });
             println!("SETTLED {ok}");
         }
@@ -103,7 +107,11 @@ fn main() {
                 let before = core.sessions().into_iter().find(|s| s.id == id).map_or(0, |s| s.attempt);
                 core.connect(&id);
                 let ok = wait_until(&core, 20, |s| {
-                    s.iter().any(|s| s.id == id && s.attempt > before && matches!(s.state, State::LoginFailed(_)))
+                    s.iter().any(|s| {
+                        s.id == id
+                            && s.attempt > before
+                            && matches!(s.state, State::LoginFailed(_) | State::Unreachable(_))
+                    })
                 });
                 println!("CONNECTED {ok}");
             } else {

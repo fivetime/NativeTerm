@@ -120,7 +120,8 @@ fn tab_menu_on_nativeterm_tabs_only() {
     core.open(&hosts, Target::NewWindow);
     wait_until("three tabs failed to log in and were located", || {
         let s = core.sessions();
-        s.len() == 3 && s.iter().all(|s| matches!(s.state, State::LoginFailed(_)) && s.location.is_some())
+        // the test host does not resolve: a server never reached
+        s.len() == 3 && s.iter().all(|s| matches!(s.state, State::Unreachable(_)) && s.location.is_some())
     });
     // one of the user's own tabs, in the same window
     launch::run(

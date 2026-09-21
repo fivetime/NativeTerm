@@ -197,9 +197,18 @@
 - [x] Startup checks (part): Windows Terminal found (packages, portable,
       unpackaged; `--terminal-dir`), single instance (second start brings
       the first to the front), data folder writable (fallbacks)
-- [ ] Startup checks (rest): Terminal recent enough; choosing among
-      several installs in the UI; located via its package if the
-      `wt.exe` alias is off; integrity-level mismatch warning
+- [x] Startup checks (rest): the Terminal's version is read (a package's
+      full name, or `WindowsTerminal.exe`'s version resource) and a
+      version older than 1.21 is named at start and in the wizard — that
+      is where `--sessionId` comes from, and without it NativeTerm cannot
+      tell its tabs apart; the install is chosen in the settings when
+      there is more than one (`terminal.install`, read at the next start,
+      a portable folder included); a packaged Terminal whose `wt.exe` app
+      execution alias was turned off is started from the package folder
+      instead (the alias only points there), with the PATH as a last
+      resort; and NativeTerm says plainly when it and Terminal run at
+      different permission levels, which Windows keeps apart either way
+      (`install.rs`, `main.rs::install_notices`, `WindowsTerminal::mismatch`)
 
 ## Phase 1 — MVP
 - [x] **SecureCRT importer** (first version): folders, names, host,

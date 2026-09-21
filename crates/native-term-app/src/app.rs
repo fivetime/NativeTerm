@@ -1005,6 +1005,7 @@ impl App {
         let folders_dir = self.editor.folders_dir();
         let facts = crate::wizard::Facts {
             terminal: self.profile.terminal_text(),
+            terminal_problem: self.profile.terminal_problem(),
             profile: self.profile.describe(),
             profile_usable: self.profile.status.usable(),
             agent: self.agent.status(),
@@ -1695,7 +1696,7 @@ impl crate::window::Ui for App {
             });
             if self.show_settings {
                 ui.group(|ui| {
-                    self.profile.settings_ui(ui, &mut self.notices);
+                    self.profile.settings_ui(ui, self.core.as_ref(), &mut self.notices);
                     if let Some(core) = &self.core {
                         ui.separator();
                         let mut auto = core.auto_reconnect();

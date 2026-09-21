@@ -17,6 +17,10 @@ use native_term_platform::Target;
 
 const WAIT: Duration = Duration::from_secs(30);
 
+/// The test host does not resolve, so the shim reports a server it never
+/// reached (`Unreachable`), not a login that failed.
+const FAILED: State = State::Unreachable(255);
+
 fn core() -> Core {
     let dir = std::env::var("NATIVETERM_TEST_WT_DIR").expect("set NATIVETERM_TEST_WT_DIR to a portable Terminal");
     let install = Install::from_dir(dir.as_ref()).unwrap();
@@ -50,7 +54,7 @@ fn open_track_reconnect_close() {
 
     // ssh can't resolve the host: exit 255 before any login
     let sessions = wait_until(&core, &ids, "both failed to log in and were located", |s| {
-        s.iter().all(|s| matches!(s.state, State::LoginFailed(255)) && s.location.is_some() && s.linked)
+        s.iter().all(|s| matches!(s.state, FAILED) && s.location.is_some() && s.linked)
     });
     let labels: Vec<&str> = sessions.iter().map(|s| s.label.as_str()).collect();
     assert_eq!(labels, ["nt-app 测试", "nt-app 测试 (2)"]);
@@ -81,7 +85,7 @@ fn open_track_reconnect_close() {
     let pid = first.shim_pid;
     core.connect(&ids[0]);
     wait_until(&core, &ids, "reconnected and failed again", |s| {
-        s[0].attempt == 2 && matches!(s[0].state, State::LoginFailed(255)) && s[0].shim_pid == pid
+        s[0].attempt == 2 && matches!(s[0].state, FAILED) && s[0].shim_pid == pid
     });
     let sessions = wait_until(&core, &ids, "the other one untouched", |s| s[1].attempt == 1);
     assert_eq!(sessions.len(), 2);
@@ -104,7 +108,7 @@ fn open_track_reconnect_close() {
     let started = Instant::now();
     let ids = core.open(&vec![host; 6], Target::NewWindow);
     let sessions = wait_until(&core, &ids, "all six connected through the queue and failed", |s| {
-        s.len() == 6 && s.iter().all(|s| matches!(s.state, State::LoginFailed(255)) && s.attempt == 1)
+        s.len() == 6 && s.iter().all(|s| matches!(s.state, FAILED) && s.attempt == 1)
     });
     // six starts, 200 ms apart
     assert!(started.elapsed() >= Duration::from_millis(1000), "{:?}", started.elapsed());
@@ -113,9 +117,7 @@ fn open_track_reconnect_close() {
 
     // "connect all" goes through the same queue
     core.connect_all(ids.clone());
-    wait_until(&core, &ids, "all reconnected once", |s| {
-        s.iter().all(|s| s.attempt == 2 && matches!(s.state, State::LoginFailed(255)))
-    });
+    wait_until(&core, &ids, "all reconnected once", |s| s.iter().all(|s| s.attempt == 2 && matches!(s.state, FAILED)));
     for id in &ids {
         core.close(id);
     }
@@ -166,7 +168,7 @@ fn close_all_spares_locked_and_foreign_tabs() {
     let host = HostRequest::new("nativeterm-test.invalid", "nt-closeall");
     let ids = core.open(&[host.clone(), host], Target::Named(window_name.clone()));
     let sessions = wait_until(&core, &ids, "both failed to log in and were located", |s| {
-        s.len() == 2 && s.iter().all(|s| matches!(s.state, State::LoginFailed(255)) && s.location.is_some() && s.linked)
+        s.len() == 2 && s.iter().all(|s| matches!(s.state, FAILED) && s.location.is_some() && s.linked)
     });
     assert!(sessions.iter().all(|s| s.location.as_ref().unwrap().window == window), "in the foreign tab's window");
     core.set_locked(&ids[1], true);

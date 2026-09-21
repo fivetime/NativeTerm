@@ -19,6 +19,49 @@ pub enum Kind {
     Unpackaged,
 }
 
+/// The oldest Windows Terminal NativeTerm works with.
+///
+/// A tab is opened with `--sessionId {guid}` and found again by it
+/// (`WT_SESSION` in the tab). Terminal learned that flag with its buffer
+/// restore (microsoft/terminal#16598, first released in 1.21); older
+/// versions open the tab but NativeTerm cannot tell which one it is.
+pub const OLDEST: (u16, u16) = (1, 21);
+
+/// A version as Terminal states it, `major.minor.build.revision`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Version(pub u16, pub u16, pub u16, pub u16);
+
+impl std::fmt::Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}.{}", self.0, self.1, self.2, self.3)
+    }
+}
+
+impl Version {
+    /// The version in a package full name
+    /// (`Microsoft.WindowsTerminal_1.21.3231.0_x64__8wekyb3d8bbwe`).
+    #[must_use]
+    pub fn from_package_name(full_name: &str) -> Option<Version> {
+        let field = full_name.split('_').nth(1)?;
+        Version::parse(field)
+    }
+
+    /// `1.21.3231.0`, as a file version or a package name states it.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Version> {
+        let mut parts = text.split('.');
+        let major = parts.next()?.parse::<u16>().ok()?;
+        let mut next = || parts.next().and_then(|p| p.parse::<u16>().ok()).unwrap_or(0);
+        Some(Version(major, next(), next(), next()))
+    }
+
+    /// Whether NativeTerm can find its tabs in this Terminal.
+    #[must_use]
+    pub fn old(&self) -> bool {
+        (self.0, self.1) < OLDEST
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Install {
     /// Folder of `WindowsTerminal.exe`.
@@ -30,6 +73,10 @@ pub struct Install {
     pub settings_dir: PathBuf,
     /// Package family name, for packaged installs.
     pub family: Option<String>,
+    /// What it says its version is (a package's full name, or the
+    /// `WindowsTerminal.exe` file version); `None` when it could not be
+    /// read.
+    pub version: Option<Version>,
 }
 
 /// Package families of Windows Terminal (release, Preview, Canary).
@@ -59,7 +106,8 @@ impl Install {
         } else {
             (Kind::Unpackaged, local_app_data()?.join("Microsoft").join("Windows Terminal"))
         };
-        Ok(Install { launcher: dir.join("wt.exe"), dir, kind, settings_dir, family: None })
+        let version = file_version(&dir.join("WindowsTerminal.exe"));
+        Ok(Install { launcher: dir.join("wt.exe"), dir, kind, settings_dir, family: None, version })
     }
 
     /// The installed package of `family`, if any.
@@ -73,6 +121,7 @@ impl Install {
             launcher: local.join("Microsoft").join("WindowsApps").join(family).join("wt.exe"),
             settings_dir: local.join("Packages").join(family).join("LocalState"),
             family: Some(family.to_string()),
+            version: Version::from_package_name(&full_name),
         }))
     }
 
@@ -81,6 +130,42 @@ impl Install {
         let mut found: Vec<Install> = FAMILIES.iter().filter_map(|f| Install::packaged(f).ok().flatten()).collect();
         found.extend(folders.iter().filter_map(|d| Install::from_dir(d).ok()));
         found
+    }
+
+    /// Too old for NativeTerm to find its tabs (see `OLDEST`). Unknown
+    /// versions are given the benefit of the doubt.
+    #[must_use]
+    pub fn too_old(&self) -> bool {
+        self.version.is_some_and(|v| v.old())
+    }
+
+    /// What starts Terminal now, if anything does.
+    ///
+    /// A packaged install is normally started through its app execution
+    /// alias, which Windows lets the person turn off (Settings 鈫?Apps 鈫?    /// Advanced app settings 鈫?App execution aliases) and which some
+    /// "debloat" scripts remove. The alias only points at `wt.exe` inside
+    /// the package, and that `wt.exe` is a shim that runs the
+    /// `WindowsTerminal.exe` next to it (terminal/src/cascadia/wt/shim.cpp),
+    /// so the copy the package info leads to does the same thing. `wt.exe`
+    /// on the PATH (scoop, a portable folder someone added) is the last
+    /// resort.
+    #[must_use]
+    pub fn launcher_now(&self) -> Option<PathBuf> {
+        if self.launcher.is_file() {
+            return Some(self.launcher.clone());
+        }
+        let in_package = self.dir.join("wt.exe");
+        if in_package.is_file() {
+            return Some(in_package);
+        }
+        on_path("wt.exe")
+    }
+
+    /// Whether the alias a packaged install is normally started through is
+    /// gone (`launcher_now` then finds it another way).
+    #[must_use]
+    pub fn alias_off(&self) -> bool {
+        self.kind == Kind::Packaged && !self.launcher.is_file()
     }
 
     pub fn settings_json(&self) -> PathBuf {
@@ -108,6 +193,42 @@ impl Install {
             .get("persistedWorkspaces")
             .and_then(|w| w.as_object())
             .is_some_and(|w| w.keys().any(|k| k.eq_ignore_ascii_case(name)))
+    }
+}
+
+/// `name` in one of the PATH folders.
+fn on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|dir| dir.join(name)).find(|p| p.is_file())
+}
+
+/// The file version of `path` (`WindowsTerminal.exe` states Terminal's).
+fn file_version(path: &Path) -> Option<Version> {
+    use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+    let wide = HSTRING::from(path.as_os_str());
+    // SAFETY: the string lives through the calls; the buffer is as large
+    // as the first call asks for, and the pointer VerQueryValue hands back
+    // is read only while the buffer is alive.
+    unsafe {
+        let size = GetFileVersionInfoSizeW(&wide, None);
+        if size == 0 {
+            return None;
+        }
+        let mut buffer = vec![0u8; size as usize];
+        GetFileVersionInfoW(&wide, None, size, buffer.as_mut_ptr().cast()).ok()?;
+        let mut value = std::ptr::null_mut();
+        let mut length = 0u32;
+        let root = HSTRING::from("\\");
+        if !VerQueryValueW(buffer.as_ptr().cast(), &root, &mut value, &mut length).as_bool() || length == 0 {
+            return None;
+        }
+        let info = &*value.cast::<windows::Win32::Storage::FileSystem::VS_FIXEDFILEINFO>();
+        Some(Version(
+            (info.dwFileVersionMS >> 16) as u16,
+            (info.dwFileVersionMS & 0xffff) as u16,
+            (info.dwFileVersionLS >> 16) as u16,
+            (info.dwFileVersionLS & 0xffff) as u16,
+        ))
     }
 }
 
@@ -177,6 +298,60 @@ mod tests {
         assert!(install.owns_image(&upper));
         let sibling = PathBuf::from(format!("{}-other", dir.display())).join("WindowsTerminal.exe");
         assert!(!install.owns_image(&sibling), "a folder with the same prefix is another install");
+    }
+
+    #[test]
+    fn versions_are_read_and_compared() {
+        assert_eq!(Version::parse("1.21.3231.0"), Some(Version(1, 21, 3231, 0)));
+        assert_eq!(Version::parse("1.22"), Some(Version(1, 22, 0, 0)), "a short version is still a version");
+        assert_eq!(Version::parse(""), None);
+        assert_eq!(Version::parse("preview"), None);
+        assert_eq!(
+            Version::from_package_name("Microsoft.WindowsTerminal_1.21.3231.0_x64__8wekyb3d8bbwe"),
+            Some(Version(1, 21, 3231, 0))
+        );
+        assert_eq!(Version::from_package_name("Microsoft.WindowsTerminal"), None);
+        assert!(Version(1, 20, 11781, 0).old(), "1.20 has no --sessionId");
+        assert!(!Version(1, 21, 0, 0).old(), "the oldest we work with");
+        assert!(!Version(1, 26, 2581, 0).old());
+        assert!(Version(1, 9, 0, 0) < Version(1, 21, 0, 0), "minor versions are numbers, not text");
+        assert_eq!(Version(1, 21, 3231, 0).to_string(), "1.21.3231.0");
+    }
+
+    #[test]
+    fn a_missing_launcher_is_looked_for_in_the_package_folder() {
+        // the app execution alias is off: the package's own wt.exe does the
+        // same thing (it starts the WindowsTerminal.exe next to it)
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("package");
+        std::fs::create_dir(&dir).unwrap();
+        fake_install(&dir, false);
+        let install = Install {
+            dir: dir.clone(),
+            kind: Kind::Packaged,
+            launcher: tmp.path().join("WindowsApps").join("family").join("wt.exe"),
+            settings_dir: tmp.path().join("LocalState"),
+            family: Some("family".to_string()),
+            version: Some(Version(1, 26, 0, 0)),
+        };
+        assert!(install.alias_off());
+        assert_eq!(install.launcher_now(), Some(dir.join("wt.exe")));
+        assert!(!install.too_old());
+        // with the alias there, that is what is used
+        std::fs::create_dir_all(install.launcher.parent().unwrap()).unwrap();
+        std::fs::write(&install.launcher, "").unwrap();
+        assert!(!install.alias_off());
+        assert_eq!(install.launcher_now(), Some(install.launcher.clone()));
+    }
+
+    #[test]
+    fn an_unknown_version_is_not_called_old() {
+        let tmp = tempfile::tempdir().unwrap();
+        fake_install(tmp.path(), true);
+        let install = Install::from_dir(tmp.path()).unwrap();
+        assert_eq!(install.version, None, "an empty file has no version resource");
+        assert!(!install.too_old(), "what we cannot read, we do not complain about");
+        assert!(!install.alias_off(), "only a packaged install has an alias");
     }
 
     #[test]

@@ -5,10 +5,14 @@
 
 use std::path::PathBuf;
 
-use native_term_app::t;
-use native_term_platform::windows_terminal::install::{Install, Kind};
+use native_term_app::{t, Core};
+use native_term_platform::windows_terminal::install::{self, Install, Kind};
 use native_term_platform::windows_terminal::profile::{self, Status};
 use native_term_platform::windows_terminal::sources;
+
+/// `state.db` setting: the folder of the Terminal install to drive, when
+/// more than one is installed. Read at start (see `choose_install`).
+pub const INSTALL_SETTING: &str = "terminal.install";
 
 pub struct ProfileSetup {
     install: Install,
@@ -90,7 +94,22 @@ impl ProfileSetup {
 
     /// The chosen Terminal, in words.
     pub fn terminal_text(&self) -> String {
-        format!("{} ({})", self.install.dir.display(), kind_name(&self.install.kind))
+        let version = self.install.version.map(|v| format!(", {v}")).unwrap_or_default();
+        format!("{} ({}{version})", self.install.dir.display(), kind_name(&self.install.kind))
+    }
+
+    /// What stands between NativeTerm and the chosen Terminal, if anything
+    /// (the same checks as at start, for the wizard). An app execution
+    /// alias that is off is not one: the package's own copy is used.
+    pub fn terminal_problem(&self) -> Option<String> {
+        if let Some(version) = self.install.version.filter(|v| v.old()) {
+            let (major, minor) = install::OLDEST;
+            return Some(t!("notice-terminal-old", version = version.to_string(), oldest = format!("{major}.{minor}")));
+        }
+        if self.install.launcher_now().is_none() {
+            return Some(t!("notice-wt-missing", dir = self.install.dir.display().to_string()));
+        }
+        None
     }
 
     fn install_fragment(&mut self) -> Result<(), String> {
@@ -148,12 +167,53 @@ impl ProfileSetup {
         self.install.settings_json()
     }
 
-    pub fn settings_ui(&mut self, ui: &mut egui::Ui, notices: &mut Vec<String>) {
+    /// Which Terminal NativeTerm drives. Each install is its own
+    /// single-instance app, so only one can be driven at a time; the
+    /// choice is read at the next start.
+    fn install_choice(&self, ui: &mut egui::Ui, core: Option<&Core>, notices: &mut Vec<String>) {
+        let Some(core) = core else { return };
+        // the installed packages, and the one in use if it is neither of
+        // them (a portable copy, or --terminal-dir)
+        let mut others = Install::discover(&[]);
+        if !others.iter().any(|i| i.dir == self.install.dir) {
+            others.insert(0, self.install.clone());
+        }
+        if others.len() < 2 {
+            return;
+        }
+        // what is shown is the choice, not what is running: it can be
+        // changed back before the next start
+        let chosen = core.setting(INSTALL_SETTING).map(PathBuf::from).unwrap_or_else(|| self.install.dir.clone());
+        let mut pick = chosen.clone();
+        let text = others.iter().find(|i| i.dir == chosen).map(name_of).unwrap_or_else(|| chosen.display().to_string());
+        ui.horizontal(|ui| {
+            ui.label(t!("settings-terminal-pick"));
+            egui::ComboBox::from_id_salt("terminal-install").selected_text(text).show_ui(ui, |ui| {
+                for install in &others {
+                    ui.selectable_value(&mut pick, install.dir.clone(), name_of(install));
+                }
+            });
+        });
+        if pick != chosen {
+            core.set_setting(INSTALL_SETTING, &pick.to_string_lossy());
+            if pick == self.install.dir {
+                notices.push(t!("settings-terminal-picked-current", dir = pick.display().to_string()));
+            } else {
+                notices.push(t!("settings-terminal-picked", dir = pick.display().to_string()));
+            }
+        }
+    }
+
+    pub fn settings_ui(&mut self, ui: &mut egui::Ui, core: Option<&Core>, notices: &mut Vec<String>) {
         ui.label(t!(
             "settings-terminal",
             dir = self.install.dir.display().to_string(),
             kind = kind_name(&self.install.kind)
         ));
+        if let Some(version) = self.install.version {
+            ui.label(t!("settings-terminal-version", version = version.to_string()));
+        }
+        self.install_choice(ui, core, notices);
         ui.label(t!("settings-profile", status = self.describe()));
         ui.horizontal(|ui| {
             let installed = matches!(self.status, Status::Installed | Status::Outdated { .. } | Status::Disabled);
@@ -188,6 +248,12 @@ impl ProfileSetup {
             }
         }
     }
+}
+
+/// How an install is named in the picker: its kind, version and folder.
+fn name_of(install: &Install) -> String {
+    let version = install.version.map(|v| v.to_string()).unwrap_or_default();
+    format!("{} {version} — {}", kind_name(&install.kind), install.dir.display())
 }
 
 fn kind_name(kind: &Kind) -> String {

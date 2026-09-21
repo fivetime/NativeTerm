@@ -40,6 +40,8 @@ pub enum WizardAction {
 /// What the wizard shows, gathered by the app each frame.
 pub struct Facts<'a> {
     pub terminal: String,
+    /// What stands in the way of the chosen Terminal, if anything.
+    pub terminal_problem: Option<String>,
     pub profile: String,
     pub profile_usable: bool,
     pub agent: Option<AgentStatus>,
@@ -137,7 +139,10 @@ impl Wizard {
             Some(Ok(version)) => check_line(ui, true, t!("wizard-ssh-ok", version = version)),
             Some(Err(e)) => check_line(ui, false, t!("wizard-ssh-missing", error = e)),
         }
-        check_line(ui, true, t!("wizard-terminal", terminal = facts.terminal.as_str()));
+        check_line(ui, facts.terminal_problem.is_none(), t!("wizard-terminal", terminal = facts.terminal.as_str()));
+        if let Some(problem) = &facts.terminal_problem {
+            ui.label(problem);
+        }
         ui.horizontal_wrapped(|ui| {
             check_line(ui, facts.profile_usable, t!("wizard-profile", status = facts.profile.as_str()));
             if !facts.profile_usable && ui.button(t!("profile-install")).clicked() {

@@ -35,12 +35,12 @@ mod tree_view;
 mod window;
 mod wizard;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use native_term_app::registry::Registry;
 use native_term_app::{data_dir, default_shim_path, t, Core};
-use native_term_platform::windows_terminal::install::Install;
-use native_term_platform::windows_terminal::WindowsTerminal;
+use native_term_platform::windows_terminal::install::{self, Install};
+use native_term_platform::windows_terminal::{Mismatch, WindowsTerminal};
 
 use app::App;
 
@@ -74,11 +74,49 @@ fn options() -> Result<Options, String> {
     Ok(Options { terminal_dir, ssh_dir: ssh_dir.ok_or("USERPROFILE is not set")?, data_dir, from_shim })
 }
 
-fn choose_install(dir: Option<&PathBuf>) -> Result<Install, String> {
-    match dir {
-        Some(dir) => Install::from_dir(dir).map_err(|e| format!("{}: {e}", dir.display())),
-        None => {
-            Install::discover(&[]).into_iter().next().ok_or_else(|| "Windows Terminal is not installed".to_string())
+/// The Terminal to drive: the one `--terminal-dir` names, the one that was
+/// chosen in the settings, or the first one found. Several installs are
+/// each their own single-instance app, so NativeTerm has to pick one; when
+/// there is a choice and none was made, it says so.
+fn choose_install(dir: Option<&PathBuf>, chosen: Option<&Path>, notices: &mut Vec<String>) -> Result<Install, String> {
+    if let Some(dir) = dir {
+        return Install::from_dir(dir).map_err(|e| format!("{}: {e}", dir.display()));
+    }
+    let found = Install::discover(&[]);
+    let first = found.first().ok_or_else(|| t!("fatal-no-terminal"))?;
+    let same = |install: &&Install, want: &Path| {
+        install.dir.as_os_str().eq_ignore_ascii_case(want.as_os_str()) || install.dir == want
+    };
+    if let Some(want) = chosen {
+        if let Some(install) = found.iter().find(|i| same(i, want)) {
+            return Ok(install.clone());
+        }
+        // a folder that was picked by hand (a portable copy) is not among
+        // the installed packages, but it is still a Terminal
+        if let Ok(install) = Install::from_dir(want) {
+            return Ok(install);
+        }
+        notices.push(t!(
+            "notice-terminal-choice-gone",
+            chosen = want.display().to_string(),
+            dir = first.dir.display().to_string()
+        ));
+    } else if found.len() > 1 {
+        notices.push(t!("notice-terminal-several", count = found.len(), dir = first.dir.display().to_string()));
+    }
+    Ok(first.clone())
+}
+
+/// What the start checks found about the Terminal that was picked.
+fn install_notices(install: &Install, notices: &mut Vec<String>) {
+    if let Some(version) = install.version.filter(|v| v.old()) {
+        let (major, minor) = install::OLDEST;
+        notices.push(t!("notice-terminal-old", version = version.to_string(), oldest = format!("{major}.{minor}")));
+    }
+    if install.alias_off() {
+        match install.launcher_now() {
+            Some(other) => notices.push(t!("notice-wt-alias-off", path = other.display().to_string())),
+            None => notices.push(t!("notice-wt-missing", dir = install.dir.display().to_string())),
         }
     }
 }
@@ -104,7 +142,6 @@ enum Start {
 
 fn setup() -> Result<Start, String> {
     let options = options()?;
-    let install = choose_install(options.terminal_dir.as_ref())?;
     let shim = default_shim_path().map_err(|e| e.to_string())?;
     let mut notices = Vec::new();
     let inputs = data_dir::Inputs::from_system(options.data_dir.clone()).map_err(|e| e.to_string())?;
@@ -128,11 +165,25 @@ fn setup() -> Result<Start, String> {
     if !shim.exists() {
         notices.push(t!("notice-shim-missing", path = shim.display().to_string()));
     }
+    // which Terminal, and is it one NativeTerm can work with (the settings
+    // hold the choice, so this waits for the database)
+    let chosen = registry
+        .as_ref()
+        .and_then(|r| r.setting(terminal_profile::INSTALL_SETTING).ok().flatten())
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from);
+    let install = choose_install(options.terminal_dir.as_ref(), chosen.as_deref(), &mut notices)?;
+    install_notices(&install, &mut notices);
     // before the window: restored tabs may already be waiting for an answer
     // another ssh folder than ~/.ssh: the tabs' shims look sessions up there
     let mut terminal = WindowsTerminal::new(install.clone(), &shim);
     if Some(&options.ssh_dir) != default_ssh_dir().as_ref() {
         terminal = terminal.with_ssh_dir(&options.ssh_dir);
+    }
+    match terminal.mismatch() {
+        Some(Mismatch::WeAreElevated) => notices.push(t!("notice-we-are-elevated")),
+        Some(Mismatch::TerminalElevated) => notices.push(t!("notice-terminal-elevated")),
+        None => {}
     }
     let core = match Core::start(terminal, registry) {
         Ok(core) => Some(core),
@@ -251,5 +302,72 @@ impl window::Ui for Fatal {
             ui.heading(t!("fatal-title"));
             ui.label(&self.0);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use native_term_platform::windows_terminal::install::{Kind, Version};
+
+    /// A folder that looks like an unpackaged Terminal.
+    fn fake_terminal(dir: &Path) {
+        for exe in ["WindowsTerminal.exe", "wt.exe"] {
+            std::fs::write(dir.join(exe), "").unwrap();
+        }
+    }
+
+    #[test]
+    fn a_chosen_folder_is_used_even_when_it_is_not_an_installed_package() {
+        let tmp = tempfile::tempdir().unwrap();
+        fake_terminal(tmp.path());
+        std::fs::write(tmp.path().join(".portable"), "").unwrap();
+        let mut notices = Vec::new();
+        let install = choose_install(None, Some(tmp.path()), &mut notices).unwrap();
+        assert_eq!(install.kind, Kind::Portable);
+        assert_eq!(install.dir, std::path::absolute(tmp.path()).unwrap());
+        assert!(notices.is_empty(), "nothing to say: the choice was there");
+    }
+
+    #[test]
+    fn a_chosen_folder_that_is_gone_is_said_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let gone = tmp.path().join("moved-away");
+        let mut notices = Vec::new();
+        match choose_install(None, Some(&gone), &mut notices) {
+            // whatever is installed here is used instead, with a word
+            Ok(_) => assert_eq!(notices.len(), 1, "{notices:?}"),
+            // no Terminal on this machine: that is the fatal error, not a notice
+            Err(_) => assert!(notices.is_empty()),
+        }
+    }
+
+    #[test]
+    fn the_start_checks_say_what_is_wrong() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("package");
+        std::fs::create_dir(&dir).unwrap();
+        fake_terminal(&dir);
+        let mut install = Install {
+            dir: dir.clone(),
+            kind: Kind::Packaged,
+            // the alias Windows makes for a packaged install, turned off
+            launcher: tmp.path().join("WindowsApps").join("wt.exe"),
+            settings_dir: tmp.path().join("LocalState"),
+            family: Some("Microsoft.WindowsTerminal_8wekyb3d8bbwe".to_string()),
+            version: Some(Version(1, 20, 11781, 0)),
+        };
+        let mut notices = Vec::new();
+        install_notices(&install, &mut notices);
+        assert_eq!(notices.len(), 2, "too old, and the alias is off: {notices:?}");
+        assert!(notices[0].contains("1.20.11781.0"), "{}", notices[0]);
+        assert!(notices[1].contains(&dir.join("wt.exe").display().to_string()), "{}", notices[1]);
+
+        // a current version with its alias in place has nothing to report
+        install.version = Some(Version(1, 26, 2609, 0));
+        install.launcher = dir.join("wt.exe");
+        let mut notices = Vec::new();
+        install_notices(&install, &mut notices);
+        assert!(notices.is_empty(), "{notices:?}");
     }
 }

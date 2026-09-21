@@ -138,6 +138,13 @@ fn restore(env: &Env, labels: &[&str]) {
     assert_waiting_and_located(&out, labels);
 }
 
+/// The test host does not resolve, so a fresh session ends as a server
+/// never reached; one NativeTerm picked up again after a restart knows
+/// only the exit code its shim reports, which reads as a failed login.
+fn ended(line: &str) -> bool {
+    line.contains("state=Unreachable(255)") || line.contains("state=LoginFailed(255)")
+}
+
 fn cleanup(data: &Path) {
     let _ = std::fs::remove_dir_all(data);
 }
@@ -162,7 +169,7 @@ fn restart_and_session_restore() {
     assert!(out.flag("SETTLED"), "{}", out.text);
     for label in labels {
         let line = out.session(label);
-        assert!(line.contains("state=LoginFailed(255)") && line.contains("linked=true"), "re-attached: {line}");
+        assert!(ended(&line) && line.contains("linked=true"), "re-attached: {line}");
     }
 
     // the window closes while NativeTerm runs: the shims report closing,
@@ -229,7 +236,7 @@ fn tab_closed_while_nativeterm_was_not_running() {
     assert!(out.flag("SETTLED"), "{}", out.text);
     assert!(!out.text.contains(&format!("label={:?}", labels[0])), "known to be closed: {}", out.text);
     let line = out.session(labels[1]);
-    assert!(line.contains("state=LoginFailed(255)") && line.contains("linked=true"), "the other one found: {line}");
+    assert!(ended(&line) && line.contains("linked=true"), "the other one found: {line}");
     assert!(!out.text.contains("NOTICE"), "nothing reported lost: {}", out.text);
 
     let out = env.run(&["close-all"]);

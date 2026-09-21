@@ -152,6 +152,49 @@ pub fn is_elevated() -> bool {
         .unwrap_or(false)
 }
 
+/// How a process stands next to this one, as far as Windows' UIPI cares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Standing {
+    /// It runs elevated (as administrator).
+    Elevated,
+    /// It runs as the user, unelevated.
+    Normal,
+    /// Its token could not be read. For a process of this user that we can
+    /// otherwise see, that means it stands above this one.
+    Unreadable,
+}
+
+/// Whether the process `pid` runs elevated. A process of the same user
+/// that sits at a higher integrity level does not let this one read its
+/// token, so a refusal is an answer of its own (`Unreadable`).
+pub fn process_standing(pid: u32) -> Standing {
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: both handles are closed on every path; the buffer is as
+    // large as GetTokenInformation asks for.
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return Standing::Unreadable;
+        };
+        let mut token = HANDLE::default();
+        let opened = OpenProcessToken(process, TOKEN_QUERY, &mut token).is_ok();
+        let _ = CloseHandle(process);
+        if !opened {
+            return Standing::Unreadable;
+        }
+        let mut elevation = TOKEN_ELEVATION::default();
+        let mut len = 0u32;
+        let size = std::mem::size_of::<TOKEN_ELEVATION>() as u32;
+        let result =
+            GetTokenInformation(token, TokenElevation, Some(std::ptr::addr_of_mut!(elevation).cast()), size, &mut len);
+        let _ = CloseHandle(token);
+        match result {
+            Ok(()) if elevation.TokenIsElevated != 0 => Standing::Elevated,
+            Ok(()) => Standing::Normal,
+            Err(_) => Standing::Unreadable,
+        }
+    }
+}
+
 /// A self-relative security descriptor parsed from SDDL, freed on drop.
 pub struct SecurityDescriptor(PSECURITY_DESCRIPTOR);
 
@@ -329,6 +372,11 @@ mod tests {
         let logon = logon_session_id().unwrap();
         assert!(!logon.is_empty() && logon.chars().all(|c| c.is_ascii_hexdigit()), "{logon}");
         let _ = is_elevated();
+        // this process can read its own token, whatever it runs as
+        let ours = process_standing(std::process::id());
+        assert_ne!(ours, Standing::Unreadable);
+        assert_eq!(ours == Standing::Elevated, is_elevated());
+        assert_eq!(process_standing(u32::MAX), Standing::Unreadable, "no such process");
     }
 
     #[test]

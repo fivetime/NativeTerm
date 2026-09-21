@@ -3077,6 +3077,35 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
     `CASCADIA_HOSTING_WINDOW_CLASS`, so UIA window lists are filtered by
     the owning process's image path.
   - Moving a portable Terminal folder makes it a new instance (new hash).
+- **Start checks on the chosen Terminal** (`install.rs`): its version is
+  read from the package full name
+  (`Microsoft.WindowsTerminal_1.24.11911.0_x64__8wekyb3d8bbwe`) or, for an
+  unpackaged or portable folder, from `WindowsTerminal.exe`'s version
+  resource (`GetFileVersionInfoW`). NativeTerm needs **1.21 or newer**:
+  that is where `--sessionId` arrived (microsoft/terminal#16598, "Implement
+  buffer restore", first released in 1.21), and without it a new tab cannot
+  be told from any other. An older one is named at start and in the
+  wizard rather than silently misbehaving; a version that cannot be read
+  is given the benefit of the doubt.
+  A packaged install is normally started through its `wt.exe` app
+  execution alias, which the user can turn off (Settings → Apps → Advanced
+  app settings → App execution aliases) and which some "debloat" scripts
+  remove. The alias only points at the `wt.exe` **inside the package**,
+  and that `wt.exe` is a shim that runs the `WindowsTerminal.exe` next to
+  it (`terminal/src/cascadia/wt/shim.cpp`), so the copy the package info
+  leads to is used instead; `wt.exe` on the PATH is the last resort. The
+  launcher is asked for at each launch, never cached, since the alias can
+  go at any time.
+- **Different permission levels** (`WindowsTerminal::mismatch`): Windows
+  keeps NativeTerm and Terminal apart when they don't run at the same
+  level, and neither side can work around it, so it is said plainly.
+  NativeTerm elevated and Terminal not: a normal tab's shim cannot write
+  to a pipe an elevated process created (mandatory integrity, no-write-up),
+  so it never connects, and nothing can be dropped on NativeTerm's window
+  (UIPI). Terminal elevated and NativeTerm not: its windows are listed but
+  can be neither read through UIA nor sent anything. A Terminal process of
+  this user whose token cannot even be opened stands above this one, which
+  counts as the same mismatch.
 - **Portable Windows Terminal** (unpackaged, `.portable` marker file next
   to `WindowsTerminal.exe`): settings live in its `settings\` folder, but
   fragments are still read from `%LOCALAPPDATA%\Microsoft\Windows
