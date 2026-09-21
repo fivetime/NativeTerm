@@ -42,10 +42,20 @@ impl Inputs {
     }
 }
 
+/// The folders inside it (see "Settings and data directory" in
+/// `docs/ARCHITECTURE.md`): sent commands, copies of the ssh config files
+/// NativeTerm edited, and its own log.
+pub const FOLDERS: [&str; 3] = ["audit", "backups", "logs"];
+
 /// The data directory, created if needed, and how it was chosen.
 pub fn resolve(inputs: &Inputs) -> io::Result<(PathBuf, &'static str)> {
     let (dir, source) = choose(inputs)?;
     std::fs::create_dir_all(&dir)?;
+    for folder in FOLDERS {
+        // a folder that cannot be made is the writer's problem, not the
+        // start's: the data directory itself is there
+        let _ = std::fs::create_dir_all(dir.join(folder));
+    }
     Ok((dir, source))
 }
 

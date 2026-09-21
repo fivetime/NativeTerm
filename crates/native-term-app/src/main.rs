@@ -38,7 +38,7 @@ mod wizard;
 use std::path::{Path, PathBuf};
 
 use native_term_app::registry::Registry;
-use native_term_app::{data_dir, default_shim_path, t, Core};
+use native_term_app::{data_dir, data_lock, default_shim_path, diag, settings, t, Core};
 use native_term_platform::windows_terminal::install::{self, Install};
 use native_term_platform::windows_terminal::{Mismatch, WindowsTerminal};
 
@@ -123,6 +123,8 @@ fn install_notices(install: &Install, notices: &mut Vec<String>) {
 
 pub struct Setup {
     options: Options,
+    /// Held while NativeTerm runs: this data directory is ours.
+    _lock: Option<data_lock::DataLock>,
     install: Install,
     shim: PathBuf,
     core: Option<Core>,
@@ -162,16 +164,43 @@ fn setup() -> Result<Start, String> {
             (std::env::temp_dir().join("NativeTerm"), "--data-dir", None)
         }
     };
+    // the settings live in a file of their own; an older data directory
+    // has them in state.db, and they are taken over once
+    let settings = std::sync::Arc::new(settings::Settings::open(&data_dir));
+    if let Some(problem) = settings.problem() {
+        notices.push(t!("notice-settings-unreadable", path = settings.path().display().to_string(), error = problem));
+    } else if let Some(registry) = &registry {
+        match settings.take_over(registry.all_settings().unwrap_or_default()) {
+            Ok(0) => {}
+            Ok(count) => diag::line(&format!("{count} settings taken over from state.db")),
+            Err(e) => notices.push(t!(
+                "notice-settings-not-written",
+                path = settings.path().display().to_string(),
+                error = e.to_string()
+            )),
+        }
+    }
+    diag::open(&data_dir.join("logs"));
+    diag::line(&format!("data directory {} (from {data_source})", data_dir.display()));
+    // a data directory can be on a share or a synced folder: say so when
+    // another NativeTerm already has it
+    let lock = match data_lock::take(&data_dir) {
+        data_lock::Taken::Ours(lock) => Some(lock),
+        data_lock::Taken::Busy(holder) => {
+            notices.push(t!("notice-data-dir-busy", holder = holder.describe()));
+            None
+        }
+        data_lock::Taken::Unavailable(e) => {
+            diag::line(&format!("data directory lock: {e}"));
+            None
+        }
+    };
     if !shim.exists() {
         notices.push(t!("notice-shim-missing", path = shim.display().to_string()));
     }
     // which Terminal, and is it one NativeTerm can work with (the settings
     // hold the choice, so this waits for the database)
-    let chosen = registry
-        .as_ref()
-        .and_then(|r| r.setting(terminal_profile::INSTALL_SETTING).ok().flatten())
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from);
+    let chosen = settings.get(terminal_profile::INSTALL_SETTING).filter(|dir| !dir.is_empty()).map(PathBuf::from);
     let install = choose_install(options.terminal_dir.as_ref(), chosen.as_deref(), &mut notices)?;
     install_notices(&install, &mut notices);
     // before the window: restored tabs may already be waiting for an answer
@@ -196,11 +225,12 @@ fn setup() -> Result<Start, String> {
         }
     };
     if let Some(core) = &core {
+        core.set_settings(settings.clone());
         if let Some(language) = core.language_setting() {
             native_term_app::i18n::set_language(Some(&language));
         }
     }
-    Ok(Start::Run(Box::new(Setup { options, install, shim, core, data_dir, data_source, notices })))
+    Ok(Start::Run(Box::new(Setup { options, _lock: lock, install, shim, core, data_dir, data_source, notices })))
 }
 
 fn main() {
@@ -240,9 +270,11 @@ fn main() {
         Err(e) => Box::new(Fatal(e)),
     });
     if let Err(e) = result {
+        diag::close(&format!("window failed: {e}"));
         native_term_win::desktop::message_box("NativeTerm", &t!("fatal-window", error = e));
         std::process::exit(1);
     }
+    diag::close("NativeTerm stopped");
 }
 
 /// `state.db` setting: where the floating button was (`x,y`).

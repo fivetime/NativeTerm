@@ -192,8 +192,20 @@
 - [x] Data directory resolution (`--data-dir`, `NATIVETERM_DATA_DIR`,
       `nativeterm.toml`, `HKCU\Software\NativeTerm\DataDir`, writable-folder
       default)
-- [ ] Data directory (rest): `settings.toml` with per-machine sections, `audit\`,
-      `backups\`, rotated `logs\`; atomic writes and a lock file
+- [x] Data directory (rest): `settings.toml` holds what the user chose,
+      shared between machines except the few keys that only make sense on
+      one (`window`, `fab`, `terminal.install`, the session folder, the
+      wizard), which go under `[machine."<name>"]`; the settings an older
+      data directory kept in `state.db` are taken over once, while the
+      records stay there (open sessions, usage, each host's last folders).
+      The file is written whole through a temporary file and a rename,
+      and one that cannot be parsed is never overwritten — NativeTerm
+      says so instead. `audit\`, `backups\` and `logs\` are made at
+      start; `logs\` now holds NativeTerm's own daily log (every notice,
+      pruned after a fortnight, nothing secret and nothing sent
+      anywhere). A `nativeterm.lock` held open for writing says which
+      machine has the directory, so a second one is told rather than
+      quietly overwriting it (`settings.rs`, `diag.rs`, `data_lock.rs`)
 - [x] Pipe protocol version number from the first release; pipe name per
       user SID and logon session
 - [x] The program folder moved: the tab profile is rewritten at start

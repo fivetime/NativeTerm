@@ -267,6 +267,15 @@ impl Registry {
         self.with(|c| c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional())
     }
 
+    /// Every setting row (for taking them over into `settings.toml`).
+    pub fn all_settings(&self) -> Result<Vec<(String, String)>> {
+        self.with(|c| {
+            let mut statement = c.prepare("SELECT key, value FROM settings ORDER BY key")?;
+            let rows = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect()
+        })
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         self.with(|c| {
             c.execute(

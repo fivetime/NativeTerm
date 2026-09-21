@@ -7,12 +7,15 @@ pub mod actions;
 pub mod commands;
 mod connect_queue;
 pub mod data_dir;
+pub mod data_lock;
+pub mod diag;
 pub mod fuzzy;
 pub mod i18n;
 pub mod import;
 mod previews;
 pub mod quick;
 pub mod registry;
+pub mod settings;
 pub mod shortcuts;
 pub mod tab_menu;
 pub mod tmux_send;
@@ -324,6 +327,10 @@ pub(crate) struct Shared {
     last_terminal: std::sync::atomic::AtomicIsize,
     /// Where sent commands are recorded (`<data dir>\\audit`).
     audit_dir: Mutex<Option<PathBuf>>,
+    /// `settings.toml`, once the data directory is known. Without it
+    /// (tests, a data directory that can't be read) settings fall back to
+    /// `state.db`.
+    settings: Mutex<Option<Arc<crate::settings::Settings>>>,
     /// Each saved host's current name, by alias.
     host_labels: Mutex<HashMap<String, String>>,
     /// Each saved host's tab look, by alias (from the app's tree).
@@ -344,6 +351,7 @@ impl Shared {
     }
 
     fn notice(&self, text: String) {
+        crate::diag::line(&text);
         lock(&self.notices).push(text);
         self.changed();
     }
@@ -501,6 +509,7 @@ impl Core {
             titles_only: Default::default(),
             last_terminal: Default::default(),
             audit_dir: Mutex::new(None),
+            settings: Mutex::new(None),
             host_labels: Mutex::new(HashMap::new()),
             host_looks: Mutex::new(HashMap::new()),
             connect_queue: Mutex::new(to_connect),
@@ -1018,18 +1027,39 @@ impl Core {
         }
     }
 
-    /// A per-machine setting from `state.db`.
+    /// Keep the settings in `settings.toml` from now on (the file is the
+    /// place for them; see `settings.rs`).
+    pub fn set_settings(&self, settings: Arc<crate::settings::Settings>) {
+        // what was read from state.db before the file was known
+        let auto = settings.get(AUTO_RECONNECT_SETTING).as_deref() == Some("1");
+        *lock(&self.shared.settings) = Some(settings);
+        self.shared.auto_reconnect.store(auto, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// A setting: from `settings.toml`, or from `state.db` while no file
+    /// is in use.
     pub fn setting(&self, key: &str) -> Option<String> {
+        if let Some(settings) = lock(&self.shared.settings).as_ref() {
+            return settings.get(key);
+        }
         self.shared.registry.as_ref()?.setting(key).ok().flatten()
     }
 
     pub fn set_setting(&self, key: &str, value: &str) {
+        let settings = lock(&self.shared.settings).clone();
+        if let Some(settings) = settings {
+            if let Err(e) = settings.set(key, value) {
+                let path = settings.path().display().to_string();
+                self.shared.notice(t!("notice-settings-not-written", path = path, error = e.to_string()));
+            }
+            return;
+        }
         self.shared.db("setting", |r| r.set_setting(key, value));
     }
 
     /// The chosen language (`None`: the system's).
     pub fn language_setting(&self) -> Option<String> {
-        self.shared.registry.as_ref()?.setting(i18n::SETTING).ok().flatten().filter(|l| !l.is_empty())
+        self.setting(i18n::SETTING).filter(|l| !l.is_empty())
     }
 
     /// Choose the language (`None`: the system's), now and at the next start.
@@ -1043,10 +1073,10 @@ impl Core {
         self.shared.auto_reconnect.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Turn automatic reconnects on or off (remembered in `state.db`).
+    /// Turn automatic reconnects on or off (remembered in the settings).
     pub fn set_auto_reconnect(&self, on: bool) {
         self.shared.auto_reconnect.store(on, std::sync::atomic::Ordering::Relaxed);
-        self.shared.db("setting", |r| r.set_setting(AUTO_RECONNECT_SETTING, if on { "1" } else { "0" }));
+        self.set_setting(AUTO_RECONNECT_SETTING, if on { "1" } else { "0" });
     }
 
     /// Clear the tab's scrollback and screen.
@@ -1746,7 +1776,7 @@ pub struct SendReport {
 }
 
 /// ("YYYY-MM-DD", "HH:MM:SS") in UTC.
-fn utc_now() -> (String, String) {
+pub(crate) fn utc_now() -> (String, String) {
     utc(registry::now().max(0))
 }
 

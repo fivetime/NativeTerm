@@ -3935,7 +3935,15 @@ Implemented (English, Simplified Chinese):
   - Being unpackaged, it can't be the default terminal and shows its own
     taskbar identity; stated in the UI when the user picks it.
 - **Diagnostics, no telemetry**: NativeTerm writes rotated local logs to
-  `logs\` in the data directory for troubleshooting and collects no telemetry of any kind. For a
+  `logs\` in the data directory for troubleshooting and collects no telemetry of any kind.
+  Implemented (`diag.rs`): one file a day, `nativeterm-YYYY-MM-DD.log`,
+  holding the starts and stops and every notice the user was shown, with
+  a UTC timestamp per line. Files older than a fortnight go at start, and
+  a day's file stops growing at 8 MB. Notices are written for people to
+  read, so nothing secret goes in; the text of sent commands has its own
+  log (`audit\`), which the user can delete. The file is opened, written
+  and closed per line, so a data directory on a synced or removable drive
+  is never held open. For a
   tool with access to a whole server fleet, this is stated plainly.
 - **Uninstall**: delete the folder, and let NativeTerm remove its Windows
   Terminal fragment first ("Clean up" in settings). The `IgnoreUnknown` /
@@ -4033,12 +4041,46 @@ under the current machine's name inside `settings.toml`, so a data
 directory used from several machines doesn't apply one machine's layout to
 another.
 
+Implemented (`settings.rs`). `settings.toml` is the home of what the user
+chose; `state.db` keeps what NativeTerm recorded. The split, by key:
+
+- shared, at the top of the file: language, theme, auto-reconnect, close
+  tabs on exit, hover cards, the drag-and-drop answer, files at once,
+  shortcuts, the tab switcher's view;
+- per machine, under `[machine."<COMPUTERNAME>"]` (`MACHINE_KEYS`):
+  `window`, `fab`, `dock_pinned`, `terminal.install`, `folders_dir`,
+  `first_run_done`, `agent_hint_dismissed` — where something was on the
+  screen, which Terminal to drive, where the session folder is on this
+  computer, and whether this computer's start checks have been through;
+- neither: the open-session registry, usage counts, long notes and each
+  host's last folders in the files window. Those are records, not
+  choices, they change constantly, and they stay in `state.db`.
+
+Every machine's section is kept when one machine writes, so two computers
+sharing a directory don't erase each other's layout. A data directory
+written by an earlier version has its settings in `state.db`; they are
+taken over into the file once, at the first start that finds no
+`settings.toml` (the per-host `files.*` rows stay in the database). The
+file is written whole through a temporary file and a rename; a file that
+cannot be parsed is **never** overwritten, and NativeTerm says so rather
+than throwing away what someone typed. A byte order mark from a Windows
+editor is accepted. Comments are lost on a rewrite, like any file a
+program owns.
+
 ### Data directory on shared or synced storage
 
 - **Two machines using it at once**: writes go to a temporary file then
   rename (never a half-written file); audit logs are already one file per
   machine; a lock file records which machine has the directory open, and
   another machine opening it gets a notice.
+  Implemented (`data_lock.rs`): `nativeterm.lock` is held open for
+  writing (`FILE_SHARE_READ`) for as long as NativeTerm runs, which
+  Windows refuses to a second writer on a local disk and over SMB alike;
+  the file's text (machine, user, pid, since) only names the holder, so a
+  file left behind by a machine that lost power blocks nothing. The lock
+  is taken before anything is written and released when NativeTerm
+  closes. The notice is a warning, not a refusal: it is the user's data
+  directory.
 - **Permissions**: the audit log contains every command sent; on a network
   share, check who can read it.
 - **OneDrive "Files On-Demand"**: files may be cloud-only placeholders that

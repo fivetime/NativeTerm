@@ -116,6 +116,8 @@ fn fingerprint(ssh_dir: &Path, tree: &SessionTree) -> Fingerprint {
 
 pub struct App {
     core: Option<Core>,
+    /// Says this data directory is ours for as long as NativeTerm runs.
+    _data_lock: Option<native_term_app::data_lock::DataLock>,
     /// Keeps the `~/.ssh` watcher alive.
     _watcher: Option<native_term_win::watch::FolderWatcher>,
     /// And the one on the folder files, when they live elsewhere.
@@ -190,7 +192,7 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
 
 impl App {
     pub fn new(ctx: &egui::Context, setup: Setup) -> App {
-        let Setup { options, install, shim, core, data_dir, data_source, mut notices } = setup;
+        let Setup { options, _lock, install, shim, core, data_dir, data_source, mut notices } = setup;
         let mut profile = ProfileSetup::new(install, shim.clone(), data_dir.join("backups"));
         if let Some(core) = &core {
             core.set_audit_dir(data_dir.join("audit"));
@@ -244,6 +246,7 @@ impl App {
         let keys = crate::shortcut_ui::ShortcutUi::new(ctx, core.as_ref(), &profile.settings_json());
         App {
             core,
+            _data_lock: _lock,
             _watcher: watcher,
             folders_watcher,
             folders_move: None,
