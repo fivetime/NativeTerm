@@ -14,6 +14,10 @@ use native_term_platform::windows_terminal::sources;
 /// more than one is installed. Read at start (see `choose_install`).
 pub const INSTALL_SETTING: &str = "terminal.install";
 
+/// Setting: whether favorite hosts get a place in Windows Terminal's own
+/// new-tab menu and command palette (a profile each, in the fragment).
+pub const FAVORITES_SETTING: &str = "terminal.favorites";
+
 pub struct ProfileSetup {
     install: Install,
     shim: PathBuf,
@@ -23,6 +27,9 @@ pub struct ProfileSetup {
     backups: PathBuf,
     /// Terminal's own SSH profiles are turned off (`None`: unreadable).
     ssh_hidden: Option<bool>,
+    /// The favorite hosts as Windows Terminal profiles, when the user
+    /// asked for them; empty otherwise.
+    favorites: Vec<profile::Favorite>,
     /// The fragment named another helper at start and was put right: the
     /// program folder moved (or a second copy had it).
     pub moved: bool,
@@ -32,7 +39,16 @@ impl ProfileSetup {
     pub fn new(install: Install, shim: PathBuf, backups: PathBuf) -> ProfileSetup {
         let root = profile::fragments_root();
         let status = profile::status(&install, root.as_deref(), &shim);
-        let mut setup = ProfileSetup { install, shim, root, status, backups, ssh_hidden: None, moved: false };
+        let mut setup = ProfileSetup {
+            install,
+            shim,
+            root,
+            status,
+            backups,
+            ssh_hidden: None,
+            moved: false,
+            favorites: Vec::new(),
+        };
         setup.refresh();
         setup
     }
@@ -42,6 +58,31 @@ impl ProfileSetup {
         self.ssh_hidden = std::fs::read_to_string(self.install.settings_json())
             .ok()
             .map(|text| sources::is_disabled(&text, sources::SSH_SOURCE));
+    }
+
+    /// Whether the user asked for the favorites in Terminal's own menus.
+    pub fn favorites_on(&self, core: Option<&Core>) -> bool {
+        core.and_then(|c| c.setting(FAVORITES_SETTING)).as_deref() == Some("1")
+    }
+
+    /// The favorites NativeTerm should offer through the fragment. When
+    /// they differ from what is installed, the fragment is written again
+    /// — but only when it is ours: installing is the user's own action.
+    pub fn set_favorites(&mut self, favorites: Vec<profile::Favorite>) -> Option<String> {
+        if self.favorites == favorites {
+            return None;
+        }
+        self.favorites = favorites;
+        if !matches!(self.status, Status::Installed) {
+            return None;
+        }
+        let root = self.root.clone()?;
+        let result = profile::install(&root, &self.shim, &self.favorites, &self.settings_files());
+        self.refresh();
+        match result {
+            Ok(_) => None,
+            Err(e) => Some(t!("profile-install-failed", error = e.to_string())),
+        }
     }
 
     /// Hide or show Terminal's own SSH profiles (a backed-up edit of its
@@ -80,7 +121,7 @@ impl ProfileSetup {
         let old = old.clone();
         let root = self.root.clone()?;
         self.moved = true;
-        let result = profile::install(&root, &self.shim, &self.settings_files());
+        let result = profile::install(&root, &self.shim, &self.favorites, &self.settings_files());
         self.refresh();
         match result {
             Ok(_) if !old.exists() => None,
@@ -118,7 +159,7 @@ impl ProfileSetup {
 
     fn install_fragment(&mut self) -> Result<(), String> {
         let root = self.root.clone().ok_or_else(|| t!("profile-no-localappdata"))?;
-        profile::install(&root, &self.shim, &self.settings_files()).map_err(|e| e.to_string())?;
+        profile::install(&root, &self.shim, &self.favorites, &self.settings_files()).map_err(|e| e.to_string())?;
         self.refresh();
         Ok(())
     }
@@ -244,6 +285,20 @@ impl ProfileSetup {
                 self.refresh();
             }
         });
+        if let Some(core) = core {
+            let mut on = core.setting(FAVORITES_SETTING).as_deref() == Some("1");
+            let response = ui
+                .add_enabled(
+                    matches!(self.status, Status::Installed),
+                    egui::Checkbox::new(&mut on, t!("settings-terminal-favorites")),
+                )
+                .on_hover_text(t!("settings-terminal-favorites-hint"))
+                .on_disabled_hover_text(t!("settings-terminal-favorites-needs-fragment"));
+            if response.changed() {
+                core.set_setting(FAVORITES_SETTING, if on { "1" } else { "0" });
+                notices.push(t!("settings-terminal-favorites-changed"));
+            }
+        }
         if let Some(hidden) = self.ssh_hidden {
             let mut hide = hidden;
             let response = ui.checkbox(&mut hide, t!("settings-hide-terminal-ssh"));

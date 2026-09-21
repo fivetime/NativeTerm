@@ -3894,10 +3894,31 @@ the user's `settings.json`:
   lists "remaining profiles"). They launch `nativeterm-shim <host-alias>`,
   so they work with or without NativeTerm running. Only favorites — not
   hundreds of hosts.
+  Implemented, behind "Favorites in Windows Terminal's own menus" in the
+  settings (off by default, and only offered while the fragment is
+  installed, since it is the fragment that carries them). Each favorite
+  becomes a profile whose GUID **is** the host's `NativeTermId`, so a
+  saved layout keeps pointing at the same host however it is renamed;
+  its name is the host's label, its command line the shim with the
+  alias, and it carries the host's tab color and color scheme (the shim
+  sets the colors too, per connect; in the profile they are right from
+  the first pixel). A host without an id is left out. The fragment is
+  rewritten whenever the favorites change, and Terminal picks that up
+  from the touched `settings.json`.
+  The fragment carries **no color schemes**: the schemes NativeTerm
+  offers are Terminal's own built-ins (`appearance::SCHEMES`, copied
+  from its `defaults.json`), so they are already there under those
+  names. A fragment may carry schemes, and would, if NativeTerm ever
+  offered one of its own.
 - **Command palette**: fragment actions (e.g. `newTab` with a favorite's
   command line) show up in Windows Terminal's command palette. No action
   can run an arbitrary program without opening a tab, so NativeTerm's own
   commands (tab switcher, group send) are not exposed there.
+  Implemented with the favorites: each one also gets an action
+  (`newTab` on its profile GUID, named "NativeTerm: <label>", with an
+  `id` so a newer Terminal can bind it). Verified in the portable
+  Terminal 1.26: the profile in the new-tab dropdown, the entry as the
+  first hit for "NativeTerm" in the command palette.
 
 ## Localization
 

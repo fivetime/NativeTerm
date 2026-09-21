@@ -306,11 +306,45 @@ impl App {
         }
     }
 
+    /// The favorite hosts as Windows Terminal profiles, when the user
+    /// asked for that; nothing otherwise.
+    fn terminal_favorites(&self) -> Vec<native_term_platform::windows_terminal::profile::Favorite> {
+        let on = self.core.as_ref().and_then(|c| c.setting(crate::terminal_profile::FAVORITES_SETTING)).as_deref()
+            == Some("1");
+        if !on {
+            return Vec::new();
+        }
+        self.tree
+            .folders()
+            .flat_map(|folder| folder.hosts.iter().map(move |host| (folder, host)))
+            .filter(|(_, host)| host.favorite())
+            .filter_map(|(folder, host)| {
+                let look = native_term_config::appearance::for_host(folder, host);
+                Some(native_term_platform::windows_terminal::profile::Favorite {
+                    id: host.id()?.to_string(),
+                    alias: host.alias().to_string(),
+                    label: host.label().to_string(),
+                    tab_color: look.tab_color,
+                    color_scheme: look.color_scheme,
+                })
+            })
+            .collect()
+    }
+
+    /// Write the favorites into the fragment when they changed.
+    fn refresh_terminal_favorites(&mut self) {
+        let favorites = self.terminal_favorites();
+        if let Some(problem) = self.profile.set_favorites(favorites) {
+            self.notices.push(problem);
+        }
+    }
+
     fn reload(&mut self) {
         self.tree = SessionTree::load(&self.ssh_dir);
         self.generation += 1;
         self.loaded_from = fingerprint(&self.ssh_dir, &self.tree);
         publish_hosts(&self.tree, self.core.as_ref());
+        self.refresh_terminal_favorites();
         self.storage.refresh(&self.ssh_dir, &self.data_dir, &self.egui_ctx);
     }
 
@@ -1812,7 +1846,11 @@ impl crate::window::Ui for App {
             });
             if self.show_settings {
                 ui.group(|ui| {
+                    let before = self.profile.favorites_on(self.core.as_ref());
                     self.profile.settings_ui(ui, self.core.as_ref(), &mut self.notices);
+                    if self.profile.favorites_on(self.core.as_ref()) != before {
+                        self.refresh_terminal_favorites();
+                    }
                     if let Some(core) = &self.core {
                         ui.separator();
                         let mut auto = core.auto_reconnect();

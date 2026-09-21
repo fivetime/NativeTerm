@@ -152,7 +152,17 @@
 - [x] Fragment in the app: status (installed / in settings.json /
       outdated / turned off / missing), install and remove on the user's
       request, automatic rewrite after the program folder moved
-- [ ] Fragment: color schemes, favorites as profiles and actions
+- [x] Fragment: favorites as profiles and actions. With "Favorites in
+      Windows Terminal's own menus" on (off by default, and only while
+      the fragment is installed), every favorite host gets a profile of
+      its own — its `NativeTermId` as the GUID, so saved layouts keep
+      pointing at it; its label as the name; the shim with the alias as
+      the command line; its tab color and color scheme — and a command
+      palette entry that opens it. So a favorite can be opened straight
+      from Windows Terminal, with or without NativeTerm running. The
+      fragment carries no color schemes: the ones NativeTerm offers are
+      Terminal's own built-ins, which it already has (it could carry
+      them if that ever changes)
 - [x] `state.db` (SQLite, bundled, rollback journal) in the data
       directory: open-session registry (GUIDs, label, alias, position
       hints, "closed with its window"), usage counts; schema version

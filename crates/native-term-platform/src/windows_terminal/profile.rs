@@ -42,8 +42,88 @@ fn quote_always(path: &str) -> String {
     }
 }
 
-pub fn fragment(shim: &Path) -> String {
-    let mut text = serde_json::to_string_pretty(&json!({ "profiles": [profile(shim)] })).expect("static JSON");
+/// A host worth its own place in Windows Terminal: its new-tab entry
+/// starts the session whether NativeTerm is running or not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Favorite {
+    /// The host's `NativeTermId`: the profile's GUID, so a saved layout
+    /// keeps pointing at it even when the host is renamed.
+    pub id: String,
+    /// What the shim is given.
+    pub alias: String,
+    /// What Terminal shows.
+    pub label: String,
+    /// `#RRGGBB` for the tab, when the host has one.
+    pub tab_color: Option<String>,
+    /// The host's color scheme, by the name Terminal knows it under
+    /// (NativeTerm offers Terminal's own built-in schemes, so the name
+    /// is always one it has; a fragment could carry schemes of its own
+    /// if that ever changes).
+    pub color_scheme: Option<String>,
+}
+
+impl Favorite {
+    /// The profile Terminal gets. Its GUID is the host's own id, which
+    /// is already a UUID; a host without one is left out (`profiles`).
+    fn profile(&self, shim: &Path) -> Option<Value> {
+        let guid = format!("{{{}}}", self.id.trim().trim_matches(['{', '}']));
+        if !is_guid(&guid) {
+            return None;
+        }
+        let mut profile = json!({
+            "guid": guid,
+            "name": self.label,
+            "commandline": format!("{} {}", quote_always(&shim.to_string_lossy()), quote(&self.alias)),
+            "suppressApplicationTitle": true,
+            "closeOnExit": "automatic",
+            "historySize": HISTORY_SIZE,
+        });
+        if let Some(color) = self.tab_color.as_deref().filter(|c| c.starts_with('#')) {
+            profile["tabColor"] = json!(color);
+        }
+        // the shim sets the colors too (OSC, every connect); in the
+        // profile they are right from the first pixel
+        if let Some(scheme) = self.color_scheme.as_deref().filter(|s| !s.trim().is_empty()) {
+            profile["colorScheme"] = json!(scheme);
+        }
+        Some(profile)
+    }
+
+    /// The command palette entry, which opens that profile in a new tab.
+    fn action(&self) -> Value {
+        json!({
+            "command": { "action": "newTab", "profile": format!("{{{}}}", self.id.trim().trim_matches(['{', '}'])) },
+            "id": format!("NativeTerm.Open.{}", self.alias),
+            "name": format!("NativeTerm: {}", self.label),
+        })
+    }
+}
+
+/// `{8-4-4-4-12}` hex, as Terminal reads a profile GUID.
+fn is_guid(text: &str) -> bool {
+    let inner = text.trim_start_matches('{').trim_end_matches('}');
+    let parts: Vec<&str> = inner.split('-').collect();
+    parts.len() == 5
+        && [8, 4, 4, 4, 12] == parts.iter().map(|p| p.len()).collect::<Vec<_>>()[..]
+        && inner.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// The fragment: NativeTerm's own profile, plus one profile and one
+/// command-palette entry per favorite host.
+pub fn fragment(shim: &Path, favorites: &[Favorite]) -> String {
+    let mut profiles = vec![profile(shim)];
+    let mut actions = Vec::new();
+    for favorite in favorites {
+        if let Some(profile) = favorite.profile(shim) {
+            profiles.push(profile);
+            actions.push(favorite.action());
+        }
+    }
+    let mut body = json!({ "profiles": profiles });
+    if !actions.is_empty() {
+        body["actions"] = Value::Array(actions);
+    }
+    let mut text = serde_json::to_string_pretty(&body).expect("static JSON");
     text.push('\n');
     text
 }
@@ -140,9 +220,9 @@ pub fn installed_shim(root: &Path) -> Option<PathBuf> {
 /// Write the fragment if it differs, then touch each `settings.json` so
 /// the Terminals reload (they only watch that file). Returns whether
 /// anything changed.
-pub fn install(root: &Path, shim: &Path, settings_files: &[PathBuf]) -> io::Result<bool> {
+pub fn install(root: &Path, shim: &Path, favorites: &[Favorite], settings_files: &[PathBuf]) -> io::Result<bool> {
     let path = fragment_path(root);
-    let text = fragment(shim);
+    let text = fragment(shim, favorites);
     if fs::read_to_string(&path).is_ok_and(|current| current == text) {
         return Ok(false);
     }
@@ -178,14 +258,59 @@ mod tests {
     #[test]
     fn fragment_content() {
         let shim = Path::new(r"C:\Program Files\NativeTerm\nativeterm-shim.exe");
-        let value: Value = serde_json::from_str(&fragment(shim)).unwrap();
+        let value: Value = serde_json::from_str(&fragment(shim, &[])).unwrap();
         let p = &value["profiles"][0];
         assert_eq!(p["name"], "NativeTerm SSH");
         assert_eq!(p["commandline"], r#""C:\Program Files\NativeTerm\nativeterm-shim.exe""#);
         assert_eq!(p["suppressApplicationTitle"], true);
         assert_eq!(p["closeOnExit"], "automatic");
+        assert!(value.get("actions").is_none(), "nothing to put in the command palette");
         let plain = profile(Path::new(r"C:\NativeTerm\nativeterm-shim.exe"));
         assert_eq!(plain["commandline"], r#""C:\NativeTerm\nativeterm-shim.exe""#);
+    }
+
+    fn favorite(id: &str, alias: &str, label: &str) -> Favorite {
+        Favorite {
+            id: id.to_string(),
+            alias: alias.to_string(),
+            label: label.to_string(),
+            tab_color: None,
+            color_scheme: None,
+        }
+    }
+
+    #[test]
+    fn favorites_become_profiles_and_palette_entries() {
+        let shim = Path::new(r"C:\NativeTerm\nativeterm-shim.exe");
+        let id = "7f3c0a11-2b4d-4e6f-8a91-0c2d4e6f8a91";
+        let mut web = favorite(id, "web01", "Web 01 (生产)");
+        web.tab_color = Some("#2E86C1".to_string());
+        web.color_scheme = Some("One Half Dark".to_string());
+        let favorites = [web, favorite("not-a-uuid", "odd", "Odd one")];
+        let value: Value = serde_json::from_str(&fragment(shim, &favorites)).unwrap();
+        let profiles = value["profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 2, "ours and the one favorite with an id: {profiles:#?}");
+        let p = &profiles[1];
+        assert_eq!(p["guid"], format!("{{{id}}}"));
+        assert_eq!(p["name"], "Web 01 (生产)");
+        assert_eq!(p["commandline"], r#""C:\NativeTerm\nativeterm-shim.exe" web01"#);
+        assert_eq!(p["tabColor"], "#2E86C1");
+        assert_eq!(p["colorScheme"], "One Half Dark");
+        let actions = value["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["command"]["action"], "newTab");
+        assert_eq!(actions[0]["command"]["profile"], format!("{{{id}}}"));
+        assert_eq!(actions[0]["name"], "NativeTerm: Web 01 (生产)");
+        assert_eq!(actions[0]["id"], "NativeTerm.Open.web01");
+    }
+
+    #[test]
+    fn a_guid_is_recognised_by_its_shape() {
+        assert!(is_guid("{7f3c0a11-2b4d-4e6f-8a91-0c2d4e6f8a91}"));
+        assert!(is_guid("7f3c0a11-2b4d-4e6f-8a91-0c2d4e6f8a91"));
+        assert!(!is_guid("{7f3c0a11-2b4d-4e6f-8a91}"));
+        assert!(!is_guid("{zzzz0a11-2b4d-4e6f-8a91-0c2d4e6f8a91}"));
+        assert!(!is_guid("securecrt:Server/web01"));
     }
 
     fn portable(dir: &Path, settings: &str) -> Install {
@@ -209,7 +334,7 @@ mod tests {
         assert_eq!(status(&install, Some(&root), shim), Status::Missing);
         assert_eq!(status(&install, None, shim), Status::Missing);
 
-        super::install(&root, shim, &[]).unwrap();
+        super::install(&root, shim, &[], &[]).unwrap();
         assert_eq!(status(&install, Some(&root), shim), Status::Installed);
         assert!(status(&install, Some(&root), shim).usable());
         let moved = Path::new(r"D:\Tools\nativeterm-shim.exe");
@@ -247,15 +372,15 @@ mod tests {
         File::options().write(true).open(&settings).unwrap().set_modified(old).unwrap();
 
         let shim = Path::new(r"D:\Tools\NativeTerm\nativeterm-shim.exe");
-        assert!(install(&root, shim, std::slice::from_ref(&settings)).unwrap());
+        assert!(install(&root, shim, &[], std::slice::from_ref(&settings)).unwrap());
         assert_eq!(installed_shim(&root).as_deref(), Some(shim));
         let touched = fs::metadata(&settings).unwrap().modified().unwrap();
         assert!(touched > old + std::time::Duration::from_secs(60));
         assert_eq!(fs::read_to_string(&settings).unwrap(), "{}", "content untouched");
-        assert!(!install(&root, shim, &[]).unwrap(), "unchanged");
+        assert!(!install(&root, shim, &[], &[]).unwrap(), "unchanged");
 
         let moved = Path::new(r"E:\NativeTerm\nativeterm-shim.exe");
-        assert!(install(&root, moved, &[]).unwrap());
+        assert!(install(&root, moved, &[], &[]).unwrap());
         assert_eq!(installed_shim(&root).as_deref(), Some(moved));
 
         uninstall(&root, &[]).unwrap();
