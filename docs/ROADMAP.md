@@ -116,9 +116,19 @@
       shell when elevated; install discovery (packages, portable,
       unpackaged); fragment writer. Live-tested on portable 1.26
       (`tests/portable_terminal.rs`)
-- [ ] `native-term-platform` (rest): resend a missing tab once (with a
-      new GUID, from the app); the elevated path tested from an elevated
-      process
+- [x] `native-term-platform` (rest): a tab that never appears is asked
+      for once more, under a new terminal GUID and in the window the
+      first try used — the label and the session stay, so it is the same
+      session in the end. Only once, only when every Terminal window
+      could be read (or a second tab might be a duplicate) and only while
+      no shim of that session has spoken. A test hook drops the first
+      `wt` command for a label (`command::SWALLOW_ENV`), which is how it
+      is live-tested (`core_portable.rs`)
+- [x] The elevated path tested from a process that really is elevated
+      (`tests/elevated_launch.rs`, run from an elevated prompt): the
+      shell detour puts the tab in the user's own Terminal (its process
+      is not elevated), while a direct launch from there makes Terminal's
+      elevated instance — which is what the detour avoids
 - [x] Connect in Tabs in New Window: `wt -w new` (unnamed) for the first
       ~100 tabs, `-w 0` for later batches, each after the previous
       batch's tabs exist and only while no other Terminal window was

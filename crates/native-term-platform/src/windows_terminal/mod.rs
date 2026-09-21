@@ -187,7 +187,11 @@ impl WindowsTerminal {
             }
             previous = chunk;
             let before = if new_window && i == 0 { self.handles() } else { Vec::new() };
-            launch::run(&self.launcher(), &args)?;
+            // nothing to open (only the test hook leaves a batch empty):
+            // running it would open a tab of the default profile
+            if args.iter().any(|a| a == "new-tab") {
+                launch::run(&self.launcher(), &args)?;
+            }
             report.launched += chunk.len();
             if new_window && i == 0 {
                 report.window = self.wait_for_new_window(&before, NEW_WINDOW_TIMEOUT);

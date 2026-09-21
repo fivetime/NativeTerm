@@ -1175,6 +1175,9 @@ pub fn unique_label(label: &str, taken: &HashSet<String>) -> String {
 }
 
 /// Open tabs and confirm them; returns the sessions whose tab didn't show.
+///
+/// A tab that never appears is asked for once more (see `resend`), in the
+/// window this try used.
 fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String> {
     let fail = |specs: &[TabSpec], why: &str| {
         for spec in specs {
@@ -1186,28 +1189,82 @@ fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String>
         }
         specs.iter().map(|s| s.session.clone()).collect::<Vec<_>>()
     };
-    let report = match shared.terminal.open(target, specs) {
-        Ok(report) => report,
-        Err(e) => {
-            shared.notice(t!("notice-terminal-failed", error = e.to_string()));
-            return fail(specs, "wt failed");
-        }
-    };
     let mut failed = Vec::new();
-    if !report.pending.is_empty() {
-        shared.notice(t!("notice-tabs-pending", count = report.pending.len()));
-        failed.extend(fail(&report.pending, "not sent"));
-    }
-    let sent = &specs[..report.launched];
-    let expected: Vec<String> = sent.iter().map(|s| s.label.clone()).collect();
-    let (_, missing) = shared.terminal.wait_for(&shared.labels(), &expected, CONFIRM);
-    if !missing.is_empty() {
-        shared.notice(t!("notice-tabs-missing", count = missing.len(), labels = missing.join(", ")));
-        let missing: Vec<TabSpec> = sent.iter().filter(|s| missing.contains(&s.label)).cloned().collect();
-        failed.extend(fail(&missing, "tab didn't appear"));
+    let mut target = target.clone();
+    let mut specs = specs.to_vec();
+    let mut once_more = true;
+    loop {
+        let report = match shared.terminal.open(&target, &specs) {
+            Ok(report) => report,
+            Err(e) => {
+                shared.notice(t!("notice-terminal-failed", error = e.to_string()));
+                failed.extend(fail(&specs, "wt failed"));
+                break;
+            }
+        };
+        if !report.pending.is_empty() {
+            shared.notice(t!("notice-tabs-pending", count = report.pending.len()));
+            failed.extend(fail(&report.pending, "not sent"));
+        }
+        let sent = specs[..report.launched].to_vec();
+        let expected: Vec<String> = sent.iter().map(|s| s.label.clone()).collect();
+        let (snapshot, missing) = shared.terminal.wait_for(&shared.labels(), &expected, CONFIRM);
+        if missing.is_empty() {
+            break;
+        }
+        let gone: Vec<TabSpec> = sent.into_iter().filter(|s| missing.contains(&s.label)).collect();
+        // one more try, unless a window could not be read (the tab may be
+        // in it, and a second one would be a duplicate) or its shim is
+        // already talking to us (then the tab is there under another name)
+        let again: Vec<TabSpec> = gone
+            .iter()
+            .filter(|s| shared.update(&s.session, |s| waiting_to_open(s)).unwrap_or(false))
+            .cloned()
+            .collect();
+        if once_more && snapshot.complete && !again.is_empty() {
+            once_more = false;
+            shared.notice(t!("notice-tabs-resent", count = again.len(), labels = label_list(&again)));
+            // `-w 0` goes to the most recently activated window: the one
+            // this try made, so the tabs don't land in a window of their own
+            if let Some(handle) = report.window {
+                window::activate(handle);
+                target = Target::Recent;
+            }
+            specs = again.iter().filter_map(|s| resend(shared, s)).collect();
+            if !specs.is_empty() {
+                continue;
+            }
+        }
+        shared.notice(t!("notice-tabs-missing", count = gone.len(), labels = label_list(&gone)));
+        failed.extend(fail(&gone, "tab didn't appear"));
+        break;
     }
     shared.refresh_soon();
     failed
+}
+
+fn label_list(specs: &[TabSpec]) -> String {
+    specs.iter().map(|s| s.label.as_str()).collect::<Vec<_>>().join(", ")
+}
+
+/// Whether a session is still waiting for the tab that was asked for: no
+/// shim of its own has spoken, and nothing else has moved it on.
+fn waiting_to_open(s: &Session) -> bool {
+    s.state == State::Opening && s.link.is_none()
+}
+
+/// The same session, asked for again under a new terminal GUID: the first
+/// one may yet turn up (a Terminal that was busy), and two tabs claiming
+/// one GUID cannot be told apart. The label and NativeTerm's own session
+/// id stay, so the tab is claimed and the host is the same.
+fn resend(shared: &Shared, spec: &TabSpec) -> Option<TabSpec> {
+    let spec = shared.update(&spec.session, |s| {
+        s.terminal_session = native_term_config::new_id();
+        s.current_terminal_session = None;
+        TabSpec { terminal_session: s.terminal_session.clone(), ..spec.clone() }
+    })?;
+    shared.db("resend", |r| r.opened(&record_for(&spec)));
+    Some(spec)
 }
 
 /// Replace restored placeholders with proper tabs (same label and

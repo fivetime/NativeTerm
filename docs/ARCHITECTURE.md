@@ -98,6 +98,20 @@ Batching:
 - **Connections are paced separately.** All tabs appear at once, but
   each shim waits for NativeTerm's go-ahead, so logins follow the
   connection queue and rate limit (jump hosts aren't hammered).
+- **A tab that never appears is asked for once more.** `wt` returns as
+  soon as it has handed the command over, so a command Terminal drops
+  (busy, mid-restore, a window closing under it) is silent. After the
+  confirmation wait, each label that was never claimed is sent again,
+  once, under a **new terminal GUID** — the first tab may still turn up
+  late, and two tabs carrying one GUID cannot be told apart. The label
+  and NativeTerm's own session id stay, so it is the same session and
+  the same claim. The retry goes to the window this try made (`-w 0`
+  after activating it), never to a window of its own. It is skipped when
+  a Terminal window could not be read (the tab may be in it, and a
+  second one would be a duplicate) or when that session's shim is
+  already talking to us (then the tab is there, under a name we didn't
+  expect). `command::SWALLOW_ENV` drops the first `wt` command for a
+  label so the whole path can be live-tested.
 
 The other SecureCRT variants:
 

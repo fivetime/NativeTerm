@@ -59,6 +59,24 @@ fn window_argument(target: &Target, first: bool) -> String {
     }
 }
 
+/// Set to a label prefix to make the **first** `wt` command for each
+/// matching tab leave that tab out, as if Terminal had swallowed it. Only
+/// for the test of "a tab that never appeared is asked for once more": the
+/// second attempt, under a new GUID, opens as usual.
+pub const SWALLOW_ENV: &str = "NATIVETERM_TEST_SWALLOW";
+
+/// Whether this tab is left out of the command (see `SWALLOW_ENV`).
+fn swallowed(tab: &TabSpec) -> bool {
+    static DONE: std::sync::Mutex<std::collections::BTreeSet<String>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    let Some(prefix) = std::env::var_os(SWALLOW_ENV) else { return false };
+    if prefix.is_empty() || !tab.label.starts_with(prefix.to_string_lossy().as_ref()) {
+        return false;
+    }
+    let mut done = DONE.lock().unwrap_or_else(|e| e.into_inner());
+    done.insert(tab.label.clone())
+}
+
 /// `wt` invocations for `tabs`: as many tabs per invocation as fit.
 /// Each item is (the tabs it opens, its arguments).
 pub fn batches<'a>(
@@ -75,10 +93,14 @@ pub fn batches<'a>(
         let mut length = 300 + args.iter().map(|a| quoted_len(a)).sum::<usize>();
         let mut end = start;
         while end < tabs.len() {
-            let mut part = if end > start { vec![OsString::from(";")] } else { Vec::new() };
+            if swallowed(&tabs[end]) {
+                end += 1; // sent as far as anyone can tell, and never opened
+                continue;
+            }
+            let mut part = if args.len() > 2 { vec![OsString::from(";")] } else { Vec::new() };
             part.extend(new_tab(&tabs[end], shim, shim_args));
             let part_length: usize = part.iter().map(|a| quoted_len(a)).sum();
-            if end > start && length + part_length > MAX_COMMAND_LINE {
+            if args.len() > 2 && length + part_length > MAX_COMMAND_LINE {
                 break;
             }
             length += part_length;

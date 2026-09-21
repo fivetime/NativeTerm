@@ -320,6 +320,7 @@ notice-tab-changed = { $label }：标签已变化，未关闭
 notice-not-linked = { $label }：它的标签没有连接到 NativeTerm
 notice-terminal-failed = 无法启动 Windows Terminal：{ $error }
 notice-tabs-pending = { $count } 个标签没有打开：另一个 Terminal 窗口成了活动窗口
+notice-tabs-resent = { $count } 个标签页没有出现在 Windows Terminal 里，已重新打开一次：{ $labels }
 notice-tabs-missing = { $count } 个标签没有出现在 Windows Terminal 中：{ $labels }
 notice-pipe-stopped = NativeTerm 的管道服务已停止：{ $error }
 notice-old-shim = 连接进来的 shim 协议版本是 { $protocol }（应为 { $expected }），请更新

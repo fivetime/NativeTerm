@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use native_term_app::{Core, HostRequest, SessionView, State};
+use native_term_platform::windows_terminal::command;
 use native_term_platform::windows_terminal::install::{Install, Kind};
 use native_term_platform::windows_terminal::WindowsTerminal;
 use native_term_platform::Target;
@@ -127,6 +128,42 @@ fn open_track_reconnect_close() {
         assert!(started.elapsed() < WAIT, "window still open");
         std::thread::sleep(Duration::from_millis(200));
     }
+}
+
+/// A tab that never turns up is asked for once more, under a new terminal
+/// GUID: the same session, the same label, one tab in the end. A test hook
+/// drops the first `wt` command for the label (`SWALLOW_ENV`), as a busy
+/// Terminal that swallows a command would.
+#[test]
+#[ignore = "needs a portable Windows Terminal"]
+fn a_tab_that_never_appeared_is_asked_for_again() {
+    let core = core();
+    // a window to open into: `-w 0` needs one
+    let host = HostRequest::new("nativeterm-test.invalid", "nt-lost window");
+    let first = core.open(&[host], Target::NewWindow);
+    let opened = wait_until(&core, &first, "the window is there", |s| s.iter().all(|s| s.location.is_some()));
+    let window = opened[0].location.as_ref().unwrap().window;
+    let guid_before = core.sessions().into_iter().find(|s| s.id == first[0]).map(|s| s.id.clone());
+    assert!(guid_before.is_some());
+
+    std::env::set_var(command::SWALLOW_ENV, "nt-lost tab");
+    let ids = core.open(&[HostRequest::new("nativeterm-test.invalid", "nt-lost tab")], Target::Recent);
+    // the first try is swallowed; the second one opens it (CONFIRM apart)
+    let sessions = wait_until(&core, &ids, "the tab arrived on the second try", |s| {
+        s.len() == 1 && matches!(s[0].state, FAILED) && s[0].location.is_some() && s[0].linked
+    });
+    std::env::remove_var(command::SWALLOW_ENV);
+    assert_eq!(sessions[0].location.as_ref().unwrap().window, window, "the same window, not one of its own");
+    let names = tab_names(&core, window);
+    assert_eq!(names.iter().filter(|n| *n == "nt-lost tab").count(), 1, "one tab, not two: {names:?}");
+    let notices = core.take_notices();
+    assert!(notices.iter().any(|n| n.contains("nt-lost tab")), "said once: {notices:?}");
+
+    for id in first.iter().chain(ids.iter()) {
+        core.close(id);
+    }
+    let all: Vec<String> = first.iter().chain(ids.iter()).cloned().collect();
+    wait_until(&core, &all, "both closed", |s| s.iter().all(|s| s.state == State::Closed));
 }
 
 /// Tab titles of a window, now.
