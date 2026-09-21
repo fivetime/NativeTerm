@@ -870,3 +870,5 @@ files-at-once = At once
 files-at-once-hint = How many files each connection copies at the same time; the rest wait their turn. More is faster for many small files; fewer is kinder to a slow link or a server that limits them.
 drop-size-folders = Folders go with everything in them ({ $size } and what they hold)
 tabs-text-preview = text preview
+tabs-hover-setting = Show a card when the mouse rests on a tab
+tabs-hover-hint = After about half a second, the tab's picture and the session's state appear under it. Terminal's own title tooltip still shows.

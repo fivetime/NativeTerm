@@ -4,6 +4,7 @@
 pub mod capture;
 pub mod command;
 pub mod events;
+pub mod hover;
 pub mod install;
 pub mod jsonc;
 pub mod launch;

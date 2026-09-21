@@ -475,6 +475,17 @@
 - [ ] Tab switcher (rest): last-seen text (UIA `TextPattern`), searchable;
       tmux text preview for persistent sessions (the console text above
       may be enough)
+- [x] A card when the mouse rests on a tab (like a browser's): the tab's
+      picture, or the text its console holds, with the session's name and
+      state, under the tab after half a second. It uses what the tab menu
+      already has — the low-level mouse hook and the same non-activating
+      Direct2D popup — and the hook only tests the point against the tab
+      strip's box (four comparisons; a low-level hook that takes too long
+      is dropped by Windows, which is what a fuller test in it caused).
+      Terminal's own title tooltip still shows, above the tab: it is set
+      in its code (`Tab.cpp`, `ToolTipService::SetToolTip`) with no
+      setting to turn it off, and Terminal has no API for any of this
+      (Monarch/Peasant was removed; only UIA is left to read from outside)
 - [ ] Tiled thumbnail switcher on Ctrl+Tab (off by default): the existing
       low-level keyboard hook swallows Ctrl+Tab while a Terminal window
       with NativeTerm tabs is in front, a non-activating grid follows

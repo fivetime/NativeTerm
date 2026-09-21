@@ -3,7 +3,9 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 
+use native_term_platform::windows_terminal::hover::HoverCard;
 use native_term_platform::windows_terminal::menu::{Entry, MenuTab, Provider};
 
 use crate::actions::{close_set, CloseSet, Closing, SessionCommand};
@@ -39,6 +41,14 @@ pub enum MenuRequest {
     /// sent after all.
     Dropped { alias: String, session: String, paths: Vec<PathBuf>, text: String },
 }
+
+/// `off` keeps the cards away (`state.db`).
+pub const HOVER_SETTING: &str = "tabs.hover";
+/// How long the mouse rests on a tab before its card appears.
+const DELAY: Duration = Duration::from_millis(500);
+/// A tab without a picture is asked what is on its screen at most this
+/// often (the tab list asks on the same terms).
+const SCREEN_EVERY: Duration = Duration::from_secs(5);
 
 pub(crate) struct Actions {
     pub(crate) core: Weak<Shared>,
@@ -130,6 +140,52 @@ impl Provider for Actions {
         entries.push(action(CLOSE_ENDED, '\u{E894}', &t!("tabmenu-close-disconnected"), some(CLOSE_ENDED)));
         entries.push(action(CLOSE_RIGHT, '\u{E72A}', &t!("tabmenu-close-right"), some(CLOSE_RIGHT)));
         entries
+    }
+
+    /// What the mouse resting on a tab shows: its picture, or the text
+    /// its console holds when Terminal has never rendered it. Off when
+    /// `HOVER_SETTING` says so.
+    fn hover(&self, tab: &MenuTab) -> Option<(HoverCard, Duration)> {
+        let core = Core { shared: self.core.upgrade()? };
+        if core.setting(HOVER_SETTING).as_deref() == Some("off") {
+            return None;
+        }
+        let session = core.sessions().into_iter().find(|s| s.state.is_open() && s.label == tab.label);
+        let mut card = HoverCard {
+            title: session.as_ref().map_or_else(|| tab.title.clone(), |s| s.label.clone()),
+            ..Default::default()
+        };
+        let mut note = Vec::new();
+        if tab.title != card.title {
+            note.push(tab.title.clone());
+        }
+        if let Some(session) = &session {
+            note.push(session.state.describe());
+        }
+        match core.preview(tab.window, tab.index) {
+            Some(preview) => {
+                let image = &preview.image;
+                card.image = Some((image.width, image.height, image.rgba.clone()));
+            }
+            None => {
+                // no picture of it: what its own console says (asked for
+                // here, shown from the next card on)
+                if let Some(session) = &session {
+                    core.ask_screen(&session.id, SCREEN_EVERY);
+                    if let Some(screen) = core.screen(&session.id) {
+                        card.columns = screen.columns;
+                        card.lines = screen.lines;
+                    }
+                }
+                if !card.lines.is_empty() {
+                    note.push(t!("tabs-text-preview"));
+                }
+            }
+        }
+        card.note = note.join(" · ");
+        // an empty card still waits: the screen was just asked for, and
+        // the answer is there by the time the card would be shown
+        (session.is_some() || !card.is_empty()).then_some((card, DELAY))
     }
 
     fn chosen(&self, tab: &MenuTab, id: u32) {

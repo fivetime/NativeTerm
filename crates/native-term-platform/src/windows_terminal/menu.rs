@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::DirectWrite::IDWriteTextFormat;
 use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
@@ -42,14 +42,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetAncestor, GetMessageW,
-    LoadCursorW, PostMessageW, PostThreadMessageW, RegisterClassW, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    UnhookWindowsHookEx, UpdateLayeredWindow, WindowFromPoint, CS_DROPSHADOW, GA_ROOT, HC_ACTION, HHOOK, IDC_ARROW,
-    KBDLLHOOKSTRUCT, MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT, SW_SHOWNOACTIVATE, ULW_ALPHA, WH_KEYBOARD_LL, WH_MOUSE_LL,
-    WM_APP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE, WM_MOUSEHWHEEL, WM_MOUSEMOVE,
-    WM_MOUSEWHEEL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WNDCLASSW,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    KillTimer, LoadCursorW, PostMessageW, PostThreadMessageW, RegisterClassW, SetTimer, SetWindowsHookExW, ShowWindow,
+    TranslateMessage, UnhookWindowsHookEx, UpdateLayeredWindow, WindowFromPoint, CS_DROPSHADOW, GA_ROOT, HC_ACTION,
+    HHOOK, IDC_ARROW, KBDLLHOOKSTRUCT, MA_NOACTIVATE, MSG, MSLLHOOKSTRUCT, SW_SHOWNOACTIVATE, ULW_ALPHA,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_APP, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MOUSEACTIVATE,
+    WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_QUIT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
+    WM_TIMER, WM_XBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
+use super::hover::{self, HoverCard};
 use super::menu_draw::Painter;
 use super::theme::{self, Look};
 use crate::Rect;
@@ -65,6 +66,11 @@ const WM_CLOSE_MENU: u32 = WM_APP + 2;
 const WM_MENU_KEY: u32 = WM_APP + 3;
 const WM_SYNC_HOOKS: u32 = WM_APP + 4;
 const WM_CHOOSE_ID: u32 = WM_APP + 5;
+/// The mouse is over the tab strip (the point rides with it).
+const WM_HOVER_MOVE: u32 = WM_APP + 6;
+/// It left the tab: no card.
+const WM_HOVER_OUT: u32 = WM_APP + 7;
+const HOVER_TIMER: usize = 1;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
 /// A NativeTerm tab as the menu knows it.
@@ -98,6 +104,12 @@ pub enum Entry {
 pub trait Provider: Send + Sync {
     fn entries(&self, tab: &MenuTab) -> Vec<Entry>;
     fn chosen(&self, tab: &MenuTab, id: u32);
+    /// What to show when the mouse rests on the tab, and how long to wait
+    /// first (`None`: no card for this tab, or the person turned them
+    /// off). Called on the menu thread: don't block.
+    fn hover(&self, _tab: &MenuTab) -> Option<(HoverCard, Duration)> {
+        None
+    }
 }
 
 struct Shared {
@@ -117,6 +129,15 @@ struct Shared {
     last_chosen: AtomicU32,
     /// Id of the highlighted item, 0 for none.
     hovered: AtomicU32,
+    /// The tab the mouse was last seen on (window, index + 1; 0 for none),
+    /// and its rectangle, so that a move inside it costs nothing.
+    hover_tab: [AtomicIsize; 2],
+    hover_rect: [AtomicI32; 4],
+    /// The tab strip's bounding box (all known tabs), for the hook's
+    /// four comparisons; left == right when there is none.
+    strip: [AtomicI32; 4],
+    /// How many cards were shown (diagnostics, tests).
+    cards: AtomicU32,
 }
 
 static SHARED: OnceLock<Arc<Shared>> = OnceLock::new();
@@ -149,6 +170,10 @@ impl TabMenu {
             right_clicks: AtomicU32::new(0),
             last_chosen: AtomicU32::new(0),
             hovered: AtomicU32::new(0),
+            hover_tab: [AtomicIsize::new(0), AtomicIsize::new(0)],
+            hover_rect: [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)],
+            strip: [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)],
+            cards: AtomicU32::new(0),
         });
         if SHARED.set(Arc::clone(&shared)).is_err() {
             return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "the tab menu is already running"));
@@ -161,6 +186,19 @@ impl TabMenu {
 
     /// The current NativeTerm tabs, fresh from a scan.
     pub fn set_tabs(&self, tabs: Vec<MenuTab>) {
+        // the box around them all: what the mouse hook tests against
+        let box_of = |pick: fn(&Rect) -> i32, most: bool| {
+            tabs.iter().map(|t| pick(&t.rect)).reduce(|a, b| if most { a.max(b) } else { a.min(b) }).unwrap_or(0)
+        };
+        let strip = [
+            box_of(|r| r.left, false),
+            box_of(|r| r.top, false),
+            box_of(|r| r.right, true),
+            box_of(|r| r.bottom, true),
+        ];
+        for (at, v) in strip.into_iter().enumerate() {
+            self.shared.strip[at].store(v, Ordering::SeqCst);
+        }
         *self.shared.tabs.lock().unwrap_or_else(|e| e.into_inner()) = tabs;
         self.shared.stale.store(false, Ordering::SeqCst);
         self.post(WM_SYNC_HOOKS);
@@ -268,9 +306,23 @@ thread_local! {
 /// Handed from the mouse hook to the owner window (both on the menu
 /// thread; the hook itself stays trivial).
 static PENDING_TAB: Mutex<Option<(MenuTab, POINT)>> = Mutex::new(None);
+/// The tab the mouse rests on, for the card (the hook itself stays trivial).
+static PENDING_HOVER: Mutex<Option<(MenuTab, POINT)>> = Mutex::new(None);
 
 fn contains(r: &Rect, p: POINT) -> bool {
     r.contains(p.x, p.y)
+}
+
+/// Posts a message carrying a point (the hook's only work beyond the
+/// comparisons).
+fn post_at(message: u32, pt: POINT) {
+    if let Some(s) = shared() {
+        let owner = HWND(s.owner.load(Ordering::SeqCst) as *mut _);
+        // SAFETY: posting to the owner window of this process.
+        unsafe {
+            let _ = PostMessageW(Some(owner), message, WPARAM(pt.x as usize), LPARAM(pt.y as isize));
+        }
+    }
 }
 
 fn post(message: u32, wparam: usize) {
@@ -336,6 +388,70 @@ pub fn since_drag_release() -> Option<Duration> {
     Some(Duration::from_millis(u64::from(now.saturating_sub(at))))
 }
 
+/// The mouse moved. A low-level hook is given a few hundred milliseconds
+/// for the whole desktop's mouse traffic, so this does four integer
+/// comparisons in the common case: the tab strip's bounding box, kept as
+/// the tabs are scanned. The work of finding which tab it is happens on
+/// the menu thread (`WM_HOVER_MOVE`).
+fn hover_moved(s: &Shared, pt: POINT) {
+    let inside = |r: &[AtomicI32; 4]| {
+        let (left, top) = (r[0].load(Ordering::Relaxed), r[1].load(Ordering::Relaxed));
+        let (right, bottom) = (r[2].load(Ordering::Relaxed), r[3].load(Ordering::Relaxed));
+        left != right && pt.x >= left && pt.x < right && pt.y >= top && pt.y < bottom
+    };
+    if s.hover_tab[1].load(Ordering::Relaxed) != 0 && inside(&s.hover_rect) {
+        return; // still on the tab the card is (or will be) for
+    }
+    if !inside(&s.strip) {
+        hover_left(s);
+        return;
+    }
+    post_at(WM_HOVER_MOVE, pt);
+}
+
+/// The mouse is no longer on a tab (or something else takes the card away).
+fn hover_left(s: &Shared) {
+    if s.hover_tab[1].swap(0, Ordering::Relaxed) != 0 {
+        post(WM_HOVER_OUT, 0);
+    }
+}
+
+/// Which tab the point is on, on the menu thread; remembers it so that
+/// further moves over the same tab cost nothing.
+fn hover_here(pt: POINT) {
+    let Some(s) = shared() else { return };
+    match hit_test(s, pt) {
+        Some(tab) => {
+            s.hover_tab[0].store(tab.window, Ordering::Relaxed);
+            s.hover_tab[1].store(tab.index as isize + 1, Ordering::Relaxed);
+            for (at, v) in [tab.rect.left, tab.rect.top, tab.rect.right, tab.rect.bottom].into_iter().enumerate() {
+                s.hover_rect[at].store(v, Ordering::Relaxed);
+            }
+            if hover::showing() == Some((tab.window, tab.index)) {
+                return; // its card is already up
+            }
+            close_card();
+            let delay = s.provider.hover(&tab).map(|(_, delay)| delay);
+            if let Some(delay) = delay {
+                if let Ok(mut pending) = PENDING_HOVER.try_lock() {
+                    *pending = Some((tab, pt));
+                }
+                let ms = u32::try_from(delay.as_millis()).unwrap_or(u32::MAX).max(1);
+                let owner = HWND(s.owner.load(Ordering::SeqCst) as *mut _);
+                // SAFETY: a timer of the owner window, killed when it fires
+                // or when the mouse leaves the tab.
+                unsafe {
+                    SetTimer(Some(owner), HOVER_TIMER, ms, None);
+                }
+            }
+        }
+        None => {
+            s.hover_tab[1].store(0, Ordering::Relaxed);
+            close_card();
+        }
+    }
+}
+
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         if let Some(s) = shared() {
@@ -344,6 +460,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             match wparam.0 as u32 {
                 WM_RBUTTONDOWN => {
                     s.right_clicks.fetch_add(1, Ordering::SeqCst);
+                    hover_left(s);
                     let swallow = if open && inside_menu(s, info.pt) {
                         true
                     } else if let Some(tab) = hit_test(s, info.pt) {
@@ -369,6 +486,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         return LRESULT(1);
                     }
                 }
+                WM_MOUSEMOVE if !open => hover_moved(s, info.pt),
                 WM_LBUTTONUP => {
                     // a drag ends over another window than it started on
                     let from = LEFT_DOWN_ON.swap(0, Ordering::Relaxed);
@@ -378,7 +496,9 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         DRAG_UP_AT.store(now.max(1), Ordering::Relaxed);
                     }
                 }
+                WM_MOUSEWHEEL | WM_MOUSEHWHEEL if !open => hover_left(s),
                 WM_LBUTTONDOWN if !open => {
+                    hover_left(s);
                     HOOKED_AT.get_or_init(Instant::now);
                     LEFT_DOWN_ON.store(window_at(info.pt), Ordering::Relaxed);
                 }
@@ -513,6 +633,7 @@ fn icon_face() -> &'static str {
 }
 
 fn open_menu(tab: MenuTab, pt: POINT) {
+    close_card();
     let Some(s) = shared() else { return };
     let entries = s.provider.entries(&tab);
     if entries.is_empty() {
@@ -712,7 +833,88 @@ fn menu_key(vk: VIRTUAL_KEY) {
     }
 }
 
+/// Shows the card for a tab the mouse rests on.
+fn open_card(tab: MenuTab, pt: POINT) {
+    let Some(s) = shared() else { return };
+    let Some((card, _)) = s.provider.hover(&tab) else { return };
+    if card.is_empty() {
+        return;
+    }
+    // SAFETY: Win32 calls with handles this thread owns; the popup is
+    // destroyed in `close_card`.
+    unsafe {
+        let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        let (mut dpi, mut dpi_y) = (96u32, 96u32);
+        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut dpi_y);
+        let scale = dpi as f32 / 96.0;
+        let size = hover::size_for(scale);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        let _ = GetMonitorInfoW(monitor, &mut info);
+        let work = info.rcWork;
+        // under the tab, kept on the monitor
+        let middle = tab.rect.left + (tab.rect.right - tab.rect.left) / 2;
+        let x = (middle - size.cx / 2).min(work.right - size.cx).max(work.left);
+        let below = tab.rect.bottom + (2.0 * scale) as i32;
+        let y = if below + size.cy > work.bottom { work.bottom - size.cy } else { below };
+        let owner = HWND(s.owner.load(Ordering::SeqCst) as *mut _);
+        let instance = GetModuleHandleW(None).unwrap_or_default();
+        let Ok(popup) = CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            POPUP_CLASS,
+            w!("NativeTerm tab card"),
+            WS_POPUP,
+            x,
+            y,
+            size.cx,
+            size.cy,
+            Some(owner),
+            None,
+            Some(instance.into()),
+            None,
+        ) else {
+            return;
+        };
+        let corner = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            popup,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const _ as *const _,
+            std::mem::size_of_val(&corner) as u32,
+        );
+        let look = theme::look(&s.settings);
+        hover::CARD.with(|c| {
+            *c.borrow_mut() = Some(hover::Card { popup, tab: (tab.window, tab.index), card, look, scale, size });
+        });
+        let _ = ShowWindow(popup, SW_SHOWNOACTIVATE);
+        let _ = InvalidateRect(Some(popup), None, false);
+        s.cards.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+/// Takes the card away, if one is up.
+fn close_card() {
+    let owner = shared().map(|s| HWND(s.owner.load(Ordering::SeqCst) as *mut _));
+    if let Some(owner) = owner.filter(|o| !o.is_invalid()) {
+        // SAFETY: a timer of the owner window; killing one that isn't
+        // there is harmless.
+        unsafe {
+            let _ = KillTimer(Some(owner), HOVER_TIMER);
+        }
+    }
+    let card = hover::CARD.with(|c| c.borrow_mut().take());
+    if let Some(card) = card {
+        // SAFETY: a window this thread made, not used again.
+        unsafe {
+            let _ = DestroyWindow(card.popup);
+        }
+    }
+}
+
 fn paint(hwnd: HWND) {
+    if hover::is_card(hwnd) {
+        paint_card(hwnd);
+        return;
+    }
     MENU.with(|m| {
         let menu = m.borrow();
         let Some(menu) = menu.as_ref() else { return };
@@ -726,6 +928,24 @@ fn paint(hwnd: HWND) {
             let _ = EndPaint(hwnd, &ps);
         }
     });
+}
+
+/// The hover card's own painting (it is never the layered kind: DWM
+/// rounds it, and on Windows 10 it is a plain rectangle).
+fn paint_card(hwnd: HWND) {
+    let size = hover::CARD.with(|c| c.borrow().as_ref().map(|card| card.size));
+    let Some(size) = size else { return };
+    // SAFETY: painting the window the message is for.
+    unsafe {
+        let mut ps = PAINTSTRUCT::default();
+        let hdc = BeginPaint(hwnd, &mut ps);
+        if let Some(painter) = painter() {
+            let background =
+                hover::CARD.with(|c| c.borrow().as_ref().map_or(COLORREF(0), |card| card.look.palette.background));
+            let _ = painter.paint(hdc, size.cx, size.cy, background, |canvas| hover::draw(canvas, &painter));
+        }
+        let _ = EndPaint(hwnd, &ps);
+    }
 }
 
 /// Draw a layered popup: its rounded shape with a border, then the rows,
@@ -890,6 +1110,27 @@ unsafe extern "system" fn owner_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
         }
         WM_CLOSE_MENU => {
             close_menu();
+            LRESULT(0)
+        }
+        // the mouse is over the tab strip: which tab, and its card later
+        WM_HOVER_MOVE => {
+            let pt = POINT { x: (wparam.0 as i32), y: (lparam.0 as i32) };
+            hover_here(pt);
+            LRESULT(0)
+        }
+        WM_HOVER_OUT => {
+            close_card();
+            LRESULT(0)
+        }
+        WM_TIMER if wparam.0 == HOVER_TIMER => {
+            // SAFETY: the timer of this window.
+            unsafe {
+                let _ = KillTimer(Some(hwnd), HOVER_TIMER);
+            }
+            let pending = PENDING_HOVER.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if let Some((tab, pt)) = pending {
+                open_card(tab, pt);
+            }
             LRESULT(0)
         }
         WM_MENU_KEY => {

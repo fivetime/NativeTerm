@@ -844,3 +844,5 @@ files-at-once = 同时传输
 files-at-once-hint = 每个连接同时传输的文件数，多出的排队等待。文件多而小时调大更快；链路慢或服务器有限制时调小。
 drop-size-folders = 文件夹连同里面的内容一起上传（共 { $size } 以上）
 tabs-text-preview = 文字预览
+tabs-hover-setting = 鼠标停在标签页上显示预览卡片
+tabs-hover-hint = 停留约半秒后，在标签下方显示该标签的画面和会话状态。Terminal 自带的标题气泡仍会出现。

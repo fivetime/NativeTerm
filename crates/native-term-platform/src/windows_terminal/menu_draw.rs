@@ -7,13 +7,15 @@
 use windows::core::{Result, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, RECT};
 use windows::Win32::Globalization::GetUserDefaultLocaleName;
+use windows::Win32::Graphics::Direct2D::Common::D2D_SIZE_U;
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_ALPHA_MODE, D2D1_ALPHA_MODE_IGNORE, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_PIXEL_FORMAT, D2D_RECT_F,
 };
 use windows::Win32::Graphics::Direct2D::{
-    D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP,
-    D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT, D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT,
-    D2D1_RENDER_TARGET_PROPERTIES, D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
+    D2D1CreateFactory, ID2D1DCRenderTarget, ID2D1Factory, ID2D1SolidColorBrush, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+    D2D1_BITMAP_PROPERTIES, D2D1_DRAW_TEXT_OPTIONS_CLIP, D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT,
+    D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_FEATURE_LEVEL_DEFAULT, D2D1_RENDER_TARGET_PROPERTIES,
+    D2D1_RENDER_TARGET_TYPE_DEFAULT, D2D1_RENDER_TARGET_USAGE_NONE, D2D1_ROUNDED_RECT,
     D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
 };
 use windows::Win32::Graphics::DirectWrite::{
@@ -154,6 +156,41 @@ impl Canvas<'_> {
         if let Some(brush) = self.brush(c) {
             let rounded = D2D1_ROUNDED_RECT { rect: rect(left, top, right, bottom), radiusX: radius, radiusY: radius };
             unsafe { self.target.FillRoundedRectangle(&rounded, &brush) };
+        }
+    }
+
+    /// A picture (RGBA, as the tab captures give it) fitted into the box,
+    /// keeping its shape, centered.
+    #[allow(clippy::too_many_arguments)]
+    pub fn picture(&self, left: i32, top: i32, right: i32, bottom: i32, rgba: &[u8], width: u32, height: u32) {
+        if width == 0 || height == 0 || rgba.len() < (width as usize * height as usize * 4) {
+            return;
+        }
+        // Direct2D wants BGRA; the alpha is ignored (a tab is opaque)
+        let mut bgra = Vec::with_capacity(rgba.len());
+        for pixel in rgba.as_chunks::<4>().0 {
+            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+        }
+        let properties = D2D1_BITMAP_PROPERTIES {
+            pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+            dpiX: 96.0,
+            dpiY: 96.0,
+        };
+        let size = D2D_SIZE_U { width, height };
+        // SAFETY: `bgra` holds width * height pixels of four bytes, which
+        // is what the size and the pitch say; the bitmap is only used here.
+        let bitmap = unsafe { self.target.CreateBitmap(size, Some(bgra.as_ptr().cast()), width * 4, &properties) };
+        let Ok(bitmap) = bitmap else { return };
+        // fitted, keeping its shape
+        let (box_w, box_h) = ((right - left) as f32, (bottom - top) as f32);
+        let scale = (box_w / width as f32).min(box_h / height as f32);
+        let (w, h) = (width as f32 * scale, height as f32 * scale);
+        let x = left as f32 + (box_w - w) / 2.0;
+        let y = top as f32 + (box_h - h) / 2.0;
+        let into = D2D_RECT_F { left: x, top: y, right: x + w, bottom: y + h };
+        // SAFETY: the bitmap and the target are alive for the call.
+        unsafe {
+            self.target.DrawBitmap(&bitmap, Some(&into), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
         }
     }
 

@@ -1699,6 +1699,18 @@ impl crate::window::Ui for App {
                         if response.changed() {
                             core.set_setting(native_term_app::CLOSE_ON_EXIT_SETTING, if close { "1" } else { "0" });
                         }
+                        let mut cards =
+                            core.setting(native_term_app::tab_menu::HOVER_SETTING).as_deref() != Some("off");
+                        if ui
+                            .checkbox(&mut cards, t!("tabs-hover-setting"))
+                            .on_hover_text(t!("tabs-hover-hint"))
+                            .changed()
+                        {
+                            core.set_setting(
+                                native_term_app::tab_menu::HOVER_SETTING,
+                                if cards { "on" } else { "off" },
+                            );
+                        }
                         let mut ask = self.remembered_drop().is_none();
                         let response = ui.checkbox(&mut ask, t!("drop-ask-setting")).on_hover_text(t!("drop-ask-hint"));
                         if response.changed() && ask {
