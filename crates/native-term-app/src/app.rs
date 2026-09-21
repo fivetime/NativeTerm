@@ -191,11 +191,21 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
 impl App {
     pub fn new(ctx: &egui::Context, setup: Setup) -> App {
         let Setup { options, install, shim, core, data_dir, data_source, mut notices } = setup;
-        let mut profile = ProfileSetup::new(install, shim, data_dir.join("backups"));
+        let mut profile = ProfileSetup::new(install, shim.clone(), data_dir.join("backups"));
         if let Some(core) = &core {
             core.set_audit_dir(data_dir.join("audit"));
         }
         notices.extend(profile.fix_moved());
+        // the program folder may have moved: put our path right in what we
+        // wrote (the tab profile above, the ssh config here)
+        let repaired = editor_for(&options.ssh_dir, &data_dir).repair_paths(&shim);
+        if !repaired.is_empty() {
+            notices.push(t!(
+                "config-paths-repaired",
+                count = repaired.lines,
+                old = repaired.was.first().map(|p| p.display().to_string()).unwrap_or_default()
+            ));
+        }
         if let Some(core) = &core {
             crate::dock::set_pinned(core.setting(PINNED_SETTING).as_deref() == Some("1"));
             apply_theme(ctx, core.setting(THEME_SETTING).as_deref());

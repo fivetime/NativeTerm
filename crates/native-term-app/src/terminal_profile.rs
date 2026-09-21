@@ -62,17 +62,25 @@ impl ProfileSetup {
         files
     }
 
-    /// Rewrite our own fragment after the program folder moved.
+    /// Rewrite our own fragment when it names another helper: the program
+    /// folder moved, or a second copy of NativeTerm had it.
+    ///
+    /// A helper that is no longer there means this program moved, which
+    /// needs no telling; one that is still there means there are two
+    /// copies, and then the change is worth a word.
     pub fn fix_moved(&mut self) -> Option<String> {
         let Status::Outdated { shim: old } = &self.status else { return None };
         let old = old.clone();
         let root = self.root.clone()?;
         let result = profile::install(&root, &self.shim, &self.settings_files());
         self.refresh();
-        Some(match result {
-            Ok(_) => t!("profile-updated", old = old.display().to_string(), new = self.shim.display().to_string()),
-            Err(e) => t!("profile-update-failed", error = e.to_string()),
-        })
+        match result {
+            Ok(_) if !old.exists() => None,
+            Ok(_) => {
+                Some(t!("profile-updated", old = old.display().to_string(), new = self.shim.display().to_string()))
+            }
+            Err(e) => Some(t!("profile-update-failed", error = e.to_string())),
+        }
     }
 
     /// Install the fragment (the user asked, e.g. in the wizard).

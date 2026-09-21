@@ -35,6 +35,7 @@ pub mod plink;
 pub mod proxy;
 #[cfg(windows)]
 pub mod putty;
+pub mod repair;
 pub mod securecrt;
 pub mod tree;
 pub mod write;

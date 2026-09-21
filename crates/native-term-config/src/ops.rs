@@ -250,6 +250,22 @@ impl Editor {
         self.ssh_dir.join("config")
     }
 
+    /// Every file NativeTerm writes hosts into: the main config and the
+    /// folders' files.
+    #[must_use]
+    pub fn written_files(&self) -> Vec<PathBuf> {
+        let mut files = vec![self.main_config()];
+        files.extend(folder_files(&self.folders_dir()));
+        files
+    }
+
+    /// Puts NativeTerm's own path right in what it wrote, after the
+    /// program folder moved: the `ProxyCommand` lines that name a helper
+    /// which is not on this computer (see `repair`).
+    pub fn repair_paths(&self, shim: &Path) -> crate::repair::Repaired {
+        crate::repair::proxy_commands(&self.writer, &self.written_files(), shim)
+    }
+
     pub fn folders_dir(&self) -> PathBuf {
         self.folders.clone()
     }

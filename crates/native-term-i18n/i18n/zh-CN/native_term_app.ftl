@@ -846,3 +846,4 @@ drop-size-folders = 文件夹连同里面的内容一起上传（共 { $size } �
 tabs-text-preview = 文字预览
 tabs-hover-setting = 鼠标停在标签页上显示预览卡片
 tabs-hover-hint = 停留约半秒后，在标签下方显示该标签的画面和会话状态。Terminal 自带的标题气泡仍会出现。
+config-paths-repaired = 程序位置变了：已把 ssh 配置里 { $count } 处代理命令指向当前程序（原为 { $old }）

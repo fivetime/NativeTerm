@@ -872,3 +872,4 @@ drop-size-folders = Folders go with everything in them ({ $size } and what they 
 tabs-text-preview = text preview
 tabs-hover-setting = Show a card when the mouse rests on a tab
 tabs-hover-hint = After about half a second, the tab's picture and the session's state appear under it. Terminal's own title tooltip still shows.
+config-paths-repaired = The program moved: { $count } proxy command(s) in the ssh config now point at this copy (they named { $old })

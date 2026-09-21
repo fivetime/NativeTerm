@@ -186,8 +186,14 @@
       `backups\`, rotated `logs\`; atomic writes and a lock file
 - [x] Pipe protocol version number from the first release; pipe name per
       user SID and logon session
-- [ ] Absolute shim path everywhere; fragment rewritten when the program
-      folder moves; tabs restored from an old path detected and reopened
+- [x] The program folder moved: the tab profile is rewritten at start
+      (quietly when the old program is gone, with a word when it is still
+      there — a second copy), and the `ProxyCommand` lines NativeTerm
+      wrote are pointed at this copy. A line whose helper **is** on this
+      computer is left alone, so a config synced between computers keeps
+      working on both (`native-term-config/src/repair.rs`)
+- [ ] The rest of it: tabs restored from an old path detected and
+      reopened (with "resend a missing tab once" below)
 - [x] Startup checks (part): Windows Terminal found (packages, portable,
       unpackaged; `--terminal-dir`), single instance (second start brings
       the first to the front), data folder writable (fallbacks)
