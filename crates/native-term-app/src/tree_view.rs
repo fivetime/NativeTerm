@@ -165,6 +165,8 @@ pub struct TreeView {
 
 struct SearchCache {
     query: String,
+    /// Bumped when a note or its tags change.
+    notes: u64,
     generation: u64,
     recent: Vec<String>,
     /// (folder index, host index), best first.
@@ -301,10 +303,16 @@ impl TreeView {
     }
 
     /// (folder index, host index) of the matches, best first.
-    fn search(&mut self, tree: &SessionTree, generation: u64, recent: &[String]) -> Vec<(usize, usize)> {
+    fn search(
+        &mut self,
+        tree: &SessionTree,
+        generation: u64,
+        recent: &[String],
+        written: Written,
+    ) -> Vec<(usize, usize)> {
         let query = self.query.trim().to_string();
         if let Some(c) = &self.hits {
-            if c.query == query && c.generation == generation && c.recent == recent {
+            if c.query == query && c.generation == generation && c.recent == recent && c.notes == written.generation {
                 return c.hits.clone();
             }
         }
@@ -316,12 +324,16 @@ impl TreeView {
             let (folder_full, folder_initials) = forms(folder.label());
             for (h, host) in folder.hosts.iter().enumerate() {
                 let (full, initials) = forms(host.label());
+                let note = written.of(host);
+                let tags = note.map(native_term_app::registry::Note::tag_line).unwrap_or_default();
                 let fields = [
                     host.label(),
                     host.alias(),
                     host.target(),
                     host.user.as_deref().unwrap_or(""),
                     host.nt.get("note").unwrap_or(""),
+                    note.map(|n| n.text.as_str()).unwrap_or(""),
+                    &tags,
                     folder.label(),
                     full,
                     initials,
@@ -337,7 +349,13 @@ impl TreeView {
         }
         scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
         let hits: Vec<(usize, usize)> = scored.into_iter().map(|(_, _, f, h)| (f, h)).collect();
-        self.hits = Some(SearchCache { query, generation, recent: recent.to_vec(), hits: hits.clone() });
+        self.hits = Some(SearchCache {
+            query,
+            notes: written.generation,
+            generation,
+            recent: recent.to_vec(),
+            hits: hits.clone(),
+        });
         hits
     }
 
@@ -346,12 +364,18 @@ impl TreeView {
         self.toggled.get(path).copied().unwrap_or(folder_count <= 20 || (depth == 0 && folder_count <= 60))
     }
 
-    fn rows<'a>(&mut self, tree: &'a SessionTree, generation: u64, recent: &[String]) -> Vec<Row<'a>> {
+    fn rows<'a>(
+        &mut self,
+        tree: &'a SessionTree,
+        generation: u64,
+        recent: &[String],
+        written: Written,
+    ) -> Vec<Row<'a>> {
         let folders: Vec<&Folder> = tree.folders().collect();
         let mut rows = Vec::new();
         let query = self.query.trim().to_string();
         if !query.is_empty() {
-            let hits = self.search(tree, generation, recent);
+            let hits = self.search(tree, generation, recent, written);
             if let Some(target) = quick::parse(&query) {
                 rows.push(Row::Quick(target));
             } else if hits.is_empty() {
@@ -461,6 +485,7 @@ impl TreeView {
         generation: u64,
         recent: &[String],
         activity: &HashMap<String, Activity>,
+        written: Written,
     ) -> Vec<TreeAction> {
         let mut actions = Vec::new();
         ui.horizontal(|ui| {
@@ -499,7 +524,7 @@ impl TreeView {
             self.query.clear();
         }
         self.update_nodes(tree, generation);
-        let rows = self.rows(tree, generation, recent);
+        let rows = self.rows(tree, generation, recent, written);
         if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
             // the best saved host; a typed target only if nothing matches
             let host =
@@ -759,7 +784,7 @@ impl TreeView {
                         };
                         // the tooltip's text only while it shows, not for every row on every frame
                         let response = draw_row(ui, row_height, &text, look).on_hover_ui(|ui| {
-                            ui.label(hover(folders[*folder], host));
+                            ui.label(hover(folders[*folder], host, written));
                         });
                         if response.clicked() {
                             click = Some((index, alias.to_string()));
@@ -907,7 +932,25 @@ impl TreeView {
     }
 }
 
-fn hover(folder: &Folder, host: &HostEntry) -> String {
+/// What was written about the hosts, by `NativeTermId` (`notes.rs`).
+pub type Notes = std::collections::BTreeMap<String, native_term_app::registry::Note>;
+
+/// The notes, with a number that changes whenever one of them does: the
+/// search keeps its results until something it looked at changed.
+#[derive(Clone, Copy)]
+pub struct Written<'a> {
+    pub notes: &'a Notes,
+    pub generation: u64,
+}
+
+impl Written<'_> {
+    /// What was written about this host, if anything.
+    fn of(&self, host: &HostEntry) -> Option<&native_term_app::registry::Note> {
+        self.notes.get(host.id()?)
+    }
+}
+
+fn hover(folder: &Folder, host: &HostEntry, written: Written) -> String {
     if let Some(session) = &host.plink {
         let mut text = format!("{} · {}", crate::plink_dialog::protocol_text(session.protocol), session.target());
         if let Some(charset) = &session.charset {
@@ -930,6 +973,14 @@ fn hover(folder: &Folder, host: &HostEntry) -> String {
     }
     if let Some(note) = host.nt.get("note") {
         text.push_str(&format!("\n{note}"));
+    }
+    if let Some(note) = written.of(host) {
+        if !note.tags.is_empty() {
+            text.push_str(&format!("\n{}", t!("host-tags", tags = note.tag_line())));
+        }
+        if !note.text.trim().is_empty() {
+            text.push_str(&format!("\n{}", note.text.trim()));
+        }
     }
     let look = native_term_config::appearance::for_host(folder, host);
     if look.tab_color.is_some() || look.color_scheme.is_some() {
@@ -988,15 +1039,17 @@ mod tests {
         std::fs::write(dir.path().join("config"), config).unwrap();
         let tree = SessionTree::load_with(dir.path(), dir.path());
         let mut view = TreeView::default();
+        let notes = Notes::new();
+        let written = Written { notes: &notes, generation: 0 };
         for query in ["kzjd", "kongzhi", "控制", "kz jd"] {
             view.query = query.into();
-            let hits = view.search(&tree, 1, &[]);
+            let hits = view.search(&tree, 1, &[], written);
             let labels: Vec<&str> =
                 hits.iter().map(|(f, h)| tree.folders().nth(*f).unwrap().hosts[*h].label()).collect();
             assert_eq!(labels, ["控制节点"], "{query}");
         }
         view.query = "web".into();
-        assert_eq!(view.search(&tree, 1, &[]).len(), 1);
+        assert_eq!(view.search(&tree, 1, &[], written).len(), 1);
     }
 
     #[test]

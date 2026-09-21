@@ -12,6 +12,7 @@ pub mod diag;
 pub mod fuzzy;
 pub mod i18n;
 pub mod import;
+pub mod notes;
 mod previews;
 pub mod quick;
 pub mod registry;

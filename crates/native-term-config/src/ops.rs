@@ -643,6 +643,28 @@ impl Editor {
         Ok(())
     }
 
+    /// The host's stable id, written into its block if it hasn't one
+    /// (a config someone wrote by hand). What is kept by that id — notes,
+    /// tags, usage — needs it to exist first.
+    pub fn ensure_id(&self, host: &HostEntry) -> Result<String, EditError> {
+        if let Some(id) = host.id() {
+            return Ok(id.to_string());
+        }
+        let alias = host.alias().to_string();
+        let id = crate::new_id();
+        edit_file(
+            &self.writer,
+            &host.file,
+            |doc| {
+                if let Some(block) = doc.find_host_block(&alias) {
+                    doc.set(block, "NativeTermId", &id);
+                }
+            },
+            || self.validate(&alias, None),
+        )?;
+        Ok(id)
+    }
+
     /// The session options written in a host's own block.
     pub fn host_options(&self, host: &HostEntry) -> Result<options::Values, EditError> {
         not_plink(host)?;

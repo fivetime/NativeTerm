@@ -1499,7 +1499,25 @@ directory. Search indexes exist only in memory.
 `state.db` is a single SQLite file (bundled `rusqlite`, no service), so
 the data directory stays portable. Long notes and tags sync as a small
 export file next to it (`notes.toml`), not as the database itself.
-SQLite files and two-way sync don't mix. Tables, as a first sketch:
+SQLite files and two-way sync don't mix.
+
+Implemented (`notes.rs`, `registry::Note`): the `notes` table holds
+`(nt_id, text, tags, updated_at)`, and every change is written to
+`notes.toml` as well — whole file, temporary file and rename. At start
+the two are merged by id: for each host the newer of the two wins, the
+database takes what the file brought, and the file is rewritten with
+whatever it was missing. A note someone cleared stays as an empty note
+with its time, so clearing one reaches the other computers instead of
+being taken for "nothing here yet". Nothing is ever merged *within* a
+note: two people writing about the same host at the same time keep the
+later text, and the file is plain enough to sort out by hand. A host
+that has no `NativeTermId` gets one written into its block the first
+time something is kept about it (`Editor::ensure_id`), since that id is
+what the note belongs to. Notes and tags are searched along with the
+name, alias, host, user and the one-line note, and both show in the
+host's hover text.
+
+Tables, as a first sketch:
 
 - `sessions_open(session_guid, nt_id, label, window_hint, position_hint,
   opened_at)`;

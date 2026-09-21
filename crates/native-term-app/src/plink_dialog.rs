@@ -40,6 +40,10 @@ pub struct PlinkDialog {
     note: String,
     on_login: String,
     pre_connect: String,
+    /// As many lines as they like, kept in `state.db` by the session's id.
+    long_note: String,
+    /// Comma separated, kept with the long note.
+    tags: String,
     /// Serial ports present when the dialog opened.
     ports: Vec<String>,
     /// The PuTTY options being edited (only `putty` is used).
@@ -89,6 +93,8 @@ impl PlinkDialog {
             note: s.note.clone().unwrap_or_default(),
             on_login: s.on_login.clone().unwrap_or_default(),
             pre_connect: s.pre_connect.clone().unwrap_or_default(),
+            long_note: String::new(),
+            tags: String::new(),
             ports,
             options: s.clone(),
             default_log: String::new(),
@@ -100,6 +106,24 @@ impl PlinkDialog {
     pub fn with_data_dir(mut self, data_dir: &Path) -> PlinkDialog {
         self.default_log = plink::default_log_file(data_dir);
         self
+    }
+
+    /// What was written about this session (`notes.rs`).
+    pub fn with_note(mut self, note: Option<&native_term_app::registry::Note>) -> PlinkDialog {
+        if let Some(note) = note {
+            self.long_note = note.text.clone();
+            self.tags = note.tag_line();
+        }
+        self
+    }
+
+    /// The note as it stands now, stamped with the time it was written.
+    pub fn note_now(&self) -> native_term_app::registry::Note {
+        native_term_app::registry::Note {
+            text: self.long_note.trim_end().to_string(),
+            tags: native_term_app::registry::Note::tags_from(&self.tags),
+            updated_at: native_term_app::registry::now(),
+        }
     }
 
     /// Log type and file; a log turned on without a file gets the default.
@@ -368,6 +392,21 @@ impl PlinkDialog {
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("plink-on-login-hint"));
                     field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
+                    ui.label(t!("field-tags")).on_hover_text(t!("field-tags-hint"));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.tags)
+                            .hint_text(t!("field-tags-hint-short"))
+                            .desired_width(280.0),
+                    );
+                    ui.end_row();
+                    ui.label(t!("field-long-note")).on_hover_text(t!("field-long-note-hint"));
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.long_note)
+                            .hint_text(t!("field-long-note-hint-short"))
+                            .desired_rows(3)
+                            .desired_width(280.0),
+                    );
+                    ui.end_row();
                 });
                 self.putty_ui(ui);
                 self.log_ui(ui);

@@ -161,6 +161,11 @@ pub struct App {
     profile: ProfileSetup,
     show_settings: bool,
     notices: Vec<String>,
+    /// What was written about each host, by its `NativeTermId`
+    /// (`notes.rs`); changes go to `state.db` and `notes.toml` at once.
+    notes: std::collections::BTreeMap<String, native_term_app::registry::Note>,
+    /// Bumped when a note changes, so the search stops using its cache.
+    notes_generation: u64,
     /// OneDrive / Dropbox folders on this computer, for the wizard.
     sync_roots: Vec<(String, PathBuf)>,
     /// PuTTY has saved sessions (checked at start).
@@ -243,6 +248,14 @@ impl App {
         .ok();
         let folders_watcher = watch_folders(&options.ssh_dir, &ssh_changed, ctx);
         let loaded_from = fingerprint(&options.ssh_dir, &tree);
+        // the notes live in state.db and travel in notes.toml
+        let (notes, note_problem) = match core.as_ref().and_then(Core::registry) {
+            Some(registry) => native_term_app::notes::open(registry, &data_dir),
+            None => (Default::default(), None),
+        };
+        if let Some(problem) = note_problem {
+            notices.push(t!("notice-notes", error = problem));
+        }
         let first_run = core.as_ref().is_some_and(|c| c.setting(crate::wizard::DONE_SETTING).is_none());
         let keys = crate::shortcut_ui::ShortcutUi::new(ctx, core.as_ref(), &profile.settings_json());
         App {
@@ -284,6 +297,8 @@ impl App {
             profile,
             show_settings: false,
             notices,
+            notes,
+            notes_generation: 0,
             sync_roots: native_term_win::cloud::sync_roots(),
             putty_sessions: native_term_config::putty::has_sessions(),
             wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
@@ -552,9 +567,9 @@ impl App {
             TreeAction::Edit(alias) => {
                 if let Some((_, host)) = self.tree.find(&alias) {
                     self.dialog = Some(match &host.plink {
-                        Some(session) => {
-                            Dialog::Plink(Box::new(PlinkDialog::edit(session).with_data_dir(&self.data_dir)))
-                        }
+                        Some(session) => Dialog::Plink(Box::new(
+                            PlinkDialog::edit(session).with_data_dir(&self.data_dir).with_note(self.note_of(host)),
+                        )),
                         None => {
                             let folder = self.folder_persistent(&host.file);
                             let account = self
@@ -568,6 +583,7 @@ impl App {
                                 .with_folder_default(folder)
                                 .with_folder_look(color, scheme)
                                 .with_credentials(set, crate::credential_sets::names())
+                                .with_note(self.note_of(host))
                                 .with_password(account);
                             Dialog::Host(Box::new(dialog))
                         }
@@ -1001,7 +1017,9 @@ impl App {
             MenuRequest::Rename(alias) => match self.tree.find(&alias) {
                 Some((_, host)) => {
                     let folder = self.folder_persistent(&host.file);
-                    let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host)).with_folder_default(folder);
+                    let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host))
+                        .with_folder_default(folder)
+                        .with_note(self.note_of(host));
                     self.dialog = Some(Dialog::Host(Box::new(dialog)));
                 }
                 None => self.notices.push(t!("notice-not-saved", alias = alias.as_str())),
@@ -1110,6 +1128,37 @@ impl App {
         }
     }
 
+    /// What was written about a host, if anything.
+    fn note_of(&self, host: &native_term_config::tree::HostEntry) -> Option<&native_term_app::registry::Note> {
+        self.notes.get(host.id()?)
+    }
+
+    /// Keep a note: in `state.db` and in `notes.toml`. The host needs a
+    /// stable id for it, which is written into its block if it hasn't one.
+    fn save_note(&mut self, alias: &str, note: native_term_app::registry::Note) {
+        let Some(registry) = self.core.as_ref().and_then(Core::registry) else { return };
+        let Some((_, host)) = self.tree.find(alias) else { return };
+        let had_id = host.id().is_some();
+        let id = match self.editor.ensure_id(host) {
+            Ok(id) => id,
+            Err(e) => {
+                self.notices.push(t!("notice-notes", error = e.to_string()));
+                return;
+            }
+        };
+        // nothing was written and there is nothing kept: leave it alone
+        if note.is_empty() && !self.notes.contains_key(&id) {
+            return;
+        }
+        if let Err(e) = native_term_app::notes::save(registry, &self.data_dir, &mut self.notes, &id, note) {
+            self.notices.push(t!("notice-notes", error = e.to_string()));
+        }
+        self.notes_generation += 1;
+        if !had_id {
+            self.reload();
+        }
+    }
+
     fn show_dialog(&mut self, ctx: &egui::Context) {
         let Some(dialog) = self.dialog.as_mut() else { return };
         let done = match dialog {
@@ -1132,18 +1181,31 @@ impl App {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
                 Outcome::Submit(draft) => {
+                    let note = d.note_now();
                     let result = match (&d.alias, &d.file) {
                         (Some(alias), _) => match self.tree.find(alias) {
-                            Some((_, host)) => self.editor.update_host(host, &draft).map_err(|e| e.to_string()),
+                            Some((_, host)) => self
+                                .editor
+                                .update_host(host, &draft)
+                                .map(|()| Some(alias.clone()))
+                                .map_err(|e| e.to_string()),
                             None => Err(t!("error-host-gone", alias = alias.as_str())),
                         },
                         (None, Some(file)) => {
-                            self.editor.create_host(&self.tree, file, &draft).map(|_| ()).map_err(|e| e.to_string())
+                            self.editor.create_host(&self.tree, file, &draft).map(Some).map_err(|e| e.to_string())
                         }
-                        (None, None) => Ok(()),
+                        (None, None) => Ok(None),
                     };
                     match result {
-                        Ok(()) => true,
+                        Ok(alias) => {
+                            // the tree has to hold the new host before its
+                            // note can be kept by its id
+                            if let Some(alias) = alias {
+                                self.reload();
+                                self.save_note(&alias, note);
+                            }
+                            true
+                        }
                         Err(e) => {
                             d.error = Some(e);
                             false
@@ -1155,11 +1217,15 @@ impl App {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
                 Outcome::Submit(()) => {
+                    let note = d.note_now();
                     let result = match (d.alias.clone(), d.file.clone()) {
                         (Some(alias), _) => match self.tree.find(&alias) {
-                            Some((_, host)) => d
-                                .session(&alias)
-                                .and_then(|s| self.editor.update_plink(host, &s).map_err(|e| e.to_string())),
+                            Some((_, host)) => d.session(&alias).and_then(|s| {
+                                self.editor
+                                    .update_plink(host, &s)
+                                    .map(|()| Some(alias.clone()))
+                                    .map_err(|e| e.to_string())
+                            }),
                             None => Err(t!("error-host-gone", alias = alias.as_str())),
                         },
                         (None, Some(file)) => {
@@ -1173,13 +1239,19 @@ impl App {
                                 native_term_config::alias::unique(&d.name_base(), &folder, &self.tree.taken_aliases());
                             d.session(&name).and_then(|mut s| {
                                 s.id = Some(native_term_config::new_id());
-                                self.editor.add_plink(&file, &s).map_err(|e| e.to_string())
+                                self.editor.add_plink(&file, &s).map(|()| Some(name)).map_err(|e| e.to_string())
                             })
                         }
-                        (None, None) => Ok(()),
+                        (None, None) => Ok(None),
                     };
                     match result {
-                        Ok(()) => true,
+                        Ok(alias) => {
+                            if let Some(alias) = alias {
+                                self.reload();
+                                self.save_note(&alias, note);
+                            }
+                            true
+                        }
                         Err(e) => {
                             d.error = Some(e);
                             false
@@ -1844,7 +1916,8 @@ impl crate::window::Ui for App {
                     ui.add_space(2.0);
                 });
             }
-            actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity);
+            let written = crate::tree_view::Written { notes: &self.notes, generation: self.notes_generation };
+            actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity, written);
         });
         for action in actions {
             self.handle(action);

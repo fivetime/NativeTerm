@@ -162,9 +162,17 @@
       with their window stay replaceable for 7 days; placeholders start
       NativeTerm when it isn't running; a second NativeTerm brings the
       first to the front. Live test `tests/restore_portable.rs`
-- [ ] `state.db` (rest): long notes and tags keyed by `NativeTermId`;
-      `notes.toml` export for sync; `NativeTermId` written on create/import;
-      position hints used for unlocated split tabs
+- [x] Notes and tags, kept by `NativeTermId` in `state.db` and written
+      to `notes.toml` so they sync: as many lines as someone likes, plus
+      tags, in the host dialog and the non-SSH session dialog. They are
+      searched along with the name, alias, host and one-line note, and
+      shown when the mouse rests on a host. The file and the database are
+      merged at start, newer note wins per host, and a cleared note is an
+      empty note rather than a missing one so clearing reaches the other
+      computers too. A host without an id gets one written into its block
+      the first time something is kept about it (`notes.rs`,
+      `Editor::ensure_id`)
+- [ ] `state.db` (rest): position hints used for unlocated split tabs
 - [x] `native-term-session`: pipe server/client with user-only ACL,
       remote clients rejected, single instance, non-blocking duplex;
       versioned JSON-lines protocol; exit classification (255 and -1 are

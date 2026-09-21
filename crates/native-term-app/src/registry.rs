@@ -11,7 +11,49 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub type Result<T> = rusqlite::Result<T>;
 
-const SCHEMA_VERSION: i64 = 4;
+const SCHEMA_VERSION: i64 = 5;
+
+/// What someone wrote about a host: as many lines as they like, and
+/// tags. Kept by the host's `NativeTermId`, so renaming it loses
+/// nothing (`notes.rs`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Note {
+    pub text: String,
+    /// In the order they were written, without empties.
+    pub tags: Vec<String>,
+    /// When it was last written, as seconds since the epoch: what
+    /// decides between two computers' copies.
+    pub updated_at: i64,
+}
+
+impl Note {
+    /// Nothing written: the row is kept so that clearing a note reaches
+    /// the other computers too.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.text.trim().is_empty() && self.tags.is_empty()
+    }
+
+    /// Tags as they are stored and shown: separated by commas.
+    #[must_use]
+    pub fn tag_line(&self) -> String {
+        self.tags.join(", ")
+    }
+
+    /// Tags from a line someone typed (commas or spaces, no empties, no
+    /// repeats).
+    #[must_use]
+    pub fn tags_from(line: &str) -> Vec<String> {
+        let mut tags: Vec<String> = Vec::new();
+        for tag in line.split([',', '\u{ff0c}', '\n', ';']) {
+            let tag = tag.trim();
+            if !tag.is_empty() && !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+                tags.push(tag.to_string());
+            }
+        }
+        tags
+    }
+}
 
 /// One session that was open when last seen.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,6 +160,19 @@ impl Registry {
                  ALTER TABLE sessions ADD COLUMN shim_pid INTEGER;
                  ALTER TABLE sessions ADD COLUMN shim_started INTEGER;
                  PRAGMA user_version = 4;
+                 COMMIT;",
+            )?;
+        }
+        if version < 5 {
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE notes (
+                     nt_id TEXT PRIMARY KEY,
+                     text TEXT NOT NULL,
+                     tags TEXT NOT NULL,
+                     updated_at INTEGER NOT NULL
+                 );
+                 PRAGMA user_version = 5;
                  COMMIT;",
             )?;
         }
@@ -274,6 +329,43 @@ impl Registry {
     /// A per-machine setting (`settings` table).
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         self.with(|c| c.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional())
+    }
+
+    /// What was written about the host with this id.
+    pub fn note(&self, nt_id: &str) -> Result<Option<Note>> {
+        self.with(|c| {
+            c.query_row("SELECT text, tags, updated_at FROM notes WHERE nt_id = ?1", [nt_id], |r| {
+                Ok(Note { text: r.get(0)?, tags: Note::tags_from(&r.get::<_, String>(1)?), updated_at: r.get(2)? })
+            })
+            .optional()
+        })
+    }
+
+    /// Every note, by host id.
+    pub fn notes(&self) -> Result<Vec<(String, Note)>> {
+        self.with(|c| {
+            let mut statement = c.prepare("SELECT nt_id, text, tags, updated_at FROM notes ORDER BY nt_id")?;
+            let rows = statement.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    Note { text: r.get(1)?, tags: Note::tags_from(&r.get::<_, String>(2)?), updated_at: r.get(3)? },
+                ))
+            })?;
+            rows.collect()
+        })
+    }
+
+    /// Write what someone said about a host. An empty note keeps its row:
+    /// clearing one has to reach the other computers too.
+    pub fn set_note(&self, nt_id: &str, note: &Note) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO notes (nt_id, text, tags, updated_at) VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT (nt_id) DO UPDATE SET text = ?2, tags = ?3, updated_at = ?4",
+                params![nt_id, note.text, note.tag_line(), note.updated_at],
+            )?;
+            Ok(())
+        })
     }
 
     /// Every setting row (for taking them over into `settings.toml`).
