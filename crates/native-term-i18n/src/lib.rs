@@ -27,9 +27,11 @@ pub fn available() -> Vec<(LanguageIdentifier, &'static str)> {
     let name = |id: &str| match id {
         "en" => "English",
         "zh-CN" => "简体中文",
+        "zh-TW" => "繁體中文",
+        "ja" => "日本語",
         _ => "?",
     };
-    ["en", "zh-CN"].iter().filter_map(|id| id.parse().ok().map(|l| (l, name(id)))).collect()
+    ["en", "zh-CN", "zh-TW", "ja"].iter().filter_map(|id| id.parse().ok().map(|l| (l, name(id)))).collect()
 }
 
 /// A loader for `domain` (the crate name with underscores) in the
@@ -77,6 +79,41 @@ mod tests {
         assert_eq!(loader.get_args("host-new-title", args), "New host in Lab");
     }
 
+    /// The whole message file of a language.
+    fn text(language: &str, domain: &str) -> String {
+        let file = Localizations::get(&format!("{language}/{domain}.ftl")).expect("message file");
+        String::from_utf8(file.data.into_owned()).expect("UTF-8")
+    }
+
+    /// Every `{ $name }` a message file uses, per message id: a
+    /// translation that invents an argument (or misspells one) shows an
+    /// error instead of the text, and only at run time.
+    fn arguments(
+        language: &str,
+        domain: &str,
+    ) -> std::collections::BTreeMap<String, std::collections::BTreeSet<String>> {
+        let mut found: std::collections::BTreeMap<String, std::collections::BTreeSet<String>> = Default::default();
+        let mut id = String::new();
+        for line in text(language, domain).lines() {
+            if line.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+                if let Some((name, _)) = line.split_once(" =") {
+                    id = name.trim().to_string();
+                }
+            }
+            if id.is_empty() {
+                continue;
+            }
+            let mut rest = line;
+            while let Some(at) = rest.find("{ $") {
+                rest = &rest[at + 3..];
+                let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
+                found.entry(id.clone()).or_default().insert(rest[..end].to_string());
+                rest = &rest[end..];
+            }
+        }
+        found
+    }
+
     fn ids(language: &str, domain: &str) -> std::collections::BTreeSet<String> {
         let file = Localizations::get(&format!("{language}/{domain}.ftl")).expect("message file");
         let text = String::from_utf8(file.data.into_owned()).unwrap();
@@ -86,9 +123,44 @@ mod tests {
             .collect()
     }
 
+    /// A translation may leave an argument out (Japanese often needs no
+    /// counter), but one it invents would be shown as an error at run
+    /// time, in that language only.
+    #[test]
+    fn no_translation_invents_an_argument() {
+        for domain in ["native_term_app", "native_term_shim", "native_term_config"] {
+            let english = arguments(FALLBACK, domain);
+            for (language, _) in available() {
+                let language = language.to_string();
+                for (id, used) in arguments(&language, domain) {
+                    let known = english.get(&id).cloned().unwrap_or_default();
+                    let unknown: Vec<&String> = used.difference(&known).collect();
+                    assert!(unknown.is_empty(), "{domain} {language}: {id} uses {unknown:?}, English has {known:?}");
+                }
+            }
+        }
+    }
+
+    /// Fluent reports a broken file by quietly having no messages, so
+    /// every language is loaded and asked for something.
+    #[test]
+    fn every_language_loads_and_formats() {
+        for (language, name) in available() {
+            let language = language.to_string();
+            let loader = loader("native_term_app", Some(&language));
+            assert_eq!(current(&loader), language, "{name}");
+            let args = std::collections::HashMap::from([("folder", "Lab")]);
+            let shown = loader.get_args("host-new-title", args);
+            assert!(shown.contains("Lab"), "{language}: {shown}");
+            assert!(!shown.contains("host-new-title"), "{language}: the message is missing ({shown})");
+            let plain = loader.get("button-save");
+            assert!(!plain.is_empty() && plain != "button-save", "{language}: {plain}");
+        }
+    }
+
     #[test]
     fn every_language_has_every_message() {
-        for domain in ["native_term_app", "native_term_shim"] {
+        for domain in ["native_term_app", "native_term_shim", "native_term_config"] {
             let english = ids(FALLBACK, domain);
             assert!(english.len() > 5, "{domain}");
             for (language, _) in available() {

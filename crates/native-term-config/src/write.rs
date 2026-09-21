@@ -74,9 +74,9 @@ pub enum WriteError {
 impl fmt::Display for WriteError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WriteError::Conflict => write!(f, "the file was changed by someone else since it was read"),
+            WriteError::Conflict => write!(f, "{}", crate::t!("config-write-conflict")),
             WriteError::Rejected { reason, .. } => {
-                write!(f, "ssh rejected the change, previous version restored: {reason}")
+                write!(f, "{}", crate::t!("config-write-rejected", reason = reason.as_str()))
             }
             WriteError::Io(e) => write!(f, "{e}"),
         }

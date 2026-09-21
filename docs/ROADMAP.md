@@ -631,7 +631,15 @@
 - [x] Localization (English, Simplified Chinese) with runtime switching:
       `native-term-i18n` (Fluent, keys checked at compile time), setting
       in `state.db`, shim follows the system language / `NATIVETERM_LANG`
-- [ ] Localization (rest): config library errors; more languages
+- [x] Localization (rest): the configuration library says what it
+      refuses to write in the person's own language too (its own message
+      domain, `native_term_config.ftl`, switched with the program's
+      choice), and two more languages: 日本語 and 繁體中文（台灣）.
+      998 messages each. Three tests hold them together: every language
+      has exactly the English message ids, no translation invents a
+      `{ $variable }` the English text doesn't have, and every language
+      actually loads and formats (a broken .ftl otherwise fails quietly,
+      at run time, in that language only)
 - [x] Animations (respecting the system animation setting) and toasts:
       short messages in the corner of the window for what an action did
       when nothing else says it ("closed 5 tabs", "cleared 3 finished

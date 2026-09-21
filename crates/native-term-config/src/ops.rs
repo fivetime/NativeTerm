@@ -23,6 +23,7 @@ use crate::persistent;
 use crate::plink::{self, PlinkSession};
 use crate::preconnect;
 use crate::securecrt::{self, Plan};
+use crate::t;
 use crate::tree::{HostEntry, SessionTree, FOLDER_DEFAULTS_HOST};
 use crate::write::{self, edit_file, WriteError, Writer};
 
@@ -84,49 +85,55 @@ impl HostDraft {
             value.is_empty() || value.contains(['\r', '\n']) || (what != "label" && value.contains(char::is_whitespace))
         };
         if bad("hostname", self.hostname.trim()) {
-            return Err(EditError::Invalid(format!("host name {:?} is empty or has spaces", self.hostname)));
+            return Err(EditError::Invalid(t!("config-hostname-blank", value = quoted(&self.hostname))));
         }
         if self.label.trim().is_empty() || self.label.contains(['\r', '\n']) {
-            return Err(EditError::Invalid("the name must be one non-empty line".into()));
+            return Err(EditError::Invalid(t!("config-name-one-line")));
         }
         for (what, value) in [("user", &self.user), ("jump host", &self.proxy_jump)] {
             if let Some(v) = value {
                 if bad(what, v) {
-                    return Err(EditError::Invalid(format!("{what} {v:?} is empty or has spaces")));
+                    return Err(EditError::Invalid(t!("config-value-blank", what = what, value = quoted(v))));
                 }
             }
         }
         if self.note.as_deref().is_some_and(|n| n.contains(['\r', '\n'])) {
-            return Err(EditError::Invalid("the note must be one line".into()));
+            return Err(EditError::Invalid(t!("config-note-one-line")));
         }
         if self.on_login.as_deref().is_some_and(|n| n.contains(['\r', '\n'])) {
-            return Err(EditError::Invalid("the login command must be one line".into()));
+            return Err(EditError::Invalid(t!("config-login-one-line")));
         }
         if let Some(c) = &self.credential {
             if !c.eq_ignore_ascii_case("none") && !password::valid_set_name(c) {
-                return Err(EditError::Invalid(format!("credential set {c:?}: no spaces, quotes or / \\ : * ?")));
+                return Err(EditError::Invalid(t!("config-credential-set", value = quoted(c))));
             }
         }
         if let Some(p) = &self.persistent {
             if !matches!(p.as_str(), "tmux" | persistent::TMUX_LOG | "screen" | "off") {
-                return Err(EditError::Invalid(format!("persistent session {p:?}: tmux, tmux-log, screen or off")));
+                return Err(EditError::Invalid(t!("config-persistent-host", value = quoted(p))));
             }
         }
         if let Some(c) = &self.tab_color {
             if !c.eq_ignore_ascii_case("none") && appearance::tab_color(c).is_none() {
-                return Err(EditError::Invalid(format!("tab color {c:?}: a color name, #RRGGBB or none")));
+                return Err(EditError::Invalid(t!("config-tab-color-host", value = quoted(c))));
             }
         }
         if let Some(s) = &self.color_scheme {
             if !s.eq_ignore_ascii_case("none") && appearance::color_scheme(s).is_none() {
-                return Err(EditError::Invalid(format!("color scheme {s:?}: a scheme name or none")));
+                return Err(EditError::Invalid(t!("config-color-scheme-host", value = quoted(s))));
             }
         }
         if self.port == Some(0) {
-            return Err(EditError::Invalid("port 0".into()));
+            return Err(EditError::Invalid(t!("config-port-zero")));
         }
         Ok(())
     }
+}
+
+/// A value as it is quoted back to the person ("web01"), the way these
+/// messages used to with `{:?}`.
+fn quoted(value: &str) -> String {
+    format!("{value:?}")
 }
 
 #[derive(Debug)]
@@ -140,7 +147,7 @@ impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             EditError::Invalid(why) => write!(f, "{why}"),
-            EditError::NotFound(what) => write!(f, "{what} not found (changed outside NativeTerm?)"),
+            EditError::NotFound(what) => write!(f, "{}", t!("config-missing", what = what.as_str())),
             EditError::Write(e) => write!(f, "{e}"),
         }
     }
@@ -166,7 +173,7 @@ const PARSE_CHECK_HOST: &str = "nativeterm-config-check.invalid";
 /// ssh-only operations refuse non-SSH sessions (they have their own).
 fn not_plink(host: &HostEntry) -> Result<(), EditError> {
     match host.plink {
-        Some(_) => Err(EditError::Invalid(format!("{} is not an ssh host", host.alias()))),
+        Some(_) => Err(EditError::Invalid(t!("config-not-ssh", alias = host.alias()))),
         None => Ok(()),
     }
 }
@@ -175,7 +182,7 @@ fn named<'s>(sessions: &'s mut [PlinkSession], alias: &str) -> Result<&'s mut Pl
     sessions
         .iter_mut()
         .find(|s| s.name.eq_ignore_ascii_case(alias))
-        .ok_or_else(|| EditError::NotFound(format!("session {alias}")))
+        .ok_or_else(|| EditError::NotFound(t!("config-missing-session", name = alias)))
 }
 
 pub struct Editor {
@@ -286,14 +293,14 @@ impl Editor {
     pub fn move_folders(&mut self, new_dir: &Path) -> Result<usize, EditError> {
         let norm = |p: &Path| p.to_string_lossy().trim_end_matches(['\\', '/']).replace('/', "\\").to_lowercase();
         if !new_dir.is_absolute() {
-            return Err(EditError::Invalid("not a full path".into()));
+            return Err(EditError::Invalid(t!("config-not-full-path")));
         }
         if norm(new_dir) == norm(&self.folders) {
-            return Err(EditError::Invalid("that is where the folders are".into()));
+            return Err(EditError::Invalid(t!("config-folders-here")));
         }
         let conf = folder_files;
         if !conf(new_dir).is_empty() {
-            return Err(EditError::Invalid(format!("{} already holds session folders", new_dir.display())));
+            return Err(EditError::Invalid(t!("config-folders-already", path = new_dir.display().to_string())));
         }
         let before: std::collections::BTreeSet<String> =
             SessionTree::load(&self.ssh_dir).hosts().map(|(_, h)| h.alias().to_lowercase()).collect();
@@ -348,7 +355,7 @@ impl Editor {
     pub fn add_plink(&self, folder_file: &Path, session: &PlinkSession) -> Result<(), EditError> {
         session.check().map_err(EditError::Invalid)?;
         if SessionTree::load(&self.ssh_dir).taken_aliases().contains(&session.name.to_ascii_lowercase()) {
-            return Err(EditError::Invalid(format!("{} is taken", session.name)));
+            return Err(EditError::Invalid(t!("config-name-taken", name = session.name.as_str())));
         }
         self.edit_plink(&plink::sibling(folder_file), |sessions| {
             sessions.push(session.clone());
@@ -359,14 +366,14 @@ impl Editor {
     /// Replace a non-SSH session (a new name must be free).
     pub fn update_plink(&self, host: &HostEntry, session: &PlinkSession) -> Result<(), EditError> {
         if host.plink.is_none() {
-            return Err(EditError::Invalid(format!("{} is an ssh host", host.alias())));
+            return Err(EditError::Invalid(t!("config-is-ssh", alias = host.alias())));
         }
         session.check().map_err(EditError::Invalid)?;
         let alias = host.alias().to_string();
         if !session.name.eq_ignore_ascii_case(&alias)
             && SessionTree::load(&self.ssh_dir).taken_aliases().contains(&session.name.to_ascii_lowercase())
         {
-            return Err(EditError::Invalid(format!("{} is taken", session.name)));
+            return Err(EditError::Invalid(t!("config-name-taken", name = session.name.as_str())));
         }
         self.edit_plink(&host.file, |sessions| {
             *named(sessions, &alias)? = session.clone();
@@ -382,7 +389,9 @@ impl Editor {
         change: impl FnOnce(&mut Vec<PlinkSession>) -> Result<(), EditError>,
     ) -> Result<(), EditError> {
         let (text, fingerprint) = write::read(file)?;
-        let mut sessions = plink::parse(&text).map_err(|e| EditError::Invalid(format!("{}: {e}", file.display())))?;
+        let mut sessions = plink::parse(&text).map_err(|e| {
+            EditError::Invalid(t!("config-file-unreadable", path = file.display().to_string(), error = e.to_string()))
+        })?;
         change(&mut sessions)?;
         for s in &sessions {
             s.check().map_err(EditError::Invalid)?;
@@ -398,11 +407,11 @@ impl Editor {
     /// Returns how many folder files `dir` has.
     pub fn adopt_folders(&mut self, dir: &Path) -> Result<usize, EditError> {
         if !dir.is_absolute() {
-            return Err(EditError::Invalid("not a full path".into()));
+            return Err(EditError::Invalid(t!("config-not-full-path")));
         }
         let files = folder_files(dir);
         if files.is_empty() {
-            return Err(EditError::Invalid(format!("{} holds no session folders", dir.display())));
+            return Err(EditError::Invalid(t!("config-folders-none", path = dir.display().to_string())));
         }
         let (old, new) = (self.include.clone(), include_for(dir));
         edit_file(
@@ -466,7 +475,7 @@ impl Editor {
     pub fn create_folder(&self, label: &str) -> Result<PathBuf, EditError> {
         let label = label.trim();
         if label.is_empty() || label.contains(['\r', '\n']) {
-            return Err(EditError::Invalid("the folder name must be one non-empty line".into()));
+            return Err(EditError::Invalid(t!("config-folder-name-one-line")));
         }
         let dir = self.folders_dir();
         std::fs::create_dir_all(&dir)?;
@@ -486,7 +495,7 @@ impl Editor {
     pub fn rename_folder(&self, file: &Path, label: &str) -> Result<(), EditError> {
         let label = label.trim();
         if label.is_empty() || label.contains(['\r', '\n']) {
-            return Err(EditError::Invalid("the folder name must be one non-empty line".into()));
+            return Err(EditError::Invalid(t!("config-folder-name-one-line")));
         }
         self.ensure_ignore_unknown()?;
         edit_file(
@@ -505,7 +514,7 @@ impl Editor {
     /// setting of its own (`tmux`, `screen`; `None` removes the default).
     pub fn set_folder_persistent(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
         if value.is_some_and(|v| !matches!(v, "tmux" | persistent::TMUX_LOG | "screen")) {
-            return Err(EditError::Invalid(format!("persistent sessions {value:?}: tmux, tmux-log or screen")));
+            return Err(EditError::Invalid(t!("config-persistent-folder", value = quoted(value.unwrap_or_default()))));
         }
         self.set_folder_value(file, "NativeTermPersistent", value)
     }
@@ -514,7 +523,7 @@ impl Editor {
     /// setting of its own (`None` removes the default).
     pub fn set_folder_credential(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
         if value.is_some_and(|v| !password::valid_set_name(v)) {
-            return Err(EditError::Invalid(format!("credential set {value:?}: no spaces, quotes or / \\ : * ?")));
+            return Err(EditError::Invalid(t!("config-credential-set", value = quoted(value.unwrap_or_default()))));
         }
         self.set_folder_value(file, "NativeTermCredential", value)
     }
@@ -523,7 +532,7 @@ impl Editor {
     /// `None` removes it).
     pub fn set_folder_tab_color(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
         if value.is_some_and(|v| appearance::tab_color(v).is_none()) {
-            return Err(EditError::Invalid(format!("tab color {value:?}: a color name or #RRGGBB")));
+            return Err(EditError::Invalid(t!("config-tab-color-folder", value = quoted(value.unwrap_or_default()))));
         }
         self.set_folder_value(file, "NativeTermTabColor", value)
     }
@@ -531,7 +540,10 @@ impl Editor {
     /// The color scheme of a folder's hosts (`None` removes it).
     pub fn set_folder_color_scheme(&self, file: &Path, value: Option<&str>) -> Result<(), EditError> {
         if value.is_some_and(|v| appearance::color_scheme(v).is_none()) {
-            return Err(EditError::Invalid(format!("color scheme {value:?}")));
+            return Err(EditError::Invalid(t!(
+                "config-color-scheme-folder",
+                value = quoted(value.unwrap_or_default())
+            )));
         }
         self.set_folder_value(file, "NativeTermColorScheme", value)
     }
@@ -546,7 +558,7 @@ impl Editor {
     /// block (made if needed); `None` removes it.
     fn set_folder_value(&self, file: &Path, keyword: &str, value: Option<&str>) -> Result<(), EditError> {
         if file == self.main_config() {
-            return Err(EditError::Invalid("the main config has no folder settings".into()));
+            return Err(EditError::Invalid(t!("config-main-no-folder-options")));
         }
         let stem = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
         self.ensure_ignore_unknown()?;
@@ -603,7 +615,11 @@ impl Editor {
         let alias = host.alias().to_string();
         let (text, _) = write::read(&host.file)?;
         if Document::parse(&text).find_host_block(&alias).is_none() {
-            return Err(EditError::NotFound(format!("host {alias} in {}", host.file.display())));
+            return Err(EditError::NotFound(t!(
+                "config-missing-host-in",
+                alias = alias.as_str(),
+                path = host.file.display().to_string()
+            )));
         }
         self.ensure_ignore_unknown()?;
         edit_file(
@@ -682,7 +698,11 @@ impl Editor {
         let doc = Document::parse(&text);
         match doc.find_host_block(host.alias()) {
             Some(block) => Ok(options::read(&doc, block)),
-            None => Err(EditError::NotFound(format!("host {} in {}", host.alias(), host.file.display()))),
+            None => Err(EditError::NotFound(t!(
+                "config-missing-host-in",
+                alias = host.alias(),
+                path = host.file.display().to_string()
+            ))),
         }
     }
 
@@ -732,7 +752,7 @@ impl Editor {
     /// keep a `Tag` of their own and so don't get the options.
     pub fn set_folder_options(&self, file: &Path, values: &options::Values) -> Result<Vec<String>, EditError> {
         if file == self.main_config() {
-            return Err(EditError::Invalid("folder options are for folder files, not the main config".into()));
+            return Err(EditError::Invalid(t!("config-folder-options-main")));
         }
         let values = options::normalize(values).map_err(EditError::Invalid)?;
         let tag = folder_options::tag_for(file);
@@ -822,7 +842,11 @@ impl Editor {
             || self.validate(PARSE_CHECK_HOST, None),
         )?;
         if !changed {
-            return Err(EditError::NotFound(format!("host {alias} in {}", host.file.display())));
+            return Err(EditError::NotFound(t!(
+                "config-missing-host-in",
+                alias = alias.as_str(),
+                path = host.file.display().to_string()
+            )));
         }
         Ok(())
     }
@@ -862,7 +886,9 @@ impl Editor {
         let alias = host.alias().to_string();
         let (text, _) = write::read(&host.file)?;
         let source = Document::parse(&text);
-        let block_index = source.find_host_block(&alias).ok_or_else(|| EditError::NotFound(format!("host {alias}")))?;
+        let block_index = source
+            .find_host_block(&alias)
+            .ok_or_else(|| EditError::NotFound(t!("config-missing-host", alias = alias.as_str())))?;
         let block = source.blocks().swap_remove(block_index);
         // trailing blank lines stay behind
         let mut end = block.end;

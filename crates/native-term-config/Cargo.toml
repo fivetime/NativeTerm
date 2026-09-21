@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+# what it says when it refuses to write something
+native-term-i18n = { path = "../native-term-i18n" }
+i18n-embed = { version = "0.16", features = ["fluent-system"] }
+i18n-embed-fl = "0.10"
 # Han characters in labels become readable aliases
 pinyin = { version = "0.11", default-features = false, features = ["plain"] }
 uuid = { version = "1", features = ["v4"] }

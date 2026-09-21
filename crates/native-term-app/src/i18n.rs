@@ -19,9 +19,11 @@ macro_rules! t {
     };
 }
 
-/// `None`: follow the system.
+/// `None`: follow the system. The configuration library says things to
+/// the person as well, so it is switched with us.
 pub fn set_language(choice: Option<&str>) {
     native_term_i18n::select(&LOADER, choice);
+    native_term_config::i18n::set_language(choice);
 }
 
 pub fn current() -> String {

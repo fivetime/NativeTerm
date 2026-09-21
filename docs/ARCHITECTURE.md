@@ -4019,14 +4019,28 @@ the user's `settings.json`:
   a shared crate used by both binaries.
 - Not translated: host names, user labels, remote output.
 
-Implemented (English, Simplified Chinese):
+Implemented (English, 简体中文, 繁體中文, 日本語 — 998 messages each):
 
 - **Where:** `native-term-i18n` embeds `i18n/<language>/<crate>.ftl`
-  (`native_term_app.ftl`, `native_term_shim.ftl`) and builds loaders.
-  Each crate that shows text has an `i18n.toml` pointing there (with a
-  `domain` override, since `fl!` would use the package name), so
-  `i18n_embed_fl::fl!` checks every key at compile time. Both crates wrap
-  it as `t!`.
+  (`native_term_app.ftl`, `native_term_shim.ftl`,
+  `native_term_config.ftl`) and builds loaders. Each crate that shows
+  text has an `i18n.toml` pointing there (with a `domain` override, since
+  `fl!` would use the package name), so `i18n_embed_fl::fl!` checks every
+  key at compile time. All three crates wrap it as `t!`.
+- **The configuration library** says what it refuses to write in the same
+  language as the rest (`native-term-config` picks the key, the message
+  file holds the wording, and the values it quotes back — names, paths,
+  ssh's own words — are not translated). It has its own loader, which the
+  program switches together with its own (`i18n::set_language`); in the
+  shim both follow `NATIVETERM_LANG` or the system.
+- **Kept honest by tests**, because Fluent fails quietly: every language
+  has exactly the English message ids; no translation uses a
+  `{ $variable }` the English text doesn't have (an invented one shows an
+  error at run time, in that language only); and every language is loaded
+  and asked to format something, since a file Fluent can't parse simply
+  has no messages. There is no tooling for this in the ecosystem —
+  `cargo-i18n`'s checks for Fluent are "not yet implemented" and its
+  extraction is gettext-only — so the tests are the check.
 - **Choosing:** Settings → Language: "System default" (the Windows
   display languages, via `sys-locale`) or a fixed language, kept in
   `state.db` (`settings.language`) and applied before the window opens.

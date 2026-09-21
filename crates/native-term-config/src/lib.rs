@@ -25,6 +25,7 @@ pub mod document;
 pub mod effective;
 pub mod folder_options;
 pub mod header;
+pub mod i18n;
 pub mod include;
 pub mod keys;
 pub mod known_hosts;

@@ -1,0 +1,6 @@
+# Messages live in the shared crate (see native-term-i18n).
+fallback_language = "en"
+
+[fluent]
+assets_dir = "../native-term-i18n/i18n"
+domain = "native_term_config"
