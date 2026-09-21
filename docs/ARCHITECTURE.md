@@ -1862,6 +1862,15 @@ Because `wt` launches the tab's process, NativeTerm itself never owns the
   and `ssh -G`), so no complex quoting ever passes through `wt`.
 - It runs `ssh` as a child in its own console (the tab), with no stdio
   redirection, so `ssh` keeps a real interactive console.
+- Before every attempt it runs the host's `NativeTermPreConnect`, if it
+  has one (its own or its folder's, `none` to keep the folder's away):
+  `cmd /c <command>` in the tab, with the session waiting for it. That
+  is what brings the VPN up, opens the tunnel or mounts the drive — and
+  it runs again before a reconnect, since after sleep those are down
+  too. A command that fails is reported and the connection goes ahead,
+  because many useful ones "fail" (a VPN that was already up); `!` in
+  front of the command makes a failure stop the connection instead.
+  `.nt.toml` sessions have the same through `pre_connect`.
 - It waits for `ssh` to exit and reports the exit code.
 - It stays alive after `ssh` exits, so a disconnected tab remains visible
   (like SecureCRT's red disconnected tabs) until the user closes it, and

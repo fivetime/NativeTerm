@@ -26,6 +26,7 @@ mod link;
 mod look;
 mod persistent;
 mod plink;
+mod preconnect;
 mod proxy;
 mod saved;
 mod ssh;
@@ -235,6 +236,17 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
     loop {
         attempt += 1;
         look::apply(alias);
+        // before every attempt: a reconnect after sleep needs the tunnel
+        // (or whatever it is) brought up again too
+        if let Some(command) = preconnect::for_alias(alias) {
+            if let preconnect::Ran::Stop = preconnect::run(&command) {
+                send(ShimMessage::Exited { code: -1 });
+                match after_exit(link) {
+                    Next::Reconnect => continue,
+                    Next::Close => return 0,
+                }
+            }
+        }
         let effective =
             native_term_config::effective::effective_with(&ssh_path, config.as_deref(), alias).unwrap_or_default();
         // read again on every attempt: an edit applies at the next connect

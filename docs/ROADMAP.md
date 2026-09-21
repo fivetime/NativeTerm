@@ -103,8 +103,17 @@
       tab, keeps retrying the pipe and replays its state; without a host:
       asks NativeTerm (placeholder closed) or starts a local shell;
       end-to-end tests with a fake ssh
-- [ ] `native-term-shim` (rest): `NativeTermPreConnect`; plink sessions;
-      askpass mode
+- [x] `native-term-shim` (rest): `NativeTermPreConnect` — a command run
+      on this computer before every attempt (a VPN, a tunnel, mounting a
+      drive), per host or as a folder default, `none` on a host to keep
+      the folder's away. It runs in the tab through `cmd /c`, the
+      session waits for it, and what it prints is what the person sees.
+      A command that fails is reported and the connection goes ahead
+      (plenty of them "fail" harmlessly); one written with `!` in front
+      stops the connection instead. `.nt.toml` sessions have the same
+      through `pre_connect`. plink sessions and askpass mode were
+      already done (`shim/preconnect.rs`,
+      `native-term-config/src/preconnect.rs`)
 - [x] `native-term-platform` (Windows): open tabs via
       `wt -w 0 new-tab --profile "NativeTerm SSH" --sessionId {…} --title=…
       --suppressApplicationTitle <shim> --session <id> <alias>` (`;`

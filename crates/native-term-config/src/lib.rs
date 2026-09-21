@@ -32,6 +32,7 @@ pub mod options;
 pub mod password;
 pub mod persistent;
 pub mod plink;
+pub mod preconnect;
 pub mod proxy;
 #[cfg(windows)]
 pub mod putty;

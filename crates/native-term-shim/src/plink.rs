@@ -143,6 +143,17 @@ pub fn run(alias: &str, link: Option<&Link>, flags: crate::args::Flags) -> i32 {
     loop {
         attempt += 1;
         crate::look::apply(alias);
+        // the session's own pre-connect command, as for an ssh host
+        let before = lookup(alias).and_then(|s| native_term_config::preconnect::command(s.pre_connect.as_deref()));
+        if let Some(command) = before {
+            if let crate::preconnect::Ran::Stop = crate::preconnect::run(&command) {
+                send(ShimMessage::Exited { code: -1 });
+                match after_exit(link) {
+                    Next::Reconnect => continue,
+                    Next::Close => return 0,
+                }
+            }
+        }
         send(ShimMessage::Connecting { attempt });
         match attempt_once(alias, attempt, link, auth.as_ref()) {
             Attempt::Close => return 0,

@@ -21,6 +21,7 @@ use crate::options;
 use crate::password;
 use crate::persistent;
 use crate::plink::{self, PlinkSession};
+use crate::preconnect;
 use crate::securecrt::{self, Plan};
 use crate::tree::{HostEntry, SessionTree, FOLDER_DEFAULTS_HOST};
 use crate::write::{self, edit_file, WriteError, Writer};
@@ -39,6 +40,8 @@ pub struct HostDraft {
     pub note: Option<String>,
     /// Typed after every login (`NativeTermOnLogin`), one line.
     pub on_login: Option<String>,
+    /// Run on this computer before connecting (`NativeTermPreConnect`).
+    pub pre_connect: Option<String>,
     /// The host's own `NativeTermPersistent` (`tmux`, `screen`, `off`);
     /// `None` follows the folder.
     pub persistent: Option<String>,
@@ -64,6 +67,7 @@ impl HostDraft {
             identity_files: host.identity_files.clone(),
             note: host.nt.get("note").map(str::to_string),
             on_login: host.nt.get("onlogin").map(str::to_string),
+            pre_connect: host.nt.get(preconnect::KEY).map(str::to_string),
             persistent: host.nt.get(persistent::KEY).map(str::to_string),
             tab_color: host.nt.get(appearance::TAB_COLOR).map(str::to_string),
             color_scheme: host.nt.get(appearance::COLOR_SCHEME).map(str::to_string),
@@ -623,6 +627,12 @@ impl Editor {
                     "NativeTermOnLogin",
                     draft.on_login.as_deref().filter(|n| !n.trim().is_empty()),
                 );
+                set_or_remove(
+                    doc,
+                    block,
+                    "NativeTermPreConnect",
+                    draft.pre_connect.as_deref().filter(|n| !n.trim().is_empty()),
+                );
                 set_or_remove(doc, block, "NativeTermPersistent", draft.persistent.as_deref());
                 set_or_remove(doc, block, "NativeTermTabColor", draft.tab_color.as_deref());
                 set_or_remove(doc, block, "NativeTermColorScheme", draft.color_scheme.as_deref());
@@ -1138,6 +1148,9 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
     if let Some(command) = draft.on_login.as_deref().filter(|n| !n.trim().is_empty()) {
         entries.push(("NativeTermOnLogin", command.to_string()));
     }
+    if let Some(command) = draft.pre_connect.as_deref().filter(|n| !n.trim().is_empty()) {
+        entries.push(("NativeTermPreConnect", command.to_string()));
+    }
     if let Some(persistent) = &draft.persistent {
         entries.push(("NativeTermPersistent", persistent.clone()));
     }
@@ -1409,6 +1422,7 @@ mod tests {
         d.identity_files = vec!["~/.ssh/id_ed25519".into()];
         d.note = Some("rack 3".into());
         d.on_login = Some("cd /srv && sudo -i".into());
+        d.pre_connect = Some("!rasdial 办公室 /phonebook:vpn".into());
         let alias = editor.create_host(&tree(&editor), &folder, &d).unwrap();
         assert_eq!(alias, "osd-1-shengchan");
 
@@ -1427,6 +1441,7 @@ mod tests {
         changed.label = "osd-1-shengchan".into();
         changed.port = None;
         changed.note = None;
+        changed.pre_connect = None;
         changed.identity_files.push("~/.ssh/id_rsa".into());
         editor.update_host(host, &changed).unwrap();
         let t = tree(&editor);

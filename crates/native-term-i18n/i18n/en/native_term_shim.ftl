@@ -87,3 +87,7 @@ zmodem-short = The file got shorter while it was sent
 zmodem-tmux = rz / sz can't work in a tmux session (tmux changes the data): stopped. Use Files (SFTP) (the tab's menu).
 zmodem-tmux-files = rz / sz can't work in a tmux session (tmux changes the data): stopped; the Files (SFTP) window is open at the current folder. Press Enter for the prompt.
 zmodem-tmux-stopped = rz / sz can't work in a tmux session (tmux changes the data): stopped. Press Enter for the prompt.
+preconnect-running = Before connecting: { $command }
+preconnect-failed = The pre-connect command ended with { $code }; connecting anyway (write ! in front of it to stop here).
+preconnect-stopped = The pre-connect command ended with { $code }; not connecting.
+preconnect-not-started = The pre-connect command could not be started: { $error }

@@ -206,6 +206,9 @@ pub struct PlinkSession {
     /// Typed once the connection is up (there is no login signal).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_login: Option<String>,
+    /// Run on this computer before connecting (see `preconnect.rs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_connect: Option<String>,
     /// Where it came from (`putty:<name>`, `securecrt:<path>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,

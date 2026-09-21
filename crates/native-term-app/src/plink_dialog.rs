@@ -39,6 +39,7 @@ pub struct PlinkDialog {
     flow: Flow,
     note: String,
     on_login: String,
+    pre_connect: String,
     /// Serial ports present when the dialog opened.
     ports: Vec<String>,
     /// The PuTTY options being edited (only `putty` is used).
@@ -87,6 +88,7 @@ impl PlinkDialog {
             flow: serial.flow,
             note: s.note.clone().unwrap_or_default(),
             on_login: s.on_login.clone().unwrap_or_default(),
+            pre_connect: s.pre_connect.clone().unwrap_or_default(),
             ports,
             options: s.clone(),
             default_log: String::new(),
@@ -212,6 +214,7 @@ impl PlinkDialog {
             serial,
             note: opt(&self.note),
             on_login: opt(&self.on_login),
+            pre_connect: opt(&self.pre_connect),
             ..self.base.clone()
         };
         // options of other protocols' pages don't apply any more
@@ -364,6 +367,7 @@ impl PlinkDialog {
                     ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("plink-on-login-hint"));
+                    field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
                 });
                 self.putty_ui(ui);
                 self.log_ui(ui);

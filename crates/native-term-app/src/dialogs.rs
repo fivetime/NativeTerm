@@ -30,6 +30,7 @@ pub struct HostDialog {
     identity_files: String,
     note: String,
     on_login: String,
+    pre_connect: String,
     /// The host's own `NativeTermPersistent`; `None` follows the folder.
     persistent: Option<String>,
     /// The folder's default, shown with "as the folder".
@@ -185,6 +186,7 @@ impl HostDialog {
             identity_files: d.identity_files.join("\n"),
             note: d.note.clone().unwrap_or_default(),
             on_login: d.on_login.clone().unwrap_or_default(),
+            pre_connect: d.pre_connect.clone().unwrap_or_default(),
             persistent: d.persistent.clone(),
             folder_persistent: None,
             tab_color: d.tab_color.clone(),
@@ -304,6 +306,7 @@ impl HostDialog {
             identity_files: self.identity_files.lines().filter_map(opt).collect(),
             note: opt(&self.note),
             on_login: opt(&self.on_login),
+            pre_connect: opt(&self.pre_connect),
             persistent: self.persistent.clone(),
             tab_color: self.tab_color.clone().filter(|c| c != "#"),
             color_scheme: self.color_scheme.clone().filter(|s| !s.trim().is_empty()),
@@ -357,6 +360,7 @@ impl HostDialog {
                     ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("field-on-login-hint"));
+                    field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
                     ui.label(t!("field-tab-color")).on_hover_text(t!("field-tab-color-hint"));
                     tab_color_choice(ui, &mut self.tab_color, self.folder_look.0.as_deref());
                     ui.end_row();

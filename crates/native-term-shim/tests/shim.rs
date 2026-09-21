@@ -927,3 +927,81 @@ fn proxy_login_from_credential_manager() {
     let login = ("alice".to_string(), "s3cret".to_string());
     assert_eq!(logins, [login.clone(), login], "not sent a third time");
 }
+
+/// `NativeTermPreConnect`: a command run on this computer before every
+/// attempt. A host takes its folder's, its own wins, `none` keeps it
+/// away, and a failed command marked `!` stops the connection.
+#[test]
+fn a_pre_connect_command_runs_before_every_attempt() {
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join(".ssh");
+    std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+    std::fs::write(ssh.join("config"), format!("Include {}/config.d/*.conf\n", ssh.display())).unwrap();
+    let marks = dir.path().join("marks.txt");
+    let mark = |what: &str| format!("cmd /c echo {what}>>{}", marks.display());
+    std::fs::write(
+        ssh.join("config.d").join("lab.conf"),
+        format!(
+            "Host __nativeterm_folder__\n    NativeTermPreConnect {}\n\n\
+             Host web01\n    HostName 10.0.0.1\n\n\
+             Host own\n    HostName 10.0.0.2\n    NativeTermPreConnect {}\n\n\
+             Host quiet\n    HostName 10.0.0.3\n    NativeTermPreConnect none\n\n\
+             Host gate\n    HostName 10.0.0.4\n    NativeTermPreConnect !cmd /c exit 3\n",
+            mark("folder"),
+            mark("own")
+        ),
+    )
+    .unwrap();
+    let run = |alias: &str, attempts: usize| {
+        let name = pipe_name(&format!("pre-{alias}"));
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let mut shim = spawn_shim(
+            &name,
+            &["--ssh-dir", ssh.to_str().unwrap(), "--session", "s-pre", alias],
+            &[("FAKE_SSH_CODE", "255")],
+        );
+        let conn = listener.accept().unwrap();
+        assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+        for attempt in 1..=attempts {
+            match expect(&conn) {
+                // the connection was stopped before ssh: no Connecting
+                ShimMessage::Exited { code } => assert_eq!(code, -1, "{alias}"),
+                ShimMessage::Connecting { attempt: n } => {
+                    assert_eq!(n as usize, attempt, "{alias}");
+                    assert_eq!(expect(&conn), ShimMessage::Exited { code: 255 }, "{alias}");
+                }
+                other => panic!("{alias}: {other:?}"),
+            }
+            if attempt < attempts {
+                conn.send(&AppMessage::Connect).unwrap();
+            }
+        }
+        conn.send(&AppMessage::Close).unwrap();
+        assert_eq!(wait_exit(&mut shim), 0);
+        String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string()
+    };
+
+    // the folder's command, once per attempt
+    let text = run("web01", 2);
+    assert!(text.contains("Before connecting:"), "{text}");
+    let written = std::fs::read_to_string(&marks).unwrap();
+    assert_eq!(written.matches("folder").count(), 2, "once per attempt: {written:?}");
+
+    // the host's own wins
+    std::fs::write(&marks, "").unwrap();
+    run("own", 1);
+    let written = std::fs::read_to_string(&marks).unwrap();
+    assert_eq!(written.matches("own").count(), 1, "{written:?}");
+    assert!(!written.contains("folder"), "the host's own, not the folder's: {written:?}");
+
+    // `none` on the host keeps the folder's away
+    std::fs::write(&marks, "").unwrap();
+    let text = run("quiet", 1);
+    assert!(!text.contains("Before connecting:"), "{text}");
+    assert_eq!(std::fs::read_to_string(&marks).unwrap().trim(), "");
+
+    // `!` and a failure: ssh is never started
+    let text = run("gate", 1);
+    assert!(text.contains("not connecting"), "{text}");
+    assert!(!text.contains("Disconnected"), "ssh never ran: {text}");
+}
