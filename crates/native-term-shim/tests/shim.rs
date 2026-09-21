@@ -41,6 +41,15 @@ fn spawn_shim(pipe: &str, args: &[&str], envs: &[(&str, &str)]) -> Child {
     command.spawn().unwrap()
 }
 
+/// The console's code pages are one setting shared by every test in this
+/// binary, and a shim sets them for the session it runs. The tests whose
+/// shims do that take this in turn.
+static CONSOLE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn console() -> std::sync::MutexGuard<'static, ()> {
+    CONSOLE.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn expect(conn: &PipeConnection) -> ShimMessage {
     conn.recv::<ShimMessage>(WAIT).unwrap().expect("message within timeout")
 }
@@ -616,6 +625,7 @@ fn install_key_batch_with_one_password() {
 /// failed connection (255).
 #[test]
 fn plink_session_with_putty_options() {
+    let _console = console();
     use native_term_win::registry::{self, RegValue};
     let base = format!(r"Software\NativeTerm-Tests-plink-{}", std::process::id());
     registry::write_user_values(&format!(r"{base}\NativeTerm-4000000000-1"), &[("Left", RegValue::Dword(1))]).unwrap();
@@ -684,6 +694,7 @@ fn plink_session_with_putty_options() {
 /// pipe, and "connection lost" (3) is a connection-level end (255).
 #[test]
 fn ntplink_session_with_options_and_break() {
+    let _console = console();
     use native_term_win::registry;
     let base = format!(r"Software\NativeTerm-Tests-ntplink-{}", std::process::id());
     let dir = tempfile::tempdir().unwrap();
@@ -693,7 +704,7 @@ fn ntplink_session_with_options_and_break() {
     std::fs::write(ssh.join("config.d").join("lab.conf"), "").unwrap();
     std::fs::write(
         ssh.join("config.d").join("lab.nt.toml"),
-        "[[session]]\nname = \"sw\"\nprotocol = \"telnet\"\nhost = \"10.9.9.9\"\nport = 2300\n\n[session.putty]\nPassiveTelnet = 1\nTerminalType = \"vt100\"\n",
+        "[[session]]\nname = \"sw\"\nprotocol = \"telnet\"\nhost = \"10.9.9.9\"\nport = 2300\nbackspace = \"^?\"\n\n[session.putty]\nPassiveTelnet = 1\nTerminalType = \"vt100\"\n",
     )
     .unwrap();
     let log = dir.path().join("ntplink.log");
@@ -731,7 +742,10 @@ fn ntplink_session_with_options_and_break() {
     let control = format!(r"\\.\pipe\nativeterm-control-{}-1", shim.id());
     assert_eq!(
         lines.next().unwrap(),
-        format!("-set | PassiveTelnet=1 | -set | TerminalType=vt100 | -nt-control | {control} | -telnet | -P | 2300 | 10.9.9.9")
+        format!(
+            "-set | PassiveTelnet=1 | -set | TerminalType=vt100 | -nt-control | {control} | \
+             -nt-backspace | ^? | -telnet | -P | 2300 | 10.9.9.9"
+        )
     );
     assert_eq!(lines.collect::<Vec<_>>(), ["control: special brk"]);
     assert!(registry::user_subkeys(&base).unwrap_or_default().is_empty(), "no saved session");
@@ -748,6 +762,7 @@ fn ntplink_session_with_options_and_break() {
 /// only the tab's size (when there is a console), and it is gone after.
 #[test]
 fn plink_always_loads_its_own_session() {
+    let _console = console();
     use native_term_win::registry::{self, RegValue};
     let base = format!(r"Software\NativeTerm-Tests-plink-load-{}", std::process::id());
     let dir = tempfile::tempdir().unwrap();
@@ -1004,4 +1019,54 @@ fn a_pre_connect_command_runs_before_every_attempt() {
     let text = run("gate", 1);
     assert!(text.contains("not connecting"), "{text}");
     assert!(!text.contains("Disconnected"), "ssh never ran: {text}");
+}
+/// `NativeTermCharset`: a host whose output is in a legacy code page.
+/// Nothing converts along the way, so the shim sets the console's code
+/// page for the session. The console is shared with every other test
+/// running at the same time (each plink test sets its own), so the
+/// charset here is one nothing else uses: seeing it at all is what shows
+/// this shim set it. That `utf-8` sets nothing is a unit test of
+/// `native_term_config::charset`.
+#[test]
+fn a_hosts_charset_becomes_the_consoles_code_page() {
+    let _console = console();
+    let dir = tempfile::tempdir().unwrap();
+    let ssh = dir.path().join(".ssh");
+    std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+    std::fs::write(
+        ssh.join("config"),
+        format!(
+            "Include {}/config.d/*.conf
+",
+            ssh.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        ssh.join("config.d").join("lab.conf"),
+        "Host __nativeterm_folder__
+    NativeTermCharset big5
+
+Host sw
+    HostName 10.0.0.1
+",
+    )
+    .unwrap();
+    let log = dir.path().join("sw.log");
+    let name = pipe_name("charset");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(
+        &name,
+        &["--ssh-dir", ssh.to_str().unwrap(), "--session", "s-cs", "sw"],
+        &[("FAKE_SSH_LOG", log.to_str().unwrap()), ("FAKE_SSH_CODEPAGE", "1"), ("FAKE_SSH_CODE", "255")],
+    );
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    assert_eq!(expect_skipping_login(&conn), ShimMessage::Exited { code: 255 });
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
+    let text = std::fs::read_to_string(&log).unwrap();
+    let pages: Vec<&str> = text.lines().filter_map(|l| l.strip_prefix("codepage ")).collect();
+    assert!(pages.contains(&"950"), "the folder's charset (Big5) was set: {text}");
 }

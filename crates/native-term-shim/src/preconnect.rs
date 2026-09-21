@@ -26,11 +26,13 @@ pub enum Ran {
     Stop,
 }
 
-/// The host's pre-connect command (its own, else its folder's).
-pub fn for_alias(alias: &str) -> Option<String> {
+/// What the host's own settings say for this attempt: the command to run
+/// before connecting, and the character set its output is in. One look at
+/// the session files for both.
+pub fn settings(alias: &str) -> (Option<String>, Option<String>) {
     let tree = SessionTree::load(&plink::ssh_dir());
-    let (folder, host) = tree.find(alias)?;
-    preconnect::for_host(folder, host)
+    let Some((folder, host)) = tree.find(alias) else { return (None, None) };
+    (preconnect::for_host(folder, host), native_term_config::charset::for_host(folder, host))
 }
 
 /// Run `command` and say whether the connection should go on. The shell

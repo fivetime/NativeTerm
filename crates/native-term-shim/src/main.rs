@@ -237,9 +237,17 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
     loop {
         attempt += 1;
         look::apply(alias);
+        let (before, charset) = preconnect::settings(alias);
+        // a host that speaks GBK (or another legacy code page): nothing
+        // in the path converts, so the console is told what to expect
+        // (see `native_term_config::charset`)
+        let _pages = native_term_config::plink::code_page(charset.as_deref())
+            .ok()
+            .filter(|page| *page != 65001)
+            .map(win::CodePages::set);
         // before every attempt: a reconnect after sleep needs the tunnel
         // (or whatever it is) brought up again too
-        if let Some(command) = preconnect::for_alias(alias) {
+        if let Some(command) = before {
             if let preconnect::Ran::Stop = preconnect::run(&command) {
                 send(ShimMessage::Exited { code: -1 });
                 match after_exit(link) {

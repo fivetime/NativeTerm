@@ -209,6 +209,12 @@ pub struct PlinkSession {
     /// Run on this computer before connecting (see `preconnect.rs`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pre_connect: Option<String>,
+    /// What the Backspace key sends: `^h` (0x08, the default) or `^?`
+    /// (0x7F), as PuTTY's Terminal page offers. Ctrl+Backspace sends the
+    /// other one, so both are always reachable. Only NativeTerm's own
+    /// client (ntplink) can do this; plink has no say over the keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backspace: Option<String>,
     /// Where it came from (`putty:<name>`, `securecrt:<path>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -288,6 +294,16 @@ pub const PUTTY_SUPDUP: [PuttyOption; 4] = [
 /// An existing file is appended to.
 pub const PUTTY_LOG: [PuttyOption; 2] =
     [PuttyOption::Number { key: "LogType", default: 0 }, PuttyOption::Text { key: "LogFileName", default: "" }];
+
+/// What a `backspace` value means, or `None` for anything else.
+#[must_use]
+pub fn backspace_code(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "^h" | "bs" | "0x08" => Some("^h"),
+        "^?" | "del" | "0x7f" => Some("^?"),
+        _ => None,
+    }
+}
 
 /// Where a session's log goes unless another file is chosen: `logs` in
 /// NativeTerm's data directory, a file per host and day.

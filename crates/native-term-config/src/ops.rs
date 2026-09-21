@@ -42,6 +42,9 @@ pub struct HostDraft {
     pub on_login: Option<String>,
     /// Run on this computer before connecting (`NativeTermPreConnect`).
     pub pre_connect: Option<String>,
+    /// What the session's bytes are in (`NativeTermCharset`); `None` is
+    /// UTF-8.
+    pub charset: Option<String>,
     /// The host's own `NativeTermPersistent` (`tmux`, `screen`, `off`);
     /// `None` follows the folder.
     pub persistent: Option<String>,
@@ -68,6 +71,7 @@ impl HostDraft {
             note: host.nt.get("note").map(str::to_string),
             on_login: host.nt.get("onlogin").map(str::to_string),
             pre_connect: host.nt.get(preconnect::KEY).map(str::to_string),
+            charset: host.nt.get(crate::charset::KEY).map(str::to_string),
             persistent: host.nt.get(persistent::KEY).map(str::to_string),
             tab_color: host.nt.get(appearance::TAB_COLOR).map(str::to_string),
             color_scheme: host.nt.get(appearance::COLOR_SCHEME).map(str::to_string),
@@ -633,6 +637,12 @@ impl Editor {
                     "NativeTermPreConnect",
                     draft.pre_connect.as_deref().filter(|n| !n.trim().is_empty()),
                 );
+                set_or_remove(
+                    doc,
+                    block,
+                    "NativeTermCharset",
+                    draft.charset.as_deref().filter(|n| !n.trim().is_empty()),
+                );
                 set_or_remove(doc, block, "NativeTermPersistent", draft.persistent.as_deref());
                 set_or_remove(doc, block, "NativeTermTabColor", draft.tab_color.as_deref());
                 set_or_remove(doc, block, "NativeTermColorScheme", draft.color_scheme.as_deref());
@@ -1172,6 +1182,9 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
     }
     if let Some(command) = draft.pre_connect.as_deref().filter(|n| !n.trim().is_empty()) {
         entries.push(("NativeTermPreConnect", command.to_string()));
+    }
+    if let Some(charset) = draft.charset.as_deref().filter(|n| !n.trim().is_empty()) {
+        entries.push(("NativeTermCharset", charset.to_string()));
     }
     if let Some(persistent) = &draft.persistent {
         entries.push(("NativeTermPersistent", persistent.clone()));

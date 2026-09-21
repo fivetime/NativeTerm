@@ -13,7 +13,7 @@ use crate::dialogs::Outcome;
 
 /// Charsets offered first; any name `plink::code_page` knows, or a code
 /// page number, can be typed.
-const CHARSETS: [&str; 5] = ["UTF-8", "GBK", "Big5", "Shift_JIS", "EUC-KR"];
+pub const CHARSETS: [&str; 5] = ["UTF-8", "GBK", "Big5", "Shift_JIS", "EUC-KR"];
 const SPEEDS: [u32; 10] = [300, 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400];
 const STOP_BITS: [&str; 3] = ["1", "1.5", "2"];
 
@@ -31,6 +31,8 @@ pub struct PlinkDialog {
     port: String,
     user: String,
     charset: String,
+    /// What the Backspace key sends: `^h` or `^?`.
+    backspace: String,
     line: String,
     speed: String,
     data_bits: u8,
@@ -84,6 +86,7 @@ impl PlinkDialog {
             port: s.port.map(|p| p.to_string()).unwrap_or_default(),
             user: s.user.clone().unwrap_or_default(),
             charset: s.charset.clone().unwrap_or_else(|| CHARSETS[0].into()),
+            backspace: s.backspace.clone().unwrap_or_else(|| "^h".into()),
             line,
             speed: serial.speed.to_string(),
             data_bits: serial.data_bits,
@@ -239,6 +242,8 @@ impl PlinkDialog {
             note: opt(&self.note),
             on_login: opt(&self.on_login),
             pre_connect: opt(&self.pre_connect),
+            // only the one that isn't the default is worth writing
+            backspace: opt(&self.backspace).filter(|b| b != "^h"),
             ..self.base.clone()
         };
         // options of other protocols' pages don't apply any more
@@ -389,6 +394,15 @@ impl PlinkDialog {
                         );
                     });
                     ui.end_row();
+                    ui.label(t!("field-backspace")).on_hover_text(t!("field-backspace-hint"));
+                    egui::ComboBox::from_id_salt("plink-backspace")
+                        .selected_text(backspace_text(&self.backspace))
+                        .show_ui(ui, |ui| {
+                            for value in ["^h", "^?"] {
+                                ui.selectable_value(&mut self.backspace, value.to_string(), backspace_text(value));
+                            }
+                        });
+                    ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("plink-on-login-hint"));
                     field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
@@ -519,6 +533,14 @@ fn option_text(key: &str) -> String {
         "SUPDUPMoreProcessing" => t!("putty-supdupmoreprocessing"),
         "SUPDUPScrolling" => t!("putty-supdupscrolling"),
         other => other.to_string(),
+    }
+}
+
+/// The Backspace choice, in words.
+fn backspace_text(value: &str) -> String {
+    match native_term_config::plink::backspace_code(value) {
+        Some("^?") => t!("backspace-delete"),
+        _ => t!("backspace-control-h"),
     }
 }
 

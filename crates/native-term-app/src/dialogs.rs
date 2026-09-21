@@ -29,6 +29,9 @@ pub struct HostDialog {
     proxy_jump: String,
     identity_files: String,
     note: String,
+    /// What the session's bytes are in (`NativeTermCharset`), empty for
+    /// UTF-8.
+    charset: String,
     /// As many lines as they like, kept in `state.db` by the host's id.
     long_note: String,
     /// Comma separated, kept with the long note.
@@ -189,6 +192,7 @@ impl HostDialog {
             proxy_jump: d.proxy_jump.clone().unwrap_or_default(),
             identity_files: d.identity_files.join("\n"),
             note: d.note.clone().unwrap_or_default(),
+            charset: d.charset.clone().unwrap_or_default(),
             long_note: String::new(),
             tags: String::new(),
             on_login: d.on_login.clone().unwrap_or_default(),
@@ -331,6 +335,7 @@ impl HostDialog {
             note: opt(&self.note),
             on_login: opt(&self.on_login),
             pre_connect: opt(&self.pre_connect),
+            charset: opt(&self.charset).filter(|c| !c.eq_ignore_ascii_case("utf-8")),
             persistent: self.persistent.clone(),
             tab_color: self.tab_color.clone().filter(|c| c != "#"),
             color_scheme: self.color_scheme.clone().filter(|s| !s.trim().is_empty()),
@@ -400,6 +405,19 @@ impl HostDialog {
                     ui.end_row();
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("field-on-login-hint"));
                     field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
+                    ui.label(t!("field-charset")).on_hover_text(t!("field-charset-hint"));
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut self.charset).hint_text("UTF-8").desired_width(120.0));
+                        egui::ComboBox::from_id_salt("host-charsets").selected_text(t!("plink-common")).show_ui(
+                            ui,
+                            |ui| {
+                                for c in crate::plink_dialog::CHARSETS {
+                                    ui.selectable_value(&mut self.charset, c.to_string(), c);
+                                }
+                            },
+                        );
+                    });
+                    ui.end_row();
                     ui.label(t!("field-tab-color")).on_hover_text(t!("field-tab-color-hint"));
                     tab_color_choice(ui, &mut self.tab_color, self.folder_look.0.as_deref());
                     ui.end_row();

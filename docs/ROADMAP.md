@@ -682,9 +682,21 @@
       server's modification time
 - [ ] rz / sz (rest): ship the fork's ssh with NativeTerm (packaging),
       macOS / Linux builds
-- [ ] Per-session Backspace mapping (`^H` / `^?`) for plink sessions
-- [ ] Optional `plink -ssh` for GBK SSH hosts (host/port/user/key from
-      `ssh -G`, `.ppk` key, Pageant)
+- [x] Per-session Backspace mapping (`^H` / `^?`) for non-SSH sessions:
+      the session dialog's "Backspace sends", written as `backspace` in
+      the `.nt.toml` file and passed to NativeTerm's own client as
+      `-nt-backspace`. The console gives 0x08 for Backspace and 0x7F for
+      Ctrl+Backspace; `^?` swaps the two on the way out (as PuTTY's
+      option does), so both codes stay reachable, and the local echo
+      still shows what was typed. plink has no say over the keys, so the
+      setting needs ntplink (`patches/ntplink.c`)
+- [x] A character set for SSH hosts (`NativeTermCharset`, per host or
+      as a folder default), which is what the "optional `plink -ssh` for
+      GBK hosts" was for: nothing in the path converts — `ssh` passes
+      bytes through and so does PuTTY's plink — so what decides is the
+      console's code page, and the shim now sets it for an SSH session
+      the same way it already did for Telnet and serial ones. No second
+      SSH client, no `.ppk` keys, no Pageant (`charset.rs`)
 - [x] Server-side session logging for persistent sessions (`tmux-log`:
       `pipe-pane` started with the session; "Sessions on the Server" shows
       the log as text, saves a copy, deletes it, ended sessions' logs too)

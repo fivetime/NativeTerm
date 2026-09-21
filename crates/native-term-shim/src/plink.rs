@@ -317,6 +317,9 @@ fn ntplink_arguments(session: &PlinkSession, control: Option<&str>) -> Vec<Strin
     if let Some(control) = control {
         args.extend(["-nt-control".to_string(), control.to_string()]);
     }
+    if let Some(code) = session.backspace.as_deref().and_then(native_term_config::plink::backspace_code) {
+        args.extend(["-nt-backspace".to_string(), code.to_string()]);
+    }
     args.extend(session.arguments(None));
     args
 }

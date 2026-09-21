@@ -16,6 +16,8 @@
 //!   interactively (a local stand-in for the remote side).
 //! - As ntplink: with `-nt-control <pipe>`, opens that pipe and logs each
 //!   command line received (`control: …`) while it runs.
+//! - `FAKE_SSH_CODEPAGE=1`: logs the console's output code page, to show
+//!   what character set the session runs in.
 //! - `FAKE_SSH_LOGIN_ONCE=<file>`: logs in (as `FAKE_SSH_LOGIN=1`) only
 //!   while `<file>` doesn't exist, and creates it: the host "goes away"
 //!   after the first connection.
@@ -30,6 +32,11 @@ fn main() {
     if let Ok(log) = std::env::var("FAKE_SSH_LOG") {
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
             let _ = writeln!(f, "{}", args.join(" | "));
+            if std::env::var("FAKE_SSH_CODEPAGE").as_deref() == Ok("1") {
+                // SAFETY: a read of the console this process is attached to
+                let page = unsafe { windows::Win32::System::Console::GetConsoleOutputCP() };
+                let _ = writeln!(f, "codepage {page}");
+            }
         }
     }
     if args.iter().any(|a| a == "-G") {

@@ -45,8 +45,8 @@ pub const MACHINE_KEYS: &[&str] = &[
 ];
 
 /// Keys that stay in `state.db`: one per host, written as the user walks
-/// around in the files window.
-const NOT_SETTINGS: &[&str] = &["files.remote.", "files.local."];
+/// around in the files window (`files.remote:<alias>`).
+const NOT_SETTINGS: &[&str] = &["files.remote", "files.local"];
 
 pub const FILE: &str = "settings.toml";
 
@@ -314,12 +314,14 @@ mod tests {
         let rows = vec![
             ("language".to_string(), "zh-CN".to_string()),
             ("window".to_string(), "1,2,3,4".to_string()),
-            ("files.remote.web01".to_string(), "2f686f6d65".to_string()),
+            ("files.remote:web01".to_string(), "2f686f6d65".to_string()),
+            ("files.local:web01".to_string(), r"C:\Downloads".to_string()),
             ("theme".to_string(), String::new()),
         ];
         assert_eq!(store.take_over(rows.clone()).unwrap(), 2, "a host's last folder stays in state.db");
         assert_eq!(store.get("window").as_deref(), Some("1,2,3,4"));
-        assert_eq!(store.get("files.remote.web01"), None);
+        assert_eq!(store.get("files.remote:web01"), None);
+        assert_eq!(store.get("files.local:web01"), None, "the files window's own memory, not a setting");
         // the file is there now: a second start takes nothing
         assert_eq!(settings(dir.path()).take_over(rows).unwrap(), 0);
     }

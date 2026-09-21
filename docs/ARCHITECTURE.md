@@ -465,7 +465,7 @@ Therefore NativeTerm provides its own menus:
 | Session logging (record all output) | **SSH: no** (client side); **other protocols: yes** | SSH output goes straight into the terminal; NativeTerm never sees it. Server-side logging for persistent sessions ("tmux, recorded on the server", see "Persistent remote sessions (tmux)"); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
 | Telnet / serial / raw / rlogin / SUPDUP | **Yes** | The shim runs PuTTY's console client `plink.exe`; NativeTerm parses no protocol. See "Other protocols via plink" |
 | Local shells / AI coding sessions | Not managed | The user opens them with `+`; NativeTerm only lists them in the tab switcher |
-| Per-session character set (e.g. GBK) | **Yes for plink sessions**; SSH via OpenSSH: no | plink follows the console code pages the shim sets (verified both directions); see "Other protocols via plink" and "Known limitations" |
+| Per-session character set (e.g. GBK) | **Yes**, for every session type | Nothing converts along the way, so the shim sets the tab console's code pages: `NativeTermCharset` for SSH hosts (per host or folder), the session's `charset` for the others (verified both directions); see "Character sets" |
 | Port forwarding | Via ssh config | `LocalForward` etc. in the host block; edited in the session options dialog |
 
 ### Session options (SecureCRT "Session Options" → NativeTerm)
@@ -635,7 +635,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | **Terminal / Emulation**: type, scrollback | `SetEnv TERM=`; profile `historySize` | ✅ |
 | Modes | Handled by Windows Terminal | — |
 | Emacs (Alt as Meta) | Windows Terminal sends Alt as an ESC prefix | ✅ |
-| Mapped Keys (per session) | Terminal key bindings are global (fragments can't bind keys); NativeTerm command buttons instead; Backspace-as-^H for plink sessions via the shim | 🟡 |
+| Mapped Keys (per session) | Terminal key bindings are global (fragments can't bind keys); NativeTerm command buttons instead; "Backspace sends ^H / ^?" per non-SSH session (ntplink's `-nt-backspace`) | 🟡 |
 | Appearance / Window (font, colors, cursor, tab color) | Per-folder/host Terminal profile, `NativeTermColorScheme`, `NativeTermTabColor` | ✅ |
 | Keyword Highlighting | Not in Windows Terminal | ❌ |
 | Log File | SSH: not client-side (OpenSSH), but on the server for persistent sessions (`tmux-log`: `pipe-pane`, read / copied / deleted from "Sessions on the Server"); other protocols: ntplink's session log; Terminal's "Export text" by hand | 🟡 |
@@ -1239,6 +1239,13 @@ shim is in the same console, so it sets both (`SetConsoleCP`,
 
 - **Default:** UTF-8 (65001).
 - **Per session:** e.g. GBK (936) for legacy network devices.
+- **Every session type.** Nothing in the path converts: `ssh` passes
+  bytes through, PuTTY's plink converts nothing either (see below), and
+  Windows Terminal draws what the console's code page says. So the shim
+  sets the code pages around the session and puts them back afterwards:
+  from the session's `charset` for Telnet, serial and the rest, and from
+  `NativeTermCharset` (per host, or a folder default) for SSH hosts.
+  That is why NativeTerm needs no second SSH client for a GBK host.
 
 Measured against a local test server:
 
