@@ -565,6 +565,10 @@
       when the mouse says a drag ended over the tab, so a pasted path is
       never uploaded behind one's back. Not for ntplink or plink sessions
       (no SFTP there)
+- [x] Several files at once in a transfer (`files.at_once`, three by
+      default, up to sixteen; the rest queue), shared by every transfer of
+      a connection. 120 small files: 11.0 s at one, 5.4 s at three, 2.3 s
+      at eight
 - [ ] Dropping onto NativeTerm's own windows (a session in the list, a tab
       picture) as a second way in
 - [x] zmodem2 fixes offered upstream (codeberg.org/jarkko/zmodem2, from

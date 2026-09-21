@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 use crate::wire::Attrs;
 use crate::{join, Error, Names, Result, Session};
@@ -34,6 +34,187 @@ pub struct Item {
 
 /// What a file being copied is called until it is complete.
 pub const PART: &str = ".ntpart";
+
+/// How many files one connection copies at once: every transfer of a
+/// connection shares these, so several of them together never open more
+/// than this. A file waits for its turn.
+pub struct Slots {
+    /// (free, width): free permits, and how many there are in all.
+    counts: Mutex<(usize, usize)>,
+    freed: Condvar,
+}
+
+/// A file's turn, given back when it is dropped.
+pub struct Slot<'a> {
+    slots: &'a Slots,
+}
+
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        let mut counts = self.slots.counts.lock().unwrap_or_else(|e| e.into_inner());
+        counts.0 += 1;
+        self.slots.freed.notify_one();
+    }
+}
+
+impl Slots {
+    /// `width` files at once (at least one).
+    #[must_use]
+    pub fn new(width: usize) -> Slots {
+        let width = width.max(1);
+        Slots { counts: Mutex::new((width, width)), freed: Condvar::new() }
+    }
+
+    /// How many files may be copied at once.
+    #[must_use]
+    pub fn width(&self) -> usize {
+        self.counts.lock().unwrap_or_else(|e| e.into_inner()).1
+    }
+
+    /// Changes it while transfers run: a smaller width takes effect as
+    /// files finish, a larger one at once.
+    pub fn set_width(&self, width: usize) {
+        let width = width.max(1);
+        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        let (free, old) = *counts;
+        // free can go negative in effect: keep it as a floor of zero and
+        // let the running files give their permits back
+        let free = free as isize + (width as isize - old as isize);
+        *counts = (free.max(0) as usize, width);
+        drop(counts);
+        self.freed.notify_all();
+    }
+
+    /// Waits for a turn.
+    fn take(&self) -> Slot<'_> {
+        let mut counts = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        while counts.0 == 0 {
+            counts = self.freed.wait(counts).unwrap_or_else(|e| e.into_inner());
+        }
+        counts.0 -= 1;
+        drop(counts);
+        Slot { slots: self }
+    }
+}
+
+impl Default for Slots {
+    fn default() -> Self {
+        Slots::new(1)
+    }
+}
+
+/// What the workers of one transfer share.
+struct Shared<'a> {
+    items: &'a [Item],
+    /// The next item to hand out.
+    cursor: AtomicUsize,
+    /// Which items are done (by index), to tell where a paused transfer
+    /// goes on.
+    done: Mutex<Vec<bool>>,
+    /// The first error; it stops the others.
+    failed: Mutex<Option<Error>>,
+    stop: AtomicBool,
+}
+
+impl<'a> Shared<'a> {
+    /// The next item to copy, or `None` when they are all handed out (or
+    /// something failed).
+    fn next(&self) -> Option<(usize, &'a Item)> {
+        if self.stop.load(Ordering::Relaxed) {
+            return None;
+        }
+        let i = self.cursor.fetch_add(1, Ordering::Relaxed);
+        self.items.get(i).map(|item| (i, item))
+    }
+
+    /// Reports an item copied and moves the resume point up to the first
+    /// item that isn't.
+    fn finished(&self, i: usize, start: usize, progress: &Progress) {
+        let mut done = self.done.lock().unwrap_or_else(|e| e.into_inner());
+        done[i] = true;
+        let mut at = progress.next.load(Ordering::Relaxed).max(start);
+        while done.get(at).copied() == Some(true) {
+            at += 1;
+        }
+        progress.next.store(at, Ordering::Relaxed);
+    }
+
+    fn fail(&self, e: Error) {
+        let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());
+        if failed.is_none() {
+            *failed = Some(e);
+        }
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    /// The first error, when there was one.
+    fn error(&self) -> Option<Error> {
+        self.failed.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+}
+
+/// Runs `copy` over the items from `start` on, `slots.width()` at a time
+/// (each file takes a slot of the connection). Folders are made first, in
+/// order, so that a file never goes before the folder it is in.
+fn each_item<'a, F>(
+    items: &'a [Item],
+    start: usize,
+    progress: &Progress,
+    slots: &Slots,
+    make_dir: impl Fn(&Item) -> Result<()> + Sync,
+    copy: F,
+) -> Result<()>
+where
+    F: Fn(&'a Item, &Progress) -> Result<()> + Sync,
+{
+    let shared = Shared {
+        items,
+        cursor: AtomicUsize::new(start),
+        done: Mutex::new(vec![false; items.len()]),
+        failed: Mutex::new(None),
+        stop: AtomicBool::new(false),
+    };
+    // the folders, in the order they were planned
+    for (i, item) in items.iter().enumerate().skip(start).filter(|(_, i)| i.dir) {
+        if progress.stopped() {
+            return Err(Error::Cancelled);
+        }
+        make_dir(item)?;
+        shared.finished(i, start, progress);
+    }
+    let workers = slots.width().max(1).min(items.len().saturating_sub(start).max(1));
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                while let Some((i, item)) = shared.next() {
+                    if item.dir {
+                        continue; // made above
+                    }
+                    if progress.stopped() {
+                        shared.fail(Error::Cancelled);
+                        return;
+                    }
+                    let _slot = slots.take();
+                    if progress.stopped() || shared.stop.load(Ordering::Relaxed) {
+                        shared.fail(Error::Cancelled);
+                        return;
+                    }
+                    match copy(item, progress) {
+                        Ok(()) => shared.finished(i, start, progress),
+                        Err(e) => {
+                            shared.fail(e);
+                            return;
+                        }
+                    }
+                }
+            });
+        }
+    });
+    match shared.error() {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
 
 /// A transfer's state, shared with whoever shows it.
 #[derive(Default)]
@@ -71,7 +252,7 @@ impl Progress {
     /// add up to.
     fn restart(&self, items: &[Item]) -> usize {
         let next = self.next.load(Ordering::Relaxed).min(items.len());
-        let before = items[..next].iter().map(|i| i.size).sum();
+        let before: u64 = items[..next].iter().map(|i| i.size).sum();
         self.done.store(before, Ordering::Relaxed);
         self.skipped.store(before, Ordering::Relaxed);
         next
@@ -251,103 +432,105 @@ fn walk_local(names: &Names, local: &Path, remote: Vec<u8>, items: &mut Vec<Item
 /// Downloads the planned items from `progress.next` on. An existing local
 /// folder is used; an existing file is replaced once its copy is
 /// complete.
-pub fn download(sftp: &Session, names: &Names, items: &[Item], progress: &Progress) -> Result<()> {
+pub fn download(sftp: &Session, names: &Names, items: &[Item], progress: &Progress, slots: &Slots) -> Result<()> {
     let start = progress.restart(items);
-    for (i, item) in items.iter().enumerate().skip(start) {
-        if progress.stopped() {
-            return Err(Error::Cancelled);
-        }
-        if item.dir {
-            std::fs::create_dir_all(&item.local)?;
-            progress.next.store(i + 1, Ordering::Relaxed);
-            continue;
-        }
-        if let Some(parent) = item.local.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        progress.set_current(names.decode(&item.remote));
-        let part = local_part(&item.local);
-        let offset = local_resume(&part, item);
-        let base = progress.done.load(Ordering::Relaxed) + offset;
-        progress.done.store(base, Ordering::Relaxed);
-        progress.skipped.fetch_add(offset, Ordering::Relaxed);
-        let result = sftp.download_from(&item.remote, &part, offset, &mut |done| {
-            progress.done.store(base + done, Ordering::Relaxed);
-            !progress.stopped()
-        });
-        let done = match result {
-            Ok(done) => done,
-            Err(e) => {
-                // cancelled: nothing is left behind; paused or broken off:
-                // the partial file is continued next time
-                if progress.cancelled() {
-                    let _ = std::fs::remove_file(&part);
-                }
-                return Err(e);
+    each_item(
+        items,
+        start,
+        progress,
+        slots,
+        |item| Ok(std::fs::create_dir_all(&item.local)?),
+        |item, progress| {
+            if let Some(parent) = item.local.parent() {
+                std::fs::create_dir_all(parent)?;
             }
-        };
-        if let Some(m) = item.modified {
-            // the server's modification time kept (compare / sync go by it)
-            let file = std::fs::OpenOptions::new().write(true).open(&part)?;
-            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(m))?;
-        }
-        std::fs::rename(&part, &item.local)?;
-        progress.done.store(base + done, Ordering::Relaxed);
-        progress.next.store(i + 1, Ordering::Relaxed);
-    }
-    Ok(())
+            progress.set_current(names.decode(&item.remote));
+            let part = local_part(&item.local);
+            let offset = local_resume(&part, item);
+            progress.done.fetch_add(offset, Ordering::Relaxed);
+            progress.skipped.fetch_add(offset, Ordering::Relaxed);
+            // the callback counts this run's bytes, from zero
+            let mut counted = 0;
+            let result = sftp.download_from(&item.remote, &part, offset, &mut |done| {
+                progress.done.fetch_add(done.saturating_sub(counted), Ordering::Relaxed);
+                counted = done;
+                !progress.stopped()
+            });
+            let done = match result {
+                Ok(done) => done,
+                Err(e) => {
+                    // cancelled: nothing is left behind; paused or broken
+                    // off: the partial file is continued next time
+                    if progress.cancelled() {
+                        let _ = std::fs::remove_file(&part);
+                    }
+                    return Err(e);
+                }
+            };
+            if let Some(m) = item.modified {
+                // the server's modification time kept (compare / sync go by it)
+                let file = std::fs::OpenOptions::new().write(true).open(&part)?;
+                file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(m))?;
+            }
+            std::fs::rename(&part, &item.local)?;
+            progress.done.fetch_add(done.saturating_sub(counted), Ordering::Relaxed);
+            Ok(())
+        },
+    )
 }
 
 /// Uploads the planned items from `progress.next` on. An existing remote
 /// folder is used; an existing file is replaced once its copy is complete
 /// (keeping its permissions).
-pub fn upload(sftp: &Session, names: &Names, items: &[Item], progress: &Progress) -> Result<()> {
+pub fn upload(sftp: &Session, names: &Names, items: &[Item], progress: &Progress, slots: &Slots) -> Result<()> {
     let start = progress.restart(items);
-    for (i, item) in items.iter().enumerate().skip(start) {
-        if progress.stopped() {
-            return Err(Error::Cancelled);
-        }
-        if item.dir {
-            match sftp.mkdir(&item.remote) {
-                Ok(()) => {}
-                // already there (as a folder: stat tells)
-                Err(e) => {
-                    if !sftp.stat(&item.remote).is_ok_and(|a| a.is_dir()) {
-                        return Err(e);
-                    }
-                }
-            }
-            progress.next.store(i + 1, Ordering::Relaxed);
-            continue;
-        }
-        progress.set_current(names.decode(&item.remote));
-        let part = remote_part(&item.remote);
-        let offset = remote_resume(sftp, &part, item);
-        let base = progress.done.load(Ordering::Relaxed) + offset;
-        progress.done.store(base, Ordering::Relaxed);
-        progress.skipped.fetch_add(offset, Ordering::Relaxed);
-        let result = sftp.upload_from(&item.local, &part, offset, item.permissions, &mut |done| {
-            progress.done.store(base + done, Ordering::Relaxed);
-            !progress.stopped()
-        });
-        let done = match result {
-            Ok(done) => done,
+    each_item(
+        items,
+        start,
+        progress,
+        slots,
+        |item| match sftp.mkdir(&item.remote) {
+            Ok(()) => Ok(()),
+            // already there (as a folder: stat tells)
             Err(e) => {
-                if progress.cancelled() {
-                    let _ = sftp.remove(&part);
+                if sftp.stat(&item.remote).is_ok_and(|a| a.is_dir()) {
+                    Ok(())
+                } else {
+                    Err(e)
                 }
-                return Err(e);
             }
-        };
-        if let Some(m) = item.modified.and_then(|m| u32::try_from(m).ok()) {
-            // the local modification time kept (compare / sync go by it)
-            let _ = sftp.setstat(&part, &Attrs { atime_mtime: Some((m, m)), ..Default::default() });
-        }
-        finish_upload(sftp, &part, &item.remote)?;
-        progress.done.store(base + done, Ordering::Relaxed);
-        progress.next.store(i + 1, Ordering::Relaxed);
-    }
-    Ok(())
+        },
+        |item, progress| {
+            progress.set_current(names.decode(&item.remote));
+            let part = remote_part(&item.remote);
+            let offset = remote_resume(sftp, &part, item);
+            progress.done.fetch_add(offset, Ordering::Relaxed);
+            progress.skipped.fetch_add(offset, Ordering::Relaxed);
+            // the callback counts this run's bytes, from zero
+            let mut counted = 0;
+            let result = sftp.upload_from(&item.local, &part, offset, item.permissions, &mut |done| {
+                progress.done.fetch_add(done.saturating_sub(counted), Ordering::Relaxed);
+                counted = done;
+                !progress.stopped()
+            });
+            let done = match result {
+                Ok(done) => done,
+                Err(e) => {
+                    if progress.cancelled() {
+                        let _ = sftp.remove(&part);
+                    }
+                    return Err(e);
+                }
+            };
+            if let Some(m) = item.modified.and_then(|m| u32::try_from(m).ok()) {
+                // the local modification time kept (compare / sync go by it)
+                let _ = sftp.setstat(&part, &Attrs { atime_mtime: Some((m, m)), ..Default::default() });
+            }
+            finish_upload(sftp, &part, &item.remote)?;
+            progress.done.fetch_add(done.saturating_sub(counted), Ordering::Relaxed);
+            Ok(())
+        },
+    )
 }
 
 /// Removes the partial file of the item a paused or failed transfer
@@ -433,6 +616,100 @@ mod tests {
     use super::*;
     use std::process::Command;
 
+    /// One file at a time, as the tests below expect.
+    fn one() -> Slots {
+        Slots::new(1)
+    }
+
+    #[test]
+    fn many_files_at_once() {
+        // every file arrives whole, however many are copied at a time
+        let server_dir = tempfile::tempdir().unwrap();
+        let Some(sftp) = local_server(server_dir.path()) else { return };
+        let names = Names::default();
+        let src = server_dir.path().join("from");
+        std::fs::create_dir_all(src.join("deep")).unwrap();
+        let mut expected = Vec::new();
+        for i in 0..40u32 {
+            let content = vec![b'a' + (i % 26) as u8; 1000 + i as usize * 37];
+            let path = if i % 3 == 0 { src.join("deep").join(format!("f{i}")) } else { src.join(format!("f{i}")) };
+            std::fs::write(&path, &content).unwrap();
+            expected.push((path, content));
+        }
+        let into = server_dir.path().join("to");
+        std::fs::create_dir_all(&into).unwrap();
+
+        let progress = Progress::default();
+        let items = plan_upload(&names, std::slice::from_ref(&src), &remote(&into), &progress).unwrap();
+        let slots = Slots::new(4);
+        upload(&sftp, &names, &items, &progress, &slots).unwrap();
+        assert_eq!(progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed));
+        assert_eq!(progress.next.load(Ordering::Relaxed), items.len(), "every item is done");
+        for (path, content) in &expected {
+            let copied = into.join("from").join(path.strip_prefix(&src).unwrap());
+            assert_eq!(&std::fs::read(&copied).unwrap(), content, "{}", copied.display());
+        }
+        // nothing is left half-copied
+        assert!(!walk(&into).iter().any(|p| p.to_string_lossy().ends_with(PART)));
+
+        // and back, four at a time as well
+        let back = server_dir.path().join("back");
+        std::fs::create_dir_all(&back).unwrap();
+        let remote_src = remote(&into.join("from"));
+        let attrs = sftp.stat(&remote_src).unwrap();
+        let progress = Progress::default();
+        let items = plan_download(&sftp, &names, &remote_src, &attrs, &back, &progress).unwrap();
+        download(&sftp, &names, &items, &progress, &slots).unwrap();
+        for (path, content) in &expected {
+            let copied = back.join("from").join(path.strip_prefix(&src).unwrap());
+            assert_eq!(&std::fs::read(&copied).unwrap(), content, "{}", copied.display());
+        }
+    }
+
+    #[test]
+    fn slots_let_only_so_many_through() {
+        let slots = Slots::new(2);
+        let at_once = std::sync::Arc::new(AtomicUsize::new(0));
+        let most = std::sync::Arc::new(AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                let (at_once, most) = (std::sync::Arc::clone(&at_once), std::sync::Arc::clone(&most));
+                let slots = &slots;
+                scope.spawn(move || {
+                    let _slot = slots.take();
+                    let now = at_once.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    at_once.fetch_sub(1, Ordering::SeqCst);
+                });
+            }
+        });
+        assert_eq!(most.load(Ordering::SeqCst), 2, "two at a time, the rest waited");
+
+        // widened while nothing runs
+        slots.set_width(5);
+        assert_eq!(slots.width(), 5);
+        let held: Vec<Slot> = (0..5).map(|_| slots.take()).collect();
+        slots.set_width(1);
+        drop(held);
+        assert_eq!(slots.width(), 1);
+    }
+
+    /// Every file below `dir`.
+    fn walk(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else { return out };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                out.extend(walk(&path));
+            } else {
+                out.push(path);
+            }
+        }
+        out
+    }
+
     fn local_server(dir: &Path) -> Option<Session> {
         let server = Path::new(r"C:\Windows\System32\OpenSSH\sftp-server.exe");
         if !server.exists() {
@@ -482,12 +759,12 @@ mod tests {
         let items = plan_upload(&names, std::slice::from_ref(&src), &remote(&server_dir), &progress).unwrap();
         assert_eq!(items.iter().filter(|i| i.dir).count(), 3);
         assert_eq!(progress.total.load(Ordering::Relaxed), 200_005);
-        upload(&sftp, &names, &items, &progress).unwrap();
+        upload(&sftp, &names, &items, &progress, &one()).unwrap();
         assert_eq!(progress.done.load(Ordering::Relaxed), 200_005);
         assert_eq!(std::fs::read(server_dir.join("源").join("子目录").join("b.bin")).unwrap().len(), 200_000);
         assert!(server_dir.join("源").join("子目录").join("空").is_dir());
         // again: existing folders are used, files replaced
-        upload(&sftp, &names, &items, &Progress::default()).unwrap();
+        upload(&sftp, &names, &items, &Progress::default(), &one()).unwrap();
 
         let back = dir.path().join("back");
         std::fs::create_dir(&back).unwrap();
@@ -495,7 +772,7 @@ mod tests {
         let attrs = sftp.stat(&remote_src).unwrap();
         let progress = Progress::default();
         let items = plan_download(&sftp, &names, &remote_src, &attrs, &back, &progress).unwrap();
-        download(&sftp, &names, &items, &progress).unwrap();
+        download(&sftp, &names, &items, &progress, &one()).unwrap();
         assert_eq!(progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed));
         assert_eq!(std::fs::read(back.join("源").join("a.txt")).unwrap(), b"alpha");
         assert!(back.join("源").join("子目录").join("空").is_dir());
@@ -526,7 +803,7 @@ mod tests {
             }
             p.cancel.store(true, Ordering::Relaxed);
         });
-        assert_eq!(download(&sftp, &names, &items, &progress), Err(Error::Cancelled));
+        assert_eq!(download(&sftp, &names, &items, &progress, &one()), Err(Error::Cancelled));
         watcher.join().unwrap();
         assert!(!out.join("big.bin").exists());
         assert!(!local_part(&out.join("big.bin")).exists());
@@ -567,7 +844,7 @@ mod tests {
             items.extend(plan_download(&sftp, &names, &path, &attrs, &out, &progress).unwrap());
         }
         let watcher = pause_at(&progress, 4 * 1024 * 1024);
-        assert_eq!(download(&sftp, &names, &items, &progress), Err(Error::Cancelled));
+        assert_eq!(download(&sftp, &names, &items, &progress, &one()), Err(Error::Cancelled));
         watcher.join().unwrap();
         let part = local_part(&out.join("a.bin"));
         let kept = std::fs::metadata(&part).unwrap().len();
@@ -576,7 +853,7 @@ mod tests {
         assert_eq!(progress.next.load(Ordering::Relaxed), 0);
 
         progress.pause.store(false, Ordering::Relaxed);
-        download(&sftp, &names, &items, &progress).unwrap();
+        download(&sftp, &names, &items, &progress, &one()).unwrap();
         assert_eq!(std::fs::read(out.join("a.bin")).unwrap(), data);
         assert_eq!(std::fs::read(out.join("b.txt")).unwrap(), b"second");
         assert!(!part.exists());
@@ -600,7 +877,7 @@ mod tests {
         let progress = std::sync::Arc::new(Progress::default());
         let items = plan_upload(&names, std::slice::from_ref(&src), &remote(&server_dir), &progress).unwrap();
         let watcher = pause_at(&progress, 4 * 1024 * 1024);
-        assert_eq!(upload(&sftp, &names, &items, &progress), Err(Error::Cancelled));
+        assert_eq!(upload(&sftp, &names, &items, &progress, &one()), Err(Error::Cancelled));
         watcher.join().unwrap();
         // asked through the session: the writes still in flight when it
         // paused are done first (the server handles requests in order)
@@ -615,7 +892,7 @@ mod tests {
         let again = Progress::default();
         let items = plan_upload(&names, std::slice::from_ref(&src), &remote(&server_dir), &again).unwrap();
         assert_eq!(remote_resume(&sftp, &remote_part(&remote_file), &items[0]), kept);
-        upload(&sftp, &names, &items, &again).unwrap();
+        upload(&sftp, &names, &items, &again, &one()).unwrap();
         assert_eq!(std::fs::read(server_dir.join("up.bin")).unwrap(), data);
         assert!(!part.exists());
     }

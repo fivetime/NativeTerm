@@ -714,7 +714,11 @@ impl DropDialog {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<(DropChoice, bool)> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        let total: u64 = self.paths.iter().filter_map(|p| p.metadata().ok()).map(|m| m.len()).sum();
+        // a folder's own entry says nothing about what is in it, which is
+        // counted when the transfer is planned
+        let files = self.paths.iter().filter(|p| p.is_file());
+        let total: u64 = files.filter_map(|p| p.metadata().ok()).map(|m| m.len()).sum();
+        let folders = self.paths.iter().any(|p| p.is_dir());
         egui::Window::new(t!("drop-title"))
             .collapsible(false)
             .resizable(false)
@@ -732,8 +736,11 @@ impl DropDialog {
                         }
                     }
                 });
-                if total > 0 {
-                    ui.weak(t!("drop-size", size = crate::files_window::size_text(total)));
+                let size = crate::files_window::size_text(total);
+                if folders {
+                    ui.weak(t!("drop-size-folders", size = size));
+                } else if total > 0 {
+                    ui.weak(t!("drop-size", size = size));
                 }
                 ui.weak(t!("drop-where"));
                 ui.checkbox(&mut self.remember, t!("drop-remember"));

@@ -32,6 +32,8 @@ through our own client — ssh (`nativeterm/nt_drop.c` in the OpenSSH fork).
    current folder, else the one last used for that host), shows progress,
    and can pause, resume and cancel. Nothing is drawn in the terminal, and
    a running command is not disturbed.
+   A dropped **folder** goes with everything in it (the plan walks it), and
+   the files go several at a time — see below.
 5. **Typing the names** sends the text with `AppMessage::SendText`, as
    "Send commands" does, with a marker in front (`ESC _ nt ESC \`) that the
    client strips: without it the names would arrive as another drop, for
@@ -46,6 +48,31 @@ used only when the mouse says it was a drop: NativeTerm's tab-menu hook
 was last released over a *different* window than it went down on, which is
 how a drag from Explorer ends and how a click never does. Without that
 within two seconds, the question is asked however it was answered before.
+
+## Several files at once
+
+A connection copies `files.at_once` files at the same time (three by
+default, up to sixteen), and the rest wait their turn: the files window's
+transfer bar has the number, and it takes effect while transfers run.
+Every transfer of that connection shares the same slots
+(`transfer::Slots`), so two jobs together never open more than that.
+
+It is one SFTP channel either way (Windows OpenSSH cannot share a
+connection, see `ARCHITECTURE.md`), so this wins where the round trips
+cost more than the bytes: many small files. Measured against the test
+container, 120 files of 5.7 MB in all:
+
+| At once | Time |
+|---|---|
+| 1 | 11.0 s |
+| 3 (default) | 5.4 s |
+| 8 | 2.3 s |
+
+Pause and resume still work file by file: what was half-copied keeps its
+`.ntpart` and goes on from there, and the resume point is the first file
+that is not finished (a few that finished after it are copied again).
+Verified with 240 MB in eight files paused in flight and resumed: 128
+files, every SHA-256 equal.
 
 ## What is not covered
 

@@ -866,3 +866,6 @@ drop-no-sftp = This session is not SSH: nothing can be uploaded.
 notice-drop-not-sent = The text did not reach the session.
 drop-ask-setting = Ask about dropped files
 drop-ask-hint = With it off, dropped files are dealt with as they were last time (uploaded, or typed into the terminal). Turning it off here does nothing: to stop the question, tick "always do this" when files are dropped.
+files-at-once = At once
+files-at-once-hint = How many files each connection copies at the same time; the rest wait their turn. More is faster for many small files; fewer is kinder to a slow link or a server that limits them.
+drop-size-folders = Folders go with everything in them ({ $size } and what they hold)

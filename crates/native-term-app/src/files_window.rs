@@ -71,6 +71,13 @@ pub struct Spec {
     pub credential: Option<String>,
 }
 
+/// How many files a connection copies at once (`state.db`); the files
+/// window's own control changes it.
+pub const AT_ONCE_SETTING: &str = "files.at_once";
+/// What it is without a setting, and as far as it can be set.
+pub const AT_ONCE_DEFAULT: usize = 3;
+pub const AT_ONCE_MAX: usize = 16;
+
 thread_local! {
     /// Sessions asked for since the window last looked.
     static PENDING: RefCell<Vec<Spec>> = const { RefCell::new(Vec::new()) };
@@ -305,6 +312,9 @@ struct Edit {
 /// The server's side of a session.
 struct Remote {
     sftp: Option<Arc<Session>>,
+    /// How many files this connection copies at once (`AT_ONCE_SETTING`),
+    /// shared by all of its transfers.
+    slots: Arc<native_term_sftp::transfer::Slots>,
     failed: Option<String>,
     path: Vec<u8>,
     path_text: String,
@@ -497,6 +507,31 @@ impl FilesWindow {
         }
     }
 
+    /// Where settings are kept (`state.db`), from whichever tab has it.
+    fn core(&self) -> Option<&native_term_app::Core> {
+        self.tabs.iter().find_map(|t| t.spec.memory.as_ref())
+    }
+
+    /// How many files a connection copies at once.
+    fn at_once(&self) -> usize {
+        self.core()
+            .and_then(|core| core.setting(AT_ONCE_SETTING))
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(AT_ONCE_DEFAULT)
+            .clamp(1, AT_ONCE_MAX)
+    }
+
+    /// Changes it for the connections that are open, and keeps it.
+    fn set_at_once(&mut self, at_once: usize) {
+        let at_once = at_once.clamp(1, AT_ONCE_MAX);
+        if let Some(core) = self.core() {
+            core.set_setting(AT_ONCE_SETTING, &at_once.to_string());
+        }
+        for tab in &self.tabs {
+            tab.remote.slots.set_width(at_once);
+        }
+    }
+
     fn take_pending(&mut self) {
         let pending = PENDING.with(|p| std::mem::take(&mut *p.borrow_mut()));
         for spec in pending {
@@ -512,11 +547,13 @@ impl FilesWindow {
             let id = self.next_id;
             self.next_id += 1;
             let names = spec.names;
+            let at_once = self.at_once();
             self.tabs.push(Tab {
                 id,
                 spec,
                 remote: Remote {
                     sftp: None,
+                    slots: Arc::new(native_term_sftp::transfer::Slots::new(at_once)),
                     failed: None,
                     path: Vec::new(),
                     path_text: String::new(),
@@ -1030,6 +1067,11 @@ impl FilesWindow {
         job.started = Instant::now();
         job.finished = None;
         let plan = Arc::clone(&job.plan);
+        let slots = self
+            .tabs
+            .iter()
+            .find(|t| t.id == tab)
+            .map_or_else(|| Arc::new(native_term_sftp::transfer::Slots::new(1)), |t| Arc::clone(&t.remote.slots));
         self.spawn(tab, move || {
             let known = plan.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let items = match known {
@@ -1044,9 +1086,9 @@ impl FilesWindow {
             let result = items.and_then(|items| {
                 *plan.lock().unwrap_or_else(|e| e.into_inner()) = Some(items.clone());
                 if work.uploads() {
-                    transfer::upload(&sftp, work.names(), &items, &progress)
+                    transfer::upload(&sftp, work.names(), &items, &progress, &slots)
                 } else {
-                    transfer::download(&sftp, work.names(), &items, &progress)
+                    transfer::download(&sftp, work.names(), &items, &progress, &slots)
                 }
             });
             What::JobDone { job: id, result }
@@ -1873,6 +1915,16 @@ impl FilesWindow {
             if ui.add_enabled(finished, egui::Button::new(t!("files-queue-clear")).small()).clicked() {
                 self.jobs.retain(|j| matches!(j.state, JobState::Running | JobState::Paused));
             }
+            // how many files each connection copies at once; the rest wait
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let mut at_once = self.at_once();
+                let widget = egui::DragValue::new(&mut at_once).range(1..=AT_ONCE_MAX).speed(0.05);
+                let response = ui.add(widget).on_hover_text(t!("files-at-once-hint"));
+                ui.label(t!("files-at-once"));
+                if response.changed() {
+                    self.set_at_once(at_once);
+                }
+            });
         });
         let mut actions = Vec::new();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {

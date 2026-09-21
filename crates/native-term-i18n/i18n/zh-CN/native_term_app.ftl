@@ -840,3 +840,6 @@ drop-no-sftp = 该会话不是 SSH，无法上传。
 notice-drop-not-sent = 文本没能送到会话。
 drop-ask-setting = 拖入文件时询问
 drop-ask-hint = 关掉后按上次的选择处理（上传或输入到终端）。取消勾选无效：要改为不再询问，请在拖入文件时勾选"以后都这样做"。
+files-at-once = 同时传输
+files-at-once-hint = 每个连接同时传输的文件数，多出的排队等待。文件多而小时调大更快；链路慢或服务器有限制时调小。
+drop-size-folders = 文件夹连同里面的内容一起上传（共 { $size } 以上）
