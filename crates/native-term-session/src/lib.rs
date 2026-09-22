@@ -4,14 +4,19 @@
 //! close, type text). See `docs/ARCHITECTURE.md`, "Session lifecycle".
 //!
 //! - [`protocol`]: messages, one JSON object per line.
-//! - [`pipe`]: the named pipe (Windows).
+//! - [`pipe`]: the channel (a named pipe on Windows, a Unix socket
+//!   elsewhere).
 
-#[cfg(windows)]
 pub mod pipe;
 pub mod protocol;
 
 /// Full name: `\\.\pipe\nativeterm-<user SID>-<logon session id>`.
+#[cfg(windows)]
 pub const PIPE_NAME_PREFIX: &str = r"\\.\pipe\nativeterm-";
+/// Where sockets other than the user's own (`pipe::pipe_name`) go: tests,
+/// `NATIVETERM_PIPE`.
+#[cfg(unix)]
+pub const PIPE_NAME_PREFIX: &str = "/tmp/nativeterm-";
 /// Sent in `Hello`/`Welcome`; a newer NativeTerm keeps talking to older
 /// shims where it can.
 pub const PROTOCOL_VERSION: u32 = 1;
@@ -43,6 +48,7 @@ pub fn is_connection_level(code: i32) -> bool {
 /// builds (Git for Windows puts one on some `PATH`s) are skipped: they read
 /// `C:/...` paths in `Include` differently, so NativeTerm's folders would be
 /// invisible to them.
+#[cfg(windows)]
 pub fn ssh_program() -> std::path::PathBuf {
     use std::path::PathBuf;
     if let Some(p) = std::env::var_os("NATIVETERM_SSH") {
@@ -63,13 +69,22 @@ pub fn ssh_program() -> std::path::PathBuf {
     })
 }
 
+/// The `ssh` NativeTerm runs and checks configs with: `NATIVETERM_SSH`, else
+/// the system's `ssh` (found on `PATH` when it is run).
+#[cfg(unix)]
+pub fn ssh_program() -> std::path::PathBuf {
+    std::env::var_os("NATIVETERM_SSH").map_or_else(|| std::path::PathBuf::from("ssh"), std::path::PathBuf::from)
+}
+
 /// NativeTerm's own ssh: `openssh\ssh.exe` next to the running program.
+#[cfg(windows)]
 fn own_ssh() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let own = exe.parent()?.join("openssh").join("ssh.exe");
     own.is_file().then_some(own)
 }
 
+#[cfg(windows)]
 fn ssh_in(dirs: impl Iterator<Item = std::path::PathBuf>) -> Option<std::path::PathBuf> {
     dirs.map(|dir| (dir.join("ssh.exe"), dir))
         .find(|(exe, dir)| exe.is_file() && !dir.join("msys-2.0.dll").exists() && !dir.join("cygwin1.dll").exists())
@@ -98,7 +113,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod ssh_tests {
     use super::*;
 

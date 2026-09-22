@@ -3012,6 +3012,11 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   is read. The peer's image path must be the shim NativeTerm opens its
   tabs with — compared without case, and, when that differs, through
   both paths' real names, so a short (8.3) name or a link still matches.
+  On Unix the channel is a socket at `$XDG_RUNTIME_DIR/nativeterm/app.sock`
+  (else `$TMPDIR/nativeterm-<uid>/`, `0700`, the socket `0600`), one
+  instance found by connecting first, and `accept` reads the peer's
+  credentials (`SO_PEERCRED`; `getpeereid` and `LOCAL_PEERPID` on macOS)
+  and drops any other user's connection before the same image check.
   Anything else has its connection closed at once; the program is named
   in the log every time and in a notice the first time, so a loop cannot
   fill the window. Live-tested by having the test program itself say

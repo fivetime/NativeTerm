@@ -877,8 +877,15 @@
         enum (Segoe on Windows, Phosphor elsewhere): the app `cargo check`s
         on the Linux and macOS targets
   - [ ] P2c — portable-check script in the checklist
-  - [ ] P3 — session pipe (`AF_UNIX`) and shim on Unix (ssh on the
-        inherited tty; typing and screen reads through the backend)
+  - [x] P3a — the session channel on Unix (`native-term-session::pipe`
+        split into `windows`/`unix` behind one API): a socket under
+        `$XDG_RUNTIME_DIR`, one instance by connecting first, peer
+        credentials checked in `accept`, `close` wakes a reader, a
+        write-and-exit client is still read; its tests run on the
+        Linux/macOS machines when they come (2026-09-22). Done before P2b
+        because the app has no `Core` without a channel
+  - [ ] P3b — the shim on Unix (ssh on the inherited tty; typing and
+        screen reads through the backend)
   - [ ] P4 — Linux backend: WezTerm (`wezterm cli`; also runs on Windows
         for end-to-end checks before a Linux machine is at hand)
   - [ ] P5 — macOS backend: iTerm2 (JXA through `osascript`)
