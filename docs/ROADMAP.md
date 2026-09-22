@@ -1066,6 +1066,18 @@
         rz upload would open the files window. Not driven by hand:
         xdotool's clicks do not reach windows under Xwayland on these
         mutter-based desktops
+  - [x] EndeavourOS (2026-09-23: Arch, glibc 2.44, KDE Plasma 6 on
+        Wayland, dark): built from source with pacman's base-devel,
+        sqlite and rustup; WezTerm from Arch's own package (a 2024
+        snapshot newer than the release). The portal answers dark and a
+        purple accent (`#6c53a6`), which reach NativeTerm's window and
+        the WezTerm tab; the window runs natively on Wayland with KDE's
+        decorations, and both WezTerm live tests pass. Plasma 6 asks the
+        person before any program may inject input (`kwin_eis_prompter`
+        for xdotool under Xwayland), so nothing was clicked there; the
+        prompt was declined. Forced through Xwayland (not a path the
+        program takes on KDE) its window stayed unmapped after that
+        prompt; not pursued
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a
