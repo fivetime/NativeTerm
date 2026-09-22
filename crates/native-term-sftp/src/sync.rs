@@ -212,7 +212,7 @@ fn walk(
     Ok(())
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
@@ -266,10 +266,7 @@ mod tests {
     /// side only (one entry), a partial copy (left out) and CJK names.
     #[test]
     fn two_trees() {
-        let server = Path::new(r"C:\Windows\System32\OpenSSH\sftp-server.exe");
-        if !server.exists() {
-            return;
-        }
+        let Some(server) = crate::test_support::sftp_server() else { return };
         let dir = tempfile::tempdir().unwrap();
         let mut command = Command::new(server);
         command.arg("-d").arg(dir.path());

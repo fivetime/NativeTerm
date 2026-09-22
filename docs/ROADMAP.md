@@ -945,7 +945,12 @@
       the machine itself over ssh: the login signal through the FIFO,
       text typed through WezTerm and run by the shell, disconnect and
       reconnect (attempt 2), and the tab closed from WezTerm's side
-      (SIGHUP → `Closing` → closed) — 1.1 s. Follow-ups seen there:
+      (SIGHUP → `Closing` → closed) — 1.1 s. The SFTP crate runs its
+      tests against the system's own `sftp-server` there (17 pass) and
+      `through_ssh` against the box's sshd (32 MB at 112 MB/s up, 144
+      down; GBK names, links, rename), so the files window's transport
+      is the same as on Windows; the window itself and the key-install
+      tool were not driven by hand there yet. Follow-ups seen there:
   - [x] The wizard and the profile page name the terminal being driven
         (`TerminalBackend::name`) and skip the profile step where there
         is no profile; the ssh-missing advice is the platform's

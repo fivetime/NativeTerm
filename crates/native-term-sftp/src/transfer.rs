@@ -611,10 +611,9 @@ pub fn remove(sftp: &Session, path: &[u8], attrs: &Attrs) -> Result<()> {
     sftp.rmdir(path)
 }
 
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
 
     /// One file at a time, as the tests below expect.
     fn one() -> Slots {
@@ -711,13 +710,7 @@ mod tests {
     }
 
     fn local_server(dir: &Path) -> Option<Session> {
-        let server = Path::new(r"C:\Windows\System32\OpenSSH\sftp-server.exe");
-        if !server.exists() {
-            return None;
-        }
-        let mut command = Command::new(server);
-        command.arg("-d").arg(dir);
-        Some(Session::spawn(command).unwrap())
+        crate::test_support::local_server(dir)
     }
 
     fn remote(path: &Path) -> Vec<u8> {

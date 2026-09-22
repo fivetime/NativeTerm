@@ -825,26 +825,51 @@ pub fn parent(path: &[u8]) -> Vec<u8> {
     }
 }
 
-#[cfg(all(test, windows))]
-mod tests {
-    use super::*;
+/// For the tests of this crate: the system's own `sftp-server`, run over
+/// pipes (a real server, no ssh), and a local path as it names it.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
 
-    /// Windows' own sftp-server over pipes: a real server, no ssh.
-    fn local_server(dir: &Path) -> Option<Session> {
-        let server = Path::new(r"C:\Windows\System32\OpenSSH\sftp-server.exe");
-        if !server.exists() {
-            eprintln!("no sftp-server.exe: skipped");
-            return None;
+    use super::Session;
+
+    /// Where OpenSSH keeps its sftp-server here.
+    pub(crate) fn sftp_server() -> Option<PathBuf> {
+        let candidates: &[&str] = if cfg!(windows) {
+            &[r"C:\Windows\System32\OpenSSH\sftp-server.exe"]
+        } else {
+            &["/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server", "/usr/libexec/sftp-server"]
+        };
+        let found = candidates.iter().map(PathBuf::from).find(|p| p.exists());
+        if found.is_none() {
+            eprintln!("no sftp-server here: skipped");
         }
-        let mut command = Command::new(server);
+        found
+    }
+
+    /// That server serving `dir`.
+    pub(crate) fn local_server(dir: &Path) -> Option<Session> {
+        let mut command = Command::new(sftp_server()?);
         command.arg("-d").arg(dir);
         Some(Session::spawn(command).unwrap())
     }
 
-    /// The server's form of a local path (`/C:/…`).
-    fn remote(path: &Path) -> Vec<u8> {
-        format!("/{}", path.display().to_string().replace('\\', "/")).into_bytes()
+    /// The server's form of a local path (`/C:/…` on Windows, the path
+    /// itself elsewhere).
+    pub(crate) fn remote(path: &Path) -> Vec<u8> {
+        if cfg!(windows) {
+            format!("/{}", path.display().to_string().replace('\\', "/")).into_bytes()
+        } else {
+            path.display().to_string().into_bytes()
+        }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{local_server, remote};
 
     #[test]
     fn names_in_any_encoding() {
@@ -948,6 +973,7 @@ mod tests {
         assert!(!dir.path().join("上传").exists());
     }
 
+    #[cfg(windows)]
     #[test]
     fn listing_during_a_transfer() {
         let dir = tempfile::tempdir().unwrap();
@@ -971,7 +997,7 @@ mod tests {
     fn through_ssh() {
         let spec = std::env::var("NATIVETERM_SFTP_TEST").unwrap();
         let (config, alias) = spec.split_once('|').unwrap();
-        let ssh = Path::new(r"C:\Windows\System32\OpenSSH\ssh.exe");
+        let ssh = if cfg!(windows) { Path::new(r"C:\Windows\System32\OpenSSH\ssh.exe") } else { Path::new("ssh") };
         let start = std::time::Instant::now();
         let sftp = Session::connect(ssh, Some(Path::new(config)), alias, None, |_| {}).unwrap();
         let home = sftp.realpath(b".").unwrap();
@@ -1089,6 +1115,7 @@ mod tests {
         eprintln!("3000 entries in {:?}", started.elapsed());
     }
 
+    #[cfg(windows)]
     #[test]
     fn a_connection_that_fails_says_why() {
         let command = Command::new(r"C:\Windows\System32\cmd.exe");
