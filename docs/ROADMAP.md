@@ -992,6 +992,14 @@
         window manager places them as it likes. Seen on Deepin (KWin):
         dock, hide, return, the button's panel, re-dock after a restart.
         The button is square there (no layered window)
+  - [x] Session restore on WezTerm needs nothing of its own
+        (2026-09-22, seen on Deepin): a NativeTerm restarted while its
+        WezTerm tabs are open claims them back (the shims reconnect to
+        the new socket: "local · connected · window 1 · tab 1"), and
+        with WezTerm gone the next start offers the last run's sessions
+        back, which reopen and log in. What Windows Terminal adds — its
+        own restore of the tab layout after a reboot, matched by
+        NativeTerm — has no counterpart in WezTerm and is not planned
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a
