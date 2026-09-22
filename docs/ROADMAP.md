@@ -843,19 +843,19 @@
       goes into `tools\` and PuTTY's licence into `licenses\`
       (`tools\get-ntplink.ps1 -Tag … -Package …` exists for it; the CI
       needs a token that can read the private PuTTY fork)
-- [ ] Session restore on Terminal 1.26: `tests/restore_portable.rs`
-      (`restart_and_session_restore`) fails against the portable
-      1.26.2581.0, and did before the backend refactor (checked at
-      `5cf5256` on a clean state, 2026-09-22). Two things changed in
-      Terminal: the persisted layout carries fresh `sessionId`s instead
-      of the ones `wt --sessionId` was given (NativeTerm assigned
-      `832a920a…`/`fd0f0569…`, `state.json` holds `09eb56fe…`/`0e56713a…`),
-      so a restored pane's `WT_SESSION` matches no session and the
-      placeholder is told to be a local shell; and closing the window
-      with NativeTerm running no longer records "closed with window"
-      (`restorable` stays 0 in `state.db`). Both need a look: match
-      restored panes some other way (title, position), and find out what
-      1.26 does with `WM_CLOSE`. The other two tests in the file pass
+- [x] Session restore on Terminal 1.26 (2026-09-22): `restart_and_session_restore`
+      passes again. What the earlier note blamed was not it: Terminal 1.26
+      does persist the `--sessionId` a tab was opened with, and a window
+      closed with NativeTerm running is recorded as "closed with window".
+      The restored placeholders were replaced correctly; the replacement
+      tabs, opened to wait, were then told to connect at once, because a
+      hello set a just-opened session to "connecting" and the rule "a
+      waiting that arrives while connecting means a lost connect" fired.
+      Now a session remembers being told to connect (`told_to_connect`)
+      and a hello leaves an opening tab's state to its shim's first
+      message; the queue no longer passes over such tabs either (it
+      dropped anything it saw as connecting). Every portable test passes
+      one per process
 - [ ] Cross-platform (see "Platform sequencing" in ARCHITECTURE.md),
       staged so Windows behaves the same after every step:
   - [x] P0 — dependencies gated: the portable crates (`i18n`, `config`,

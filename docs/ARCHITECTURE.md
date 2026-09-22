@@ -3174,9 +3174,16 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
     down with the link. Two things make sure it is told again: the queue
     puts a session back in its place when the link is gone or the send
     fails between choosing it and telling it, and a "waiting" that
-    arrives while NativeTerm believes the session is connecting puts it
+    arrives after NativeTerm told the session to connect (the session
+    remembers being told, until its shim says it is connecting) puts it
     back in the queue. Without this, one tab in six hung in "waiting"
-    about half the time when six were opened at once.
+    about half the time when six were opened at once. It used to be "a
+    waiting that arrives while the session counts as connecting", and a
+    session counted as connecting from its hello on — so a tab opened to
+    wait (a restored session's replacement) was told to connect the
+    moment it said it was waiting, and the queue, seeing "connecting",
+    passed over tabs it was about to connect; now a hello leaves a
+    just-opened tab's state to its first message.
 - **Elevation decides which Terminal instance a tab joins** (verified,
   2026-09-17):
   - `wt` started from an elevated process joins (or starts) the

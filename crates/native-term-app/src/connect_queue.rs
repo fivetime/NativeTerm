@@ -86,6 +86,7 @@ pub(crate) fn run(shared: Weak<Shared>, ids: Receiver<String>) {
         if told {
             // counted as connecting right away, not only when the shim says so
             if let Some(s) = lock(&shared.sessions).iter_mut().find(|s| s.id == id) {
+                s.told_to_connect = true;
                 if s.state.can_connect() {
                     s.state = State::Connecting;
                 }

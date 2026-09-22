@@ -470,6 +470,7 @@ fn after_exit(link: Option<&Link>) -> Next {
         if let Some(keys) = &keys {
             // every record read clears the signal; non-key records too
             while let Ok(Some(key)) = keys.read_key(Duration::ZERO) {
+                debug::log(format!("waiting: key {key:?}"));
                 match key {
                     'r' | 'R' | '\r' => return Next::Reconnect,
                     'c' | 'C' => return Next::Close,
@@ -478,6 +479,7 @@ fn after_exit(link: Option<&Link>) -> Next {
             }
         }
         for message in link.map(Link::drain).unwrap_or_default() {
+            debug::log(format!("waiting: {message:?}"));
             match message {
                 AppMessage::Connect => return Next::Reconnect,
                 AppMessage::Close => return Next::Close,

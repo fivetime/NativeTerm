@@ -198,6 +198,10 @@ pub(crate) struct Session {
     no_forwards: bool,
     /// Automatic reconnects since the connection was last stable.
     auto_retries: u32,
+    /// Told to connect (`AppMessage::Connect`) and not yet heard
+    /// connecting: a shim that says it is waiting meanwhile lost the
+    /// word with a broken link and is told again.
+    told_to_connect: bool,
     /// Typed after every login.
     on_login: Option<String>,
     /// When the current connection logged in.
@@ -233,6 +237,7 @@ impl Session {
             restorable: false,
             no_forwards: false,
             auto_retries: 0,
+            told_to_connect: false,
             connected_at: None,
             on_login: None,
             locked: false,
@@ -1319,7 +1324,12 @@ impl Core {
     }
 
     fn send(&self, id: &str, message: AppMessage) {
-        let link = self.shared.update(id, |s| (s.label.clone(), s.link.clone()));
+        let link = self.shared.update(id, |s| {
+            if matches!(message, AppMessage::Connect) {
+                s.told_to_connect = true;
+            }
+            (s.label.clone(), s.link.clone())
+        });
         match link {
             Some((_, Some(link))) => {
                 if let Err(e) = link.send(&message) {
@@ -1827,7 +1837,10 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             s.current_terminal_session = if differs { wt_session.clone() } else { None };
             s.shim_pid = Some(pid);
             s.link = Some(Arc::clone(&conn));
-            if !s.state.is_open() || matches!(s.state, State::Opening | State::Detached) {
+            // a tab just opened says first what it does (waiting, or
+            // connecting): calling it connecting here would make the
+            // connection queue pass it over as already on its way
+            if !s.state.is_open() || s.state == State::Detached {
                 s.state = State::Connecting;
             }
             s.current_terminal_session.clone()
@@ -1846,7 +1859,10 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                     .update(&id, |s| {
                         let was_connected = s.state == State::Connected;
                         // we had told it to connect (see below)
-                        let was_connecting = s.state == State::Connecting;
+                        let was_told = s.told_to_connect;
+                        if matches!(message, ShimMessage::Connecting { .. }) {
+                            s.told_to_connect = false;
+                        }
                         apply(s, &message);
                         let logged_in = s.state == State::Connected && !was_connected;
                         let login = if logged_in { s.on_login.clone() } else { None };
@@ -1859,8 +1875,10 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                         // it says it is waiting although it was told to
                         // connect: the message went down with a link that
                         // broke (the shim replays its state when it comes
-                        // back), so it has to be told again
-                        let lost = was_connecting && matches!(message, ShimMessage::Waiting);
+                        // back), so it has to be told again. (Only when it
+                        // was told: a tab opened to wait says so first, and
+                        // its state was Connecting only since its hello.)
+                        let lost = was_told && matches!(message, ShimMessage::Waiting);
                         (s.location.as_ref().map(|l| l.window), retry.map(|r| (s.attempt, r)), login, lost)
                     })
                     .map_or((None, None, None, false), |(w, r, l, lost)| (Some(w), Some(r), l, lost));
