@@ -36,12 +36,41 @@ pub struct ListedPane {
 pub struct ListedClient {
     #[serde(default)]
     pub focused_pane_id: Option<u64>,
+    /// Since the client's last input.
+    #[serde(default)]
+    pub idle_time: Option<Seconds>,
+}
+
+/// A duration as the client list prints it.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct Seconds {
+    #[serde(default)]
+    pub secs: u64,
+    #[serde(default)]
+    pub nanos: u32,
+}
+
+/// A client's focus: the pane, and how long ago the person last gave
+/// that client input. The GUI reports a focus only from its own events,
+/// so a tab NativeTerm activated shows there only once the window has
+/// had the focus; until the person acts, what NativeTerm chose is what
+/// the window shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Focus {
+    pub pane: u64,
+    pub since_input: std::time::Duration,
 }
 
 /// The panes the clients have the focus on (the GUI's, normally one).
-pub fn parse_focused_panes(json: &str) -> Result<Vec<u64>, serde_json::Error> {
+pub fn parse_focus(json: &str) -> Result<Vec<Focus>, serde_json::Error> {
     let clients: Vec<ListedClient> = serde_json::from_str(json)?;
-    Ok(clients.into_iter().filter_map(|c| c.focused_pane_id).collect())
+    Ok(clients
+        .into_iter()
+        .filter_map(|c| {
+            let idle = c.idle_time.unwrap_or_default();
+            Some(Focus { pane: c.focused_pane_id?, since_input: std::time::Duration::new(idle.secs, idle.nanos) })
+        })
+        .collect())
 }
 
 /// One tab: its id, its panes in order, and which is active.
@@ -435,9 +464,14 @@ mod tests {
         assert_eq!(windows[0].tab_of_pane(3), Some(1));
         assert_eq!(windows[0].tab_index(1), Some(1));
         assert_eq!(windows[1].tab_of_pane(3), None);
-        let clients = r#"[{"username":"x","hostname":"h","pid":1,"workspace":"default","focused_pane_id":7}]"#;
-        assert_eq!(parse_focused_panes(clients).unwrap(), [7]);
-        assert!(parse_focused_panes("[]").unwrap().is_empty());
+        let clients = r#"[{"username":"x","hostname":"h","pid":1,"workspace":"default","focused_pane_id":7,"idle_time":{"secs":9,"nanos":500000000}}]"#;
+        assert_eq!(
+            parse_focus(clients).unwrap(),
+            [Focus { pane: 7, since_input: std::time::Duration::from_millis(9500) }]
+        );
+        assert!(parse_focus("[]").unwrap().is_empty());
+        let no_idle = r#"[{"focused_pane_id":3}]"#;
+        assert_eq!(parse_focus(no_idle).unwrap()[0].since_input, std::time::Duration::ZERO);
         assert!(windows[0].tab_named(0, "web01").is_some());
         assert!(windows[0].tab_named(0, "moved").is_none());
         assert!(windows[0].tab_named(9, "web01").is_none());

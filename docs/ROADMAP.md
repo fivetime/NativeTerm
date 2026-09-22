@@ -1020,8 +1020,18 @@
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a
-        tab; the next start worked. Its stdio is `null` on our side, so
-        the cause is not known yet; watch for it
+        tab; the next start worked. Not seen again in 18 starts on
+        2026-09-22 (12 through the live test, 6 through the window and a
+        double-click, each closing the tab and the GUI again); its stdio
+        is `null` on our side. Left as a watch item
+  - [x] WezTerm's tab selection while its window has no focus
+        (2026-09-22): the GUI reports its focused pane only from its own
+        focus events, so after NativeTerm's `activate-tab` on a window
+        without the focus `list-clients` kept naming the old pane and the
+        selected tab read wrong (the live test failed on a desktop whose
+        lock screen held the focus). A tab selected here now counts as
+        shown until the client's `idle_time` says the person acted on the
+        window after that
   - [ ] `rustup component add … -q` is not an option; the box's
         toolchain got its components from `rust-toolchain.toml` anyway
 

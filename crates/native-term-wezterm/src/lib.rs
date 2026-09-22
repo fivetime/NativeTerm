@@ -47,8 +47,16 @@ struct State {
     recent: Option<u64>,
     /// `Target::Named` windows, for as long as this process runs.
     named: HashMap<String, u64>,
-    /// The tab each window shows, as last seen focused or selected here.
-    selected: HashMap<u64, u64>,
+    /// The tab each window shows, as last seen focused or selected here
+    /// (and when it was selected here).
+    selected: HashMap<u64, Chosen>,
+}
+
+/// A tab NativeTerm selected in a window, and when.
+#[derive(Clone, Copy, Debug)]
+struct Chosen {
+    tab_id: u64,
+    at: Instant,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -159,24 +167,43 @@ impl WezTerm {
         self.list().into_iter().find(|w| w.window_id == id)
     }
 
-    /// The panes the GUI has the focus on.
-    fn focused_panes(&self) -> Vec<u64> {
-        self.run(&cli::list_clients_args()).ok().and_then(|j| cli::parse_focused_panes(&j).ok()).unwrap_or_default()
+    /// The panes the GUI has the focus on, with how long ago it last had
+    /// input.
+    fn focused_panes(&self) -> Vec<cli::Focus> {
+        self.run(&cli::list_clients_args()).ok().and_then(|j| cli::parse_focus(&j).ok()).unwrap_or_default()
     }
 
     /// Note which tab each window shows, from the focused panes, and give
     /// the index of the tab shown in each window (as far as it is known).
-    fn selected_tabs(&self, windows: &[ListedWindow], focused: &[u64]) -> HashMap<u64, usize> {
+    fn selected_tabs(&self, windows: &[ListedWindow], focused: &[cli::Focus]) -> HashMap<u64, usize> {
+        let now = Instant::now();
         let mut state = lock(&self.state);
         for w in windows {
-            if let Some(index) = focused.iter().find_map(|p| w.tab_of_pane(*p)) {
-                state.selected.insert(w.window_id, w.tabs[index].tab_id);
+            let Some((index, focus)) = focused.iter().find_map(|f| w.tab_of_pane(f.pane).map(|i| (i, f))) else {
+                continue;
+            };
+            // the GUI's focus is what the person last made of the window;
+            // a tab selected here since then is what the window shows
+            // (the GUI reports it only once the window itself had the focus)
+            let ours_since = state.selected.get(&w.window_id).map(|c| c.at);
+            let input_at = now.checked_sub(focus.since_input);
+            let ours_newer = match (ours_since, input_at) {
+                (Some(ours), Some(input)) => ours > input,
+                (Some(_), None) => true,
+                (None, _) => false,
+            };
+            if !ours_newer {
+                state
+                    .selected
+                    .insert(w.window_id, Chosen { tab_id: w.tabs[index].tab_id, at: input_at.unwrap_or(now) });
             }
         }
         state.selected.retain(|id, _| windows.iter().any(|w| w.window_id == *id));
         windows
             .iter()
-            .filter_map(|w| state.selected.get(&w.window_id).and_then(|t| w.tab_index(*t)).map(|i| (w.window_id, i)))
+            .filter_map(|w| {
+                state.selected.get(&w.window_id).and_then(|c| w.tab_index(c.tab_id)).map(|i| (w.window_id, i))
+            })
             .collect()
     }
 
@@ -194,7 +221,7 @@ impl WezTerm {
             let focused = self.focused_panes();
             windows
                 .iter()
-                .find(|w| focused.iter().any(|p| w.tab_of_pane(*p).is_some()))
+                .find(|w| focused.iter().any(|f| w.tab_of_pane(f.pane).is_some()))
                 .or(windows.first())
                 .map(|w| w.window_id)
         })
@@ -319,7 +346,7 @@ impl TerminalBackend for WezTerm {
             .map(|w| WindowView {
                 handle: w.id(),
                 pid: 0,
-                foreground: focused.iter().any(|p| w.tab_of_pane(*p).is_some()),
+                foreground: focused.iter().any(|f| w.tab_of_pane(f.pane).is_some()),
                 unresponsive: false,
                 tabs: claimer.claim(w.id(), &w.as_window_tabs(selected.get(&w.window_id).copied()), labels),
             })
@@ -390,7 +417,7 @@ impl TerminalBackend for WezTerm {
         self.run(&cli::activate_tab_args(found.tab_id))?;
         let mut state = lock(&self.state);
         state.recent = Some(window.0);
-        state.selected.insert(window.0, found.tab_id);
+        state.selected.insert(window.0, Chosen { tab_id: found.tab_id, at: Instant::now() });
         Ok(true)
     }
 
@@ -420,9 +447,12 @@ impl TerminalBackend for WezTerm {
                 };
                 let look = || {
                     let windows = output(cli::list_args()).and_then(|j| cli::parse_list(&j).ok()).unwrap_or_default();
-                    let focused = output(cli::list_clients_args())
-                        .and_then(|j| cli::parse_focused_panes(&j).ok())
-                        .unwrap_or_default();
+                    let focused: Vec<u64> = output(cli::list_clients_args())
+                        .and_then(|j| cli::parse_focus(&j).ok())
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|f| f.pane)
+                        .collect();
                     shape(&windows, &focused)
                 };
                 let mut last = look();
@@ -515,16 +545,38 @@ mod tests {
                 {"window_id":7,"tab_id":8,"pane_id":9,"tab_title":"c","is_active":true}]"#,
         )
         .unwrap();
-        let selected = w.selected_tabs(&windows, &[5]);
+        let focus = |pane: u64, idle_secs: u64| cli::Focus { pane, since_input: Duration::from_secs(idle_secs) };
+        let selected = w.selected_tabs(&windows, &[focus(5, 0)]);
         assert_eq!(selected.get(&1), Some(&1));
         assert_eq!(selected.get(&7), None, "never seen focused");
-        let selected = w.selected_tabs(&windows, &[9]);
+        let selected = w.selected_tabs(&windows, &[focus(9, 0)]);
         assert_eq!(selected.get(&1), Some(&1), "still what it showed");
         assert_eq!(selected.get(&7), Some(&0));
         let only_one = &windows[1..];
         let selected = w.selected_tabs(only_one, &[]);
         assert_eq!(selected.get(&1), None, "window 1 is gone");
         assert_eq!(selected.get(&7), Some(&0));
+    }
+
+    /// A tab selected here is what the window shows until the person acts
+    /// on the window: the GUI reports its focus only from its own events,
+    /// which a window without the focus never gets.
+    #[test]
+    fn a_tab_selected_here_beats_a_stale_focus() {
+        let w = WezTerm::new(None, Path::new("shim"));
+        let windows = cli::parse_list(
+            r#"[{"window_id":1,"tab_id":2,"pane_id":3,"tab_title":"a","is_active":true},
+                {"window_id":1,"tab_id":4,"pane_id":5,"tab_title":"b","is_active":true}]"#,
+        )
+        .unwrap();
+        let focus = |pane: u64, idle_secs: u64| cli::Focus { pane, since_input: Duration::from_secs(idle_secs) };
+        // the person last touched the window 10 s ago, on tab "a"
+        assert_eq!(w.selected_tabs(&windows, &[focus(3, 10)]).get(&1), Some(&0));
+        // NativeTerm selected "b" since: that is what the window shows
+        lock(&w.state).selected.insert(1, Chosen { tab_id: 4, at: Instant::now() });
+        assert_eq!(w.selected_tabs(&windows, &[focus(3, 10)]).get(&1), Some(&1), "ours is newer than the input");
+        // the person clicks tab "a" now: the focus is what counts again
+        assert_eq!(w.selected_tabs(&windows, &[focus(3, 0)]).get(&1), Some(&0));
     }
 
     #[test]
