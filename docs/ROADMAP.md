@@ -949,8 +949,10 @@
       tests against the system's own `sftp-server` there (17 pass) and
       `through_ssh` against the box's sshd (32 MB at 112 MB/s up, 144
       down; GBK names, links, rename), so the files window's transport
-      is the same as on Windows; the window itself and the key-install
-      tool were not driven by hand there yet. Follow-ups seen there:
+      is the same as on Windows, and the files window opened there
+      (`NATIVETERM_OPEN_FILES`) connects to the box, lists both sides
+      and shows the local Downloads folder; the key-install tool was
+      not driven by hand there yet. Follow-ups seen there:
   - [x] The wizard and the profile page name the terminal being driven
         (`TerminalBackend::name`) and skip the profile step where there
         is no profile; the ssh-missing advice is the platform's
