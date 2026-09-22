@@ -3839,6 +3839,18 @@ All UI surfaces invoke one shared app-level command layer
   - **Icons:** Segoe Fluent Icons (Windows 11) or Segoe MDL2 Assets
     (Windows 10), memory-mapped like the CJK font and added as the last
     fallback font, so a glyph (private use area) can sit in any label.
+  - **Moving hosts:** a host dragged onto a folder moves into that
+    folder's file (several at once if the dragged host is part of a
+    selection); the folder under the pointer is marked, a grouping node
+    with no file of its own is not a target, and a host dropped on the
+    folder it is already in changes nothing. It is the "Move to" menu
+    item's shortcut, and that item says so.
+  - **Dropping files on NativeTerm's own window:** a session in the list
+    and a tab (row or picture) in the tab list take dropped files like
+    the session's Terminal tab does, and ask the same question (upload
+    over SFTP, or type the names). On the tab itself the drop has to be
+    told from a paste (the mouse hook's drag-release), but here Windows
+    reports the drop, so nothing is guessed.
   - **Session tree:** folder labels are nested at " / " (an imported
     SecureCRT tree `生产 / 控制节点` shows as folders in folders; a group
     without its own file is a folder too), sorted by name, with folder

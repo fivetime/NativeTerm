@@ -4,6 +4,7 @@
 //! Clicking one only switches to it.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
 use native_term_app::{fuzzy, t, Core, Preview, Screen, SessionView, State};
@@ -145,7 +146,9 @@ impl TabList {
         }
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, core: &Core) {
+    /// Files dropped on one of NativeTerm's own tabs here: its session
+    /// and the paths (the window asks what to do with them).
+    pub fn show(&mut self, ui: &mut egui::Ui, core: &Core) -> Option<(String, Vec<PathBuf>)> {
         core.want_all_tabs(true);
         let pictures = *self.pictures.get_or_insert_with(|| core.setting(VIEW_SETTING).as_deref() == Some("pictures"));
         let now = Instant::now();
@@ -160,6 +163,8 @@ impl TabList {
         }
 
         let mut clear = false;
+        // files dragged from Explorer onto one of NativeTerm's tabs
+        let mut dropped: Option<(String, Vec<PathBuf>)> = None;
         let search = ui
             .horizontal(|ui| {
                 ui.label(icons::SEARCH.to_string());
@@ -217,7 +222,7 @@ impl TabList {
         ui.add_space(4.0);
         if list.is_empty() {
             ui.weak(if self.query.trim().is_empty() { t!("tabs-none") } else { t!("tabs-no-match") });
-            return;
+            return None;
         }
         let searching = !self.query.trim().is_empty();
         if pictures && focused {
@@ -247,8 +252,14 @@ impl TabList {
                         for e in group {
                             let picture = self.texture(ui.ctx(), core, e);
                             let screen = picture.is_none().then(|| core.screen(e.session_id.as_ref()?)).flatten();
-                            if tab_card(ui, e, searching, picture, screen).clicked() {
+                            let response = tab_card(ui, e, searching, picture, screen);
+                            if response.clicked() {
                                 core.select_tab(e.window, e.index, &e.title);
+                            }
+                            if let Some(session) = &e.session_id {
+                                if let Some(paths) = over(ui, response.rect, &shown_name(e)) {
+                                    dropped = Some((session.clone(), paths));
+                                }
                             }
                         }
                     });
@@ -275,11 +286,42 @@ impl TabList {
                         if response.clicked() {
                             core.select_tab(e.window, e.index, &e.title);
                         }
+                        if let Some(session) = &e.session_id {
+                            if let Some(paths) = over(ui, response.rect, &shown_name(e)) {
+                                dropped = Some((session.clone(), paths));
+                            }
+                        }
                     }
                 }
             }
         });
+        dropped
     }
+}
+
+/// Files dragged over this row or card: it is marked while they are,
+/// and their paths are given once they are let go.
+fn over(ui: &egui::Ui, rect: egui::Rect, name: &str) -> Option<Vec<PathBuf>> {
+    let at = ui.ctx().input(|i| i.pointer.interact_pos().or_else(|| i.pointer.latest_pos()))?;
+    if !rect.contains(at) {
+        return None;
+    }
+    let (hovering, paths) = ui.ctx().input(|i| {
+        let paths: Vec<PathBuf> = i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect();
+        (!i.raw.hovered_files.is_empty(), paths)
+    });
+    if hovering {
+        let accent = ui.visuals().selection.bg_fill;
+        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0_f32, accent), egui::StrokeKind::Inside);
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            t!("drop-on-session", label = name),
+            egui::TextStyle::Body.resolve(ui.style()),
+            ui.visuals().strong_text_color(),
+        );
+    }
+    (!paths.is_empty()).then_some(paths)
 }
 
 /// "As of 14:05" for a picture.

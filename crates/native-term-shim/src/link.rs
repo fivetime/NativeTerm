@@ -29,6 +29,9 @@ struct Replay {
     authenticated: bool,
     /// `Quiet` while nothing arrives.
     quiet: Option<ShimMessage>,
+    /// The server was never reached; it tells `Exited` apart from a
+    /// refused login, so it has to be replayed before it.
+    unreachable: bool,
     /// `Exited` or `Waiting`.
     outcome: Option<ShimMessage>,
 }
@@ -105,7 +108,8 @@ impl Link {
                 let state = lock(&reader.replay);
                 let mut ok = conn.send(&hello).is_ok();
                 let login = state.authenticated.then_some(&ShimMessage::Authenticated);
-                for m in state.connecting.iter().chain(login).chain(state.quiet.iter()) {
+                let unreachable = state.unreachable.then_some(&ShimMessage::Unreachable);
+                for m in state.connecting.iter().chain(login).chain(state.quiet.iter()).chain(unreachable) {
                     ok = ok && conn.send(m).is_ok();
                 }
                 if let Some(m) = &state.outcome {
@@ -216,6 +220,46 @@ fn remember(replay: &Mutex<Replay>, message: &ShimMessage) {
         ShimMessage::Authenticated => state.authenticated = true,
         ShimMessage::Quiet { .. } => state.quiet = Some(message.clone()),
         ShimMessage::Heard => state.quiet = None,
+        ShimMessage::Unreachable => state.unreachable = true,
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn remembered(messages: &[ShimMessage]) -> Replay {
+        let replay = Mutex::new(Replay::default());
+        for message in messages {
+            remember(&replay, message);
+        }
+        replay.into_inner().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// NativeTerm restarting must hear the whole story again, or a
+    /// server that was never reached looks like a refused login.
+    #[test]
+    fn the_replay_keeps_what_tells_an_exit_apart() {
+        let connecting = ShimMessage::Connecting { attempt: 1 };
+        let state = remembered(&[connecting.clone(), ShimMessage::Unreachable, ShimMessage::Exited { code: 255 }]);
+        assert!(state.unreachable);
+        assert_eq!(state.outcome, Some(ShimMessage::Exited { code: 255 }));
+        assert!(!state.authenticated);
+
+        // a new attempt starts from nothing: last time's "never reached"
+        // must not colour this one
+        let state = remembered(&[
+            connecting.clone(),
+            ShimMessage::Unreachable,
+            ShimMessage::Exited { code: 255 },
+            connecting.clone(),
+        ]);
+        assert!(!state.unreachable);
+        assert_eq!(state.outcome, None);
+
+        // and a login that failed after the server answered stays that way
+        let state = remembered(&[connecting, ShimMessage::Exited { code: 255 }]);
+        assert!(!state.unreachable);
     }
 }

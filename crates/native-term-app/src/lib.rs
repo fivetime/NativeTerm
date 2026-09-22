@@ -843,6 +843,20 @@ impl Core {
                     candidates.push((window.handle, tab.clone()));
                 }
             }
+            // a tab a session was last seen at is tried first: a split
+            // tab can only be found by selecting it, and after a restart
+            // it is usually still where it was, so the sweep normally
+            // ends on its first pick instead of walking the whole strip
+            let hints: std::collections::HashSet<(usize, usize)> = core
+                .sessions()
+                .iter()
+                .filter(|s| s.state.is_open() && s.location.is_none())
+                .filter_map(|s| s.last_position)
+                .collect();
+            let numbers: Vec<(isize, Option<usize>)> =
+                candidates.iter().map(|(w, _)| (*w, core.window_number(*w))).collect();
+            let number = |handle: isize| numbers.iter().find(|(w, _)| *w == handle).and_then(|(_, n)| *n);
+            likely_first(&mut candidates, &hints, number);
             let mut looked_at = 0;
             for (window, tab) in candidates {
                 if core.unlocated() == 0 {
@@ -1961,6 +1975,20 @@ fn check_window_closed(shared: &Shared, id: &str, window: isize) {
     debug(shared, format!("{id}: closed, its window stayed"));
 }
 
+/// Put the tabs a session was last seen at first, so the locating
+/// sweep usually stops after one selection. `number`: the stable window
+/// number of a window handle, as the hints were written with.
+fn likely_first(
+    candidates: &mut [(isize, native_term_platform::TabView)],
+    hints: &std::collections::HashSet<(usize, usize)>,
+    number: impl Fn(isize) -> Option<usize>,
+) {
+    candidates.sort_by_key(|(window, tab)| {
+        let hinted = number(*window).is_some_and(|w| hints.contains(&(w, tab.index)));
+        (!hinted, *window, tab.index)
+    });
+}
+
 /// Diagnostics as notices when `NATIVETERM_DEBUG` is set.
 fn debug(shared: &Shared, text: String) {
     if std::env::var_os("NATIVETERM_DEBUG").is_some() {
@@ -2091,6 +2119,41 @@ mod tests {
         apply(&mut s, &ShimMessage::Authenticated);
         assert!(s.connected_at.is_some());
         assert_eq!(s.view().auto_retry, None, "shown only while reconnecting");
+    }
+
+    /// The sweep selects tabs one by one, which the person sees, so a
+    /// tab a session was last seen at is tried first.
+    #[test]
+    fn where_a_session_was_last_seen_is_looked_at_first() {
+        let tab = |index: usize| native_term_platform::TabView {
+            index,
+            name: format!("tab {index}"),
+            selected: false,
+            rect: None,
+            claim: None,
+        };
+        // window handle 10 is window 1, handle 20 is window 2
+        let number = |handle: isize| match handle {
+            10 => Some(1),
+            20 => Some(2),
+            _ => None,
+        };
+        let mut candidates = vec![(10, tab(0)), (10, tab(3)), (20, tab(1)), (20, tab(5))];
+        let hints = std::collections::HashSet::from([(2, 1), (1, 3)]);
+        likely_first(&mut candidates, &hints, number);
+        let order: Vec<(isize, usize)> = candidates.iter().map(|(w, t)| (*w, t.index)).collect();
+        assert_eq!(order, vec![(10, 3), (20, 1), (10, 0), (20, 5)]);
+
+        // without hints the order is steady (window, then strip order)
+        let mut candidates = vec![(20, tab(5)), (10, tab(3)), (10, tab(0))];
+        likely_first(&mut candidates, &Default::default(), number);
+        let order: Vec<(isize, usize)> = candidates.iter().map(|(w, t)| (*w, t.index)).collect();
+        assert_eq!(order, vec![(10, 0), (10, 3), (20, 5)]);
+
+        // a window NativeTerm has no number for is simply not hinted
+        let mut candidates = vec![(30, tab(1)), (10, tab(3))];
+        likely_first(&mut candidates, &hints, number);
+        assert_eq!(candidates[0].0, 10);
     }
 
     #[test]

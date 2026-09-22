@@ -959,3 +959,25 @@ toast-cleared = Cleared { $count } finished { $count ->
         [one] session
        *[other] sessions
     }
+
+# files ssh refuses because someone else may change them
+storage-too-open = { $count } file(s) can be changed by someone other than you, so ssh refuses to use them ("Bad owner or permissions"): { $files }
+storage-fix-permissions = Fix permissions
+storage-fix-hint = Gives full control to you, Administrators and SYSTEM only, and takes inherited entries off — what NativeTerm and ssh-keygen write themselves.
+storage-fixed = Put the permissions back on { $count } file(s).
+storage-fix-failed = { $path } was not changed: { $error }
+
+# what this is, and what it doesn't do
+about-title = NativeTerm { $version }
+about-no-telemetry = Sends nothing anywhere: no telemetry, no update pings, no accounts. Everything it keeps is in the data folder above and in your ssh configuration.
+
+# dragging hosts into another folder
+tree-dragging = { $count ->
+        [one] Moving 1 host
+       *[other] Moving { $count } hosts
+    }
+tree-drag-hint = Drag a host onto a folder to move it there (several, if several are selected).
+
+# dropping files on NativeTerm's own window
+drop-on-session = Drop for { $label }
+drop-on-tab = Drop for this tab

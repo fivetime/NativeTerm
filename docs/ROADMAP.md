@@ -93,8 +93,14 @@
       validated with `ssh -G` (host name must resolve as entered), rolled
       back otherwise
 - [x] Watching `~/.ssh`: reload when a config file really changed
-- [ ] `native-term-config` (rest): `.nt.toml` non-SSH
-      sessions; a "fix permissions" action for files ssh rejects
+- [x] `native-term-config` (rest): `.nt.toml` non-SSH sessions; and a
+      "fix permissions" action for files ssh rejects — `acl::open_to_others`
+      reads a file's DACL and reports who else may write it (allow entries
+      only, write rights only, the SDDL abbreviations and hexadecimal
+      masks), the storage check runs it over the config, the folder files
+      and the private keys, and the banner offers to put the permissions
+      back (owner, Administrators, SYSTEM; inherited entries off), which is
+      what NativeTerm writes itself
 - [x] `native-term-shim`: `--session <id> <alias>` plus session GUID from
       `WT_SESSION`; builds the `ssh` command line itself (`LocalCommand`
       login helper, default keepalives only when not configured); reports
@@ -182,7 +188,10 @@
       computers too. A host without an id gets one written into its block
       the first time something is kept about it (`notes.rs`,
       `Editor::ensure_id`)
-- [ ] `state.db` (rest): position hints used for unlocated split tabs
+- [x] `state.db` (rest): position hints used for unlocated split tabs —
+      the locating sweep selects tabs one by one, which the person sees, so
+      the tabs a session was last seen at (window number and tab index from
+      `state.db`) are tried first and it usually ends on the first pick
 - [x] `native-term-session`: pipe server/client with user-only ACL,
       remote clients rejected, single instance, non-blocking duplex;
       versioned JSON-lines protocol; exit classification (255 and -1 are
@@ -220,7 +229,11 @@
       again rather than waiting forever. It used to make one tab in six
       hang in "waiting" about half the time
       (`connect_queue.rs`, `core_portable.rs`)
-- [ ] `native-term-app` (rest): drag and drop in the tree
+- [x] `native-term-app` (rest): drag and drop in the tree — a host
+      dragged onto a folder moves there (the whole selection if it is part
+      of one), the folder under the pointer is marked, and a grouping node
+      without a file of its own takes nothing. The same thing the "Move
+      to" menu does, which now says so
 - [x] **Measure NativeTerm's own idle CPU/memory** (release, idle: 0 ms
       CPU, 74 MB private with Vulkan) and the shim (≈ 1 MB private,
       6.6 MB working set)
@@ -729,8 +742,10 @@
       default, up to sixteen; the rest queue), shared by every transfer of
       a connection. 120 small files: 11.0 s at one, 5.4 s at three, 2.3 s
       at eight
-- [ ] Dropping onto NativeTerm's own windows (a session in the list, a tab
-      picture) as a second way in
+- [x] Dropping onto NativeTerm's own windows (a session in the list, a
+      tab row or picture) as a second way in: the same question as on the
+      tab itself (upload over SFTP, or type the names), and no guessing
+      about whether it was a drop — Windows tells us directly here
 - [x] zmodem2 fixes offered upstream (codeberg.org/jarkko/zmodem2, from
       `fivetime/zmodem2`), one branch each, with tests against lrzsz:
       #8 `abort()` sends the cancel sequence, #9 ZFILE carries the
@@ -802,7 +817,9 @@
       `ssh` itself) and the passwords and the registry value only on a
       second click. The list can be copied
       (`cleanup.rs`, `native-term-config/src/traces.rs`)
-- [ ] State "no telemetry" in README and the About page
+- [x] State "no telemetry" in README and in the settings ("Sends nothing
+      anywhere: no telemetry, no update pings, no accounts"), with the
+      version beside it
 - [ ] Third-party license texts and busybox-w32 source pointer in the release
 - [ ] Integration test suite against a real Windows Terminal, including an
       install path with spaces

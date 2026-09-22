@@ -943,3 +943,22 @@ theme-look-accent = Windows のアクセントカラー
 theme-look-dim = 落ち着いた色
 theme-look-compact = コンパクト
 toast-cleared = 終了したセッション { $count } 件を消しました
+
+# 他人が変更できるため ssh が受け付けないファイル
+storage-too-open = { $count } 個のファイルは自分以外も変更できるため、ssh が使用を拒否します（"Bad owner or permissions"）: { $files }
+storage-fix-permissions = アクセス許可を直す
+storage-fix-hint = 自分・Administrators・SYSTEM だけにフル コントロールを与え、継承された項目を外します。NativeTerm や ssh-keygen 自身が書くものと同じです。
+storage-fixed = { $count } 個のファイルのアクセス許可を直しました。
+storage-fix-failed = { $path } は変更していません: { $error }
+
+# これは何で、何をしないか
+about-title = NativeTerm { $version }
+about-no-telemetry = どこにも送信しません: テレメトリーも、更新の問い合わせも、アカウントもありません。保存するものはすべて上のデータフォルダーと ssh の設定の中にあります。
+
+# ホストを別のフォルダーへドラッグする
+tree-dragging = { $count } 台を移動
+tree-drag-hint = ホストをフォルダーにドラッグすると移動します（複数選択していればまとめて移動します）。
+
+# NativeTerm 自身のウィンドウにファイルをドロップする
+drop-on-session = ここで放すと { $label } へ
+drop-on-tab = ここで放すとこのタブへ

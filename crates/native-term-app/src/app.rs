@@ -962,14 +962,18 @@ impl App {
     /// Files dropped into a tab: upload them, or send the text Terminal
     /// pasted (the client held it back). The answer can be remembered,
     /// and then this happens without asking.
-    fn dropped(&mut self, alias: &str, session: &str, paths: Vec<PathBuf>, text: &str) {
+    /// `certain`: Windows told us this was a file drop (our own window),
+    /// so it needs no guessing.
+    fn dropped(&mut self, alias: &str, session: &str, paths: Vec<PathBuf>, text: &str, certain: bool) {
         let can_upload = self.tree.find(alias).is_some_and(|(_, host)| host.plink.is_none());
-        // A drop ends with the mouse button released over the tab, having
-        // gone down in another window (Explorer). Text that arrives
-        // without that was typed or pasted, and is never acted on without
-        // asking, however the question was answered before.
-        let dropped_by_mouse = native_term_platform::windows_terminal::menu::since_drag_release()
-            .is_some_and(|since| since < std::time::Duration::from_millis(2000));
+        // A drop on a Terminal tab ends with the mouse button released
+        // over it, having gone down in another window (Explorer). Text
+        // that arrives without that was typed or pasted, and is never
+        // acted on without asking, however the question was answered
+        // before.
+        let dropped_by_mouse = certain
+            || native_term_platform::windows_terminal::menu::since_drag_release()
+                .is_some_and(|since| since < std::time::Duration::from_millis(2000));
         match self.remembered_drop().filter(|_| dropped_by_mouse) {
             Some(DropChoice::Upload) if can_upload => {
                 self.upload_dropped(alias, session, &paths);
@@ -1041,7 +1045,7 @@ impl App {
             return;
         }
         if let MenuRequest::Dropped { alias, session, paths, text } = request {
-            self.dropped(&alias, &session, paths, &text);
+            self.dropped(&alias, &session, paths, &text, false);
             return;
         }
         if self.dialog.is_some() {
@@ -1479,7 +1483,14 @@ impl App {
             }
             View::Tabs => {
                 ui.separator();
-                self.tab_list.show(ui, &core);
+                // a tab of ours here can take files as its own tab does
+                if let Some((session, paths)) = self.tab_list.show(ui, &core) {
+                    let alias = core.sessions().into_iter().find(|s| s.id == session).map(|s| s.alias);
+                    if let Some(alias) = alias {
+                        let text = paths_as_text(&paths);
+                        self.dropped(&alias, &session, paths, &text, true);
+                    }
+                }
             }
         }
     }
@@ -1535,6 +1546,7 @@ impl App {
         }
         let mut save = None;
         let mut send = None;
+        let mut dropped: Option<(String, String, Vec<PathBuf>)> = None;
         let tmux = self.tmux_hosts();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for s in &sessions {
@@ -1545,14 +1557,45 @@ impl App {
                     .is_none()
                     .then(|| native_term_app::quick::from_destination(&s.alias))
                     .flatten();
-                match session_card(ui, &core, s, typed, tmux.contains(&s.alias)) {
+                let (card, rect) = session_card(ui, &core, s, typed, tmux.contains(&s.alias));
+                match card {
                     Some(CardAction::Save(target)) => save = Some(target),
                     Some(CardAction::Send) => send = Some(s.id.clone()),
                     None => {}
                 }
+                // files dragged from Explorer onto a session: the same
+                // question as dropping them on its tab
+                if s.state.is_open() {
+                    if let Some(at) = hovering_files(ui.ctx()).filter(|at| rect.contains(*at)) {
+                        let _ = at;
+                        let accent = ui.visuals().selection.bg_fill;
+                        ui.painter().rect_stroke(
+                            rect,
+                            6.0,
+                            egui::Stroke::new(2.0_f32, accent),
+                            egui::StrokeKind::Inside,
+                        );
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            t!("drop-on-session", label = s.label.as_str()),
+                            egui::TextStyle::Body.resolve(ui.style()),
+                            ui.visuals().strong_text_color(),
+                        );
+                    }
+                    if let Some((paths, at)) = dropped_files(ui.ctx()) {
+                        if rect.contains(at) {
+                            dropped = Some((s.alias.clone(), s.id.clone(), paths));
+                        }
+                    }
+                }
                 ui.add_space(6.0);
             }
         });
+        if let Some((alias, session, paths)) = dropped {
+            let text = paths_as_text(&paths);
+            self.dropped(&alias, &session, paths, &text, true);
+        }
         if let (Some(id), None) = (send, &self.dialog) {
             self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(&core, &[id]))));
         }
@@ -1569,6 +1612,41 @@ impl App {
             self.dialog = Some(Dialog::Host(Box::new(HostDialog::new_host_from(main, &folder, &draft))));
         }
     }
+}
+
+/// Where the pointer is while files are dragged over NativeTerm's own
+/// window (`None`: nothing is being dragged).
+fn hovering_files(ctx: &egui::Context) -> Option<egui::Pos2> {
+    ctx.input(|i| {
+        (!i.raw.hovered_files.is_empty()).then(|| i.pointer.interact_pos().or_else(|| i.pointer.latest_pos()))
+    })
+    .flatten()
+}
+
+/// Files just dropped on NativeTerm's own window, and where.
+fn dropped_files(ctx: &egui::Context) -> Option<(Vec<PathBuf>, egui::Pos2)> {
+    ctx.input(|i| {
+        let paths: Vec<PathBuf> = i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect();
+        let at = i.pointer.interact_pos().or_else(|| i.pointer.latest_pos());
+        (!paths.is_empty()).then(|| at.map(|at| (paths, at))).flatten()
+    })
+}
+
+/// The paths as a terminal would paste them (quoted when they hold a
+/// space), for the "type the names" answer.
+fn paths_as_text(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| {
+            let text = p.display().to_string();
+            if text.contains(' ') {
+                format!("\"{text}\"")
+            } else {
+                text
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// The saved hosts, for the floating button's search.
@@ -1628,6 +1706,18 @@ fn theme_choice(ui: &mut egui::Ui, core: &Core) {
                 }
             }
         });
+    });
+}
+
+/// What this is, which build, and what it does not do. The last part
+/// is the point of the section: a tool that drives your terminal and
+/// holds your passwords should say plainly that it sends nothing
+/// anywhere (the README says it too).
+fn about(ui: &mut egui::Ui) {
+    ui.separator();
+    ui.horizontal_wrapped(|ui| {
+        ui.strong(t!("about-title", version = env!("CARGO_PKG_VERSION")));
+        ui.weak(t!("about-no-telemetry"));
     });
 }
 
@@ -1695,126 +1785,129 @@ enum CardAction {
 
 /// One open session as a card: name and state, then where its tab is and
 /// what can be done.
+/// One session in the list; also where it is, so files can be dropped
+/// on it.
 fn session_card(
     ui: &mut egui::Ui,
     core: &Core,
     s: &SessionView,
     typed: Option<native_term_app::quick::QuickTarget>,
     tmux: bool,
-) -> Option<CardAction> {
+) -> (Option<CardAction>, egui::Rect) {
     let mut action = None;
     let color = state_color(ui, &s.state);
-    egui::Frame::group(ui.style()).corner_radius(6.0).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal_wrapped(|ui| {
-            let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-            ui.painter().circle_filled(dot.center(), 4.5, color);
-            if s.locked {
-                ui.label(icons::LOCK.to_string()).on_hover_text(t!("session-locked"));
-            }
-            let label = ui.strong(&s.label);
-            if s.label != s.alias {
-                label.on_hover_text(&s.alias);
-            }
-            let mut state = s.state.describe();
-            if s.attempt > 1 && s.state.is_open() {
-                state.push_str(&format!(" · {}", t!("session-attempt", n = s.attempt)));
-            }
-            if let Some(n) = s.auto_retry {
-                state.push_str(&format!(" · {}", t!("session-auto-reconnect", n = n)));
-            }
-            ui.colored_label(color, state);
-            // tmux's own status bar is off in NativeTerm's sessions: this says
-            // the shell lives on the server instead
-            if tmux {
-                ui.weak(t!("session-kept-on-server")).on_hover_text(t!("session-kept-on-server-hint"));
-            }
-            if let Some(since) = s.quiet_since {
-                let time = native_term_win::local_time_of_day(since);
-                ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), t!("session-quiet", time = time))
-                    .on_hover_text(t!("session-quiet-hint"));
-            }
-            if let Some(name) = &s.renamed_to {
-                ui.weak(t!("session-renamed", name = name.as_str())).on_hover_text(t!("session-renamed-hint"));
-            }
-        });
-        ui.horizontal_wrapped(|ui| {
-            match &s.location {
-                Some(l) => {
-                    let tab = l.tab_index + 1;
-                    let mut text = t!("session-location", window = l.window_number, tab = tab);
-                    if l.selected {
-                        text.push_str(&format!(" · {}", t!("session-selected")));
-                    }
-                    if l.mixed {
-                        text.push_str(&format!(" · {}", t!("session-split")));
-                    }
-                    let response = ui.weak(text);
-                    if l.title != s.label {
-                        response.on_hover_text(t!("session-current-title", title = l.title.as_str()));
-                    }
+    let frame =
+        egui::Frame::group(ui.style()).corner_radius(6.0).inner_margin(egui::Margin::symmetric(10, 6)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_wrapped(|ui| {
+                let (dot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                ui.painter().circle_filled(dot.center(), 4.5, color);
+                if s.locked {
+                    ui.label(icons::LOCK.to_string()).on_hover_text(t!("session-locked"));
                 }
-                None if s.state.is_open() => {
-                    let text = match s.last_position {
-                        Some((window, tab)) => {
-                            let tab = tab + 1;
-                            t!("session-not-located-hint", window = window, tab = tab)
+                let label = ui.strong(&s.label);
+                if s.label != s.alias {
+                    label.on_hover_text(&s.alias);
+                }
+                let mut state = s.state.describe();
+                if s.attempt > 1 && s.state.is_open() {
+                    state.push_str(&format!(" · {}", t!("session-attempt", n = s.attempt)));
+                }
+                if let Some(n) = s.auto_retry {
+                    state.push_str(&format!(" · {}", t!("session-auto-reconnect", n = n)));
+                }
+                ui.colored_label(color, state);
+                // tmux's own status bar is off in NativeTerm's sessions: this says
+                // the shell lives on the server instead
+                if tmux {
+                    ui.weak(t!("session-kept-on-server")).on_hover_text(t!("session-kept-on-server-hint"));
+                }
+                if let Some(since) = s.quiet_since {
+                    let time = native_term_win::local_time_of_day(since);
+                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), t!("session-quiet", time = time))
+                        .on_hover_text(t!("session-quiet-hint"));
+                }
+                if let Some(name) = &s.renamed_to {
+                    ui.weak(t!("session-renamed", name = name.as_str())).on_hover_text(t!("session-renamed-hint"));
+                }
+            });
+            ui.horizontal_wrapped(|ui| {
+                match &s.location {
+                    Some(l) => {
+                        let tab = l.tab_index + 1;
+                        let mut text = t!("session-location", window = l.window_number, tab = tab);
+                        if l.selected {
+                            text.push_str(&format!(" · {}", t!("session-selected")));
                         }
-                        None => t!("session-not-located"),
-                    };
-                    ui.weak(text);
+                        if l.mixed {
+                            text.push_str(&format!(" · {}", t!("session-split")));
+                        }
+                        let response = ui.weak(text);
+                        if l.title != s.label {
+                            response.on_hover_text(t!("session-current-title", title = l.title.as_str()));
+                        }
+                    }
+                    None if s.state.is_open() => {
+                        let text = match s.last_position {
+                            Some((window, tab)) => {
+                                let tab = tab + 1;
+                                t!("session-not-located-hint", window = window, tab = tab)
+                            }
+                            None => t!("session-not-located"),
+                        };
+                        ui.weak(text);
+                    }
+                    None => {}
                 }
-                None => {}
-            }
-            ui.add_space(12.0);
-            let button = |ui: &mut egui::Ui, command: SessionCommand, text: String| {
-                ui.add_enabled(command.applies(s), egui::Button::new(text).small())
-            };
-            if button(ui, SessionCommand::Focus, t!("button-focus")).clicked() {
-                core.run(&s.id, SessionCommand::Focus);
-            }
-            let label = if s.state == State::Waiting { t!("button-connect") } else { t!("button-reconnect") };
-            if button(ui, SessionCommand::Connect, label).clicked() {
-                core.run(&s.id, SessionCommand::Connect);
-            }
-            if button(ui, SessionCommand::Disconnect, t!("button-disconnect")).clicked() {
-                core.run(&s.id, SessionCommand::Disconnect);
-            }
-            if button(ui, SessionCommand::Close, t!("button-close")).clicked() {
-                core.run(&s.id, SessionCommand::Close);
-            }
-            let lock = if s.locked {
-                icons::with(icons::UNLOCK, t!("session-unlock"))
-            } else {
-                icons::with(icons::LOCK, t!("session-lock"))
-            };
-            if button(ui, SessionCommand::ToggleLock, lock).on_hover_text(t!("session-lock-hint")).clicked() {
-                core.run(&s.id, SessionCommand::ToggleLock);
-            }
-            // a session kept in tmux can be sent to through it, logged in or not
-            let send = ui.add_enabled(
-                SessionCommand::Send.applies(s) || tmux,
-                egui::Button::new(icons::with(icons::SEND, t!("session-send"))).small(),
-            );
-            if send.clicked() {
-                action = Some(CardAction::Send);
-            }
-            if SessionCommand::SendBreak.offered(s)
-                && button(ui, SessionCommand::SendBreak, t!("button-break"))
-                    .on_hover_text(t!("session-break-hint"))
-                    .clicked()
-            {
-                core.run(&s.id, SessionCommand::SendBreak);
-            }
-            if let Some(target) = typed {
-                let button = egui::Button::new(icons::with(icons::SAVE, t!("quick-save"))).small();
-                if ui.add(button).on_hover_text(t!("quick-save-hint")).clicked() {
-                    action = Some(CardAction::Save(target));
+                ui.add_space(12.0);
+                let button = |ui: &mut egui::Ui, command: SessionCommand, text: String| {
+                    ui.add_enabled(command.applies(s), egui::Button::new(text).small())
+                };
+                if button(ui, SessionCommand::Focus, t!("button-focus")).clicked() {
+                    core.run(&s.id, SessionCommand::Focus);
                 }
-            }
+                let label = if s.state == State::Waiting { t!("button-connect") } else { t!("button-reconnect") };
+                if button(ui, SessionCommand::Connect, label).clicked() {
+                    core.run(&s.id, SessionCommand::Connect);
+                }
+                if button(ui, SessionCommand::Disconnect, t!("button-disconnect")).clicked() {
+                    core.run(&s.id, SessionCommand::Disconnect);
+                }
+                if button(ui, SessionCommand::Close, t!("button-close")).clicked() {
+                    core.run(&s.id, SessionCommand::Close);
+                }
+                let lock = if s.locked {
+                    icons::with(icons::UNLOCK, t!("session-unlock"))
+                } else {
+                    icons::with(icons::LOCK, t!("session-lock"))
+                };
+                if button(ui, SessionCommand::ToggleLock, lock).on_hover_text(t!("session-lock-hint")).clicked() {
+                    core.run(&s.id, SessionCommand::ToggleLock);
+                }
+                // a session kept in tmux can be sent to through it, logged in or not
+                let send = ui.add_enabled(
+                    SessionCommand::Send.applies(s) || tmux,
+                    egui::Button::new(icons::with(icons::SEND, t!("session-send"))).small(),
+                );
+                if send.clicked() {
+                    action = Some(CardAction::Send);
+                }
+                if SessionCommand::SendBreak.offered(s)
+                    && button(ui, SessionCommand::SendBreak, t!("button-break"))
+                        .on_hover_text(t!("session-break-hint"))
+                        .clicked()
+                {
+                    core.run(&s.id, SessionCommand::SendBreak);
+                }
+                if let Some(target) = typed {
+                    let button = egui::Button::new(icons::with(icons::SAVE, t!("quick-save"))).small();
+                    if ui.add(button).on_hover_text(t!("quick-save-hint")).clicked() {
+                        action = Some(CardAction::Save(target));
+                    }
+                }
+            });
         });
-    });
-    action
+    (action, frame.response.rect)
 }
 
 impl crate::window::Ui for App {
@@ -1935,6 +2028,7 @@ impl crate::window::Ui for App {
                     ui.separator();
                     self.folders_ui(ui);
                     self.data_dir_ui(ui);
+                    about(ui);
                     ui.separator();
                     ui.horizontal_wrapped(|ui| {
                         if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {
@@ -1958,7 +2052,7 @@ impl crate::window::Ui for App {
             }
             self.profile.banner(ui, &mut self.notices);
             self.agent.banner(ui, self.core.as_ref(), &mut self.show_settings);
-            self.storage.banner(ui);
+            self.storage.banner(ui, &self.ssh_dir, &self.data_dir);
             self.lost_banner(ui);
             if !self.notices.is_empty() {
                 let mut clear = false;
@@ -2008,5 +2102,19 @@ impl crate::window::Ui for App {
         self.show_wizard(ctx);
         // over everything else, in the corner
         self.toasts.show(ctx, native_term_win::desktop::animations());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dropped files can also be typed into the session as names; a path
+    /// with a space needs its quotes, as a shell expects them.
+    #[test]
+    fn dropped_paths_as_a_command_line() {
+        let paths = [PathBuf::from(r"C:\tools\id_ed25519.pub"), PathBuf::from(r"C:\My Files\notes.txt")];
+        assert_eq!(paths_as_text(&paths), r#"C:\tools\id_ed25519.pub "C:\My Files\notes.txt""#);
+        assert_eq!(paths_as_text(&[]), "");
     }
 }

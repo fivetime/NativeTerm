@@ -185,6 +185,11 @@ const INDENT: f32 = 16.0;
 
 /// One full-width, left-aligned, clickable row: indentation, an optional
 /// leading glyph, the text, and an optional status dot after it.
+/// Hosts being dragged in the tree, by alias. A drag of one host that
+/// is part of the selection takes the whole selection.
+#[derive(Clone, Debug)]
+struct Dragged(Vec<String>);
+
 struct RowLook {
     icon: Option<char>,
     /// The host's tab color, as a bar at the row's start.
@@ -192,17 +197,37 @@ struct RowLook {
     dot: Option<egui::Color32>,
     selected: bool,
     weak: bool,
+    /// A host row: it can be dragged into another folder.
+    draggable: bool,
+    /// A folder row: hosts dropped on it move there.
+    accepts_drop: bool,
     indent: f32,
 }
 
 fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::Response {
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+    // a host can be dragged into another folder; a click is still a click
+    // (egui only calls it a drag once the pointer has moved)
+    let sense = if look.draggable { egui::Sense::click_and_drag() } else { egui::Sense::click() };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
+    let drop_here =
+        look.accepts_drop && response.contains_pointer() && egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx());
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, look.selected, text));
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact_selectable(&response, look.selected);
         if look.selected || response.hovered() || response.highlighted() {
             ui.painter().rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+        }
+        if drop_here {
+            // where the dragged hosts would land
+            let accent = ui.visuals().selection.bg_fill;
+            ui.painter().rect_filled(rect, visuals.corner_radius, accent.gamma_multiply(0.35));
+            ui.painter().rect_stroke(
+                rect,
+                visuals.corner_radius,
+                egui::Stroke::new(1.0_f32, accent),
+                egui::StrokeKind::Inside,
+            );
         }
         let weak = ui.visuals().weak_text_color();
         let color = if look.weak { weak } else { visuals.text_color() };
@@ -548,6 +573,8 @@ impl TreeView {
             .collect();
         let modifiers = ui.input(|i| i.modifiers);
         let mut click = None;
+        // how many hosts were just picked up (for the label at the pointer)
+        let mut dragging: Option<usize> = None;
         // the selected hosts that still exist, in selection order
         let chosen: Vec<&HostEntry> = self.selected.iter().filter_map(|a| tree.find(a).map(|(_, h)| h)).collect();
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_height, rows.len(), |ui, range| {
@@ -556,8 +583,16 @@ impl TreeView {
                 let index = first + offset;
                 match row {
                     Row::Heading(text) => {
-                        let look =
-                            RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
+                        let look = RowLook {
+                            icon: None,
+                            stripe: None,
+                            dot: None,
+                            selected: false,
+                            weak: true,
+                            indent: 0.0,
+                            draggable: false,
+                            accepts_drop: false,
+                        };
                         draw_row(ui, row_height, text, look);
                     }
                     Row::Quick(target) => {
@@ -568,6 +603,8 @@ impl TreeView {
                             selected: false,
                             weak: false,
                             indent: 0.0,
+                            draggable: false,
+                            accepts_drop: false,
                         };
                         let text = t!("quick-connect", target = target.label());
                         let response = draw_row(ui, row_height, &text, look);
@@ -582,14 +619,25 @@ impl TreeView {
                         });
                     }
                     Row::Empty(text) => {
-                        let look =
-                            RowLook { icon: None, stripe: None, dot: None, selected: false, weak: true, indent: 0.0 };
+                        let look = RowLook {
+                            icon: None,
+                            stripe: None,
+                            dot: None,
+                            selected: false,
+                            weak: true,
+                            indent: 0.0,
+                            draggable: false,
+                            accepts_drop: false,
+                        };
                         draw_row(ui, row_height, text, look);
                     }
                     Row::Folder { depth, name, path, folder, count, open } => {
                         let chevron = if *open { icons::CHEVRON_DOWN } else { icons::CHEVRON_RIGHT };
                         let icon = if *open { icons::FOLDER_OPEN } else { icons::FOLDER };
                         let text = format!("{icon}  {name}  ({count})");
+                        // a folder with a file of its own can take hosts;
+                        // a grouping node (no file) can't
+                        let file = folder.and_then(|i| folders.get(i)).map(|f| f.file.clone());
                         let look = RowLook {
                             icon: Some(chevron),
                             stripe: None,
@@ -597,8 +645,19 @@ impl TreeView {
                             selected: false,
                             weak: false,
                             indent: *depth as f32 * INDENT,
+                            draggable: false,
+                            accepts_drop: file.is_some(),
                         };
                         let response = draw_row(ui, row_height, &text, look);
+                        if let (Some(file), Some(dropped)) = (&file, response.dnd_release_payload::<Dragged>()) {
+                            // the ones that are somewhere else; a host
+                            // dropped on its own folder changes nothing
+                            for alias in dropped.0.iter() {
+                                if tree.find(alias).is_some_and(|(_, h)| h.file != *file) {
+                                    actions.push(TreeAction::Move(alias.clone(), file.clone()));
+                                }
+                            }
+                        }
                         // a double click (Explorer's way to open) reports two
                         // clicks: the second would close the folder again
                         if response.clicked() && !response.double_clicked() {
@@ -781,6 +840,8 @@ impl TreeView {
                             selected,
                             weak: false,
                             indent: *depth as f32 * INDENT,
+                            draggable: true,
+                            accepts_drop: false,
                         };
                         // the tooltip's text only while it shows, not for every row on every frame
                         let response = draw_row(ui, row_height, &text, look).on_hover_ui(|ui| {
@@ -788,6 +849,16 @@ impl TreeView {
                         });
                         if response.clicked() {
                             click = Some((index, alias.to_string()));
+                        }
+                        // dragging one of several selected hosts takes them all
+                        if response.drag_started() {
+                            let dragged = if selected && chosen.len() > 1 {
+                                chosen.iter().map(|h| h.alias().to_string()).collect()
+                            } else {
+                                vec![alias.to_string()]
+                            };
+                            dragging = Some(dragged.len());
+                            egui::DragAndDrop::set_payload(ui.ctx(), Dragged(dragged));
                         }
                         if response.double_clicked() && !modifiers.ctrl && !modifiers.shift {
                             actions.push(TreeAction::Open(vec![request(tree, host)], Target::Recent));
@@ -854,6 +925,7 @@ impl TreeView {
                                 actions.push(TreeAction::Files(alias.to_string()));
                                 ui.close();
                             }
+                            // the same thing dragging does, for a long list
                             ui.menu_button(t!("menu-move-to"), |ui| {
                                 egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                                     for (title, file) in &folder_files {
@@ -863,7 +935,9 @@ impl TreeView {
                                         }
                                     }
                                 });
-                            });
+                            })
+                            .response
+                            .on_hover_text(t!("tree-drag-hint"));
                             let (label, on) = if host.favorite() {
                                 (t!("menu-unfavorite"), false)
                             } else {
@@ -893,6 +967,25 @@ impl TreeView {
         });
         if let Some((path, open)) = toggle {
             self.toggled.insert(path, open);
+        }
+        // what is being carried, next to the pointer
+        let carried = dragging.or_else(|| egui::DragAndDrop::payload::<Dragged>(ui.ctx()).map(|d| d.0.len()));
+        if let Some(count) = carried {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            if let Some(at) = ui.ctx().pointer_interact_pos() {
+                let text = t!("tree-dragging", count = count);
+                let painter = ui
+                    .ctx()
+                    .layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("nativeterm-tree-drag")));
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                let color = ui.visuals().strong_text_color();
+                let galley = painter.layout_no_wrap(text, font, color);
+                let at = at + egui::vec2(14.0, 8.0);
+                let around = egui::Rect::from_min_size(at, galley.size()).expand(4.0);
+                painter.rect_filled(around, 4.0, ui.visuals().window_fill);
+                painter.rect_stroke(around, 4.0, ui.visuals().window_stroke, egui::StrokeKind::Inside);
+                painter.galley(at, galley, color);
+            }
         }
         if let Some((index, alias)) = click {
             self.click(&host_rows, index, alias, modifiers);

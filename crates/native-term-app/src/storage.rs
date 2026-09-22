@@ -1,7 +1,10 @@
 //! Checks on where sessions and data live: files a cloud client may keep
-//! only online (OneDrive "Files On-Demand"), and copies left by sync
-//! conflicts. A conflict copy in `config.d` is serious: `web-PC.conf`
-//! still matches `*.conf`, so ssh reads it and its hosts appear twice.
+//! only online (OneDrive "Files On-Demand"), copies left by sync
+//! conflicts, and files someone else may write. A conflict copy in
+//! `config.d` is serious: `web-PC.conf` still matches `*.conf`, so ssh
+//! reads it and its hosts appear twice. A config or key anyone else can
+//! change is refused by ssh outright ("Bad owner or permissions"), which
+//! is why NativeTerm can put the permissions back.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -17,11 +20,14 @@ pub struct Health {
     pub not_kept: Vec<PathBuf>,
     /// Look like sync conflict copies.
     pub conflicts: Vec<PathBuf>,
+    /// Someone other than the owner may write them, so ssh refuses to
+    /// use them.
+    pub too_open: Vec<PathBuf>,
 }
 
 impl Health {
     pub fn is_fine(&self) -> bool {
-        self.cloud_only.is_empty() && self.not_kept.is_empty() && self.conflicts.is_empty()
+        self.cloud_only.is_empty() && self.not_kept.is_empty() && self.conflicts.is_empty() && self.too_open.is_empty()
     }
 }
 
@@ -95,7 +101,45 @@ pub fn check(ssh_dir: &Path, data_dir: &Path) -> Health {
             _ => {}
         }
     }
+    // what ssh refuses to read: its config files and private keys
+    for file in ssh_checked(ssh_dir) {
+        if native_term_config::acl::open_to_others(&file).is_some_and(|others| !others.is_empty()) {
+            health.too_open.push(file);
+        }
+    }
     health
+}
+
+/// The files ssh checks the permissions of: the config, the folder files
+/// it includes, and the private keys beside them.
+fn ssh_checked(ssh_dir: &Path) -> Vec<PathBuf> {
+    let is_private_key = |path: &Path| {
+        path.extension().is_none()
+            && path.with_extension("pub").is_file()
+            && path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("id_"))
+    };
+    let mut files: Vec<PathBuf> = files_in(ssh_dir)
+        .into_iter()
+        .filter(|f| {
+            let name = f.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+            name == "config" || is_private_key(f)
+        })
+        .collect();
+    files.extend(
+        files_in(&crate::app::folders_dir(ssh_dir))
+            .into_iter()
+            .filter(|f| f.extension().is_some_and(|e| e.eq_ignore_ascii_case("conf"))),
+    );
+    files
+}
+
+/// Put the permissions back on these files (owner, Administrators and
+/// SYSTEM only). Returns what could not be changed.
+pub fn restrict(files: &[PathBuf]) -> Vec<(PathBuf, String)> {
+    files
+        .iter()
+        .filter_map(|f| native_term_config::acl::restrict_to_owner(f).err().map(|e| (f.clone(), e.to_string())))
+        .collect()
 }
 
 /// The check, run in the background; shown as a warning line.
@@ -103,6 +147,8 @@ pub fn check(ssh_dir: &Path, data_dir: &Path) -> Health {
 pub struct StorageCheck {
     result: Arc<Mutex<Option<Health>>>,
     dismissed: Option<Health>,
+    /// What came of "Fix permissions" (shown until the next check).
+    fixed: Option<String>,
 }
 
 fn names(paths: &[PathBuf]) -> String {
@@ -127,7 +173,9 @@ impl StorageCheck {
         });
     }
 
-    pub fn banner(&mut self, ui: &mut egui::Ui) {
+    /// `ssh_dir` and `data_dir`: to look again after the permissions
+    /// were put back.
+    pub fn banner(&mut self, ui: &mut egui::Ui, ssh_dir: &Path, data_dir: &Path) {
         let Some(health) = self.result.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
         if health.is_fine() || self.dismissed.as_ref() == Some(&health) {
             return;
@@ -135,6 +183,7 @@ impl StorageCheck {
         let amber = egui::Color32::from_rgb(0xd0, 0x9a, 0x1a);
         let red = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
         let mut dismiss = false;
+        let mut fix = false;
         ui.vertical(|ui| {
             if !health.conflicts.is_empty() {
                 ui.colored_label(
@@ -153,6 +202,27 @@ impl StorageCheck {
                     amber,
                     t!("storage-not-kept", count = health.not_kept.len(), files = names(&health.not_kept)),
                 );
+            }
+            if !health.too_open.is_empty() {
+                ui.colored_label(
+                    red,
+                    t!("storage-too-open", count = health.too_open.len(), files = names(&health.too_open)),
+                );
+                if ui.small_button(t!("storage-fix-permissions")).on_hover_text(t!("storage-fix-hint")).clicked() {
+                    let failed = restrict(&health.too_open);
+                    self.fixed = Some(match failed.first() {
+                        None => t!("storage-fixed", count = health.too_open.len()),
+                        Some((path, error)) => {
+                            t!("storage-fix-failed", path = path.display().to_string(), error = error.as_str())
+                        }
+                    });
+                    // ask the files again, with what was just changed
+                    *self.result.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                    fix = true;
+                }
+            }
+            if let Some(said) = &self.fixed {
+                ui.weak(said);
             }
             ui.horizontal(|ui| {
                 let folder = health
@@ -174,12 +244,43 @@ impl StorageCheck {
             // until something changes
             self.dismissed = Some(health);
         }
+        if fix {
+            self.refresh(ssh_dir, data_dir, ui.ctx());
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A config anyone may write is what ssh refuses; putting the
+    /// permissions back makes it acceptable again.
+    #[test]
+    fn a_config_others_can_write_is_found_and_put_right() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = dir.path().join(".ssh");
+        std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+        let config = ssh.join("config");
+        std::fs::write(
+            &config, "Host a
+",
+        )
+        .unwrap();
+        native_term_config::acl::restrict_to_owner(&config).unwrap();
+        let health = check(&ssh, dir.path());
+        assert!(health.too_open.is_empty(), "{health:?}");
+
+        // everyone (S-1-1-0) with full control: ssh stops at this file
+        let me = native_term_config::acl::current_user_sid().unwrap();
+        native_term_config::acl::set_dacl(&config, &format!("D:P(A;;FA;;;{me})(A;;FA;;;WD)")).unwrap();
+        let health = check(&ssh, dir.path());
+        assert_eq!(health.too_open, vec![config.clone()]);
+        assert!(!health.is_fine());
+
+        assert!(restrict(&health.too_open).is_empty());
+        assert!(check(&ssh, dir.path()).too_open.is_empty());
+    }
 
     #[test]
     fn conflict_names() {

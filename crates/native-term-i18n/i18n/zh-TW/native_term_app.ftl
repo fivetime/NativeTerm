@@ -927,3 +927,22 @@ theme-look-accent = Windows 強調色
 theme-look-dim = 柔和
 theme-look-compact = 緊湊
 toast-cleared = 已清除 { $count } 條結束的工作階段記錄
+
+# ssh 因為別人能改而拒絕使用的檔案
+storage-too-open = 有 { $count } 個檔案除了你以外還有人能修改，ssh 會拒絕使用它們（"Bad owner or permissions"）：{ $files }
+storage-fix-permissions = 修復權限
+storage-fix-hint = 只給你自己、Administrators 和 SYSTEM 完全控制，並移除繼承而來的項目 —— 和 NativeTerm、ssh-keygen 自己寫出來的一樣。
+storage-fixed = 已修復 { $count } 個檔案的權限。
+storage-fix-failed = { $path } 沒有變更：{ $error }
+
+# 這是什麼，以及它不做什麼
+about-title = NativeTerm { $version }
+about-no-telemetry = 不向任何地方傳送資料：沒有遙測、沒有更新探測、不需要帳號。它保存的一切都在上面的資料夾和你的 ssh 設定裡。
+
+# 把主機拖到別的資料夾
+tree-dragging = 移動 { $count } 台主機
+tree-drag-hint = 把主機拖到資料夾上即可移過去（選取多台時會一起移動）。
+
+# 把檔案拖到 NativeTerm 自己的視窗上
+drop-on-session = 放開即交給 { $label }
+drop-on-tab = 放開即交給這個分頁
