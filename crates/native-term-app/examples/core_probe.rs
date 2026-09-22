@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! Test driver: one NativeTerm core run against a portable Terminal, with
 //! a `state.db`, doing one thing and printing the sessions. Several runs in
 //! a row are NativeTerm restarts (see `tests/restore_portable.rs`).

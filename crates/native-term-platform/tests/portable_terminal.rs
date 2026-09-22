@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! Live test against a portable Windows Terminal (never the user's own):
 //!
 //! ```text

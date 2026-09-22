@@ -1281,6 +1281,15 @@ fn last_host_block(doc: &Document, alias: &str) -> Option<usize> {
 mod tests {
     use super::*;
 
+    /// What NativeTerm does to every file it writes: only Windows OpenSSH
+    /// checks the ACL ("Bad owner or permissions"), so only there is
+    /// there anything to set.
+    fn restrict(path: &Path) {
+        #[cfg(windows)]
+        crate::acl::restrict_to_owner(path).unwrap();
+        let _ = path;
+    }
+
     /// A fake `~/.ssh` and an editor on it; `None` if ssh isn't installed.
     fn setup() -> Option<(tempfile::TempDir, Editor)> {
         let ssh = PathBuf::from(r"C:\Windows\System32\OpenSSH\ssh.exe");
@@ -1294,7 +1303,7 @@ mod tests {
         let writer = Writer::new(home.path().join("backups"));
         let editor = Editor::for_directory(&dir, writer, &ssh);
         std::fs::write(editor.main_config(), "# mine\nHost old\n    HostName 10.0.0.9\n").unwrap();
-        crate::acl::restrict_to_owner(&editor.main_config()).unwrap();
+        restrict(&editor.main_config());
         Some((home, editor))
     }
 
@@ -1361,7 +1370,7 @@ mod tests {
         assert!(editor.adopt_folders(&synced).is_err(), "nothing there yet");
         std::fs::create_dir_all(&synced).unwrap();
         std::fs::write(synced.join("prod.conf"), "Host web\n    HostName 10.0.0.1\n").unwrap();
-        crate::acl::restrict_to_owner(&synced.join("prod.conf")).unwrap();
+        restrict(&synced.join("prod.conf"));
         std::fs::write(synced.join("prod.nt.toml"), "[[session]]\nname = \"sw\"\nhost = \"10.0.0.2\"\n").unwrap();
         assert!(holds_folders(&synced));
         assert!(editor.move_folders(&synced).is_err(), "moving onto them is refused");
@@ -1670,10 +1679,10 @@ mod tests {
         std::fs::create_dir_all(dir.join("config.d")).unwrap();
         let lab = dir.join("config.d").join("lab.conf");
         std::fs::write(&lab, "Host web\n    HostName 10.0.0.1\n").unwrap();
-        crate::acl::restrict_to_owner(&lab).unwrap();
+        restrict(&lab);
         let include = format!("Include {}/config.d/*.conf\n", dir.display().to_string().replace('\\', "/"));
         std::fs::write(editor.main_config(), &include).unwrap();
-        crate::acl::restrict_to_owner(&editor.main_config()).unwrap();
+        restrict(&editor.main_config());
 
         let web = tree(&editor).find("web").unwrap().1.clone();
         let mut draft = HostDraft::from_host(&web);
@@ -1701,7 +1710,7 @@ mod tests {
 ",
         )
         .unwrap();
-        crate::acl::restrict_to_owner(&earlier).unwrap();
+        restrict(&earlier);
         let before = std::fs::read_to_string(&web).unwrap();
         let mut t = tree(&editor);
         // pretend the alias is free, as a stale tree would
@@ -1792,7 +1801,7 @@ mod tests {
             key: "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl".into(),
         };
         std::fs::write(editor.known_hosts(), "# mine").unwrap();
-        crate::acl::restrict_to_owner(&editor.known_hosts()).unwrap();
+        restrict(&editor.known_hosts());
         assert_eq!(editor.add_host_keys(std::slice::from_ref(&key)).unwrap(), 1);
         assert_eq!(editor.add_host_keys(std::slice::from_ref(&key)).unwrap(), 0, "already there");
         let text = std::fs::read_to_string(editor.known_hosts()).unwrap();
@@ -1819,7 +1828,7 @@ mod tests {
 ",
         )
         .unwrap();
-        crate::acl::restrict_to_owner(&earlier).unwrap();
+        restrict(&earlier);
         let outcome = editor.import(&plan, &|_, _| {}).unwrap();
         assert_eq!(outcome.written.len(), 1);
         assert_eq!(outcome.failed.len(), 1, "{:?}", outcome.failed);

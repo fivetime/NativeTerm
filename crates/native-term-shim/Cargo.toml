@@ -14,10 +14,10 @@ i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
 native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
-native-term-win = { path = "../native-term-win" }
 zmodem2 = "0.7"
 
 [target.'cfg(windows)'.dependencies]
+native-term-win = { path = "../native-term-win" }
 windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",

@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! NativeTerm's core against a portable Windows Terminal (see
 //! `native-term-platform/tests/portable_terminal.rs` for the setup):
 //!

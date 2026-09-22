@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! Sending commands end to end: shims started directly, each with its own
 //! console (injection needs one; the console windows show briefly), and a
 //! fake ssh that logs what is typed. Needs no other NativeTerm running and

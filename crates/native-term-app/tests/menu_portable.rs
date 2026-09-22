@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! NativeTerm's tab menu against a portable Windows Terminal (setup as in
 //! `core_portable.rs`). Moves the mouse and types: don't touch the machine
 //! while it runs.

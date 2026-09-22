@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! The elevated path, from a process that really is elevated.
 //!
 //! An elevated `wt.exe` joins Terminal's *elevated* instance, not the

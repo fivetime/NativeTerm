@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! Automatic reconnects, with shims started directly (not in a Terminal
 //! tab) and a fake ssh. Needs no other NativeTerm running (it serves the
 //! user's pipe) and a portable Terminal folder for the core's setup.

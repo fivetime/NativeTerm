@@ -1,3 +1,4 @@
+#![cfg(windows)]
 //! NativeTerm restarts and Windows Terminal's session restore, against a
 //! portable Terminal whose settings have the "NativeTerm SSH" profile,
 //! `"firstWindowPreference": "persistedLayout"` and
