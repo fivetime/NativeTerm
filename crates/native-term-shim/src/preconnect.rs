@@ -11,8 +11,6 @@
 //! up, a `ping` that warms an ARP entry). A command written with `!` in
 //! front stops the connection instead.
 
-use std::process::Command;
-
 use native_term_config::preconnect;
 use native_term_config::tree::SessionTree;
 
@@ -36,12 +34,11 @@ pub fn settings(alias: &str) -> (Option<String>, Option<String>) {
 }
 
 /// Run `command` and say whether the connection should go on. The shell
-/// is `cmd /c`, as everywhere else a user types a Windows command line.
+/// is the one a user types command lines for here (`cmd /c`, `sh -c`).
 pub fn run(command: &str) -> Ran {
     let (stop_on_failure, command) = preconnect::stop_on_failure(command);
     println!("{}", t!("preconnect-running", command = command));
-    let comspec = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
-    let status = Command::new(comspec).arg("/c").arg(command).status();
+    let status = crate::console::local_command(command).status();
     match status {
         Ok(status) if status.success() => Ran::Go,
         Ok(status) => {

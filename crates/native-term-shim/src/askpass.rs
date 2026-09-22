@@ -46,7 +46,7 @@ pub fn serve(password: String) -> io::Result<String> {
 /// (`None`: the helper asks in the console); the pipe's name.
 pub fn serve_with(answer: impl Fn(&str, u32) -> Option<String> + Send + 'static) -> io::Result<String> {
     let random = std::collections::hash_map::RandomState::new().build_hasher().finish();
-    let name = format!(r"\\.\pipe\NativeTerm-askpass-{}-{random:016x}", std::process::id());
+    let name = private_pipe_name(random);
     let mut listener = pipe::PipeListener::bind(&name)?;
     std::thread::spawn(move || {
         while let Ok(conn) = listener.accept() {
@@ -57,6 +57,18 @@ pub fn serve_with(answer: impl Fn(&str, u32) -> Option<String> + Send + 'static)
         }
     });
     Ok(name)
+}
+
+/// A channel of this batch's own, named so nobody guesses it.
+fn private_pipe_name(random: u64) -> String {
+    #[cfg(windows)]
+    {
+        format!(r"\\.\pipe\NativeTerm-askpass-{}-{random:016x}", std::process::id())
+    }
+    #[cfg(unix)]
+    {
+        format!("{}askpass-{}-{random:016x}", native_term_session::PIPE_NAME_PREFIX, std::process::id())
+    }
 }
 
 /// The helper: print the answer to `prompt` for ssh; exit code.
@@ -71,7 +83,7 @@ pub fn answer(pipe_name: &str, prompt: &str) -> i32 {
         // cancelled, with nobody at a console to ask
         None if std::env::var_os(NO_CONSOLE_VAR).is_some() => return 1,
         // not a password: ask here, echoing only a yes/no question
-        None => match crate::win::read_line(prompt, prompt.contains("(yes/no")) {
+        None => match crate::console::read_line(prompt, prompt.contains("(yes/no")) {
             Ok(line) => line,
             Err(_) => return 1,
         },

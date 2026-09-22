@@ -597,6 +597,28 @@ impl Drop for ControlPipe {
     }
 }
 
+/// What `wait_any` waits on.
+pub type Handle = HANDLE;
+
+/// What to wait on for `child` to exit: its process handle.
+pub fn child_handle(child: &std::process::Child) -> Handle {
+    use std::os::windows::io::AsRawHandle;
+    HANDLE(child.as_raw_handle() as _)
+}
+
+/// The user's shell, for a tab that is theirs.
+pub fn local_shell() -> std::process::Command {
+    std::process::Command::new(std::env::var_os("COMSPEC").unwrap_or_else(|| "cmd.exe".into()))
+}
+
+/// A command line the way a person types it here: through `cmd /c`.
+pub fn local_command(command: &str) -> std::process::Command {
+    let comspec = std::env::var_os("ComSpec").unwrap_or_else(|| "cmd.exe".into());
+    let mut cmd = std::process::Command::new(comspec);
+    cmd.arg("/c").arg(command);
+    cmd
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use native_term_config::password::{self, Target, REFUSED};
-use native_term_win::credentials;
+use native_term_os::credentials;
 
 /// What the pipe serves for the current attempt.
 #[derive(Default)]
@@ -43,7 +43,7 @@ fn server() -> Option<&'static Server> {
                 let armed = a.lock().unwrap_or_else(|e| e.into_inner());
                 let target = armed.target.as_ref()?;
                 // the helper of our own ssh only
-                let parent = native_term_win::parent_pid(helper)?;
+                let parent = native_term_os::process::parent_pid(helper)?;
                 if armed.ssh_pid == 0 || parent != armed.ssh_pid || !target.answers(prompt) {
                     return None;
                 }

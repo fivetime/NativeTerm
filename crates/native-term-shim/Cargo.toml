@@ -14,7 +14,11 @@ i18n-embed = { version = "0.16", features = ["fluent-system"] }
 i18n-embed-fl = "0.10"
 native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
+native-term-os = { path = "../native-term-os" }
 zmodem2 = "0.7"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 native-term-win = { path = "../native-term-win" }

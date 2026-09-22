@@ -220,7 +220,7 @@ pub fn install(key_file: &str, alias: &str) -> i32 {
 fn ask_password(prompt: &str) -> String {
     use std::io::{BufRead, IsTerminal};
     if std::io::stdin().is_terminal() {
-        return crate::win::read_line(prompt, false).unwrap_or_default();
+        return crate::console::read_line(prompt, false).unwrap_or_default();
     }
     let mut line = String::new();
     let _ = std::io::stdin().lock().read_line(&mut line);
@@ -332,6 +332,7 @@ mod tests {
 
     /// cmd.exe, like a Windows sshd's default shell, rejects the POSIX
     /// script in a way that is recognized.
+    #[cfg(windows)]
     #[test]
     fn a_windows_shell_is_recognized() {
         let script = remote_script("ssh-ed25519 AAAA c", "AAAA");

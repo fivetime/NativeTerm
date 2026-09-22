@@ -900,8 +900,14 @@
         write-and-exit client is still read; its tests run on the
         Linux/macOS machines when they come (2026-09-22). Done before P2b
         because the app has no `Core` without a channel
-  - [ ] P3b — the shim on Unix (ssh on the inherited tty; typing and
-        screen reads through the backend)
+  - [x] P3b — the shim on Unix: `posix.rs` behind `mod console` (poll
+        over a pipe pair, the tty, a login FIFO and a SIGCHLD pipe;
+        termios; SIGHUP/SIGTERM → `Closing`), `plink_stub.rs`, the SSPI
+        round and the file dialogs behind `cfg(windows)`, `sh -c` and
+        `$SHELL` where Windows has `cmd`; clippy on the Linux and macOS
+        targets, the Windows tests unchanged (2026-09-22). Left for the
+        machines: running it; typing and screen reads are the backend's
+        (P4/P5); "never reached" is Linux-only; no rz/sz dialogs
   - [ ] P4 — Linux backend: WezTerm (`wezterm cli`; also runs on Windows
         for end-to-end checks before a Linux machine is at hand)
   - [ ] P5 — macOS backend: iTerm2 (JXA through `osascript`)

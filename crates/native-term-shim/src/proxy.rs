@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use native_term_config::password::REFUSED;
 use native_term_config::proxy::{Kind, Proxy};
-use native_term_win::credentials;
+use native_term_os::credentials;
 
 use crate::t;
 
@@ -259,6 +259,7 @@ pub(crate) fn socks4(stream: &mut (impl Read + Write), host: &str, port: u16, us
 const ROUNDS: usize = 4;
 
 /// What the proxy said to a `CONNECT`.
+#[cfg_attr(not(windows), allow(dead_code))]
 struct Answer {
     /// The first line, as it stands.
     status: String,
@@ -274,6 +275,7 @@ struct Answer {
     chunked: bool,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 impl Answer {
     /// Whether `Basic` is on offer (a proxy that names nothing takes it).
     fn takes_basic(&self) -> bool {
@@ -338,6 +340,8 @@ fn answer(stream: &mut (impl Read + Write)) -> Result<Answer, Fail> {
 /// Negotiate) through SSPI, which needs nothing configured — Windows
 /// answers with the credentials the person is signed in with. Both are
 /// kept to one connection, as NTLM requires.
+// without the Windows login round the loop runs once and returns
+#[cfg_attr(not(windows), allow(clippy::never_loop))]
 pub(crate) fn http(
     stream: &mut (impl Read + Write),
     proxy: &str,
@@ -353,7 +357,11 @@ pub(crate) fn http(
         unsafe { pair.as_bytes_mut().fill(0) };
         header
     });
+    #[cfg(not(windows))]
+    let _ = proxy;
+    #[cfg(windows)]
     let mut windows: Option<crate::sspi::Handshake> = None;
+    #[cfg(windows)]
     let mut sent_token = false;
     for _ in 0..ROUNDS {
         let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
@@ -374,34 +382,37 @@ pub(crate) fn http(
             _ => return Err(Fail::Other(t!("proxy-refused", reason = answer.status))),
         }
         // a login Windows can answer itself, with or without a user name
-        if let Some(scheme) = crate::sspi::supported(&answer.schemes) {
-            if answer.chunked {
-                return Err(Fail::Other(t!("proxy-schemes", schemes = answer.schemes.join(", "))));
-            }
-            if windows.is_none() {
-                windows = Some(
-                    crate::sspi::Handshake::start(scheme, proxy, login)
-                        .map_err(|e| Fail::Other(t!("proxy-windows-login", error = e)))?,
-                );
-            }
-            let handshake = windows.as_mut().expect("just made");
-            let token = answer.token_for(scheme);
-            // the login was made, or we sent a token and it came back
-            // with nothing to carry on with: it has refused the person
-            if handshake.finished() || (sent_token && token.is_none()) {
-                return Err(Fail::Login);
-            }
-            match handshake.next(token) {
-                // nothing more to send and still refused: it said no
-                Ok(None) => return Err(Fail::Login),
-                Ok(Some(token)) => {
-                    authorization = Some(format!("{scheme} {}", base64(&token)));
-                    sent_token = true;
-                    continue;
+        #[cfg(windows)]
+        let () = {
+            if let Some(scheme) = crate::sspi::supported(&answer.schemes) {
+                if answer.chunked {
+                    return Err(Fail::Other(t!("proxy-schemes", schemes = answer.schemes.join(", "))));
                 }
-                Err(e) => return Err(Fail::Other(t!("proxy-windows-login", error = e))),
+                if windows.is_none() {
+                    windows = Some(
+                        crate::sspi::Handshake::start(scheme, proxy, login)
+                            .map_err(|e| Fail::Other(t!("proxy-windows-login", error = e)))?,
+                    );
+                }
+                let handshake = windows.as_mut().expect("just made");
+                let token = answer.token_for(scheme);
+                // the login was made, or we sent a token and it came back
+                // with nothing to carry on with: it has refused the person
+                if handshake.finished() || (sent_token && token.is_none()) {
+                    return Err(Fail::Login);
+                }
+                match handshake.next(token) {
+                    // nothing more to send and still refused: it said no
+                    Ok(None) => return Err(Fail::Login),
+                    Ok(Some(token)) => {
+                        authorization = Some(format!("{scheme} {}", base64(&token)));
+                        sent_token = true;
+                        continue;
+                    }
+                    Err(e) => return Err(Fail::Other(t!("proxy-windows-login", error = e))),
+                }
             }
-        }
+        };
         return match (answer.takes_basic(), login.is_some()) {
             (false, _) => Err(Fail::Other(t!("proxy-schemes", schemes = answer.schemes.join(", ")))),
             (true, true) => Err(Fail::Login),
@@ -493,6 +504,7 @@ mod tests {
         requests: usize,
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
     impl Fake {
         fn new(answer: &[u8]) -> Fake {
             Fake {
@@ -678,6 +690,7 @@ mod tests {
     /// machine this runs on may have no credentials of its own to offer
     /// (`sspi::tests`); the path through the proxy is the same either
     /// way.
+    #[cfg(windows)]
     #[test]
     fn a_windows_login_is_answered_by_windows() {
         let challenge = format!(

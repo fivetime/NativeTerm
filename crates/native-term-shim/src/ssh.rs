@@ -9,10 +9,9 @@ pub const KEEPALIVE_COUNT: u32 = 3;
 
 /// Arguments for `ssh`, ending with `-- <alias>`.
 ///
-/// - Login signal: `LocalCommand` runs through `cmd.exe /c` after
-///   authentication. The shim's path is quoted for `cmd.exe`; a path with
-///   `%` can't be passed safely (both ssh and `cmd.exe` expand it), so the
-///   signal is left out then.
+/// - Login signal: `LocalCommand` runs through the shell after
+///   authentication (`cmd.exe /c` on Windows, `sh -c` elsewhere); see
+///   `login_signal` for the quoting.
 /// - Keepalives only when `effective` (from `ssh -G`) shows the user hasn't
 ///   set them; command-line options would override the config.
 /// - `config`: `-F <file>` for a folder other than `~/.ssh` (`--ssh-dir`).
@@ -36,10 +35,9 @@ pub fn arguments(
         args.push("-o".into());
         args.push(value.into());
     };
-    let exe = shim_exe.to_string_lossy();
-    if !exe.contains('%') && !exe.contains('"') {
+    if let Some(command) = login_signal(&shim_exe.to_string_lossy(), shim_pid) {
         option("PermitLocalCommand=yes".into());
-        option(format!("LocalCommand=\"{exe}\" --authenticated {shim_pid}"));
+        option(format!("LocalCommand={command}"));
     }
     let value = |key: &str| effective.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
     if value("serveraliveinterval").unwrap_or("0") == "0" {
@@ -59,6 +57,22 @@ pub fn arguments(
     args.push("--".into());
     args.push(alias.into());
     args
+}
+
+/// The helper's command line for `LocalCommand`, quoted for the shell ssh
+/// runs it with. On Windows that is `cmd.exe`: the path in double quotes,
+/// and a path with `%` can't be passed safely (both ssh and `cmd.exe`
+/// expand it), so there is no signal then. Elsewhere `sh`: single quotes,
+/// which a `'` in the path would end.
+fn login_signal(exe: &str, shim_pid: u32) -> Option<String> {
+    #[cfg(windows)]
+    {
+        (!exe.contains('%') && !exe.contains('"')).then(|| format!("\"{exe}\" --authenticated {shim_pid}"))
+    }
+    #[cfg(not(windows))]
+    {
+        (!exe.contains('\'')).then(|| format!("'{exe}' --authenticated {shim_pid}"))
+    }
 }
 
 /// Whether ssh connects to the host itself: no `ProxyCommand` or
@@ -85,7 +99,7 @@ impl Reached {
         let (stop, reached) = (watch.stop.clone(), watch.reached.clone());
         std::thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
-                if crate::win::tcp_states(pid).contains(&crate::win::TCP_ESTABLISHED) {
+                if crate::console::tcp_states(pid).contains(&crate::console::TCP_ESTABLISHED) {
                     reached.store(true, Ordering::Relaxed);
                     return;
                 }
@@ -121,6 +135,7 @@ mod tests {
         args.iter().map(|a| a.to_string_lossy().to_string()).collect()
     }
 
+    #[cfg(windows)]
     #[test]
     fn full_command_line() {
         let args = arguments(
@@ -192,10 +207,31 @@ mod tests {
         assert_eq!(args[at + 1..], ["--", "web01"]);
     }
 
+    #[cfg(windows)]
     #[test]
     fn percent_in_path_drops_the_login_signal() {
         let args = strings(&arguments("web01", Path::new(r"C:\100%\nativeterm-shim.exe"), 1, &[], false, None, None));
         assert!(!args.iter().any(|a| a.contains("LocalCommand")), "{args:?}");
         assert_eq!(args.last().unwrap(), "web01");
+    }
+
+    /// The helper's path in single quotes for `sh`; one with a quote in it
+    /// gets no signal.
+    #[cfg(not(windows))]
+    #[test]
+    fn login_signal_is_quoted_for_sh() {
+        let args =
+            strings(&arguments("web01", Path::new("/opt/native term/nativeterm-shim"), 77, &[], false, None, None));
+        assert_eq!(
+            args[..4],
+            [
+                "-o",
+                "PermitLocalCommand=yes",
+                "-o",
+                "LocalCommand='/opt/native term/nativeterm-shim' --authenticated 77"
+            ]
+        );
+        let args = strings(&arguments("web01", Path::new("/opt/it's/nativeterm-shim"), 1, &[], false, None, None));
+        assert!(!args.iter().any(|a| a.contains("LocalCommand")), "{args:?}");
     }
 }

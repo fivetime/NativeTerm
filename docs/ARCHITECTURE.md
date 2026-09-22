@@ -1898,7 +1898,8 @@ the OneDrive folder and point `Include` at it.
 ## Session lifecycle (the shim)
 
 Because `wt` launches the tab's process, NativeTerm itself never owns the
-`ssh` process. The shim closes that gap:
+`ssh` process. The shim closes that gap (on Windows as written here; the
+Unix side is under "The shim on Unix" below):
 
 - It reads its session GUID from `WT_SESSION` and registers it on
   NativeTerm's named pipe.
@@ -1944,6 +1945,38 @@ Because `wt` launches the tab's process, NativeTerm itself never owns the
   cancelled", "Disconnected", "Session ended", each with the exit code)
   and "Press R to reconnect, C to close this tab"; Enter also
   reconnects. NativeTerm's Connect/Close commands do the same.
+
+### The shim on Unix
+
+The same program over `posix.rs` instead of `win.rs` (`mod console` picks
+one), with the same shape: ssh runs as a child on the inherited terminal
+(no pseudo-terminal of the shim's own), the main loop sleeps in `poll`
+on descriptors — a pipe pair for the link's arrivals, the terminal for
+keys, a FIFO the `LocalCommand` helper writes the login signal to
+(`$TMPDIR/nativeterm-auth-<uid>-<pid>`, `0600`), and a pipe a `SIGCHLD`
+handler pokes for the child — and `SIGHUP`/`SIGTERM` send `Closing`
+before the process exits, while `SIGINT`/`SIGQUIT` are left to ssh (a
+handler, not `SIG_IGN`, so ssh gets the default back on exec).
+`LocalCommand` is `'<shim>' --authenticated <pid>` for `sh`; the
+pre-connect command runs through `sh -c`; a placeholder's local shell is
+`$SHELL`; the batch askpass channel is a socket under
+`PIPE_NAME_PREFIX`. Terminal settings are saved and put back around
+ssh (termios), and reading a key or a password puts the terminal in
+the mode that needs.
+
+What the console API can't do without owning the terminal is not done
+here: `SendText`, `ClearScreen` and `Screen` are the terminal backend's
+(WezTerm's `send-text`/`get-text`, iTerm2's `write text`/`contents`),
+so `inject` and `screen_text` say `Unsupported`/`None`, and the app
+falls back to the backend. "Never reached" is told apart from a refused
+login on Linux only (the child's socket inodes against
+`/proc/<pid>/net/tcp`); elsewhere a failed login is a failed login.
+Non-SSH sessions (ntplink), the SSPI proxy login, the saved-password
+store and the rz/sz file dialogs are Windows'; on Unix rz/sz receive
+into the Downloads folder without asking and send only what
+`NATIVETERM_ZMODEM_FILES` names. The Windows integration tests
+(`tests/shim.rs`, against `fake_ssh`, a console program) don't run
+there; the Unix shim gets its own on a Unix machine.
 
 ### Shim ↔ NativeTerm protocol (implemented)
 

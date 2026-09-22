@@ -25,16 +25,30 @@ mod keys;
 mod link;
 mod look;
 mod persistent;
+#[cfg(windows)]
 mod plink;
+#[cfg(not(windows))]
+#[path = "plink_stub.rs"]
+mod plink;
+#[cfg(unix)]
+mod posix;
 mod preconnect;
 mod proxy;
 mod saved;
 mod ssh;
+#[cfg(windows)]
 mod sspi;
+#[cfg(windows)]
 mod win;
 mod zmodem;
 
-use std::os::windows::io::AsRawHandle;
+/// The console and the process, whichever system this is.
+mod console {
+    #[cfg(unix)]
+    pub use crate::posix::*;
+    #[cfg(windows)]
+    pub use crate::win::*;
+}
 
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -115,7 +129,7 @@ fn wt_session() -> Option<String> {
 /// The `LocalCommand` helper: runs synchronously inside ssh, so it must be
 /// quick and print nothing.
 fn authenticated(shim_pid: u32) {
-    win::signal_authenticated(shim_pid);
+    console::signal_authenticated(shim_pid);
     let Some(name) = pipe_name() else { return };
     if let Ok(conn) = pipe::connect(&name, Duration::from_millis(300)) {
         let _ = conn.send(&ShimMessage::Hello {
@@ -144,17 +158,17 @@ fn run(session: Option<String>, alias: Option<String>, flags: args::Flags) -> i3
         wt_session: wt_session(),
         session: session.clone(),
         alias: alias.clone(),
-        terminal_window: win::terminal_window(),
+        terminal_window: console::terminal_window(),
     };
     let link = pipe_name().map(|name| Link::start(name, hello));
     if let Some(link) = &link {
         let closing = link.sender();
-        win::install_ctrl_handler(move || {
+        console::install_ctrl_handler(move || {
             closing.send(ShimMessage::Closing);
             std::thread::sleep(Duration::from_millis(300));
         });
     } else {
-        win::install_ctrl_handler(|| {});
+        console::install_ctrl_handler(|| {});
     }
 
     match alias {
@@ -191,8 +205,7 @@ fn run_without_host(link: Option<Link>) -> i32 {
     }
     // a local shell makes this the user's own tab: leave NativeTerm alone
     drop(link);
-    let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
-    let _ = Command::new(shell).status();
+    let _ = console::local_shell().status();
     0
 }
 
@@ -203,7 +216,7 @@ fn start_app() -> bool {
         return false;
     }
     let Ok(exe) = std::env::current_exe() else { return false };
-    let app = exe.with_file_name("nativeterm.exe");
+    let app = exe.with_file_name(format!("nativeterm{}", std::env::consts::EXE_SUFFIX));
     let started = app.exists() && Command::new(&app).arg("--from-shim").spawn().is_ok();
     debug::log(format!("started {}: {started}", app.display()));
     started
@@ -221,7 +234,7 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
     let ssh_path = native_term_session::ssh_program();
     let shim_exe = std::env::current_exe().unwrap_or_default();
     let pid = std::process::id();
-    let auth = win::AuthEvent::create(pid).ok();
+    let auth = console::AuthEvent::create(pid).ok();
     let mut attempt = 0;
 
     if flags.wait {
@@ -244,7 +257,7 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         let _pages = native_term_config::plink::code_page(charset.as_deref())
             .ok()
             .filter(|page| *page != 65001)
-            .map(win::CodePages::set);
+            .map(console::CodePages::set);
         // before every attempt: a reconnect after sleep needs the tunnel
         // (or whatever it is) brought up again too
         if let Some(command) = before {
@@ -268,7 +281,7 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         send(ShimMessage::Connecting { attempt });
         // put back after ssh: Windows 10's OpenSSH 8.1 leaves the console
         // without "processed output" (line breaks shown as ♪◙)
-        let modes = win::ConsoleModes::save();
+        let modes = console::ConsoleModes::save();
         let direct = ssh::is_direct(&effective);
         let mut command = Command::new(&ssh_path);
         // NativeTerm's ssh hands rz / sz to the shim (`--zmodem`); any
@@ -341,11 +354,11 @@ enum Supervised {
 fn supervise(
     child: &mut Child,
     link: Option<&Link>,
-    auth: Option<&win::AuthEvent>,
-    control: Option<&win::ControlPipe>,
+    auth: Option<&console::AuthEvent>,
+    control: Option<&console::ControlPipe>,
 ) -> Supervised {
     let mut reported = false;
-    let process = windows::Win32::Foundation::HANDLE(child.as_raw_handle() as _);
+    let process = console::child_handle(child);
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             return Supervised::Exited(status.code().unwrap_or(-1));
@@ -357,7 +370,7 @@ fn supervise(
                 handles.push(auth.handle());
             }
         }
-        win::wait_any(&handles, None);
+        console::wait_any(&handles, None);
         if let (false, Some(link), Some(auth)) = (reported, link, auth) {
             if auth.is_set() {
                 link.send(ShimMessage::Authenticated);
@@ -372,7 +385,7 @@ fn supervise(
                 }
                 AppMessage::Disconnect => end(child),
                 AppMessage::SendText { text, enter } => {
-                    let _ = win::inject(&text, enter);
+                    let _ = console::inject(&text, enter);
                 }
                 AppMessage::Screen => send_screen(link),
                 AppMessage::ClearScreen => {
@@ -380,7 +393,7 @@ fn supervise(
                         // clear here first, then let the remote side redraw
                         // (Ctrl+L) on the empty screen
                         write_console(CLEAR_ALL);
-                        let _ = win::inject("\u{c}", false);
+                        let _ = console::inject("\u{c}", false);
                     } else {
                         // a password prompt may be showing: keep the screen,
                         // and don't type into it
@@ -428,7 +441,7 @@ enum Next {
 /// and follow NativeTerm's commands.
 fn after_exit(link: Option<&Link>) -> Next {
     println!("{}", t!("reconnect-or-close"));
-    let keys = win::KeyReader::open().ok();
+    let keys = console::KeyReader::open().ok();
     loop {
         let mut handles = Vec::new();
         if let Some(keys) = &keys {
@@ -441,7 +454,7 @@ fn after_exit(link: Option<&Link>) -> Next {
             // no console input and no NativeTerm: nothing can ever arrive
             return Next::Close;
         }
-        win::wait_any(&handles, None);
+        console::wait_any(&handles, None);
         if let Some(keys) = &keys {
             // every record read clears the signal; non-key records too
             while let Ok(Some(key)) = keys.read_key(Duration::ZERO) {
@@ -457,7 +470,7 @@ fn after_exit(link: Option<&Link>) -> Next {
                 AppMessage::Connect => return Next::Reconnect,
                 AppMessage::Close => return Next::Close,
                 AppMessage::SendText { text, enter } => {
-                    let _ = win::inject(&text, enter);
+                    let _ = console::inject(&text, enter);
                 }
                 AppMessage::Screen => send_screen(link),
                 AppMessage::ClearScreen => {
@@ -487,7 +500,7 @@ fn wait_for_any_key() {
     if !std::io::stdout().is_terminal() {
         return;
     }
-    if let Ok(keys) = win::KeyReader::open() {
+    if let Ok(keys) = console::KeyReader::open() {
         println!("{}", t!("any-key"));
         while !matches!(keys.read_key(Duration::from_secs(3600)), Ok(Some(_))) {}
     }
@@ -497,6 +510,6 @@ fn wait_for_any_key() {
 fn send_screen(link: Option<&Link>) {
     let Some(link) = link else { return };
     // enough for a tall window; more than a picture of it needs
-    let Some((columns, lines)) = win::screen_text(120) else { return };
+    let Some((columns, lines)) = console::screen_text(120) else { return };
     link.send(ShimMessage::Screen { columns, lines });
 }

@@ -30,6 +30,7 @@ const NUDGE: Duration = Duration::from_secs(10);
 /// Nothing at all this long: give up.
 const GIVE_UP: Duration = Duration::from_secs(60);
 /// Where the last folders are kept (HKCU).
+#[cfg(windows)]
 const REG_KEY: &str = r"Software\NativeTerm\Zmodem";
 /// Written last on stdout: ssh gives the session back to the terminal.
 /// Raw XOFF never appears in ZMODEM data (it is always escaped there);
@@ -566,6 +567,7 @@ impl<W: Write> Write for Tapped<W> {
 
 /// ntplink reads the keyboard itself (PuTTY's reader thread takes every
 /// key): on Esc or Ctrl+C it sets this event, named after our pid.
+#[cfg(windows)]
 fn watch_cancel_event(cancel: Arc<AtomicBool>) {
     use windows::core::HSTRING;
     use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject, INFINITE};
@@ -586,6 +588,26 @@ fn watch_cancel_event(cancel: Arc<AtomicBool>) {
 
 /// Esc or Ctrl+C in the tab cancels (ssh doesn't read the keyboard while
 /// the transfer has the session).
+#[cfg(unix)]
+fn watch_keys(cancel: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        let Ok(keys) = crate::console::KeyReader::open() else { return };
+        loop {
+            match keys.read_key(Duration::from_secs(1)) {
+                Ok(Some('\u{1b}' | '\u{3}')) => {
+                    cancel.store(true, Ordering::Relaxed);
+                    return;
+                }
+                Ok(_) => {}
+                Err(_) => return,
+            }
+        }
+    });
+}
+
+/// Esc or Ctrl+C in the tab cancels (ssh doesn't read the keyboard while
+/// the transfer has the session).
+#[cfg(windows)]
 fn watch_keys(cancel: Arc<AtomicBool>) {
     watch_cancel_event(Arc::clone(&cancel));
     use windows::core::w;
@@ -640,16 +662,60 @@ fn watch_keys(cancel: Arc<AtomicBool>) {
     });
 }
 
+/// The folder last used for `name` (kept in the registry; nowhere yet
+/// elsewhere).
 fn remembered(name: &str) -> Option<PathBuf> {
-    native_term_win::registry::user_values(REG_KEY).ok()?.into_iter().find_map(|(n, v)| match v {
-        native_term_win::registry::RegValue::Str(s) if n == name => Some(PathBuf::from(s)),
-        _ => None,
-    })
+    #[cfg(windows)]
+    {
+        native_term_os::registry::user_values(REG_KEY).ok()?.into_iter().find_map(|(n, v)| match v {
+            native_term_os::registry::RegValue::Str(s) if n == name => Some(PathBuf::from(s)),
+            _ => None,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = name;
+        None
+    }
 }
 
 fn remember(name: &str, folder: &Path) {
-    let value = native_term_win::registry::RegValue::Str(folder.display().to_string());
-    let _ = native_term_win::registry::write_user_values(REG_KEY, &[(name, value)]);
+    #[cfg(windows)]
+    {
+        let value = native_term_os::registry::RegValue::Str(folder.display().to_string());
+        let _ = native_term_os::registry::write_user_values(REG_KEY, &[(name, value)]);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (name, folder);
+    }
+}
+
+/// Where to put received files: a folder dialog on Windows; elsewhere the
+/// Downloads folder (or the one remembered) without asking.
+fn pick_folder(start: Option<&Path>) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        native_term_os::picker::pick_folder(&t!("zmodem-folder-title"), start)
+    }
+    #[cfg(not(windows))]
+    {
+        start.map(Path::to_path_buf)
+    }
+}
+
+/// Which files to send: a file dialog on Windows; elsewhere none, so the
+/// transfer is declined unless `NATIVETERM_ZMODEM_FILES` names them.
+fn pick_files(start: Option<&Path>) -> Option<Vec<PathBuf>> {
+    #[cfg(windows)]
+    {
+        native_term_os::picker::pick_files(&t!("zmodem-files-title"), start)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = start;
+        None
+    }
 }
 
 /// Asks NativeTerm (its pipe) to open the files window of this tab's
@@ -719,8 +785,8 @@ pub fn run(mode: &str, escape: bool, files: bool) -> i32 {
         "download" => {
             let dir = std::env::var_os("NATIVETERM_ZMODEM_DIR").map(PathBuf::from).or_else(|| {
                 eprint!("\r\n[NativeTerm] {}", t!("zmodem-pick-folder"));
-                let start = remembered("DownloadFolder").or_else(native_term_win::shell::downloads_folder);
-                let dir = native_term_win::picker::pick_folder(&t!("zmodem-folder-title"), start.as_deref());
+                let start = remembered("DownloadFolder").or_else(native_term_os::shell::downloads_folder);
+                let dir = pick_folder(start.as_deref());
                 if let Some(dir) = &dir {
                     remember("DownloadFolder", dir);
                 }
@@ -746,7 +812,7 @@ pub fn run(mode: &str, escape: bool, files: bool) -> i32 {
                 .or_else(|| {
                     eprint!("\r\n[NativeTerm] {}", t!("zmodem-pick-files"));
                     let start = remembered("UploadFolder");
-                    let files = native_term_win::picker::pick_files(&t!("zmodem-files-title"), start.as_deref());
+                    let files = pick_files(start.as_deref());
                     if let Some(folder) = files.as_ref().and_then(|f| f.first()).and_then(|f| f.parent()) {
                         remember("UploadFolder", folder);
                     }

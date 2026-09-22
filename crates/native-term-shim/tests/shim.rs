@@ -1,3 +1,6 @@
+#![cfg(windows)]
+// Against fake_ssh (a Windows console program) and Windows Terminal's
+// consoles: the Unix shim gets its own tests on a Unix machine.
 //! End to end: a real shim process against a test pipe server, with a fake
 //! ssh (examples/fake_ssh.rs), no network.
 

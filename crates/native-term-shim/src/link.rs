@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use native_term_session::pipe::{self, PipeConnection};
 use native_term_session::protocol::{AppMessage, ShimMessage};
 
-use crate::win::Event;
+use crate::console::Event;
 
 const RETRY: Duration = Duration::from_secs(2);
 const TICK: Duration = Duration::from_millis(50);
