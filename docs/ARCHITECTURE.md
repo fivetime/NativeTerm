@@ -3709,6 +3709,22 @@ Implemented (first version), on NativeTerm's main window:
   area, frame bounds, cursor, buttons).
 - **Not yet:** the floating action button; hiding into a strip on the
   bottom edge (the taskbar is usually there).
+- **On X11** (`native_term_os::dock`, over `x11rb`): the same events and
+  timers, with the frame as the window manager drew it
+  (`_NET_FRAME_EXTENTS`), the work area it publishes (`_NET_WORKAREA`)
+  and the pointer from the X server; the window handle is the X window
+  id. Two things differ. A window manager keeps windows on the screen
+  (KWin clamps a client's own move requests), so the docked window
+  can't slide away: it is hidden outright, and a 4 px strip of its own
+  — a plain always-on-top window the server paints in the accent
+  colour — stands along the edge; the pointer entering the strip brings
+  the window back (`Runner::set_hidden`). And a window manager places a
+  newly mapped window as it likes and forgets an unmapped one's place,
+  so the strip, the floating button and the window coming back are
+  moved again once mapped, to where they were. Verified on Deepin 25
+  (KWin): dock at the top, hide, return through the strip, the button
+  bottom-right and its panel, and docking again after a restart. On
+  Wayland none of the questions can be answered, so nothing docks.
 
 ## Floating action button (FAB)
 

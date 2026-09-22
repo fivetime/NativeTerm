@@ -984,6 +984,14 @@
         actions as the Windows menu. Ctrl+Tab shows WezTerm's tab
         navigator when the switcher setting is on. `core_fake` covers
         the pipe side; the picker was driven by hand on Deepin
+  - [x] Docking and the floating button on X11 (2026-09-22):
+        `native_term_os::dock` over `x11rb` (frame extents, work area,
+        pointer, moves); where the window manager keeps windows on the
+        screen the docked window hides outright behind a 4 px strip of
+        its own, and windows are moved again once mapped since the
+        window manager places them as it likes. Seen on Deepin (KWin):
+        dock, hide, return, the button's panel, re-dock after a restart.
+        The button is square there (no layered window)
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

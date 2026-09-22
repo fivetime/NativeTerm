@@ -140,6 +140,10 @@ struct Docking {
     /// Brought out on request (the floating button): stays out until the
     /// pointer has been over it, or it loses the focus.
     until_visited: bool,
+    /// Where the window was when it was hidden outright (see
+    /// `Runner::set_hidden`), to put it back there.
+    #[cfg(not(windows))]
+    shown_at: Option<(i32, i32)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -405,6 +409,14 @@ struct Runner {
     /// Windows from `open`: number, key, window.
     extras: Vec<(u64, String, Pane)>,
     next_extra: u64,
+    /// The strip along the edge that stands for the docked window while
+    /// it is hidden outright (see `set_hidden`): plain, painted by the
+    /// server, brings the window back when the pointer touches it.
+    #[cfg(not(windows))]
+    strip: Option<Window>,
+    /// Where the floating button was last shown (see `sync_button`).
+    #[cfg(not(windows))]
+    button_at: Option<(i32, i32)>,
 }
 
 /// Run the windows until the main one is closed.
@@ -435,6 +447,10 @@ pub fn run(
         docking: Docking::default(),
         extras: Vec::new(),
         next_extra: 1,
+        #[cfg(not(windows))]
+        strip: None,
+        #[cfg(not(windows))]
+        button_at: None,
     };
     event_loop.run_app(&mut runner).map_err(|e| e.to_string())?;
     match runner.error {
@@ -457,6 +473,23 @@ impl Runner {
             }
         })?;
         self.main = Some(main);
+        #[cfg(not(windows))]
+        {
+            let attributes = Window::default_attributes()
+                .with_title("NativeTerm")
+                .with_decorations(false)
+                .with_resizable(false)
+                .with_visible(false)
+                .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
+                .with_inner_size(winit::dpi::PhysicalSize::new(200u32, dock::STRIP as u32));
+            if let Ok(strip) = event_loop.create_window(attributes) {
+                let colour = native_term_os::desktop::accent().unwrap_or((0x80, 0x80, 0x80));
+                if let Some(handle) = window_handle(&strip) {
+                    win::fill(handle, colour);
+                }
+                self.strip = Some(strip);
+            }
+        }
         if let Some(spec) = self.button_spec.take() {
             let viewport = spec.viewport.with_visible(false);
             let position = spec.position;
@@ -579,6 +612,69 @@ impl Runner {
     }
 
     fn start_slide(&mut self, hide: bool) {
+        if cfg!(windows) {
+            self.slide_window(hide);
+        } else {
+            self.set_hidden(hide);
+        }
+    }
+
+    /// Where the window manager keeps windows on the screen (X11), a
+    /// docked window can't slide away: it is hidden outright, and a
+    /// strip along the edge stands for it until the pointer touches it.
+    fn set_hidden(&mut self, hide: bool) {
+        let Some(edge) = self.docking.edge else { return };
+        #[cfg(windows)]
+        let _ = edge;
+        self.docking.slide = None;
+        self.docking.leave_check = None;
+        if hide {
+            let at = self.hwnd().and_then(win::frame_bounds);
+            #[cfg(not(windows))]
+            {
+                self.docking.shown_at = at.map(|b| (b.left, b.top));
+                if let (Some(strip), Some(frame)) = (&self.strip, at) {
+                    let (x, y, w, h) = match edge {
+                        Edge::Top => (frame.left, frame.top, frame.width(), dock::STRIP),
+                        Edge::Left => (frame.left, frame.top, dock::STRIP, frame.height()),
+                        Edge::Right => (frame.right - dock::STRIP, frame.top, dock::STRIP, frame.height()),
+                    };
+                    let _ = strip.request_inner_size(winit::dpi::PhysicalSize::new(w.max(1) as u32, h.max(1) as u32));
+                    strip.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+                    strip.set_visible(true);
+                    // the window manager places a newly mapped window as it
+                    // likes; a move once it is mapped is honoured
+                    if let Some(handle) = window_handle(strip) {
+                        win::move_window(handle, x, y);
+                    }
+                }
+            }
+            let _ = at;
+            if let Some(main) = &self.main {
+                main.window.set_visible(false);
+            }
+            self.docking.hidden = true;
+        } else {
+            #[cfg(not(windows))]
+            if let Some(strip) = &self.strip {
+                strip.set_visible(false);
+            }
+            if let Some(main) = &self.main {
+                main.window.set_visible(true);
+            }
+            self.docking.hidden = false;
+            // mapped again, the window manager may have placed it anew
+            #[cfg(not(windows))]
+            if let Some(at) = self.docking.shown_at.take() {
+                self.move_to(at);
+            }
+            if !self.docking.until_visited {
+                self.docking.leave_check = Some(Instant::now() + dock::LEAVE_DELAY);
+            }
+        }
+    }
+
+    fn slide_window(&mut self, hide: bool) {
         let Some(edge) = self.docking.edge else { return };
         let (Some(hwnd), Some(to)) = (self.hwnd(), self.docked_target(edge, hide)) else { return };
         let Some(from) = win::window_bounds(hwnd).map(|b| (b.left, b.top)) else { return };
@@ -601,6 +697,10 @@ impl Runner {
         }
         let was = self.docking.edge;
         self.docking.edge = edge;
+        if self.docking.hidden {
+            // undocked while hidden outright (X11): back on the screen
+            self.set_hidden(false);
+        }
         self.docking.hidden = false;
         dock::publish_edge(edge);
         if let Some(r) = &self.main {
@@ -744,9 +844,26 @@ impl Runner {
         if let Some(button) = &self.button {
             let visible = button.window.is_visible().unwrap_or(false);
             if (wanted || (visible && keep_open)) != visible {
+                // where it is while shown: a window unmapped on X11 forgets
+                // its place, and the window manager places a newly mapped
+                // one as it likes; a move once it is mapped is honoured
+                #[cfg(not(windows))]
+                let at = match visible {
+                    true => win::window_bounds(button.hwnd).map(|b| (b.left, b.top)),
+                    // before the first map, where it was put at creation
+                    false => self.button_at.or_else(|| button.window.outer_position().ok().map(|p| (p.x, p.y))),
+                };
                 button.window.set_visible(!visible);
                 if !visible {
+                    #[cfg(not(windows))]
+                    if let Some((x, y)) = at {
+                        win::move_window(button.hwnd, x, y);
+                    }
                     button.window.request_redraw();
+                }
+                #[cfg(not(windows))]
+                {
+                    self.button_at = at;
                 }
             }
         }
@@ -799,6 +916,13 @@ impl ApplicationHandler<UserEvent> for Runner {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let now = Instant::now();
+        #[cfg(not(windows))]
+        if self.strip.as_ref().is_some_and(|s| s.id() == id) {
+            if matches!(event, WindowEvent::CursorEntered { .. }) && self.docking.hidden {
+                self.start_slide(false);
+            }
+            return;
+        }
         let Some((which, pane)) = self.pane(id) else { return };
         match event {
             WindowEvent::RedrawRequested => {
@@ -895,12 +1019,15 @@ impl ApplicationHandler<UserEvent> for Runner {
 }
 
 /// The window's native handle: the `HWND`, which docking, the layered
-/// button and the Terminal windows are all about. Elsewhere there is
-/// nothing of that, and `0` stands for a handle nothing asks after.
+/// button and the Terminal windows are all about, or the X window id,
+/// which docking asks the X server about. Elsewhere there is nothing of
+/// that, and `0` stands for a handle nothing asks after.
 fn window_handle(window: &Window) -> Option<isize> {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match window.window_handle().ok()?.as_raw() {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
+        RawWindowHandle::Xlib(h) => Some(h.window as isize),
+        RawWindowHandle::Xcb(h) => Some(h.window.get() as isize),
         _ => Some(0),
     }
 }
