@@ -272,3 +272,35 @@ script does instead:
 
 Warnings: 7 × C4819 (source characters outside code page 936) and 2 ×
 C4047 in `clientloop.c` / `serverloop.c`, both upstream as is.
+
+## On Linux (built and verified 2026-09-22, Deepin 25 with WezTerm)
+
+The same fork builds the same ssh on Linux: the `nativeterm` branch's
+`Makefile.in` lists `nativeterm/nt_zmodem.o` and `nt_drop.o` next to the
+other ssh objects, so `autoreconf -i && ./configure && make ssh` (with
+`autoconf`, `automake`, `libssl-dev`, `zlib1g-dev`) gives a `ssh` whose
+`-V` still says `OpenSSH_for_Windows_10.2p1` (the fork's banner; cosmetic).
+`nt_zmodem.c` is portable already (`posix_spawn`, pipes; `windows.h` only
+under `WINDOWS`). NativeTerm's `ssh_program()` now prefers `openssh/ssh`
+next to the running program on every platform (`openssh\ssh.exe` on
+Windows), else `NATIVETERM_SSH`, else `ssh` on `PATH` — so a package can
+ship the fork beside the shim and nothing else changes.
+
+The helper's dialogs are the desktop's: `native_term_os::picker` runs
+`zenity` (the portal's own file dialog on Deepin, so it looks like the
+desktop's) or `kdialog`, whichever is there; on a desktop with neither a
+download goes to the Downloads folder without asking, and an upload
+opens the files window (SFTP) instead, said in the tab. macOS gets
+`osascript`'s `choose file` / `choose folder` (unverified). The last
+folder is not remembered off Windows yet.
+
+Seen on Deepin (the box talking to its own sshd, `lrzsz` there):
+`sz` of a 10-byte file and of 30 MB (identical, mtime kept), `rz` of 30 MB
+(identical), Esc during a download (cancelled on both sides, the
+`.ntpart` left for a resume, the tab usable). 30 MB took 0.5–0.8 s down
+(40–65 MB/s) and 1.1 s up. Before that the download crawled at
+0.3 MB/s: the helper's wire buffer was a `Vec` drained from the front
+a subpacket at a time, which moved the megabytes a fast sender had
+queued for every kilobyte consumed; it is now an `Inbox` with a read
+position, compacted once in a while — the same code runs on Windows,
+which had the same cost on fast links.

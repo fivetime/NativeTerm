@@ -1000,6 +1000,15 @@
         back, which reopen and log in. What Windows Terminal adds — its
         own restore of the tab layout after a reboot, matched by
         NativeTerm — has no counterpart in WezTerm and is not planned
+  - [x] rz / sz on Linux (2026-09-22): the OpenSSH fork builds on Linux
+        (its Makefile lists the NativeTerm helpers), `ssh_program()`
+        prefers `openssh/ssh` next to the program everywhere, the
+        helper's dialogs are `zenity` / `kdialog` (the Downloads folder
+        or the files window without them), and a fast sender no longer
+        makes the helper's buffer crawl (an O(n²) drain, on Windows too).
+        Seen on Deepin: sz and rz of 30 MB in about a second each, Esc
+        cancels with a `.ntpart` kept; the Ctrl+C in a tab reaches the
+        remote command (exit 130) and the shim stays. See `RZSZ.md`
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

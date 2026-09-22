@@ -4480,9 +4480,12 @@ program owns.
   services, font files, the desktop's look. On Windows each name is the
   `native-term-win` helper it always was; elsewhere the same name over
   libc and the desktop's tools, or an honest "not here" (`Unsupported`,
-  an empty list, `None`). What only Windows has (registry, docking,
-  layered windows, the picker) is reachable through it under
-  `cfg(windows)` only. `appearance::read` is the one place the desktop's
+  an empty list, `None`). What only Windows has (the registry, layered
+  windows) is reachable through it under `cfg(windows)` only; `picker`
+  is the desktop's file dialog everywhere (Windows' own; `zenity` or
+  `kdialog` on Linux, `available()` saying whether either is there;
+  `osascript` on macOS) and `dock` asks X11 where it can (see the
+  docking section). `appearance::read` is the one place the desktop's
   light-or-dark, accent colour and monospace font are read, and it is
   deliberately not per desktop: on Linux the portal's
   `org.freedesktop.appearance` settings first (the one standard home,

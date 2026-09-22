@@ -7,9 +7,8 @@
 //! (`io::ErrorKind::Unsupported`, an empty list, `None`) that the program
 //! shows as a missing feature rather than a broken one.
 //!
-//! What only Windows has (the registry, docking to Terminal windows,
-//! layered windows, the file picker) is here under `cfg(windows)` only;
-//! the program keeps those behind the same `cfg`.
+//! What only Windows has (the registry, layered windows) is here under
+//! `cfg(windows)` only; the program keeps those behind the same `cfg`.
 
 pub mod appearance;
 pub mod cloud;
@@ -21,6 +20,7 @@ pub mod home;
 pub mod host;
 pub mod hotkey;
 pub mod layered;
+pub mod picker;
 pub mod process;
 pub mod serial;
 pub mod service;
@@ -30,7 +30,7 @@ pub mod time;
 pub mod watch;
 
 #[cfg(windows)]
-pub use native_term_win::{picker, registry};
+pub use native_term_win::registry;
 
 /// The error a feature gives where the OS has nothing for it.
 #[cfg(unix)]

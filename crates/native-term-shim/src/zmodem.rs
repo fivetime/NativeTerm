@@ -60,17 +60,64 @@ pub enum Outcome {
 }
 
 /// Reads wire input for a little while; `false` once the other side is gone.
-fn wait_input(input: &mpsc::Receiver<Vec<u8>>, into: &mut Vec<u8>) -> bool {
+fn wait_input(input: &mpsc::Receiver<Vec<u8>>, into: &mut Inbox) -> bool {
     match input.recv_timeout(Duration::from_millis(50)) {
         Ok(bytes) => {
-            into.extend_from_slice(&bytes);
-            while let Ok(more) = input.try_recv() {
-                into.extend_from_slice(&more);
+            into.extend(&bytes);
+            // what else is queued, up to a bound: a sender that streams
+            // faster than the files are written must not pile up here
+            while into.len() < INBOX_TAKE {
+                let Ok(more) = input.try_recv() else { break };
+                into.extend(&more);
             }
             true
         }
         Err(mpsc::RecvTimeoutError::Timeout) => true,
         Err(mpsc::RecvTimeoutError::Disconnected) => false,
+    }
+}
+
+/// How much of the wire is taken from the reader at a time.
+const INBOX_TAKE: usize = 1024 * 1024;
+
+/// Bytes from the wire waiting for the protocol: consumed from the front
+/// a subpacket at a time, which must not move the rest each time (a fast
+/// sender fills this by the megabyte, and moving it per kilobyte made a
+/// 30 MB download crawl): a read position, compacted now and then.
+#[derive(Default)]
+struct Inbox {
+    buf: Vec<u8>,
+    at: usize,
+}
+
+impl Inbox {
+    /// What has not been consumed yet.
+    fn unread(&self) -> &[u8] {
+        &self.buf[self.at..]
+    }
+
+    fn len(&self) -> usize {
+        self.buf.len() - self.at
+    }
+
+    fn is_empty(&self) -> bool {
+        self.at >= self.buf.len()
+    }
+
+    fn extend(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
+    /// The first `n` unread bytes are done with.
+    fn consume(&mut self, n: usize) {
+        self.at = (self.at + n).min(self.buf.len());
+        if self.at == self.buf.len() {
+            self.buf.clear();
+            self.at = 0;
+        } else if self.at >= 64 * 1024 {
+            self.buf.drain(..self.at);
+            self.at = 0;
+        }
     }
 }
 
@@ -121,7 +168,7 @@ pub fn receive<W: Write>(
     if escape && receiver.set_escape_control(true).is_err() {
         return Outcome::Failed("zmodem".into());
     }
-    let mut input = Vec::new();
+    let mut input = Inbox::default();
     let mut quiet = Instant::now();
     let mut open: Option<(File, PathBuf, String)> = None;
     // what the server says the file was last changed (ZFILE), kept on the
@@ -209,9 +256,9 @@ pub fn receive<W: Write>(
             Action::Event(_) => {}
             Action::Idle => {
                 if !input.is_empty() {
-                    match receiver.submit_wire(&input) {
+                    match receiver.submit_wire(input.unread()) {
                         Ok(used) => {
-                            input.drain(..used);
+                            input.consume(used);
                             if used > 0 {
                                 continue;
                             }
@@ -318,7 +365,7 @@ pub fn send<W: Write>(
         Ok(next) => next,
         Err(e) => return Outcome::Failed(e),
     };
-    let mut input = Vec::new();
+    let mut input = Inbox::default();
     let mut quiet = Instant::now();
     let mut buf = vec![0u8; 8192];
     let (mut sent, mut bytes) = (0usize, 0u64);
@@ -338,12 +385,12 @@ pub fn send<W: Write>(
                 // receiver says meanwhile (ZRPOS after an error, a cancel)
                 // is taken as it comes
                 while let Ok(more) = wire.input.try_recv() {
-                    input.extend_from_slice(&more);
+                    input.extend(&more);
                 }
                 if !input.is_empty() {
-                    match sender.submit_wire(&input) {
+                    match sender.submit_wire(input.unread()) {
                         Ok(used) => {
-                            input.drain(..used);
+                            input.consume(used);
                         }
                         Err(e) => return Outcome::Failed(format!("{e:?}")),
                     }
@@ -400,9 +447,9 @@ pub fn send<W: Write>(
                     return Outcome::Failed(t!("zmodem-gone"));
                 }
                 if !input.is_empty() {
-                    match sender.submit_wire(&input) {
+                    match sender.submit_wire(input.unread()) {
                         Ok(used) => {
-                            input.drain(..used);
+                            input.consume(used);
                             if used > 0 {
                                 continue;
                             }
@@ -691,31 +738,28 @@ fn remember(name: &str, folder: &Path) {
     }
 }
 
-/// Where to put received files: a folder dialog on Windows; elsewhere the
-/// Downloads folder (or the one remembered) without asking.
+/// Where to put received files: a folder dialog (Windows' own; zenity or
+/// kdialog on Linux; macOS's), or on a desktop without one the Downloads
+/// folder (or the one remembered) without asking.
 fn pick_folder(start: Option<&Path>) -> Option<PathBuf> {
-    #[cfg(windows)]
-    {
-        native_term_os::picker::pick_folder(&t!("zmodem-folder-title"), start)
+    if !native_term_os::picker::available() {
+        return start.map(Path::to_path_buf);
     }
-    #[cfg(not(windows))]
-    {
-        start.map(Path::to_path_buf)
-    }
+    native_term_os::picker::pick_folder(&t!("zmodem-folder-title"), start)
 }
 
-/// Which files to send: a file dialog on Windows; elsewhere none, so the
-/// transfer is declined unless `NATIVETERM_ZMODEM_FILES` names them.
+/// Which files to send: a file dialog, or on a desktop without one none —
+/// the files window is opened instead (see `run`), so the transfer is
+/// declined unless `NATIVETERM_ZMODEM_FILES` names the files.
 fn pick_files(start: Option<&Path>) -> Option<Vec<PathBuf>> {
-    #[cfg(windows)]
-    {
-        native_term_os::picker::pick_files(&t!("zmodem-files-title"), start)
+    if !native_term_os::picker::available() {
+        eprint!(
+            "\r\n[NativeTerm] {}",
+            if ask_for_files() { t!("zmodem-no-picker-files") } else { t!("zmodem-no-picker") }
+        );
+        return None;
     }
-    #[cfg(not(windows))]
-    {
-        let _ = start;
-        None
-    }
+    native_term_os::picker::pick_files(&t!("zmodem-files-title"), start)
 }
 
 /// Asks NativeTerm (its pipe) to open the files window of this tab's
@@ -729,7 +773,7 @@ fn ask_for_files() -> bool {
         protocol: native_term_session::PROTOCOL_VERSION,
         role: Role::Request,
         pid: std::process::id(),
-        wt_session: std::env::var("WT_SESSION").ok().filter(|s| !s.is_empty()),
+        wt_session: crate::wt_session(),
         session: None,
         alias: None,
         terminal_window: None,
@@ -850,6 +894,26 @@ pub fn run(mode: &str, escape: bool, files: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_inbox_is_consumed_from_the_front_without_moving_the_rest() {
+        let mut inbox = Inbox::default();
+        inbox.extend(b"abcdef");
+        inbox.consume(2);
+        assert_eq!(inbox.unread(), b"cdef");
+        assert_eq!(inbox.len(), 4);
+        assert_eq!(inbox.at, 2, "not moved");
+        inbox.extend(b"gh");
+        assert_eq!(inbox.unread(), b"cdefgh");
+        inbox.consume(6);
+        assert!(inbox.is_empty());
+        assert_eq!((inbox.buf.len(), inbox.at), (0, 0), "emptied outright");
+        inbox.extend(&vec![7u8; 70 * 1024]);
+        inbox.consume(65 * 1024);
+        assert_eq!((inbox.len(), inbox.at), (5 * 1024, 0), "compacted once far in");
+        inbox.consume(usize::MAX);
+        assert!(inbox.is_empty());
+    }
 
     struct Quiet;
     impl Watch for Quiet {

@@ -47,7 +47,7 @@ pub fn run(paths: &[String]) -> i32 {
         protocol: native_term_session::PROTOCOL_VERSION,
         role: Role::Request,
         pid: std::process::id(),
-        wt_session: std::env::var("WT_SESSION").ok().filter(|s| !s.is_empty()),
+        wt_session: crate::wt_session(),
         session: None,
         alias: None,
         terminal_window: None,

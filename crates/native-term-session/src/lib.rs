@@ -73,14 +73,17 @@ pub fn ssh_program() -> std::path::PathBuf {
 /// the system's `ssh` (found on `PATH` when it is run).
 #[cfg(unix)]
 pub fn ssh_program() -> std::path::PathBuf {
-    std::env::var_os("NATIVETERM_SSH").map_or_else(|| std::path::PathBuf::from("ssh"), std::path::PathBuf::from)
+    if let Some(p) = std::env::var_os("NATIVETERM_SSH") {
+        return std::path::PathBuf::from(p);
+    }
+    own_ssh().unwrap_or_else(|| std::path::PathBuf::from("ssh"))
 }
 
-/// NativeTerm's own ssh: `openssh\ssh.exe` next to the running program.
-#[cfg(windows)]
+/// NativeTerm's own ssh (the fork with rz / sz): `openssh/ssh` next to
+/// the running program (`openssh\ssh.exe` on Windows).
 fn own_ssh() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
-    let own = exe.parent()?.join("openssh").join("ssh.exe");
+    let own = exe.parent()?.join("openssh").join(format!("ssh{}", std::env::consts::EXE_SUFFIX));
     own.is_file().then_some(own)
 }
 
