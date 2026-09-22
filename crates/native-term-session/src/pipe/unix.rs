@@ -50,11 +50,19 @@ pub fn pipe_name() -> io::Result<String> {
     Ok(path.to_string_lossy().into_owned())
 }
 
-/// The socket's folder, ours alone.
+/// The socket's folder: made, and then ours alone. One that is already
+/// there (`/tmp`, for a test's socket) is left as it is.
 fn prepare_dir(path: &Path) -> io::Result<()> {
     let Some(dir) = path.parent() else { return Ok(()) };
-    std::fs::create_dir_all(dir)?;
-    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    match std::fs::create_dir(dir) {
+        Ok(()) => std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(dir)?;
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn gone(e: io::Error) -> io::Error {
@@ -406,6 +414,7 @@ mod tests {
     #[test]
     fn a_socket_file_nobody_serves_is_replaced() {
         let name = test_name("stale");
+        std::fs::create_dir_all(Path::new(&name).parent().unwrap()).unwrap();
         {
             let listener = UnixListener::bind(&name).unwrap();
             drop(listener);

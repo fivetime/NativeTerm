@@ -358,6 +358,7 @@ mod tests {
     /// pointed at a scratch folder: adds the key once (for a member of
     /// Administrators into the admin file, locked to Administrators and
     /// SYSTEM), then reports it as present.
+    #[cfg(windows)]
     #[test]
     fn the_windows_script_adds_the_key_once() {
         let dir = tempfile::tempdir().unwrap();

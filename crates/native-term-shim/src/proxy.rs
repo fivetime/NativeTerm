@@ -720,6 +720,7 @@ mod tests {
     }
 
     /// The same, but the proxy says no at the end.
+    #[cfg(windows)]
     #[test]
     fn a_windows_login_the_proxy_refuses_is_a_refusal() {
         let challenge =

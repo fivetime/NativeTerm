@@ -184,7 +184,8 @@ Host own
         assert!(!supported("OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2"));
         assert!(!supported("OpenSSH_9.3p1"));
         assert!(!supported("PuTTY"));
-        assert_eq!(tag_for(Path::new(r"C:\x\config.d\sheng-chan.conf")), "nativeterm-sheng-chan");
+        let file = Path::new("x").join("config.d").join("sheng-chan.conf");
+        assert_eq!(tag_for(&file), "nativeterm-sheng-chan");
     }
 
     #[test]

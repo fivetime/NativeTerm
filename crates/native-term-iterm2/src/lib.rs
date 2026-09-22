@@ -306,13 +306,20 @@ impl TerminalBackend for ITerm2 {
 mod tests {
     use super::*;
 
+    /// The shim built next to this test binary (`<target>/debug`), wherever
+    /// the target folder is.
+    fn built_shim() -> PathBuf {
+        let exe = std::env::current_exe().expect("this test binary");
+        let debug = exe.parent().and_then(Path::parent).expect("target/debug/deps/<test>");
+        debug.join(format!("nativeterm-shim{}", std::env::consts::EXE_SUFFIX))
+    }
+
     /// Against a running iTerm2 on a Mac, with the shim built. The first
     /// run asks for Automation permission.
     #[test]
     #[ignore = "needs macOS with iTerm2 and a built shim"]
     fn meets_the_contract() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf();
-        let shim = root.join("target").join("debug").join("nativeterm-shim");
+        let shim = built_shim();
         assert!(shim.exists(), "build the shim first");
         assert!(ITerm2::available(), "no iTerm2 here");
         native_term_platform::contract::exercise(&ITerm2::new(&shim), ["nt-iterm a", "nt-iterm b"]);

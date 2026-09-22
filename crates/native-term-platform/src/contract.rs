@@ -65,12 +65,26 @@ pub fn exercise(backend: &dyn TerminalBackend, labels: [&str; 2]) {
 
     backend.open_tool("contract tool", &["--version".into()]).expect("open_tool");
     let started = std::time::Instant::now();
-    loop {
+    let (window, tab) = loop {
         let snapshot = backend.snapshot(&HashSet::new());
-        if snapshot.windows.iter().any(|w| w.tabs.iter().any(|t| t.name == "contract tool")) {
-            break;
+        let found = snapshot
+            .windows
+            .iter()
+            .find_map(|w| w.tabs.iter().find(|t| t.name == "contract tool").map(|t| (w.handle, t.clone())));
+        if let Some(found) = found {
+            break found;
         }
         assert!(started.elapsed() < WAIT, "the tool tab never showed its title");
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(backend.close(window, &tab).expect("close the tool tab"), "the tool tab is where it was");
+    let started = std::time::Instant::now();
+    loop {
+        let snapshot = backend.snapshot(&HashSet::new());
+        if !snapshot.windows.iter().any(|w| w.tabs.iter().any(|t| t.name == "contract tool")) {
+            break;
+        }
+        assert!(started.elapsed() < WAIT, "the tool tab stays after it was closed");
         std::thread::sleep(Duration::from_millis(100));
     }
 }

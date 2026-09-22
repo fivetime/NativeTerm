@@ -23,10 +23,25 @@ pub struct ListedPane {
     /// The tab's title when one was set (`set-tab-title`); empty otherwise.
     #[serde(default)]
     pub tab_title: String,
-    /// The pane is the active one of its tab, and its tab the active one
-    /// of its window.
+    /// The pane is the active one of its tab (not: its tab the active one
+    /// of its window — `list` doesn't say that; `list-clients` says which
+    /// pane has the focus).
     #[serde(default)]
     pub is_active: bool,
+}
+
+/// One client as `wezterm cli list-clients --format json` prints it (the
+/// GUI is one).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct ListedClient {
+    #[serde(default)]
+    pub focused_pane_id: Option<u64>,
+}
+
+/// The panes the clients have the focus on (the GUI's, normally one).
+pub fn parse_focused_panes(json: &str) -> Result<Vec<u64>, serde_json::Error> {
+    let clients: Vec<ListedClient> = serde_json::from_str(json)?;
+    Ok(clients.into_iter().filter_map(|c| c.focused_pane_id).collect())
 }
 
 /// One tab: its id, its panes in order, and which is active.
@@ -53,8 +68,8 @@ impl ListedTab {
         self.panes.iter().find(|p| p.is_active).or(self.panes.first()).map(|p| p.pane_id)
     }
 
-    pub fn is_active(&self) -> bool {
-        self.panes.iter().any(|p| p.is_active)
+    pub fn has_pane(&self, pane_id: u64) -> bool {
+        self.panes.iter().any(|p| p.pane_id == pane_id)
     }
 }
 
@@ -70,10 +85,20 @@ impl ListedWindow {
         WindowId(self.window_id)
     }
 
+    /// The index of the tab holding `pane_id`.
+    pub fn tab_of_pane(&self, pane_id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.has_pane(pane_id))
+    }
+
+    /// The index of the tab with id `tab_id`.
+    pub fn tab_index(&self, tab_id: u64) -> Option<usize> {
+        self.tabs.iter().position(|t| t.tab_id == tab_id)
+    }
+
     /// The window as the claimer reads a window: names in strip order, no
-    /// rectangles, the active tab selected, and its panes.
-    pub fn as_window_tabs(&self) -> WindowTabs {
-        let selected = self.tabs.iter().position(ListedTab::is_active);
+    /// rectangles, tab `selected` selected, and its panes.
+    pub fn as_window_tabs(&self, selected: Option<usize>) -> WindowTabs {
+        let selected = selected.filter(|s| *s < self.tabs.len());
         let panes = selected
             .map(|s| {
                 self.tabs[s].panes.iter().map(|p| Pane { title: p.title.clone(), profile: String::new() }).collect()
@@ -168,6 +193,10 @@ pub fn list_args() -> Vec<OsString> {
     ["cli", "--no-auto-start", "list", "--format", "json"].iter().map(OsString::from).collect()
 }
 
+pub fn list_clients_args() -> Vec<OsString> {
+    ["cli", "--no-auto-start", "list-clients", "--format", "json"].iter().map(OsString::from).collect()
+}
+
 pub fn set_tab_title_args(pane_id: u64, title: &str) -> Vec<OsString> {
     let mut args: Vec<OsString> =
         ["cli", "--no-auto-start", "set-tab-title", "--pane-id"].iter().map(OsString::from).collect();
@@ -249,12 +278,20 @@ mod tests {
         assert_eq!(windows[0].tabs.len(), 2);
         assert_eq!(windows[0].tabs[1].panes.len(), 2, "a split tab keeps both panes");
         assert_eq!(windows[1].tabs[0].tab_id, 5);
-        let tabs = windows[0].as_window_tabs();
+        let tabs = windows[0].as_window_tabs(Some(1));
         assert_eq!(tabs.names, ["web01", "vim notes.md"], "a set title, else the pane's");
         assert_eq!(tabs.selected, Some(1));
         assert_eq!(tabs.rects, [None, None]);
         assert_eq!(tabs.panes.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["vim notes.md", "db01"]);
+        assert_eq!(windows[0].as_window_tabs(Some(9)).selected, None, "a tab that is gone");
+        assert!(windows[0].as_window_tabs(None).panes.is_empty());
         assert_eq!(windows[0].tabs[1].active_pane(), Some(1));
+        assert_eq!(windows[0].tab_of_pane(3), Some(1));
+        assert_eq!(windows[0].tab_index(1), Some(1));
+        assert_eq!(windows[1].tab_of_pane(3), None);
+        let clients = r#"[{"username":"x","hostname":"h","pid":1,"workspace":"default","focused_pane_id":7}]"#;
+        assert_eq!(parse_focused_panes(clients).unwrap(), [7]);
+        assert!(parse_focused_panes("[]").unwrap().is_empty());
         assert!(windows[0].tab_named(0, "web01").is_some());
         assert!(windows[0].tab_named(0, "moved").is_none());
         assert!(windows[0].tab_named(9, "web01").is_none());
@@ -302,6 +339,7 @@ mod tests {
     #[test]
     fn the_other_commands() {
         assert_eq!(strings(&list_args()), ["cli", "--no-auto-start", "list", "--format", "json"]);
+        assert_eq!(strings(&list_clients_args())[2], "list-clients");
         assert_eq!(strings(&set_tab_title_args(7, "-dash"))[4..], ["7", "--", "-dash"]);
         assert_eq!(strings(&activate_tab_args(5))[2..], ["activate-tab", "--tab-id", "5"]);
         assert_eq!(strings(&kill_pane_args(9))[2..], ["kill-pane", "--pane-id", "9"]);

@@ -1,7 +1,10 @@
 //! WezTerm driven from outside through `wezterm cli`: tabs are spawned
 //! with the shim as their program and titled with their label (which the
-//! claimer's first rule finds), `list --format json` is the whole state,
-//! and there are no events, so a subscription polls it. Text is typed
+//! claimer's first rule finds), `list --format json` and `list-clients`
+//! (the focused pane) are the whole state, and there are no events, so a
+//! subscription polls them. Which tab a window shows is known for the
+//! focused window from the focused pane, and for the others from what
+//! this backend last selected or saw focused. Text is typed
 //! with `send-text` and screens read with `get-text`; nothing is
 //! pictured, no menu is drawn over the tab strip, and a window can't be
 //! brought forward by the CLI (a pane can be focused, which is what
@@ -43,6 +46,8 @@ struct State {
     recent: Option<u64>,
     /// `Target::Named` windows, for as long as this process runs.
     named: HashMap<String, u64>,
+    /// The tab each window shows, as last seen focused or selected here.
+    selected: HashMap<u64, u64>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -111,14 +116,45 @@ impl WezTerm {
         self.list().into_iter().find(|w| w.window_id == id)
     }
 
+    /// The panes the GUI has the focus on.
+    fn focused_panes(&self) -> Vec<u64> {
+        self.run(&cli::list_clients_args()).ok().and_then(|j| cli::parse_focused_panes(&j).ok()).unwrap_or_default()
+    }
+
+    /// Note which tab each window shows, from the focused panes, and give
+    /// the index of the tab shown in each window (as far as it is known).
+    fn selected_tabs(&self, windows: &[ListedWindow], focused: &[u64]) -> HashMap<u64, usize> {
+        let mut state = lock(&self.state);
+        for w in windows {
+            if let Some(index) = focused.iter().find_map(|p| w.tab_of_pane(*p)) {
+                state.selected.insert(w.window_id, w.tabs[index].tab_id);
+            }
+        }
+        state.selected.retain(|id, _| windows.iter().any(|w| w.window_id == *id));
+        windows
+            .iter()
+            .filter_map(|w| state.selected.get(&w.window_id).and_then(|t| w.tab_index(*t)).map(|i| (w.window_id, i)))
+            .collect()
+    }
+
+    /// The tab `window` shows, as far as it is known.
+    fn shown_tab(&self, window: &ListedWindow) -> Option<usize> {
+        let focused = self.focused_panes();
+        self.selected_tabs(std::slice::from_ref(window), &focused).get(&window.window_id).copied()
+    }
+
     /// The window `Target::Recent` means: the one last activated or made,
-    /// else the one with the active tab, else any.
+    /// else the one with the focus, else any.
     fn recent(&self, windows: &[ListedWindow]) -> Option<u64> {
         let recent = lock(&self.state).recent;
-        recent
-            .filter(|id| windows.iter().any(|w| w.window_id == *id))
-            .or_else(|| windows.iter().find(|w| w.tabs.iter().any(|t| t.is_active())).map(|w| w.window_id))
-            .or_else(|| windows.first().map(|w| w.window_id))
+        recent.filter(|id| windows.iter().any(|w| w.window_id == *id)).or_else(|| {
+            let focused = self.focused_panes();
+            windows
+                .iter()
+                .find(|w| focused.iter().any(|p| w.tab_of_pane(*p).is_some()))
+                .or(windows.first())
+                .map(|w| w.window_id)
+        })
     }
 
     /// A new window running `program`: `spawn --new-window` when WezTerm
@@ -126,7 +162,12 @@ impl WezTerm {
     fn new_window(&self, program: &[OsString], before: &[ListedWindow]) -> io::Result<u64> {
         let known: HashSet<u64> = before.iter().map(|w| w.window_id).collect();
         let (pane, timeout) = if before.is_empty() && self.run(&cli::list_args()).is_err() {
-            Command::new(&self.gui).args(cli::start_args(program)).stdin(Stdio::null()).spawn()?;
+            Command::new(&self.gui)
+                .args(cli::start_args(program))
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?;
             (None, START_TIMEOUT)
         } else {
             let out = self.run(&cli::spawn_args(Into::NewWindow, program))?;
@@ -183,17 +224,14 @@ impl Drop for Poller {
     }
 }
 
-/// One tab as a poll sees it: window, tab, name, selected.
-type TabShape = (u64, u64, String, bool);
+/// One tab as a poll sees it: window, tab, name.
+type TabShape = (u64, u64, String);
 
-/// What a poll compares: the windows, and each tab's name and selection.
-fn shape(windows: &[ListedWindow]) -> (Vec<u64>, Vec<TabShape>) {
+/// What a poll compares: the windows, each tab's name, and the focus.
+fn shape(windows: &[ListedWindow], focused: &[u64]) -> (Vec<u64>, Vec<TabShape>, Vec<u64>) {
     let ids = windows.iter().map(|w| w.window_id).collect();
-    let tabs = windows
-        .iter()
-        .flat_map(|w| w.tabs.iter().map(move |t| (w.window_id, t.tab_id, t.name(), t.is_active())))
-        .collect();
-    (ids, tabs)
+    let tabs = windows.iter().flat_map(|w| w.tabs.iter().map(move |t| (w.window_id, t.tab_id, t.name()))).collect();
+    (ids, tabs, focused.to_vec())
 }
 
 impl TerminalBackend for WezTerm {
@@ -218,22 +256,25 @@ impl TerminalBackend for WezTerm {
 
     fn activate(&self, window: WindowId) -> bool {
         let Some(w) = self.window(window.0) else { return false };
+        let shown = self.shown_tab(&w).unwrap_or(0);
         lock(&self.state).recent = Some(window.0);
-        let pane = w.tabs.iter().find(|t| t.is_active()).or(w.tabs.first()).and_then(|t| t.active_pane());
+        let pane = w.tabs.get(shown).or(w.tabs.first()).and_then(|t| t.active_pane());
         pane.is_some_and(|p| self.run(&cli::activate_pane_args(p)).is_ok())
     }
 
     fn snapshot(&self, labels: &HashSet<String>) -> Snapshot {
         let listed = self.list();
+        let focused = self.focused_panes();
+        let selected = self.selected_tabs(&listed, &focused);
         let mut claimer = lock(&self.claimer);
         let windows = listed
             .iter()
             .map(|w| WindowView {
                 handle: w.id(),
                 pid: 0,
-                foreground: false,
+                foreground: focused.iter().any(|p| w.tab_of_pane(*p).is_some()),
                 unresponsive: false,
-                tabs: claimer.claim(w.id(), &w.as_window_tabs(), labels),
+                tabs: claimer.claim(w.id(), &w.as_window_tabs(selected.get(&w.window_id).copied()), labels),
             })
             .collect();
         claimer.retain(&listed.iter().map(ListedWindow::id).collect::<Vec<_>>());
@@ -300,7 +341,9 @@ impl TerminalBackend for WezTerm {
     fn select(&self, window: WindowId, tab: &TabView) -> io::Result<bool> {
         let Some(found) = self.find_tab(window, tab)? else { return Ok(false) };
         self.run(&cli::activate_tab_args(found.tab_id))?;
-        lock(&self.state).recent = Some(window.0);
+        let mut state = lock(&self.state);
+        state.recent = Some(window.0);
+        state.selected.insert(window.0, found.tab_id);
         Ok(true)
     }
 
@@ -319,26 +362,36 @@ impl TerminalBackend for WezTerm {
         std::thread::Builder::new()
             .name("wezterm-poll".into())
             .spawn(move || {
-                let list = || {
+                let output = |args: Vec<OsString>| {
                     Command::new(&exe)
-                        .args(cli::list_args())
+                        .args(args)
                         .stdin(Stdio::null())
                         .output()
                         .ok()
                         .filter(|o| o.status.success())
-                        .and_then(|o| cli::parse_list(&String::from_utf8_lossy(&o.stdout)).ok())
-                        .unwrap_or_default()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
                 };
-                let mut last = shape(&list());
+                let look = || {
+                    let windows = output(cli::list_args()).and_then(|j| cli::parse_list(&j).ok()).unwrap_or_default();
+                    let focused = output(cli::list_clients_args())
+                        .and_then(|j| cli::parse_focused_panes(&j).ok())
+                        .unwrap_or_default();
+                    shape(&windows, &focused)
+                };
+                let mut last = look();
                 while !stop.load(Ordering::Relaxed) {
                     std::thread::sleep(POLL);
-                    let now = shape(&list());
+                    let now = look();
                     if now.0 != last.0 {
                         windows.fetch_add(1, Ordering::Relaxed);
                         notify(Change::Windows);
                     } else if now.1 != last.1 {
                         tabs.fetch_add(1, Ordering::Relaxed);
                         notify(Change::Tabs);
+                    } else if now.2 != last.2 {
+                        // the focus moved: another tab or window is shown
+                        tabs.fetch_add(1, Ordering::Relaxed);
+                        notify(Change::Content);
                     }
                     last = now;
                 }
@@ -349,7 +402,7 @@ impl TerminalBackend for WezTerm {
 
     fn screen_text(&self, window: WindowId, max_lines: usize) -> Option<Vec<String>> {
         let w = self.window(window.0)?;
-        let pane = w.tabs.iter().find(|t| t.is_active())?.active_pane()?;
+        let pane = w.tabs.get(self.shown_tab(&w)?)?.active_pane()?;
         let text = self.run(&cli::get_text_args(pane)).ok()?;
         Some(cli::screen_lines(&text, max_lines))
     }
@@ -371,14 +424,21 @@ impl TerminalBackend for WezTerm {
 mod tests {
     use super::*;
 
+    /// The shim built next to this test binary (`<target>/debug`), wherever
+    /// the target folder is.
+    fn built_shim() -> PathBuf {
+        let exe = std::env::current_exe().expect("this test binary");
+        let debug = exe.parent().and_then(Path::parent).expect("target/debug/deps/<test>");
+        debug.join(format!("nativeterm-shim{}", std::env::consts::EXE_SUFFIX))
+    }
+
     /// Against a running WezTerm: `NATIVETERM_TEST_WEZTERM_DIR` names its
     /// folder (or it is on `PATH`), and the shim is built.
     #[test]
     #[ignore = "needs WezTerm and a built shim"]
     fn meets_the_contract() {
         let dir = std::env::var_os("NATIVETERM_TEST_WEZTERM_DIR").map(PathBuf::from);
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf();
-        let shim = root.join("target").join("debug").join(format!("nativeterm-shim{}", std::env::consts::EXE_SUFFIX));
+        let shim = built_shim();
         assert!(shim.exists(), "build the shim first");
         let backend = WezTerm::new(dir.as_deref(), &shim);
         assert!(backend.available(), "no wezterm at {}", backend.exe.display());
@@ -391,9 +451,33 @@ mod tests {
             cli::parse_list(r#"[{"window_id":1,"tab_id":2,"pane_id":3,"tab_title":"a","is_active":true}]"#).unwrap();
         let renamed =
             cli::parse_list(r#"[{"window_id":1,"tab_id":2,"pane_id":3,"tab_title":"b","is_active":true}]"#).unwrap();
-        assert_ne!(shape(&one), shape(&renamed));
-        assert_eq!(shape(&one), shape(&one.clone()));
-        assert_ne!(shape(&one).0, shape(&[]).0);
+        assert_ne!(shape(&one, &[3]), shape(&renamed, &[3]));
+        assert_eq!(shape(&one, &[3]), shape(&one.clone(), &[3]));
+        assert_ne!(shape(&one, &[3]).2, shape(&one, &[]).2, "the focus moved");
+        assert_ne!(shape(&one, &[]).0, shape(&[], &[]).0);
+    }
+
+    /// Which tab a window shows comes from the focused pane, and stays
+    /// known for a window that lost the focus.
+    #[test]
+    fn the_shown_tab_is_remembered() {
+        let w = WezTerm::new(None, Path::new("shim"));
+        let windows = cli::parse_list(
+            r#"[{"window_id":1,"tab_id":2,"pane_id":3,"tab_title":"a","is_active":true},
+                {"window_id":1,"tab_id":4,"pane_id":5,"tab_title":"b","is_active":true},
+                {"window_id":7,"tab_id":8,"pane_id":9,"tab_title":"c","is_active":true}]"#,
+        )
+        .unwrap();
+        let selected = w.selected_tabs(&windows, &[5]);
+        assert_eq!(selected.get(&1), Some(&1));
+        assert_eq!(selected.get(&7), None, "never seen focused");
+        let selected = w.selected_tabs(&windows, &[9]);
+        assert_eq!(selected.get(&1), Some(&1), "still what it showed");
+        assert_eq!(selected.get(&7), Some(&0));
+        let only_one = &windows[1..];
+        let selected = w.selected_tabs(only_one, &[]);
+        assert_eq!(selected.get(&1), None, "window 1 is gone");
+        assert_eq!(selected.get(&7), Some(&0));
     }
 
     #[test]
