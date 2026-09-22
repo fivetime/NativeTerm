@@ -250,7 +250,12 @@ fn setup() -> Result<Start, String> {
         let other_ssh_dir = Some(&options.ssh_dir) != default_ssh_dir().as_ref();
         let core = match chosen {
             Chosen::WezTerm(dir) => {
-                let mut terminal = native_term_wezterm::WezTerm::new(dir.as_deref(), &shim).with_config_dir(&data_dir);
+                // the windows look like the desktop from the start; the theme
+                // setting is applied over it once the window is up
+                native_term_os::appearance::refresh();
+                let look = app::terminal_look(None);
+                let mut terminal =
+                    native_term_wezterm::WezTerm::new(dir.as_deref(), &shim).with_config_dir(&data_dir, &look);
                 if other_ssh_dir {
                     terminal = terminal.with_ssh_dir(&options.ssh_dir);
                 }

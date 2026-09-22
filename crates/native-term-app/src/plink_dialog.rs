@@ -619,6 +619,8 @@ mod tests {
         assert_eq!(s.putty.keys().collect::<Vec<_>>(), ["PingIntervalSecs"], "the Telnet page doesn't apply to raw");
     }
 
+    /// (Windows paths: the log file is joined the Windows way.)
+    #[cfg(windows)]
     #[test]
     fn a_log_needs_a_type_and_a_file() {
         let mut d = PlinkDialog::new_session(PathBuf::from("lab.conf"), "Lab").with_data_dir(Path::new(r"D:\NT"));

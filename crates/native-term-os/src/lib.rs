@@ -1,7 +1,7 @@
 //! The operating system, as NativeTerm's program needs it: local time,
 //! process identity, the shell and its folders, the desktop, saved
 //! passwords, cloud-synced files, folder watching, global shortcuts,
-//! services, font files. One name per need; on Windows each is the
+//! services, font files, the desktop's look. One name per need; on Windows each is the
 //! `native-term-win` helper it always was, elsewhere the same name over
 //! libc and the desktop's own tools, or an honest "not here"
 //! (`io::ErrorKind::Unsupported`, an empty list, `None`) that the program
@@ -11,6 +11,7 @@
 //! layered windows, the file picker) is here under `cfg(windows)` only;
 //! the program keeps those behind the same `cfg`.
 
+pub mod appearance;
 pub mod cloud;
 pub mod credentials;
 pub mod desktop;

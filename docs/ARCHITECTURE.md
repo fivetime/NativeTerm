@@ -3865,7 +3865,12 @@ All UI surfaces invoke one shared app-level command layer
     ever woken on hybrid laptops.
 - **Implemented so far:**
   - **Theme:** Settings → Appearance: system default, light or dark
-    (`settings.theme`); the window's title bar follows.
+    (`settings.theme`); the window's title bar follows. On Windows the
+    toolkit knows the system's choice; elsewhere it is what
+    `native-term-os::appearance` read from the desktop (below), looked
+    at again every few seconds. Where NativeTerm writes the terminal's
+    configuration (WezTerm) the same choice goes there, so its windows
+    switch with NativeTerm's.
   - **Look** (`looks.rs`, Settings → Look, `settings.theme.preset`): on
     top of light and dark — standard (egui's own), the Windows accent
     colour for what is selected (read from DWM, lightened on a dark
@@ -4456,11 +4461,27 @@ program owns.
 - `native-term-os` — the operating system as the app needs it: local
   time, process identity, the shell and its folders, the desktop, saved
   passwords, cloud-synced files, folder watching, global shortcuts,
-  services, font files. On Windows each name is the `native-term-win`
-  helper it always was; elsewhere the same name over libc and the
-  desktop's tools, or an honest "not here" (`Unsupported`, an empty
-  list, `None`). What only Windows has (registry, docking, layered
-  windows, the picker) is reachable through it under `cfg(windows)` only
+  services, font files, the desktop's look. On Windows each name is the
+  `native-term-win` helper it always was; elsewhere the same name over
+  libc and the desktop's tools, or an honest "not here" (`Unsupported`,
+  an empty list, `None`). What only Windows has (registry, docking,
+  layered windows, the picker) is reachable through it under
+  `cfg(windows)` only. `appearance::read` is the one place the desktop's
+  light-or-dark, accent colour and monospace font are read, and it is
+  deliberately not per desktop: on Linux the portal's
+  `org.freedesktop.appearance` settings first (the one standard home,
+  `Read` through `dbus-send` or `busctl`), then the files the toolkits
+  themselves read — GTK's `settings.ini`, KDE's `kdeglobals` — then
+  `gsettings`; the first that answers wins, and a desktop none of them
+  cover reads as unknown (shown light, the theme setting there to
+  override it). The two boxes it was written against: Deepin 25 answers
+  through its portal; Lingmo OS 3 ships an old portal with only the GTK
+  backend that says "no preference" in both modes, claims to be KDE, and
+  is read through its GTK `settings.ini`, which its settings program
+  does write. The font is fontconfig's `monospace` match only when its
+  spacing says monospace (Lingmo matches it to a proportional CJK font).
+  Windows reads the registry (`AppsUseLightTheme`, the DWM accent),
+  macOS `defaults` (`AppleInterfaceStyle`, `AppleAccentColor`)
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
 - `native-term-iterm2` — iTerm2 as a `TerminalBackend`, through JXA and
@@ -4585,9 +4606,14 @@ every second and reports `Windows` or `Tabs` when the shape changed.
 window last activated), `screen_text` is `get-text`, and `type_text` is
 `send-text --no-paste`. A GUI NativeTerm starts, and every `cli` call,
 carries `WEZTERM_CONFIG_FILE=<data dir>/wezterm.lua`, written by
-NativeTerm (the desktop's light or dark scheme, no close prompts, the
-tab bar always shown), unless the person has a WezTerm configuration of
-their own, which is left alone. The environment, not `--config-file`: a
+NativeTerm from a `Look` — light or dark (the theme setting, else what
+`native-term-os::appearance` read; only when neither knows does the file
+let WezTerm ask the desktop itself), the desktop's accent colour on the
+selected tab, the desktop's monospace font first in WezTerm's fallback
+list — plus no close prompts and the tab bar always shown; `set_look`
+rewrites it when any of that changes and running windows reload it on
+their own. All of it only unless the person has a WezTerm configuration
+of their own, which is left alone. The environment, not `--config-file`: a
 GUI started with the flag publishes no discovery socket, and no
 `wezterm cli` finds it. A GUI killed outright can leave a stale
 discovery socket behind that answers for nobody; WezTerm's own clean

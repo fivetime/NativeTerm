@@ -962,6 +962,25 @@
         into the data folder — the desktop's light or dark scheme, no
         close prompts, the tab bar always there — unless the person has
         a WezTerm configuration of their own, which is left alone
+  - [x] The look follows the desktop, without per-desktop code
+        (2026-09-22): `native-term-os::appearance` reads light-or-dark,
+        accent and monospace font from the portal, GTK's `settings.ini`,
+        `kdeglobals`, `gsettings` and fontconfig, in that order; off
+        Windows the "system" theme is that answer (winit knows none on
+        X11), re-read every few seconds; the WezTerm configuration is
+        written from it and from the theme setting, so its windows and
+        NativeTerm's switch together. Read on Deepin 25 (portal) and
+        Lingmo OS 3 (portal says nothing; GTK ini). A desktop none of
+        the sources cover shows light, and the setting overrides. Seen
+        live on Deepin: the desktop switched to dark through DDE's
+        D-Bus, and within the three-second poll NativeTerm's window went
+        dark, `wezterm.lua` said Tango Dark and the open WezTerm tab
+        reloaded to it; back to light the same way
+  - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
+        with a panic in `std::io::stdio` (its log said `!?`), so the tab
+        never appeared and the session was later reported as without a
+        tab; the next start worked. Its stdio is `null` on our side, so
+        the cause is not known yet; watch for it
   - [ ] `rustup component add … -q` is not an option; the box's
         toolchain got its components from `rust-toolchain.toml` anyway
 

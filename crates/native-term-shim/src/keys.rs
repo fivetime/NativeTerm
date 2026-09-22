@@ -343,6 +343,7 @@ mod tests {
         assert!(!is_windows_shell("Permission denied (publickey,password)."));
     }
 
+    #[cfg(windows)]
     fn run_windows_script(script: &str, dir: &Path) -> String {
         let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
         let output = Command::new("powershell")

@@ -244,8 +244,11 @@ impl App {
         }
         if let Some(core) = &core {
             crate::dock::set_pinned(core.setting(PINNED_SETTING).as_deref() == Some("1"));
+            native_term_os::appearance::refresh();
             apply_theme(ctx, core.setting(THEME_SETTING).as_deref());
             crate::looks::Preset::from_setting(core.setting(crate::looks::SETTING).as_deref()).choose(ctx);
+            sync_terminal_look(core);
+            watch_appearance(ctx.clone());
             let repaint = ctx.clone();
             let woken = ctx.clone();
             native_term_app::toast::wake_with(move || woken.request_repaint());
@@ -1725,15 +1728,69 @@ pub const THEME_SETTING: &str = "theme";
 pub static THEME: std::sync::Mutex<Option<egui::ThemePreference>> = std::sync::Mutex::new(None);
 
 pub fn apply_theme(ctx: &egui::Context, setting: Option<&str>) {
-    let (preference, title_bar) = match setting {
-        Some("light") => (egui::ThemePreference::Light, egui::SystemTheme::Light),
-        Some("dark") => (egui::ThemePreference::Dark, egui::SystemTheme::Dark),
+    let (preference, title_bar) = match (setting, system_dark()) {
+        (Some("light"), _) | (_, Some(false)) => (egui::ThemePreference::Light, egui::SystemTheme::Light),
+        (Some("dark"), _) | (_, Some(true)) => (egui::ThemePreference::Dark, egui::SystemTheme::Dark),
         _ => (egui::ThemePreference::System, egui::SystemTheme::SystemDefault),
     };
     ctx.set_theme(preference);
     *THEME.lock().unwrap_or_else(|e| e.into_inner()) = Some(preference);
     // the window's own title bar follows too
     ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(title_bar));
+}
+
+/// What "system" means for the window: on Windows the toolkit knows
+/// (and follows changes as they happen); elsewhere it is what
+/// `native-term-os` read from the desktop, when it could.
+fn system_dark() -> Option<bool> {
+    if cfg!(windows) {
+        None
+    } else {
+        native_term_os::appearance::cached().dark
+    }
+}
+
+/// Set when the desktop's look changed since the last frame.
+static APPEARANCE_CHANGED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// No desktop tells every program when its look changes (Windows tells
+/// the toolkit; on Linux it is a portal signal at best): look every few
+/// seconds, and let the next frame apply it. Windows keeps its own way.
+fn watch_appearance(ctx: egui::Context) {
+    if cfg!(windows) {
+        return;
+    }
+    std::thread::Builder::new()
+        .name("appearance".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if native_term_os::appearance::refresh() {
+                APPEARANCE_CHANGED.store(true, std::sync::atomic::Ordering::Relaxed);
+                ctx.request_repaint();
+            }
+        })
+        .ok();
+}
+
+/// How the terminal's windows should look, where NativeTerm writes their
+/// configuration (WezTerm): what the desktop says, with the theme
+/// setting (`light`/`dark`, or nothing) over it.
+pub fn terminal_look(setting: Option<&str>) -> native_term_wezterm::Look {
+    let desktop = native_term_os::appearance::cached();
+    let dark = match setting {
+        Some("light") => Some(false),
+        Some("dark") => Some(true),
+        _ => desktop.dark,
+    };
+    native_term_wezterm::Look { dark, accent: desktop.accent, font: desktop.monospace }
+}
+
+/// The terminal's windows follow the theme too, where NativeTerm writes
+/// their configuration.
+fn sync_terminal_look(core: &Core) {
+    if let Some(wezterm) = core.terminal().as_any().downcast_ref::<native_term_wezterm::WezTerm>() {
+        wezterm.set_look(&terminal_look(core.setting(THEME_SETTING).as_deref()));
+    }
 }
 
 fn theme_choice(ui: &mut egui::Ui, core: &Core) {
@@ -1747,6 +1804,7 @@ fn theme_choice(ui: &mut egui::Ui, core: &Core) {
                 if ui.selectable_label(setting.as_deref() == *value, name.as_str()).clicked() {
                     core.set_setting(THEME_SETTING, value.unwrap_or(""));
                     apply_theme(ui.ctx(), *value);
+                    sync_terminal_look(core);
                 }
             }
         });
@@ -1967,6 +2025,11 @@ impl crate::window::Ui for App {
         let ctx = &ui.ctx().clone();
         if let Some(core) = &self.core {
             self.notices.extend(core.take_notices());
+            if APPEARANCE_CHANGED.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                apply_theme(ctx, core.setting(THEME_SETTING).as_deref());
+                crate::looks::Preset::from_setting(core.setting(crate::looks::SETTING).as_deref()).choose(ctx);
+                sync_terminal_look(core);
+            }
         }
         for (command, global) in self.keys.take(ctx) {
             self.run_shortcut(command, global);
@@ -2160,5 +2223,17 @@ mod tests {
         let paths = [PathBuf::from(r"C:\tools\id_ed25519.pub"), PathBuf::from(r"C:\My Files\notes.txt")];
         assert_eq!(paths_as_text(&paths), r#"C:\tools\id_ed25519.pub "C:\My Files\notes.txt""#);
         assert_eq!(paths_as_text(&[]), "");
+    }
+
+    /// The theme setting decides light or dark for the terminal's windows
+    /// too; without one, the desktop does (whatever it could say).
+    #[test]
+    fn the_terminal_follows_the_theme_setting() {
+        assert_eq!(terminal_look(Some("light")).dark, Some(false));
+        assert_eq!(terminal_look(Some("dark")).dark, Some(true));
+        let desktop = native_term_os::appearance::cached();
+        assert_eq!(terminal_look(None).dark, desktop.dark);
+        assert_eq!(terminal_look(Some("")).dark, desktop.dark);
+        assert_eq!(terminal_look(None).font, desktop.monospace);
     }
 }

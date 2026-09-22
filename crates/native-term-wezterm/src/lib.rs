@@ -14,6 +14,7 @@
 //! all three.
 
 pub mod cli;
+pub use cli::Look;
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
@@ -54,6 +55,12 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// `path` holding `wanted`: written when it doesn't yet. Whether it
+/// does now.
+fn write_if_changed(path: &Path, wanted: &str) -> bool {
+    std::fs::read_to_string(path).ok().as_deref() == Some(wanted) || std::fs::write(path, wanted).is_ok()
+}
+
 /// WezTerm, through its command line.
 pub struct WezTerm {
     /// `wezterm` (the CLI).
@@ -88,22 +95,26 @@ impl WezTerm {
         }
     }
 
-    /// Windows NativeTerm opens use `<dir>/wezterm.lua` (written here) when
-    /// the person has no WezTerm configuration of their own.
-    pub fn with_config_dir(mut self, dir: &Path) -> WezTerm {
+    /// Windows NativeTerm opens use `<dir>/wezterm.lua` (written here,
+    /// for `look`) when the person has no WezTerm configuration of their
+    /// own.
+    pub fn with_config_dir(mut self, dir: &Path, look: &Look) -> WezTerm {
         if cli::user_config_exists() {
             return self;
         }
         let path = dir.join("wezterm.lua");
-        let wanted = cli::default_config();
-        let current = std::fs::read_to_string(&path).ok();
-        if current.as_deref() != Some(wanted.as_str())
-            && std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, wanted)).is_err()
-        {
+        if std::fs::create_dir_all(dir).is_err() || !write_if_changed(&path, &cli::default_config(look)) {
             return self;
         }
         self.config = Some(path);
         self
+    }
+
+    /// The look changed (the desktop's, or NativeTerm's theme setting):
+    /// rewrite the configuration, which running WezTerm windows pick up
+    /// on their own. Whether there is one to rewrite.
+    pub fn set_look(&self, look: &Look) -> bool {
+        self.config.as_deref().is_some_and(|path| write_if_changed(path, &cli::default_config(look)))
     }
 
     /// Session tabs look sessions up in `ssh_dir` instead of `~/.ssh`.

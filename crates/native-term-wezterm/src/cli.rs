@@ -269,16 +269,42 @@ pub fn user_config_exists() -> bool {
 /// The configuration NativeTerm's WezTerm windows use when the person has
 /// none: the desktop's light or dark, no questions when a tab is closed
 /// from outside, the tab bar always there.
-pub fn default_config() -> String {
-    r#"-- Written by NativeTerm for the WezTerm windows it opens, and used only
+pub fn default_config(look: &Look) -> String {
+    let mut lua = String::from(
+        r#"-- Written by NativeTerm for the WezTerm windows it opens, and used only
 -- while you have no WezTerm configuration of your own (~/.wezterm.lua or
 -- ~/.config/wezterm/wezterm.lua): make one and this file is ignored.
+-- NativeTerm rewrites it when the desktop's look or its theme setting
+-- changes, and WezTerm reloads it on its own.
 local wezterm = require("wezterm")
 local config = wezterm.config_builder()
 
--- follow the desktop
-config.color_scheme = wezterm.gui.get_appearance():find("Dark") and "Builtin Tango Dark" or "Builtin Tango Light"
-config.font_size = 11.0
+-- the desktop's look, as NativeTerm read it
+"#,
+    );
+    let scheme = |dark: bool| if dark { "Builtin Tango Dark" } else { "Builtin Tango Light" };
+    match look.dark {
+        Some(dark) => lua.push_str(&format!("config.color_scheme = \"{}\"\n", scheme(dark))),
+        None => lua.push_str(&format!(
+            "config.color_scheme = wezterm.gui.get_appearance():find(\"Dark\") and \"{}\" or \"{}\"\n",
+            scheme(true),
+            scheme(false)
+        )),
+    }
+    if let Some((r, g, b)) = look.accent {
+        // the selected tab in the accent colour, its title in black or white
+        let light = (u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) / 1000 > 140;
+        let on_accent = if light { "#000000" } else { "#ffffff" };
+        lua.push_str(&format!(
+            "config.colors = {{ tab_bar = {{ active_tab = {{ bg_color = \"#{r:02x}{g:02x}{b:02x}\", fg_color = \"{on_accent}\" }} }} }}\n"
+        ));
+    }
+    if let Some(font) = &look.font {
+        // the desktop's monospace font first; WezTerm's own fallbacks follow
+        lua.push_str(&format!("config.font = wezterm.font_with_fallback({{ \"{}\" }})\n", lua_escape(font)));
+    }
+    lua.push_str(
+        r#"config.font_size = 11.0
 
 -- NativeTerm closes tabs itself; the tab strip is where it looks
 config.window_close_confirmation = "NeverPrompt"
@@ -286,8 +312,26 @@ config.hide_tab_bar_if_only_one_tab = false
 config.use_fancy_tab_bar = true
 
 return config
-"#
-    .to_string()
+"#,
+    );
+    lua
+}
+
+/// How the windows NativeTerm opens should look: what it read from the
+/// desktop, overridden by its own theme setting.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Look {
+    /// Dark or light; `None` lets WezTerm ask the desktop itself.
+    pub dark: Option<bool>,
+    /// The desktop's accent colour, for the selected tab.
+    pub accent: Option<(u8, u8, u8)>,
+    /// The desktop's monospace font family.
+    pub font: Option<String>,
+}
+
+/// `text` inside a Lua double-quoted string.
+fn lua_escape(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
 }
 
 /// The screen as `get-text` printed it: lines, trailing spaces and empty
@@ -376,7 +420,28 @@ mod tests {
         );
         assert_eq!(strings(&spawn_args(Into::NewWindow, &program))[3], "--new-window");
         assert_eq!(strings(&start_args(&program))[..2], ["start", "--"]);
-        assert!(default_config().contains("wezterm.config_builder()"));
+        let unknown = default_config(&Look::default());
+        assert!(unknown.contains("wezterm.config_builder()"));
+        assert!(unknown.contains("wezterm.gui.get_appearance()"), "no reading: WezTerm asks the desktop");
+        assert!(!unknown.contains("config.font ="));
+        assert!(!unknown.contains("config.colors"));
+        let read = default_config(&Look {
+            dark: Some(true),
+            accent: Some((0x1f, 0x6e, 0xe7)),
+            font: Some("Noto Mono".into()),
+        });
+        assert!(read.contains("config.color_scheme = \"Builtin Tango Dark\"\n"));
+        assert!(!read.contains("get_appearance"));
+        assert!(read.contains("active_tab = { bg_color = \"#1f6ee7\", fg_color = \"#ffffff\" }"));
+        assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Noto Mono\" })\n"));
+        let light = default_config(&Look {
+            dark: Some(false),
+            accent: Some((0xff, 0xc6, 0x00)),
+            font: Some("Odd \"Mono\"".into()),
+        });
+        assert!(light.contains("\"Builtin Tango Light\""));
+        assert!(light.contains("fg_color = \"#000000\""), "black on a light accent");
+        assert!(light.contains("font_with_fallback({ \"Odd \\\"Mono\\\"\" })"), "quotes escaped");
     }
 
     #[test]

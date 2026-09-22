@@ -661,6 +661,7 @@ mod tests {
     /// A `Proxy-Authenticate: NTLM` challenge as a proxy sends it: a
     /// type 2 message with a target name, the challenge and a target
     /// info block (NTLMv2 needs one).
+    #[cfg(windows)]
     fn ntlm_challenge() -> Vec<u8> {
         let target: Vec<u8> = "GW".encode_utf16().flat_map(u16::to_le_bytes).collect();
         let info = [0u8; 4]; // MsvAvEOL

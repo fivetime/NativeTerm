@@ -10,10 +10,11 @@ pub use native_term_win::desktop::{
 mod unix {
     use std::path::Path;
 
-    /// The desktop's accent colour, if it publishes one. Not read here yet.
+    /// The desktop's accent colour, if it publishes one (as the last
+    /// `appearance::refresh` read it).
     #[must_use]
     pub fn accent() -> Option<(u8, u8, u8)> {
-        None
+        crate::appearance::cached().accent
     }
 
     /// Whether things may move and fade. No desktop-wide switch is read
