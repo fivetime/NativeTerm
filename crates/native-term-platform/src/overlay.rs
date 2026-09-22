@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use crate::{Rect, WindowId};
+use crate::{Icon, Rect, WindowId};
 
 /// A NativeTerm tab as the menu knows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,13 +24,7 @@ pub struct MenuTab {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {
-    /// A glyph from Segoe Fluent Icons (Segoe MDL2 Assets on Windows 10).
-    Action {
-        id: u32,
-        glyph: char,
-        text: String,
-        enabled: bool,
-    },
+    Action { id: u32, icon: Icon, text: String, enabled: bool },
     Header(String),
     Separator,
 }

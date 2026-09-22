@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use native_term_platform::{Entry, HoverCard, MenuProvider as Provider, MenuTab, SwitcherTab, WindowId};
+use native_term_platform::{Entry, HoverCard, Icon, MenuProvider as Provider, MenuTab, SwitcherTab, WindowId};
 
 use crate::actions::{close_set, CloseSet, Closing, SessionCommand};
 use crate::{t, Core, SessionView, Shared, State};
@@ -70,8 +70,8 @@ pub(crate) fn base_label(label: &str) -> &str {
     label
 }
 
-fn action(id: u32, glyph: char, text: &str, enabled: bool) -> Entry {
-    Entry::Action { id, glyph, text: text.to_string(), enabled }
+fn action(id: u32, icon: Icon, text: &str, enabled: bool) -> Entry {
+    Entry::Action { id, icon, text: text.to_string(), enabled }
 }
 
 /// The "close …" items and the set each one closes.
@@ -119,29 +119,29 @@ impl Provider for Actions {
         }
         let applies = |id: u32| command(id).is_some_and(|c| c.applies(this));
         let connect = if this.state == State::Waiting { t!("tabmenu-connect") } else { t!("tabmenu-reconnect") };
-        entries.push(action(CONNECT, '\u{E72C}', &connect, applies(CONNECT)));
-        entries.push(action(DISCONNECT, '\u{E8CD}', &t!("tabmenu-disconnect"), applies(DISCONNECT)));
-        entries.push(action(CLONE, '\u{E8C8}', &t!("tabmenu-clone"), applies(CLONE)));
-        entries.push(action(SEND, '\u{E724}', &t!("tabmenu-send"), applies(SEND)));
+        entries.push(action(CONNECT, Icon::Refresh, &connect, applies(CONNECT)));
+        entries.push(action(DISCONNECT, Icon::Disconnect, &t!("tabmenu-disconnect"), applies(DISCONNECT)));
+        entries.push(action(CLONE, Icon::Clone, &t!("tabmenu-clone"), applies(CLONE)));
+        entries.push(action(SEND, Icon::Send, &t!("tabmenu-send"), applies(SEND)));
         // the main window knows the host: a non-SSH session gets a note there
-        entries.push(action(FILES, '\u{E8B7}', &t!("tabmenu-files"), true));
+        entries.push(action(FILES, Icon::Folder, &t!("tabmenu-files"), true));
         if SessionCommand::SendBreak.offered(this) {
-            entries.push(action(BREAK, '\u{E7BA}', &t!("tabmenu-break"), applies(BREAK)));
+            entries.push(action(BREAK, Icon::Break, &t!("tabmenu-break"), applies(BREAK)));
         }
-        entries.push(action(CLEAR, '\u{E75C}', &t!("tabmenu-clear"), applies(CLEAR)));
-        entries.push(action(RENAME, '\u{E8AC}', &t!("tabmenu-rename"), true));
+        entries.push(action(CLEAR, Icon::ClearScreen, &t!("tabmenu-clear"), applies(CLEAR)));
+        entries.push(action(RENAME, Icon::Rename, &t!("tabmenu-rename"), true));
         if this.locked {
-            entries.push(action(LOCK, '\u{E785}', &t!("tabmenu-unlock"), applies(LOCK)));
+            entries.push(action(LOCK, Icon::Unlock, &t!("tabmenu-unlock"), applies(LOCK)));
         } else {
-            entries.push(action(LOCK, '\u{E72E}', &t!("tabmenu-lock"), applies(LOCK)));
+            entries.push(action(LOCK, Icon::Lock, &t!("tabmenu-lock"), applies(LOCK)));
         }
         entries.push(Entry::Separator);
         let close = if tab.mixed { t!("tabmenu-close-mixed") } else { t!("tabmenu-close") };
-        entries.push(action(CLOSE, '\u{E711}', &close, applies(CLOSE)));
+        entries.push(action(CLOSE, Icon::Clear, &close, applies(CLOSE)));
         let some = |id: u32| close_item(id, &this.id).is_some_and(|set| !close_set(&all, &set).is_empty());
-        entries.push(action(CLOSE_OTHERS, '\u{E8BB}', &t!("tabmenu-close-others"), some(CLOSE_OTHERS)));
-        entries.push(action(CLOSE_ENDED, '\u{E894}', &t!("tabmenu-close-disconnected"), some(CLOSE_ENDED)));
-        entries.push(action(CLOSE_RIGHT, '\u{E72A}', &t!("tabmenu-close-right"), some(CLOSE_RIGHT)));
+        entries.push(action(CLOSE_OTHERS, Icon::CloseOthers, &t!("tabmenu-close-others"), some(CLOSE_OTHERS)));
+        entries.push(action(CLOSE_ENDED, Icon::CloseEnded, &t!("tabmenu-close-disconnected"), some(CLOSE_ENDED)));
+        entries.push(action(CLOSE_RIGHT, Icon::CloseRight, &t!("tabmenu-close-right"), some(CLOSE_RIGHT)));
         entries
     }
 

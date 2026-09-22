@@ -3841,9 +3841,13 @@ All UI surfaces invoke one shared app-level command layer
     window) and compact (the same colours, less room per row: more hosts
     on screen). It is only `egui` style, so switching costs nothing; the
     floating button has its own egui context and follows the choice.
-  - **Icons:** Segoe Fluent Icons (Windows 11) or Segoe MDL2 Assets
-    (Windows 10), memory-mapped like the CJK font and added as the last
-    fallback font, so a glyph (private use area) can sit in any label.
+  - **Icons:** named by what they mean (`native_term_platform::Icon`),
+    drawn with the platform's icon font: Segoe Fluent Icons (Windows 11)
+    or Segoe MDL2 Assets (Windows 10), memory-mapped like the CJK font
+    and added as the last fallback font, so a glyph (private use area)
+    can sit in any label; elsewhere Phosphor (regular), bundled through
+    `egui-phosphor`, with `icons::phosphor` naming the glyph that means
+    the same. The Windows tab menu draws `Icon::segoe` itself.
   - **Moving hosts:** a host dragged onto a folder moves into that
     folder's file (several at once if the dragged host is part of a
     selection); the folder under the pointer is marked, a grouping node

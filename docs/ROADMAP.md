@@ -886,8 +886,10 @@
         driven. `winit`/`softbuffer` get X11 and Wayland on Linux;
         SQLite is the system's library off Windows (bundled on Windows).
         Windows: same binary as before (smoke-tested)
-  - [ ] P2b (2/2) — `Icon` enum with a per-platform glyph map (Segoe on
-        Windows, Phosphor bundled elsewhere)
+  - [x] P2b (2/2) — `Icon` enum with a per-platform glyph map: Segoe
+        code points on Windows (unchanged, pixel for pixel), Phosphor
+        bundled elsewhere (`egui-phosphor` 0.12 for egui 0.34)
+        (2026-09-22)
   - [ ] P2c — portable-check script in the checklist
   - [x] P3a — the session channel on Unix (`native-term-session::pipe`
         split into `windows`/`unix` behind one API): a socket under

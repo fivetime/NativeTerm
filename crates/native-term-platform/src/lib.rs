@@ -6,6 +6,7 @@ pub mod backend;
 pub mod claim;
 pub mod contract;
 pub mod fake;
+pub mod icon;
 pub mod jsonc;
 pub mod overlay;
 pub mod stub;
@@ -52,6 +53,7 @@ impl std::fmt::Display for WindowId {
 
 pub use backend::{Capabilities, Change, ChangeCounts, Image, Notify, OpenReport, Subscription, TerminalBackend};
 pub use fake::FakeBackend;
+pub use icon::Icon;
 pub use overlay::{Entry, HoverCard, MenuProvider, MenuTab, OverlayMenu, SwitcherTab};
 
 /// One tab to open.

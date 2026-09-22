@@ -32,6 +32,10 @@ serde = { version = "1", features = ["derive"] }
 [target.'cfg(windows)'.dependencies]
 rusqlite = { version = "0.37", features = ["bundled"] }
 
+# no Segoe icon font off Windows: Phosphor, bundled
+[target.'cfg(not(windows))'.dependencies]
+egui-phosphor = "0.12"
+
 # X11 and Wayland, loaded at run time so one binary runs on both
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen"] }

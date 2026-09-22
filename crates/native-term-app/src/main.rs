@@ -358,6 +358,12 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
             fonts.families.entry(family).or_default().push(name.into());
         }
     }
+    // no icon font on the system: Phosphor, bundled (see `icons`)
+    #[cfg(not(windows))]
+    {
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        fonts.families.entry(egui::FontFamily::Monospace).or_default().push("phosphor".into());
+    }
     ctx.set_fonts(fonts);
 }
 

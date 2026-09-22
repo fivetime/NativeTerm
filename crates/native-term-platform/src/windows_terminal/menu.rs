@@ -1349,7 +1349,7 @@ fn draw_entries(canvas: &super::menu_draw::Canvas, menu: &Menu) {
             Entry::Header(text) => {
                 canvas.text(&menu.text_format, text, px(ICON_X), top, w, bottom, colors.dim);
             }
-            Entry::Action { glyph, text, enabled, .. } => {
+            Entry::Action { icon, text, enabled, .. } => {
                 let hovered = *enabled && menu.hover == Some(n);
                 if hovered {
                     let (left, right) = (px(ROW_INSET), w - px(ROW_INSET));
@@ -1360,7 +1360,7 @@ fn draw_entries(canvas: &super::menu_draw::Canvas, menu: &Menu) {
                     (true, true) => colors.hover_text,
                     (true, false) => colors.text,
                 };
-                canvas.text(&menu.icon_format, &glyph.to_string(), px(ICON_X), top, px(TEXT_X), bottom, color);
+                canvas.text(&menu.icon_format, &icon.segoe().to_string(), px(ICON_X), top, px(TEXT_X), bottom, color);
                 canvas.text(&menu.text_format, text, px(TEXT_X), top, w, bottom, color);
             }
         }
