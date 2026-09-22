@@ -2,9 +2,14 @@
 //! sessions are opened as tabs in the user's own terminal window. See
 //! `docs/ARCHITECTURE.md`.
 
+pub mod backend;
 pub mod claim;
+pub mod overlay;
 #[cfg(windows)]
 pub mod windows_terminal;
+
+pub use backend::{Capabilities, Change, ChangeCounts, Image, Notify, OpenReport, Subscription, TerminalBackend};
+pub use overlay::{Entry, HoverCard, MenuProvider, MenuTab, OverlayMenu, SwitcherTab};
 
 /// One tab to open.
 #[derive(Clone, Debug, PartialEq, Eq)]

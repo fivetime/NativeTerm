@@ -55,17 +55,7 @@ pub enum Mismatch {
     TerminalElevated,
 }
 
-/// What `open` did.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct OpenReport {
-    /// Tabs handed to `wt` (still to be confirmed).
-    pub launched: usize,
-    /// Tabs not sent: the user left the new window, it never appeared, or
-    /// an earlier batch didn't show up in time.
-    pub pending: Vec<TabSpec>,
-    /// The window created for `Target::NewWindow` (or a restored workspace).
-    pub window: Option<isize>,
-}
+pub use crate::backend::OpenReport;
 
 pub struct WindowsTerminal {
     install: Install,
@@ -329,5 +319,97 @@ impl WindowsTerminal {
             None => Err(io::Error::new(io::ErrorKind::TimedOut, "Windows Terminal is not responding")),
             Some(result) => result.map_err(|e| io::Error::other(e.to_string())),
         }
+    }
+}
+
+/// Terminal's change notifications, as the backend contract sees them.
+struct WindowsSubscription(events::Watcher);
+
+impl crate::Subscription for WindowsSubscription {
+    fn counts(&self) -> crate::ChangeCounts {
+        use std::sync::atomic::Ordering::Relaxed;
+        let c = self.0.counts();
+        crate::ChangeCounts {
+            windows: c.windows.load(Relaxed),
+            tabs: c.selected.load(Relaxed) + c.structure.load(Relaxed),
+        }
+    }
+}
+
+impl crate::TerminalBackend for WindowsTerminal {
+    fn capabilities(&self) -> crate::Capabilities {
+        crate::Capabilities {
+            capture: true,
+            screen_text: true,
+            overlay_menu: true,
+            tab_rects: true,
+            profile_install: true,
+            named_windows: true,
+        }
+    }
+
+    fn shim_path(&self) -> &Path {
+        self.shim()
+    }
+
+    fn window_ids(&self) -> Vec<isize> {
+        self.handles()
+    }
+
+    fn foreground(&self) -> Option<isize> {
+        let front = window::foreground();
+        self.handles().contains(&front).then_some(front)
+    }
+
+    fn activate(&self, window: isize) -> bool {
+        window::activate(window)
+    }
+
+    fn snapshot(&self, labels: &HashSet<String>) -> Snapshot {
+        WindowsTerminal::snapshot(self, labels)
+    }
+
+    fn open(&self, target: &Target, tabs: &[TabSpec]) -> io::Result<OpenReport> {
+        WindowsTerminal::open(self, target, tabs)
+    }
+
+    fn open_tool(&self, title: &str, shim_args: &[String]) -> io::Result<()> {
+        WindowsTerminal::open_tool(self, title, shim_args)
+    }
+
+    fn select(&self, window: isize, tab: &TabView) -> io::Result<bool> {
+        WindowsTerminal::select(self, window, tab)
+    }
+
+    fn close(&self, window: isize, tab: &TabView) -> io::Result<bool> {
+        WindowsTerminal::close(self, window, tab)
+    }
+
+    fn subscribe(&self, notify: crate::Notify) -> Box<dyn crate::Subscription> {
+        Box::new(WindowsSubscription(events::Watcher::start(self.install.clone(), notify)))
+    }
+
+    fn screen_text(&self, window: isize, max_lines: usize) -> Option<Vec<String>> {
+        WindowsTerminal::screen_text(self, window, max_lines)
+    }
+
+    fn capture(&self, window: isize, content_top: Option<i32>, width: i32) -> Option<crate::Image> {
+        capture::capture(window, content_top, width)
+    }
+
+    fn start_overlay_menu(
+        &self,
+        provider: std::sync::Arc<dyn crate::MenuProvider>,
+    ) -> io::Result<Option<Box<dyn crate::OverlayMenu>>> {
+        let menu = menu::TabMenu::start(self.install.settings_json(), provider)?;
+        Ok(Some(Box::new(menu)))
+    }
+
+    fn wait_for(&self, labels: &HashSet<String>, expected: &[String], timeout: Duration) -> (Snapshot, Vec<String>) {
+        WindowsTerminal::wait_for(self, labels, expected, timeout)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }

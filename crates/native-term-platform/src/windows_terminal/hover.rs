@@ -27,28 +27,7 @@ pub(super) const PAD: f32 = 8.0;
 pub(super) const TITLE_H: f32 = 20.0;
 pub(super) const NOTE_H: f32 = 16.0;
 
-/// What a tab's card shows.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct HoverCard {
-    /// The session's name (the tab's title when it has no session).
-    pub title: String,
-    /// Under it: where the tab is, the state, when the picture was taken.
-    pub note: String,
-    /// The tab's picture: width, height, RGBA.
-    pub image: Option<(u32, u32, Vec<u8>)>,
-    /// What its console holds, when there is no picture of it.
-    pub lines: Vec<String>,
-    /// How wide that console is, for sizing the text.
-    pub columns: u16,
-}
-
-impl HoverCard {
-    /// Nothing to show: no picture and no text.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.image.is_none() && self.lines.iter().all(String::is_empty)
-    }
-}
+pub use crate::overlay::HoverCard;
 
 pub(super) struct Card {
     pub(super) popup: HWND,

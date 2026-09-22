@@ -37,26 +37,7 @@ use windows_core::{implement, Ref};
 use super::install::Install;
 use super::window::{self, terminal_windows, WINDOW_CLASS};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Change {
-    /// A Terminal window appeared or went away.
-    Windows,
-    /// A Terminal window (or something else) became the foreground window.
-    Foreground,
-    /// The tab strip changed (tabs opened, closed, moved): tab rectangles
-    /// are stale.
-    Tabs,
-    /// A tab was selected, or a tab's content changed (panes, focus):
-    /// worth a rescan, rectangles unchanged.
-    Content,
-    /// A flyout menu or popup opened or closed (e.g. Terminal's own tab
-    /// menu): nothing NativeTerm tracks changed.
-    Popup,
-    /// A Terminal window moved or changed size: tab rectangles are stale.
-    Moved,
-}
-
-pub type Notify = Arc<dyn Fn(Change) + Send + Sync>;
+pub use crate::backend::{Change, Notify};
 
 /// How many notifications of each kind were delivered (diagnostics).
 #[derive(Default)]

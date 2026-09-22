@@ -843,8 +843,25 @@
       goes into `tools\` and PuTTY's licence into `licenses\`
       (`tools\get-ntplink.ps1 -Tag … -Package …` exists for it; the CI
       needs a token that can read the private PuTTY fork)
-- [ ] macOS backend — Terminal.app / iTerm2 tab scripting
-- [ ] Linux backend — investigate VTE
+- [ ] Cross-platform (see "Platform sequencing" in ARCHITECTURE.md),
+      staged so Windows behaves the same after every step:
+  - [x] P0 — dependencies gated: the portable crates (`i18n`, `config`,
+        `session`, `sftp`, `platform`) `cargo check` on the Linux and
+        macOS targets (2026-09-22)
+  - [x] P1a — `TerminalBackend` and `OverlayMenu` contracts in
+        `native-term-platform`; `Core` holds `Arc<dyn TerminalBackend>`
+        and no longer names Windows Terminal (2026-09-22)
+  - [ ] P1b — `WindowId` newtype in place of the raw `HWND`
+  - [ ] P1c — `FakeBackend` and `core_fake` tests: `Core` tested without
+        a terminal, on any platform
+  - [ ] P2 — `native-term-os` facade for the OS helpers, `cfg` splits in
+        the binaries, `NoTerminal` stub, `Icon` enum (Segoe on Windows,
+        Phosphor elsewhere), portable-check script in the checklist
+  - [ ] P3 — session pipe (`AF_UNIX`) and shim on Unix (ssh on the
+        inherited tty; typing and screen reads through the backend)
+  - [ ] P4 — Linux backend: WezTerm (`wezterm cli`; also runs on Windows
+        for end-to-end checks before a Linux machine is at hand)
+  - [ ] P5 — macOS backend: iTerm2 (JXA through `osascript`)
 
 ## Explicitly not planned
 - Self-rendered terminal emulation of any kind

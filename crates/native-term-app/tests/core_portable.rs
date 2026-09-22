@@ -96,7 +96,7 @@ fn open_track_reconnect_close() {
     core.close(&ids[1]);
     wait_until(&core, &ids, "both closed", |s| s.iter().all(|s| s.state == State::Closed));
     let started = Instant::now();
-    while core.terminal().windows().iter().any(|w| w.handle == window) {
+    while core.terminal().window_ids().contains(&window) {
         assert!(started.elapsed() < WAIT, "window still open");
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -125,7 +125,7 @@ fn open_track_reconnect_close() {
     }
     wait_until(&core, &ids, "all closed", |s| s.iter().all(|s| s.state == State::Closed));
     let started = Instant::now();
-    while core.terminal().windows().iter().any(|w| w.handle == window) {
+    while core.terminal().window_ids().contains(&window) {
         assert!(started.elapsed() < WAIT, "window still open");
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -230,9 +230,9 @@ fn close_all_spares_locked_and_foreign_tabs() {
         .unwrap();
     let started = Instant::now();
     let window = loop {
-        let found = core.terminal().windows().into_iter().find(|w| tab_names(&core, w.handle).contains(&foreign));
+        let found = core.terminal().window_ids().into_iter().find(|w| tab_names(&core, *w).contains(&foreign));
         if let Some(w) = found {
-            break w.handle;
+            break w;
         }
         assert!(started.elapsed() < WAIT, "the foreign tab didn't appear");
         std::thread::sleep(Duration::from_millis(200));
@@ -256,7 +256,7 @@ fn close_all_spares_locked_and_foreign_tabs() {
     let names = tab_names(&core, window);
     assert!(names.contains(&"nt-closeall (2)".to_string()), "the locked one stays: {names:?}");
     assert!(names.contains(&foreign), "the foreign tab stays: {names:?}");
-    assert!(core.terminal().windows().iter().any(|w| w.handle == window), "the window stays");
+    assert!(core.terminal().window_ids().contains(&window), "the window stays");
 
     // clean up: the locked session, then the foreign tab (this test's own)
     core.set_locked(&ids[1], false);

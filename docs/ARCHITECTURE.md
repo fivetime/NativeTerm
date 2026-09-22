@@ -4402,7 +4402,8 @@ program owns.
   write, `NativeTerm*` keys, SecureCRT importer
 - `native-term-session` — session records, shim pipe protocol, exit
   classification
-- `native-term-platform` — tab claiming (pure logic) and the Windows
+- `native-term-platform` — the `TerminalBackend` contract (below), the
+  overlay-menu contract, tab claiming (pure logic), and the Windows
   Terminal backend: install discovery, `wt` command lines and batches,
   unelevated launch, window enumeration with the `WM_NULL` probe, UIA
   reads and actions on a watchdog worker, the fragment profile
@@ -4416,9 +4417,93 @@ program owns.
 ## Platform sequencing
 
 Windows first (the primary daily-driver OS). Other platforms get their own
-`TerminalBackend` implementation without touching the rest:
+terminal backend without touching the rest: `Core` holds an
+`Arc<dyn TerminalBackend>` and never names Windows Terminal (the one
+exception is `Core::windows_terminal()`, a `cfg(windows)` downcast for a
+test that reads the install's launcher path).
 
-- **macOS**: Terminal.app and iTerm2 are scriptable (AppleScript; iTerm2
-  also has a Python API) including their tabs — to be investigated.
-- **Linux**: fragmented across terminal emulators; VTE (see above) is the
-  strongest candidate.
+### The `TerminalBackend` contract
+
+`native_term_platform::TerminalBackend` (`platform/src/backend.rs`) is the
+whole of what NativeTerm asks of a terminal program. Every method may
+take seconds and is called from background threads, often several at
+once; nothing in it runs on the GUI thread.
+
+- `capabilities()` — what the backend can do beyond the basics
+  (`capture`, `screen_text`, `overlay_menu`, `tab_rects`,
+  `profile_install`, `named_windows`). The program hides what a backend
+  can't do; a backend never pretends.
+- `shim_path()` — the helper every tab runs, and what a client on the
+  pipe must be (`our_shim` compares the peer's image against it).
+- `window_ids()`, `foreground()`, `activate(window)` — the terminal's
+  windows (responsive or not), the one in front if it is the terminal's,
+  and bringing one forward. `activate` also decides what the next
+  `Target::Recent` means (the `-w 0` dance on Windows: activate, then
+  open into the most recent window).
+- `snapshot(labels)` — every window and tab, claimed for the open
+  sessions' labels through `claim::Claimer` (pure logic, shared by every
+  backend). Claims are kept only for labels in `labels`; a window that
+  can't be read comes back `unresponsive` with `complete == false` and
+  keeps its earlier claims for the next scan.
+- `open(target, tabs)` — tabs running the shim. `Target::NewWindow` must
+  report the new window in `OpenReport::window` (the resend path depends
+  on it); `Target::Named` is a window found again by name where the
+  terminal supports that, a new window where it doesn't. Confirmed
+  afterwards with `wait_for` (a default method: poll `snapshot` until
+  every expected label is claimed or the timeout passes).
+- `open_tool(title, shim_args)` — a tab running the shim for a tool
+  (installing a key, an SFTP session).
+- `select(window, tab)`, `close(window, tab)` — `Ok(false)` when the tab
+  moved since the snapshot (index or name no longer match).
+- `subscribe(notify)` — change notifications (`Change::{Windows,
+  Foreground, Tabs, Content, Popup, Moved}`); dropping the `Subscription`
+  stops them. A backend without events of its own polls and reports what
+  it saw change; `counts()` is for diagnostics and tests.
+- `screen_text`, `capture`, `start_overlay_menu` — optional, with defaults
+  of "none": the selected tab's screen text, a picture of the window
+  below the tab strip, and NativeTerm's own menu over the tab strip.
+- `as_any()` — for what only one terminal has (Windows Terminal's install
+  and profile fragment).
+
+The overlay menu has its own contract (`platform/src/overlay.rs`):
+`MenuProvider` is what the program supplies (entries for a tab, what was
+chosen, the hover card, the Ctrl+Tab tiles, a switch); `OverlayMenu` is
+the menu once it is up (tabs and their rectangles, invalidation, the
+Ctrl+Tab flag, what the switcher picked, and how long ago a drag from
+another window ended over the terminal, which tells a drop from a paste).
+`MenuTab`, `Entry`, `HoverCard`, `SwitcherTab` are neutral data. Windows
+Terminal's `TabMenu` implements `OverlayMenu`; a backend that can't draw
+one returns `Ok(None)` from `start_overlay_menu` and the menu accessors on
+`Core` quietly report "no menu".
+
+What stays outside the contract, by design: finding the terminal
+(`Install`, `Version`, `Kind`), the elevation mismatch check, the fragment
+profile and `disabledProfileSources`, `wt` command lines, UIA, the
+watchdog worker, the hooks and popup behind the menu. Each of those is
+Windows Terminal's business.
+
+### Where the other platforms are going
+
+The plan (2026-09-22) is staged so Windows behaves the same after every
+step: dependencies gated so the portable crates build on Linux and macOS
+targets (done); the trait above with `Core` on dynamic dispatch (done);
+a `WindowId` newtype in place of the raw `HWND`; a `FakeBackend` so
+`Core` is tested without a terminal on any platform; a `native-term-os`
+facade for the one-line OS helpers (local time, process identity, the
+shell, credentials, folder watching) with `cfg` splits in the binaries;
+the session pipe and the shim on Unix (`AF_UNIX`, `SO_PEERCRED` /
+`LOCAL_PEERPID`, termios; the first shim runs ssh on the inherited tty
+and leaves typing and screen reads to the backend); then the backends:
+
+- **Linux**: WezTerm first (`wezterm cli spawn / list / activate-tab /
+  set-tab-title / get-text / send-text / kill-pane`, `WEZTERM_PANE` as
+  the per-tab id; no events, so a 1 s poll). It also runs on Windows, so
+  the whole chain is verified here before a Linux machine is at hand.
+  VTE-based terminals, GNOME Terminal and Konsole have no usable API for
+  reading tabs or text; Ghostty can't be read either.
+- **macOS**: iTerm2 (JXA through `osascript`: `createTabWithDefaultProfile
+  ({command})`, `session.uniqueId / name / contents / write`,
+  `ITERM_SESSION_ID` as the per-tab id; 1 s poll). Terminal.app can only
+  open tabs by simulated keystrokes. First use asks for Automation
+  permission, which macOS remembers only for an `.app` bundle — a
+  packaging constraint.

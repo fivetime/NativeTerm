@@ -53,9 +53,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
-use super::hover::{self, HoverCard};
+use super::hover;
 use super::menu_draw::Painter;
-use super::switcher::{self, SwitcherTab};
+use super::switcher;
 use super::theme::{self, Look};
 use crate::Rect;
 
@@ -85,55 +85,7 @@ const WM_SWITCHER_CLOSE: u32 = WM_APP + 11;
 const HOVER_TIMER: usize = 1;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
-/// A NativeTerm tab as the menu knows it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MenuTab {
-    pub window: isize,
-    pub rect: Rect,
-    /// The session label the tab was claimed for.
-    pub label: String,
-    /// The tab's current title.
-    pub title: String,
-    pub mixed: bool,
-    pub index: usize,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Entry {
-    /// A glyph from Segoe Fluent Icons (Segoe MDL2 Assets on Windows 10).
-    Action {
-        id: u32,
-        glyph: char,
-        text: String,
-        enabled: bool,
-    },
-    Header(String),
-    Separator,
-}
-
-/// What the menu shows for a tab, and what happens when an item is chosen.
-/// Called on the menu thread: don't block.
-pub trait Provider: Send + Sync {
-    fn entries(&self, tab: &MenuTab) -> Vec<Entry>;
-    fn chosen(&self, tab: &MenuTab, id: u32);
-    /// What to show when the mouse rests on the tab, and how long to wait
-    /// first (`None`: no card for this tab, or the person turned them
-    /// off). Called on the menu thread: don't block.
-    fn hover(&self, _tab: &MenuTab) -> Option<(HoverCard, Duration)> {
-        None
-    }
-
-    /// Every tab of `window` in strip order, for the Ctrl+Tab grid, with
-    /// the selected one marked. Fewer than two: no grid. Called on the
-    /// menu thread: don't block.
-    fn tiles(&self, _window: isize) -> Vec<SwitcherTab> {
-        Vec::new()
-    }
-
-    /// Switch to the tab the grid picked (by index, or by title if the
-    /// strip moved under it). Called on the menu thread: don't block.
-    fn switch(&self, _window: isize, _index: usize, _title: &str) {}
-}
+pub use crate::overlay::{Entry, MenuProvider as Provider, MenuTab};
 
 struct Shared {
     tabs: Mutex<Vec<MenuTab>>,
@@ -1619,5 +1571,59 @@ fn menu_thread(ready: mpsc::Sender<u32>) {
             }
         });
         let _ = DestroyWindow(owner);
+    }
+}
+
+impl crate::overlay::OverlayMenu for TabMenu {
+    fn set_tabs(&self, tabs: Vec<MenuTab>) {
+        TabMenu::set_tabs(self, tabs);
+    }
+
+    fn invalidate(&self) {
+        TabMenu::invalidate(self);
+    }
+
+    fn is_open(&self) -> bool {
+        TabMenu::is_open(self)
+    }
+
+    fn opened(&self) -> u32 {
+        TabMenu::opened(self)
+    }
+
+    fn choose(&self, id: u32) {
+        TabMenu::choose(self, id);
+    }
+
+    fn hovered(&self) -> Option<u32> {
+        TabMenu::hovered(self)
+    }
+
+    fn set_ctrl_tab(&self, on: bool) {
+        TabMenu::set_ctrl_tab(self, on);
+    }
+
+    fn ctrl_tab(&self) -> bool {
+        TabMenu::ctrl_tab(self)
+    }
+
+    fn switcher_open(&self) -> bool {
+        TabMenu::switcher_open(self)
+    }
+
+    fn switcher_pick(&self) -> Option<(isize, usize)> {
+        TabMenu::switcher_pick(self)
+    }
+
+    fn switcher_counts(&self) -> (u32, u32) {
+        TabMenu::switcher_counts(self)
+    }
+
+    fn debug_state(&self) -> String {
+        TabMenu::debug_state(self)
+    }
+
+    fn since_drag_release(&self) -> Option<Duration> {
+        since_drag_release()
     }
 }

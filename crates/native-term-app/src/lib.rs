@@ -29,9 +29,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
-use native_term_platform::windows_terminal::events::{Change, Watcher};
-use native_term_platform::windows_terminal::menu::{MenuTab, TabMenu};
-use native_term_platform::windows_terminal::{window, WindowsTerminal};
+#[cfg(windows)]
+use native_term_platform::windows_terminal::WindowsTerminal;
+use native_term_platform::{Change, MenuTab, OverlayMenu, Subscription, TerminalBackend};
 use native_term_platform::{Snapshot, TabSpec, Target};
 use native_term_session::pipe::{self, PipeConnection, PipeListener};
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
@@ -305,7 +305,7 @@ pub struct SwitcherState {
 type Ask = Arc<dyn Fn(tab_menu::MenuRequest) + Send + Sync>;
 
 pub(crate) struct Shared {
-    terminal: WindowsTerminal,
+    terminal: Arc<dyn TerminalBackend>,
     registry: Option<Registry>,
     pub(crate) sessions: Mutex<Vec<Session>>,
     /// Closed with their window in an earlier run; only matched against
@@ -319,9 +319,9 @@ pub(crate) struct Shared {
     repaint: Mutex<Option<Repaint>>,
     wake: Mutex<Sender<()>>,
     /// Keeps the Terminal change notifications alive.
-    watcher: Mutex<Option<Watcher>>,
+    watcher: Mutex<Option<Box<dyn Subscription>>>,
     /// NativeTerm's own tab menu, once started.
-    menu: Mutex<Option<TabMenu>>,
+    menu: Mutex<Option<Box<dyn OverlayMenu>>>,
     /// Asks the main window (dialogs, the files window); set with the tab
     /// menu, used by helpers' requests too.
     ask: Mutex<Option<Ask>>,
@@ -469,7 +469,8 @@ impl Core {
     /// Serve the pipe, pick up the sessions `state.db` knows, and start the
     /// background threads. Fails with `AddrInUse` if another NativeTerm is
     /// running.
-    pub fn start(terminal: WindowsTerminal, registry: Option<Registry>) -> io::Result<Core> {
+    pub fn start(terminal: impl TerminalBackend, registry: Option<Registry>) -> io::Result<Core> {
+        let terminal: Arc<dyn TerminalBackend> = Arc::new(terminal);
         let listener = PipeListener::bind(&pipe::pipe_name()?)?;
         let (wake, woken) = mpsc::channel();
         let (placeholders, queued) = mpsc::channel();
@@ -552,33 +553,29 @@ impl Core {
         std::thread::Builder::new().name("pipe-server".into()).spawn(move || serve(server, listener))?;
         let wake = Mutex::new(wake);
         let weak: Weak<Shared> = Arc::downgrade(&shared);
-        let watcher = Watcher::start(
-            shared.terminal.install().clone(),
-            Arc::new(move |change: Change| {
-                match change {
-                    Change::Foreground => {
-                        if let Some(shared) = weak.upgrade() {
-                            let front = native_term_platform::windows_terminal::window::foreground();
-                            if shared.terminal.windows().iter().any(|w| w.handle == front) {
-                                shared.last_terminal.store(front, std::sync::atomic::Ordering::Relaxed);
-                            }
+        let watcher = shared.terminal.subscribe(Arc::new(move |change: Change| {
+            match change {
+                Change::Foreground => {
+                    if let Some(shared) = weak.upgrade() {
+                        if let Some(front) = shared.terminal.foreground() {
+                            shared.last_terminal.store(front, std::sync::atomic::Ordering::Relaxed);
                         }
-                        return;
                     }
-                    Change::Popup => return,
-                    Change::Content => {}
-                    Change::Tabs | Change::Windows | Change::Moved => {
-                        // tab rectangles are stale until the next scan
-                        if let Some(shared) = weak.upgrade() {
-                            if let Some(menu) = lock(&shared.menu).as_ref() {
-                                menu.invalidate();
-                            }
+                    return;
+                }
+                Change::Popup => return,
+                Change::Content => {}
+                Change::Tabs | Change::Windows | Change::Moved => {
+                    // tab rectangles are stale until the next scan
+                    if let Some(shared) = weak.upgrade() {
+                        if let Some(menu) = lock(&shared.menu).as_ref() {
+                            menu.invalidate();
                         }
                     }
                 }
-                let _ = lock(&wake).send(());
-            }),
-        );
+            }
+            let _ = lock(&wake).send(());
+        }));
         *lock(&shared.watcher) = Some(watcher);
         let refresher = Arc::clone(&shared);
         std::thread::Builder::new().name("tab-refresh".into()).spawn(move || loop {
@@ -636,16 +633,22 @@ impl Core {
     /// Start NativeTerm's own right-click menu on its tabs (once).
     /// `send` opens the send dialog for a session id.
     pub fn start_tab_menu(&self, ask: impl Fn(tab_menu::MenuRequest) + Send + Sync + 'static) -> io::Result<()> {
-        let settings = self.shared.terminal.install().settings_json();
         let ask: Ask = Arc::new(ask);
+        // kept even without a menu: helpers in tabs ask through it too
         *lock(&self.shared.ask) = Some(Arc::clone(&ask));
         let provider = Arc::new(tab_menu::Actions { core: Arc::downgrade(&self.shared), ask });
-        let menu = TabMenu::start(settings, provider)?;
+        let Some(menu) = self.shared.terminal.start_overlay_menu(provider)? else { return Ok(()) };
         // the keyboard hook can't read settings: it is told
         menu.set_ctrl_tab(self.setting(tab_menu::SWITCHER_SETTING).as_deref() == Some("on"));
         *lock(&self.shared.menu) = Some(menu);
         self.shared.refresh_soon();
         Ok(())
+    }
+
+    /// How long ago a drag from another window ended over a terminal
+    /// window (the menu's hook sees it), if the backend has such a menu.
+    pub fn tab_menu_since_drag_release(&self) -> Option<Duration> {
+        lock(&self.shared.menu).as_ref().and_then(|m| m.since_drag_release())
     }
 
     /// Choose an item of the open tab menu (automation, tests).
@@ -700,8 +703,15 @@ impl Core {
         *lock(&self.shared.repaint) = Some(Box::new(repaint));
     }
 
-    pub fn terminal(&self) -> &WindowsTerminal {
-        &self.shared.terminal
+    pub fn terminal(&self) -> &dyn TerminalBackend {
+        &*self.shared.terminal
+    }
+
+    /// The Windows Terminal behind the backend, for what only it has
+    /// (its install, its profile fragment).
+    #[cfg(windows)]
+    pub fn windows_terminal(&self) -> Option<&WindowsTerminal> {
+        self.shared.terminal.as_any().downcast_ref()
     }
 
     pub fn registry(&self) -> Option<&Registry> {
@@ -718,10 +728,9 @@ impl Core {
 
     /// Terminal change notifications so far: (window, tab) events.
     pub fn change_counts(&self) -> (u64, u64) {
-        use std::sync::atomic::Ordering::Relaxed;
         lock(&self.shared.watcher).as_ref().map_or((0, 0), |w| {
             let c = w.counts();
-            (c.windows.load(Relaxed), c.selected.load(Relaxed) + c.structure.load(Relaxed))
+            (c.windows, c.tabs)
         })
     }
 
@@ -1374,7 +1383,7 @@ fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String>
             // `-w 0` goes to the most recently activated window: the one
             // this try made, so the tabs don't land in a window of their own
             if let Some(handle) = report.window {
-                window::activate(handle);
+                shared.terminal.activate(handle);
                 target = Target::Recent;
             }
             specs = again.iter().filter_map(|s| resend(shared, s)).collect();
@@ -1463,7 +1472,7 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
             }
             // `-w 0` goes to the most recently activated window
             if let Some(handle) = target_window {
-                window::activate(handle);
+                shared.terminal.activate(handle);
             }
             let failed = open_tabs(shared, &Target::Recent, &specs);
             for p in group {
@@ -1566,7 +1575,7 @@ fn scan(shared: &Shared, picture: bool) -> Snapshot {
         *lock(&shared.snapshot) = snapshot.clone();
     }
     // the selected tabs, as they look now
-    let pictured = picture && previews::take(&shared.previews, &shared.terminal, &snapshot);
+    let pictured = picture && previews::take(&shared.previews, &*shared.terminal, &snapshot);
     if changed || pictured {
         // only then: an idle NativeTerm doesn't repaint
         shared.changed();
@@ -1612,7 +1621,7 @@ fn same_program(one: &Path, two: &Path) -> bool {
 fn our_shim(shared: &Shared, conn: &PipeConnection) -> Result<(), String> {
     let pid = conn.client_pid().map_err(|e| e.to_string())?;
     let image = native_term_win::desktop::process_image(pid).ok_or_else(|| format!("pid {pid}"))?;
-    match same_program(&image, shared.terminal.shim()) {
+    match same_program(&image, shared.terminal.shim_path()) {
         true => Ok(()),
         false => Err(image.display().to_string()),
     }
@@ -1965,7 +1974,7 @@ fn utc(secs: i64) -> (String, String) {
 fn check_window_closed(shared: &Shared, id: &str, window: isize) {
     let deadline = Instant::now() + WINDOW_CLOSE_CHECK;
     while Instant::now() < deadline {
-        if !shared.terminal.windows().iter().any(|w| w.handle == window) {
+        if !shared.terminal.window_ids().contains(&window) {
             shared.update(id, |s| s.restorable = true);
             shared.db("closed with window", |r| r.closed_with_window(id));
             return;

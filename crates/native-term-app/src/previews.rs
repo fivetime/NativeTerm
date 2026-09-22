@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use native_term_platform::windows_terminal::capture::{self, Image};
 use native_term_platform::Snapshot;
+use native_term_platform::{Image, TerminalBackend};
 
 /// A tab seen this recently isn't pictured again.
 const FRESH: Duration = Duration::from_secs(3);
@@ -101,15 +101,11 @@ impl Previews {
 /// Picture what `wanted` asks for (on the scanning thread; ~25 ms a
 /// window), and read the text of the same screen. Minimized windows are
 /// skipped. Whether any was taken.
-pub fn take(
-    previews: &std::sync::Mutex<Previews>,
-    terminal: &native_term_platform::windows_terminal::WindowsTerminal,
-    snapshot: &Snapshot,
-) -> bool {
+pub fn take(previews: &std::sync::Mutex<Previews>, terminal: &dyn TerminalBackend, snapshot: &Snapshot) -> bool {
     let wanted = crate::lock(previews).wanted(snapshot);
     let mut taken = false;
     for (window, index, title, strip) in wanted {
-        if let Some(image) = capture::capture(window, strip, WIDTH) {
+        if let Some(image) = terminal.capture(window, strip, WIDTH) {
             let text = terminal.screen_text(window, TEXT_LINES).unwrap_or_default();
             crate::lock(previews).insert(window, index, title, image, text);
             taken = true;

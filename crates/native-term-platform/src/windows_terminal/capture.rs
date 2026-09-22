@@ -19,13 +19,7 @@ use super::window::hwnd;
 /// `PW_RENDERFULLCONTENT`: DirectComposition content (Terminal's) too.
 const PW_RENDERFULLCONTENT: u32 = 2;
 
-/// An RGBA picture, rows top to bottom.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Image {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
-}
+pub use crate::backend::Image;
 
 /// The part of the window to keep, in its own pixels (0, 0 = the window
 /// rectangle's corner): the visible frame, below `content_top` (a screen

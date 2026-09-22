@@ -36,25 +36,7 @@ pub(super) const MAX_COLUMNS: usize = 5;
 /// meant for a glance, not for a hundred tabs).
 pub const MAX_TILES: usize = 20;
 
-/// One tab in the grid.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SwitcherTab {
-    pub window: isize,
-    pub index: usize,
-    /// What the tile says: the session's name, or the tab's title.
-    pub title: String,
-    /// What Terminal calls the tab, for finding it again when the strip
-    /// has moved under the grid.
-    pub name: String,
-    /// The tab's last picture: width, height, RGBA.
-    pub image: Option<(u32, u32, Vec<u8>)>,
-    /// What was on its screen, when there is no picture.
-    pub lines: Vec<String>,
-    /// How wide that screen is, for sizing the text.
-    pub columns: u16,
-    /// Whether it is the window's selected tab.
-    pub selected: bool,
-}
+pub use crate::overlay::SwitcherTab;
 
 pub(super) struct Grid {
     pub(super) popup: HWND,

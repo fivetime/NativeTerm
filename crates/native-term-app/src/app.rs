@@ -972,7 +972,10 @@ impl App {
         // acted on without asking, however the question was answered
         // before.
         let dropped_by_mouse = certain
-            || native_term_platform::windows_terminal::menu::since_drag_release()
+            || self
+                .core
+                .as_ref()
+                .and_then(|c| c.tab_menu_since_drag_release())
                 .is_some_and(|since| since < std::time::Duration::from_millis(2000));
         match self.remembered_drop().filter(|_| dropped_by_mouse) {
             Some(DropChoice::Upload) if can_upload => {

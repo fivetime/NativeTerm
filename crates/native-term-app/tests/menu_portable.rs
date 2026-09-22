@@ -152,7 +152,7 @@ fn tab_menu_on_nativeterm_tabs_only() {
     });
     // one of the user's own tabs, in the same window
     launch::run(
-        &core.terminal().install().launcher,
+        &core.windows_terminal().unwrap().install().launcher,
         &["-w".into(), "0".into(), "new-tab".into(), "--title=user tab".into(), "cmd".into()],
     )
     .unwrap();
@@ -212,7 +212,7 @@ fn tab_menu_on_nativeterm_tabs_only() {
     {
         let _ = core.terminal().close(w.handle, t);
     }
-    wait_until("window closed", || !core.terminal().windows().iter().any(|w| w.handle == window));
+    wait_until("window closed", || !core.terminal().window_ids().contains(&window));
 }
 
 /// Ctrl+Tab shows NativeTerm's grid over the window's tabs, more presses
@@ -294,5 +294,5 @@ fn ctrl_tab_shows_the_grid_and_switches() {
     for session in core.sessions() {
         core.close(&session.id);
     }
-    wait_until("window closed", || !core.terminal().windows().iter().any(|w| w.handle == window));
+    wait_until("window closed", || !core.terminal().window_ids().contains(&window));
 }
