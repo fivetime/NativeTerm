@@ -292,7 +292,8 @@ desktop's) or `kdialog`, whichever is there; on a desktop with neither a
 download goes to the Downloads folder without asking, and an upload
 opens the files window (SFTP) instead, said in the tab. macOS gets
 `osascript`'s `choose file` / `choose folder` (unverified). The last
-folder is not remembered off Windows yet.
+folders are remembered in `zmodem-folders` in the data folder (one
+`name=path` per line), as the registry holds them on Windows.
 
 Seen on Deepin (the box talking to its own sshd, `lrzsz` there):
 `sz` of a 10-byte file and of 30 MB (identical, mtime kept), `rz` of 30 MB

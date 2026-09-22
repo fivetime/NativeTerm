@@ -709,8 +709,9 @@ fn watch_keys(cancel: Arc<AtomicBool>) {
     });
 }
 
-/// The folder last used for `name` (kept in the registry; nowhere yet
-/// elsewhere).
+/// The folder last used for `name` (kept in the registry on Windows;
+/// elsewhere in `zmodem-folders` in the data folder, one `name=path`
+/// per line).
 fn remembered(name: &str) -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -721,8 +722,8 @@ fn remembered(name: &str) -> Option<PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        let _ = name;
-        None
+        let text = std::fs::read_to_string(folders_file()?).ok()?;
+        folders::get(&text, name).map(PathBuf::from)
     }
 }
 
@@ -734,7 +735,39 @@ fn remember(name: &str, folder: &Path) {
     }
     #[cfg(not(windows))]
     {
-        let _ = (name, folder);
+        let Some(file) = folders_file() else { return };
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        if let Some(dir) = file.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&file, folders::set(&text, name, &folder.display().to_string()));
+    }
+}
+
+/// Where the folders are remembered off Windows.
+#[cfg(not(windows))]
+fn folders_file() -> Option<PathBuf> {
+    Some(native_term_os::home::app_data()?.join("zmodem-folders"))
+}
+
+/// The remembered folders as a text: one `name=path` per line (the
+/// registry holds them on Windows; tested everywhere).
+#[cfg_attr(windows, allow(dead_code))]
+mod folders {
+    pub fn get<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+        text.lines()
+            .find_map(|l| l.split_once('=').filter(|(n, _)| *n == name).map(|(_, v)| v))
+            .filter(|v| !v.is_empty())
+    }
+
+    pub fn set(text: &str, name: &str, value: &str) -> String {
+        let mut out: String = text
+            .lines()
+            .filter(|l| l.split_once('=').is_none_or(|(n, _)| n != name))
+            .map(|l| format!("{l}\n"))
+            .collect();
+        out.push_str(&format!("{name}={value}\n"));
+        out
     }
 }
 
@@ -894,6 +927,20 @@ pub fn run(mode: &str, escape: bool, files: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remembered_folders_as_lines() {
+        let text = folders::set("", "DownloadFolder", "/home/x/Downloads");
+        assert_eq!(text, "DownloadFolder=/home/x/Downloads\n");
+        let text = folders::set(&text, "UploadFolder", "/srv/out");
+        assert_eq!(folders::get(&text, "DownloadFolder"), Some("/home/x/Downloads"));
+        assert_eq!(folders::get(&text, "UploadFolder"), Some("/srv/out"));
+        let text = folders::set(&text, "DownloadFolder", "/tmp/dl");
+        assert_eq!(folders::get(&text, "DownloadFolder"), Some("/tmp/dl"), "replaced, not added");
+        assert_eq!(text.lines().count(), 2);
+        assert_eq!(folders::get(&text, "Other"), None);
+        assert_eq!(folders::get("odd line\nX=\n", "X"), None, "an empty value is none");
+    }
 
     #[test]
     fn the_inbox_is_consumed_from_the_front_without_moving_the_rest() {
