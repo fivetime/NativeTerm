@@ -873,9 +873,21 @@
         `/proc`, `proc_pidinfo`, `mmap`), `notify` for folder watching,
         `xdg-open`/`open`, and `Unsupported` for passwords, the
         wastebasket and global shortcuts (2026-09-22)
-  - [ ] P2b — `cfg` splits in the binaries, `NoTerminal` stub, `Icon`
-        enum (Segoe on Windows, Phosphor elsewhere): the app `cargo check`s
-        on the Linux and macOS targets
+  - [x] P2b (1/2) — `cfg` splits in the app and the `NoTerminal` stub:
+        `nativeterm` passes clippy on the Linux and macOS targets
+        (2026-09-22). What differs off Windows: no registry pointer to
+        the data folder (a `Pointer::Registry` is `Unsupported`), no
+        SecureCRT or PuTTY discovery, the data lock is an advisory file
+        lock, ssh file permissions are mode bits, the Terminal profile
+        is a stand-in (`terminal_profile_stub.rs`), the window's native
+        handle is `0` (nothing docks, the button is square), fonts come
+        from the system's font folders (PingFang, Noto Sans CJK,
+        WenQuanYi; no icon font yet), and a notice says no terminal is
+        driven. `winit`/`softbuffer` get X11 and Wayland on Linux;
+        SQLite is the system's library off Windows (bundled on Windows).
+        Windows: same binary as before (smoke-tested)
+  - [ ] P2b (2/2) — `Icon` enum with a per-platform glyph map (Segoe on
+        Windows, Phosphor bundled elsewhere)
   - [ ] P2c — portable-check script in the checklist
   - [x] P3a — the session channel on Unix (`native-term-session::pipe`
         split into `windows`/`unix` behind one API): a socket under

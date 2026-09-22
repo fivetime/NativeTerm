@@ -442,7 +442,7 @@ impl FilesWindow {
             remote_focus: true,
             remote_rect: None,
             edit_dir: std::env::temp_dir().join("NativeTerm-edit"),
-            computer: std::env::var("COMPUTERNAME").unwrap_or_default(),
+            computer: native_term_os::host::name(),
             local_roots: native_term_os::shell::user_folders()
                 .into_iter()
                 .chain(native_term_os::shell::drives())
@@ -2796,10 +2796,18 @@ fn empty_local() -> Local {
     }
 }
 
-/// A local row's key (its path, as bytes of UTF-16).
+/// A local row's key (its path, as bytes).
 fn local_key(row: &LocalRow) -> Vec<u8> {
-    use std::os::windows::ffi::OsStrExt;
-    row.path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect()
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        row.path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect()
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        row.path.as_os_str().as_bytes().to_vec()
+    }
 }
 
 /// A server folder's entries, folders first, by name.

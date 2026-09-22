@@ -12,11 +12,11 @@
 
 use std::path::PathBuf;
 
+use crate::terminal_profile::Status;
 use native_term_app::t;
 use native_term_config::password;
 use native_term_config::traces::Traces;
 use native_term_os::credentials;
-use native_term_platform::windows_terminal::profile::Status;
 
 use crate::dialogs::Outcome;
 
@@ -51,6 +51,39 @@ fn saved_entries() -> Vec<String> {
     entries
 }
 
+/// The data-folder pointer in the registry, where there is one.
+fn registry_value() -> Option<String> {
+    #[cfg(windows)]
+    {
+        native_term_os::desktop::user_registry_string(
+            native_term_app::data_dir::REGISTRY_KEY,
+            native_term_app::data_dir::REGISTRY_VALUE,
+        )
+        .ok()
+        .flatten()
+        .filter(|value| !value.is_empty())
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// Remove that pointer.
+fn delete_registry_value() -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        native_term_os::registry::delete_user_value(
+            native_term_app::data_dir::REGISTRY_KEY,
+            native_term_app::data_dir::REGISTRY_VALUE,
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(())
+    }
+}
+
 impl Cleanup {
     pub fn new(
         ssh_dir: &std::path::Path,
@@ -62,13 +95,7 @@ impl Cleanup {
             traces: native_term_config::traces::find(ssh_dir, folders, shim),
             data_dir,
             credentials: saved_entries(),
-            registry: native_term_os::desktop::user_registry_string(
-                native_term_app::data_dir::REGISTRY_KEY,
-                native_term_app::data_dir::REGISTRY_VALUE,
-            )
-            .ok()
-            .flatten()
-            .filter(|value| !value.is_empty()),
+            registry: registry_value(),
             done: Vec::new(),
             confirming: None,
         }
@@ -220,19 +247,13 @@ impl CleanupDialog {
                     self.cleanup.done.extend(failed);
                     self.cleanup.credentials = saved_entries();
                 }
-                Step::Registry => {
-                    let result = native_term_os::registry::delete_user_value(
-                        native_term_app::data_dir::REGISTRY_KEY,
-                        native_term_app::data_dir::REGISTRY_VALUE,
-                    );
-                    match result {
-                        Ok(()) => {
-                            self.cleanup.registry = None;
-                            self.cleanup.done.push(t!("cleanup-registry-gone"));
-                        }
-                        Err(e) => self.cleanup.done.push(e.to_string()),
+                Step::Registry => match delete_registry_value() {
+                    Ok(()) => {
+                        self.cleanup.registry = None;
+                        self.cleanup.done.push(t!("cleanup-registry-gone"));
                     }
-                }
+                    Err(e) => self.cleanup.done.push(e.to_string()),
+                },
             }
         }
     }

@@ -14,9 +14,14 @@
 pub mod cloud;
 pub mod credentials;
 pub mod desktop;
+pub mod dock;
 pub mod fonts;
+pub mod home;
+pub mod host;
 pub mod hotkey;
+pub mod layered;
 pub mod process;
+pub mod serial;
 pub mod service;
 pub mod shell;
 pub mod ssh;
@@ -24,7 +29,7 @@ pub mod time;
 pub mod watch;
 
 #[cfg(windows)]
-pub use native_term_win::{dock, layered, picker, registry};
+pub use native_term_win::{picker, registry};
 
 /// The error a feature gives where the OS has nothing for it.
 #[cfg(unix)]

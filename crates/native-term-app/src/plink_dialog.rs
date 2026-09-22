@@ -72,7 +72,7 @@ impl PlinkDialog {
 
     fn from_session(title: String, alias: Option<String>, file: Option<PathBuf>, s: &PlinkSession) -> PlinkDialog {
         let serial = s.serial.clone().unwrap_or_else(|| Serial::new(""));
-        let ports = native_term_os::registry::serial_ports();
+        let ports = native_term_os::serial::ports();
         let line =
             if serial.line.is_empty() { ports.first().cloned().unwrap_or_default() } else { serial.line.clone() };
         PlinkDialog {
@@ -164,7 +164,7 @@ impl PlinkDialog {
                 if let (true, Some(folder)) = (n != 0, folder) {
                     ui.label("");
                     if ui.button(t!("plink-log-open-folder")).clicked() {
-                        let _ = std::process::Command::new("explorer.exe").arg(&folder).spawn();
+                        let _ = native_term_os::shell::open_folder(&folder);
                     }
                     ui.end_row();
                 }

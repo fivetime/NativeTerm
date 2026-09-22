@@ -6,18 +6,21 @@
 //! so no file is ever half written, but two NativeTerms still overwrite
 //! each other's settings, so the second one is told.
 //!
-//! The lock is the file's sharing mode, not its contents: `nativeterm.lock`
-//! is held open for writing while NativeTerm runs, and Windows refuses a
-//! second writer — on a local disk and over SMB alike. Its text is only
-//! there to name the holder; a stale file from a machine that lost power
-//! blocks nothing, because nobody holds it open any more.
+//! The lock is the file's sharing mode (a lock on it elsewhere), not its
+//! contents: `nativeterm.lock` is held open for writing while NativeTerm
+//! runs, and Windows refuses a second writer — on a local disk and over
+//! SMB alike. Its text is only there to name the holder; a stale file
+//! from a machine that lost power blocks nothing, because nobody holds
+//! it open any more.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
+#[cfg(windows)]
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 /// Others may read it (to see who we are), not write it.
+#[cfg(windows)]
 const FILE_SHARE_READ: u32 = 0x0000_0001;
 /// The file, by name.
 pub const LOCK_FILE: &str = "nativeterm.lock";
@@ -90,23 +93,47 @@ pub enum Taken {
 /// Take the data directory's lock, or find out who holds it.
 pub fn take(dir: &Path) -> Taken {
     let path = dir.join(LOCK_FILE);
-    let opened = OpenOptions::new().write(true).create(true).truncate(true).share_mode(FILE_SHARE_READ).open(&path);
-    match opened {
-        Ok(mut file) => {
+    match open_held(&path) {
+        Ok(Some(mut file)) => {
             let _ = write!(file, "{}", ours());
             let _ = file.flush();
             Taken::Ours(DataLock { file: Some(file), path })
         }
-        // ERROR_SHARING_VIOLATION: someone holds it open
-        Err(e) if e.raw_os_error() == Some(32) => Taken::Busy(read(&path)),
+        Ok(None) => Taken::Busy(read(&path)),
         Err(e) => Taken::Unavailable(e),
+    }
+}
+
+/// The file, open and ours alone; `None` when someone else holds it.
+#[cfg(windows)]
+fn open_held(path: &Path) -> io::Result<Option<File>> {
+    match OpenOptions::new().write(true).create(true).truncate(true).share_mode(FILE_SHARE_READ).open(path) {
+        Ok(file) => Ok(Some(file)),
+        // ERROR_SHARING_VIOLATION: someone holds it open
+        Err(e) if e.raw_os_error() == Some(32) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// The file with an exclusive lock on it (advisory, so only NativeTerms
+/// see it; a holder that died released it).
+#[cfg(not(windows))]
+fn open_held(path: &Path) -> io::Result<Option<File>> {
+    let file = OpenOptions::new().write(true).create(true).truncate(false).open(path)?;
+    match file.try_lock() {
+        Ok(()) => {
+            file.set_len(0)?;
+            Ok(Some(file))
+        }
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(e),
     }
 }
 
 /// What this NativeTerm writes into the file.
 fn ours() -> String {
-    let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
-    let user = std::env::var("USERNAME").unwrap_or_default();
+    let machine = native_term_os::host::name();
+    let user = native_term_os::host::user();
     let (date, time) = crate::utc_now();
     format!("machine = {machine:?}\nuser = {user:?}\npid = {}\nsince = \"{date} {time}\"\n", std::process::id())
 }
@@ -146,7 +173,7 @@ mod tests {
             _ => panic!("an empty folder is free"),
         };
         let Taken::Busy(holder) = take(dir.path()) else { panic!("taken twice") };
-        assert_eq!(holder.machine, std::env::var("COMPUTERNAME").unwrap_or_default());
+        assert_eq!(holder.machine, native_term_os::host::name());
         assert_eq!(holder.pid, std::process::id().to_string());
         assert!(!holder.describe().is_empty());
         // and it is free again afterwards

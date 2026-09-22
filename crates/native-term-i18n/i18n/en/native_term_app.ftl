@@ -376,6 +376,7 @@ settings-terminal-pick = Use this Windows Terminal:
 settings-terminal-picked = { $dir } is used the next time NativeTerm starts.
 settings-terminal-picked-current = { $dir } is the one already running; NativeTerm keeps using it.
 notice-no-pipe = NativeTerm can't serve its pipe: { $error }
+notice-no-terminal-backend = No terminal can be driven on this system yet: the list and the settings work, tabs cannot be opened.
 notice-tab-menu-unavailable = NativeTerm's tab menu isn't available: { $error }
 notice-agent-forwarding = { $count } of the { $total } hosts just opened forward your ssh-agent ({ $names }…): while connected, anyone with root there can use your keys. Turn it off in Session Options → Authentication where it isn't needed.
 notice-move-failed = Moving { $alias } failed: { $error }
@@ -399,6 +400,7 @@ profile-install-hint = Writes { $path } (read by every Windows Terminal of this 
 profile-install-update = Install / update
 profile-remove = Remove
 profile-install-failed = Installing the profile failed: { $error }
+profile-no-terminal = no terminal to install the profile into on this system
 profile-remove-failed = Removing the profile failed: { $error }
 profile-no-localappdata = LOCALAPPDATA is not set
 

@@ -40,7 +40,7 @@ impl ShortcutUi {
         let mut terminal = shortcuts::terminal_defaults();
         if let Some(settings) = std::fs::read_to_string(terminal_settings)
             .ok()
-            .and_then(|text| native_term_platform::windows_terminal::jsonc::parse(&text).ok())
+            .and_then(|text| native_term_platform::jsonc::parse(&text).ok())
         {
             terminal.extend(shortcuts::terminal_bindings(&settings));
         }

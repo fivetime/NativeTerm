@@ -1,8 +1,34 @@
 //! The desktop's shell: opening a file with its program, the wastebasket,
 //! the drives and the user's folders.
 
+use std::path::Path;
+
 #[cfg(windows)]
 pub use native_term_win::shell::{downloads_folder, drives, open_file, recycle, user_folders};
+
+/// Show a folder in the desktop's file manager.
+pub fn open_folder(dir: &Path) -> std::io::Result<()> {
+    let manager = if cfg!(windows) {
+        "explorer.exe"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(manager).arg(dir).spawn().map(|_| ())
+}
+
+/// Show a file in the desktop's file manager, selected where that is
+/// possible (Windows, macOS), else its folder.
+pub fn reveal(file: &Path) -> std::io::Result<()> {
+    if cfg!(windows) {
+        std::process::Command::new("explorer.exe").arg(format!("/select,{}", file.display())).spawn().map(|_| ())
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open").arg("-R").arg(file).spawn().map(|_| ())
+    } else {
+        open_folder(file.parent().unwrap_or(file))
+    }
+}
 
 #[cfg(unix)]
 mod unix {

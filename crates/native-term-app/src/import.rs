@@ -15,9 +15,17 @@ pub fn securecrt_config_path() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("NATIVETERM_SECURECRT_CONFIG").filter(|d| !d.is_empty()) {
         return Some(PathBuf::from(dir));
     }
-    let value = native_term_os::desktop::user_registry_string(r"Software\VanDyke\SecureCRT", "Config Path").ok()??;
-    let path = PathBuf::from(value);
-    path.join("Sessions").is_dir().then_some(path)
+    #[cfg(windows)]
+    {
+        let value =
+            native_term_os::desktop::user_registry_string(r"Software\VanDyke\SecureCRT", "Config Path").ok()??;
+        let path = PathBuf::from(value);
+        path.join("Sessions").is_dir().then_some(path)
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
 }
 
 /// One line of the summary; `detail` lines list session paths.

@@ -2065,7 +2065,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
 /// `nativeterm-shim.exe` next to the running program.
 pub fn default_shim_path() -> io::Result<PathBuf> {
     let exe = std::env::current_exe()?;
-    Ok(exe.with_file_name("nativeterm-shim.exe"))
+    Ok(exe.with_file_name(format!("nativeterm-shim{}", std::env::consts::EXE_SUFFIX)))
 }
 
 #[cfg(test)]

@@ -79,7 +79,7 @@ fn files_in(dir: &Path) -> Vec<PathBuf> {
 /// Look at the ssh folder, the folder files (`config.d` or where they were
 /// moved), and the data folder.
 pub fn check(ssh_dir: &Path, data_dir: &Path) -> Health {
-    let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
+    let machine = native_term_os::host::name();
     let mut health = Health::default();
     let mut files: Vec<PathBuf> = files_in(ssh_dir)
         .into_iter()
@@ -103,11 +103,38 @@ pub fn check(ssh_dir: &Path, data_dir: &Path) -> Health {
     }
     // what ssh refuses to read: its config files and private keys
     for file in ssh_checked(ssh_dir) {
-        if native_term_config::acl::open_to_others(&file).is_some_and(|others| !others.is_empty()) {
+        if open_to_others(&file) {
             health.too_open.push(file);
         }
     }
     health
+}
+
+/// Whether ssh would refuse the file for its permissions: someone besides
+/// the owner (and the system) may open it.
+fn open_to_others(file: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        native_term_config::acl::open_to_others(file).is_some_and(|others| !others.is_empty())
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(file).is_ok_and(|m| m.permissions().mode() & 0o077 != 0)
+    }
+}
+
+/// Owner only, as ssh wants it.
+fn restrict_one(file: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        native_term_config::acl::restrict_to_owner(file)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o600))
+    }
 }
 
 /// The files ssh checks the permissions of: the config, the folder files
@@ -136,10 +163,7 @@ fn ssh_checked(ssh_dir: &Path) -> Vec<PathBuf> {
 /// Put the permissions back on these files (owner, Administrators and
 /// SYSTEM only). Returns what could not be changed.
 pub fn restrict(files: &[PathBuf]) -> Vec<(PathBuf, String)> {
-    files
-        .iter()
-        .filter_map(|f| native_term_config::acl::restrict_to_owner(f).err().map(|e| (f.clone(), e.to_string())))
-        .collect()
+    files.iter().filter_map(|f| restrict_one(f).err().map(|e| (f.clone(), e.to_string()))).collect()
 }
 
 /// The check, run in the background; shown as a warning line.
@@ -234,7 +258,7 @@ impl StorageCheck {
                     .and_then(|f| f.parent());
                 if let Some(folder) = folder {
                     if ui.small_button(t!("wizard-open-folder")).clicked() {
-                        let _ = std::process::Command::new("explorer.exe").arg(folder).spawn();
+                        let _ = native_term_os::shell::open_folder(folder);
                     }
                 }
                 dismiss = ui.small_button(t!("agent-hint-dismiss")).clicked();
@@ -256,6 +280,7 @@ mod tests {
 
     /// A config anyone may write is what ssh refuses; putting the
     /// permissions back makes it acceptable again.
+    #[cfg(windows)]
     #[test]
     fn a_config_others_can_write_is_found_and_put_right() {
         let dir = tempfile::tempdir().unwrap();
@@ -280,6 +305,24 @@ mod tests {
 
         assert!(restrict(&health.too_open).is_empty());
         assert!(check(&ssh, dir.path()).too_open.is_empty());
+    }
+
+    /// The same on Unix, by mode bits.
+    #[cfg(unix)]
+    #[test]
+    fn a_config_others_can_read_is_found_and_put_right() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = dir.path().join(".ssh");
+        std::fs::create_dir_all(ssh.join("config.d")).unwrap();
+        let config = ssh.join("config");
+        std::fs::write(&config, "Host a\n").unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let health = check(&ssh, dir.path());
+        assert_eq!(health.too_open, vec![config.clone()]);
+        assert!(restrict(&health.too_open).is_empty());
+        assert!(check(&ssh, dir.path()).too_open.is_empty());
+        assert_eq!(std::fs::metadata(&config).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]
@@ -313,7 +356,7 @@ mod tests {
         std::fs::create_dir_all(ssh.join("config.d")).unwrap();
         let data = dir.path().join("data");
         std::fs::create_dir_all(&data).unwrap();
-        let machine = std::env::var("COMPUTERNAME").unwrap_or_default();
+        let machine = native_term_os::host::name();
         for f in [
             ssh.join("config"),
             ssh.join("id_ed25519 (1)"),

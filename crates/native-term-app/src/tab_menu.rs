@@ -5,10 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use native_term_platform::windows_terminal::hover::HoverCard;
-use native_term_platform::windows_terminal::menu::{Entry, MenuTab, Provider};
-use native_term_platform::windows_terminal::switcher::SwitcherTab;
-use native_term_platform::WindowId;
+use native_term_platform::{Entry, HoverCard, MenuProvider as Provider, MenuTab, SwitcherTab, WindowId};
 
 use crate::actions::{close_set, CloseSet, Closing, SessionCommand};
 use crate::{t, Core, SessionView, Shared, State};

@@ -47,8 +47,3 @@ pub const GRID: char = '\u{F0E2}';
 pub fn with(glyph: char, text: impl AsRef<str>) -> String {
     format!("{glyph}  {}", text.as_ref())
 }
-
-/// The icon font's file: Fluent on Windows 11, MDL2 otherwise.
-pub fn font_file(fonts: &std::path::Path) -> Option<std::path::PathBuf> {
-    ["SegoeIcons.ttf", "segmdl2.ttf"].iter().map(|f| fonts.join(f)).find(|p| p.exists())
-}

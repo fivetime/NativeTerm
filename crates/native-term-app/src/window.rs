@@ -893,11 +893,14 @@ impl ApplicationHandler<UserEvent> for Runner {
     }
 }
 
+/// The window's native handle: the `HWND`, which docking, the layered
+/// button and the Terminal windows are all about. Elsewhere there is
+/// nothing of that, and `0` stands for a handle nothing asks after.
 fn window_handle(window: &Window) -> Option<isize> {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match window.window_handle().ok()?.as_raw() {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
-        _ => None,
+        _ => Some(0),
     }
 }
 

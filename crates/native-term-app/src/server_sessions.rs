@@ -139,8 +139,7 @@ impl ServerSessionsDialog {
                     });
             let note = match copied {
                 Ok(file) => {
-                    let _ =
-                        std::process::Command::new("explorer.exe").arg(format!("/select,{}", file.display())).spawn();
+                    let _ = native_term_os::shell::reveal(&file);
                     t!("server-log-copied", file = file.display().to_string())
                 }
                 Err(e) => t!("server-log-failed", error = e),

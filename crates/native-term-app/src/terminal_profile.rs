@@ -7,7 +7,8 @@ use std::path::PathBuf;
 
 use native_term_app::{t, Core};
 use native_term_platform::windows_terminal::install::{self, Install, Kind};
-use native_term_platform::windows_terminal::profile::{self, Status};
+use native_term_platform::windows_terminal::profile;
+pub use native_term_platform::windows_terminal::profile::Status;
 use native_term_platform::windows_terminal::sources;
 
 /// `state.db` setting: the folder of the Terminal install to drive, when

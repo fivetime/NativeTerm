@@ -6,7 +6,7 @@ pub mod command;
 pub mod events;
 pub mod hover;
 pub mod install;
-pub mod jsonc;
+pub use crate::jsonc;
 pub mod launch;
 pub mod menu;
 mod menu_draw;

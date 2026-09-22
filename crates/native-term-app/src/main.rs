@@ -7,7 +7,7 @@
 //! the installed Windows Terminal is used. `--from-shim`: started by a
 //! restored tab; exits quietly if NativeTerm is already running.
 
-#![windows_subsystem = "windows"]
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod agent;
 mod app;
@@ -32,21 +32,32 @@ mod shell;
 mod shortcut_ui;
 mod storage;
 mod tab_list;
+#[cfg(windows)]
+mod terminal_profile;
+#[cfg(not(windows))]
+#[path = "terminal_profile_stub.rs"]
 mod terminal_profile;
 mod tree_view;
 mod window;
 mod wizard;
 
-use std::path::{Path, PathBuf};
+#[cfg(windows)]
+use std::path::Path;
+use std::path::PathBuf;
 
 use native_term_app::registry::Registry;
 use native_term_app::{data_dir, data_lock, default_shim_path, diag, settings, t, Core};
+#[cfg(windows)]
 use native_term_platform::windows_terminal::install::{self, Install};
+#[cfg(windows)]
 use native_term_platform::windows_terminal::{Mismatch, WindowsTerminal};
 
 use app::App;
 
 pub struct Options {
+    /// A portable Terminal's folder: meaningful where Windows Terminal is
+    /// driven.
+    #[cfg_attr(not(windows), allow(dead_code))]
     terminal_dir: Option<PathBuf>,
     pub ssh_dir: PathBuf,
     data_dir: Option<PathBuf>,
@@ -54,7 +65,7 @@ pub struct Options {
 }
 
 fn default_ssh_dir() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"))
+    native_term_os::home::ssh_dir()
 }
 
 fn options() -> Result<Options, String> {
@@ -73,13 +84,14 @@ fn options() -> Result<Options, String> {
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    Ok(Options { terminal_dir, ssh_dir: ssh_dir.ok_or("USERPROFILE is not set")?, data_dir, from_shim })
+    Ok(Options { terminal_dir, ssh_dir: ssh_dir.ok_or("the home folder is not known")?, data_dir, from_shim })
 }
 
 /// The Terminal to drive: the one `--terminal-dir` names, the one that was
 /// chosen in the settings, or the first one found. Several installs are
 /// each their own single-instance app, so NativeTerm has to pick one; when
 /// there is a choice and none was made, it says so.
+#[cfg(windows)]
 fn choose_install(dir: Option<&PathBuf>, chosen: Option<&Path>, notices: &mut Vec<String>) -> Result<Install, String> {
     if let Some(dir) = dir {
         return Install::from_dir(dir).map_err(|e| format!("{}: {e}", dir.display()));
@@ -110,6 +122,7 @@ fn choose_install(dir: Option<&PathBuf>, chosen: Option<&Path>, notices: &mut Ve
 }
 
 /// What the start checks found about the Terminal that was picked.
+#[cfg(windows)]
 fn install_notices(install: &Install, notices: &mut Vec<String>) {
     if let Some(version) = install.version.filter(|v| v.old()) {
         let (major, minor) = install::OLDEST;
@@ -127,6 +140,7 @@ pub struct Setup {
     options: Options,
     /// Held while NativeTerm runs: this data directory is ours.
     _lock: Option<data_lock::DataLock>,
+    #[cfg(windows)]
     install: Install,
     shim: PathBuf,
     core: Option<Core>,
@@ -202,20 +216,30 @@ fn setup() -> Result<Start, String> {
     }
     // which Terminal, and is it one NativeTerm can work with (the settings
     // hold the choice, so this waits for the database)
-    let chosen = settings.get(terminal_profile::INSTALL_SETTING).filter(|dir| !dir.is_empty()).map(PathBuf::from);
-    let install = choose_install(options.terminal_dir.as_ref(), chosen.as_deref(), &mut notices)?;
-    install_notices(&install, &mut notices);
-    // before the window: restored tabs may already be waiting for an answer
-    // another ssh folder than ~/.ssh: the tabs' shims look sessions up there
-    let mut terminal = WindowsTerminal::new(install.clone(), &shim);
-    if Some(&options.ssh_dir) != default_ssh_dir().as_ref() {
-        terminal = terminal.with_ssh_dir(&options.ssh_dir);
-    }
-    match terminal.mismatch() {
-        Some(Mismatch::WeAreElevated) => notices.push(t!("notice-we-are-elevated")),
-        Some(Mismatch::TerminalElevated) => notices.push(t!("notice-terminal-elevated")),
-        None => {}
-    }
+    #[cfg(windows)]
+    let (install, terminal) = {
+        let chosen = settings.get(terminal_profile::INSTALL_SETTING).filter(|dir| !dir.is_empty()).map(PathBuf::from);
+        let install = choose_install(options.terminal_dir.as_ref(), chosen.as_deref(), &mut notices)?;
+        install_notices(&install, &mut notices);
+        // before the window: restored tabs may already be waiting for an answer
+        // another ssh folder than ~/.ssh: the tabs' shims look sessions up there
+        let mut terminal = WindowsTerminal::new(install.clone(), &shim);
+        if Some(&options.ssh_dir) != default_ssh_dir().as_ref() {
+            terminal = terminal.with_ssh_dir(&options.ssh_dir);
+        }
+        match terminal.mismatch() {
+            Some(Mismatch::WeAreElevated) => notices.push(t!("notice-we-are-elevated")),
+            Some(Mismatch::TerminalElevated) => notices.push(t!("notice-terminal-elevated")),
+            None => {}
+        }
+        (install, terminal)
+    };
+    // no terminal is driven here yet: the list and the settings, no tabs
+    #[cfg(not(windows))]
+    let terminal = {
+        notices.push(t!("notice-no-terminal-backend"));
+        native_term_platform::stub::NoTerminal::new(&shim)
+    };
     let core = match Core::start(terminal, registry) {
         Ok(core) => Some(core),
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
@@ -232,7 +256,17 @@ fn setup() -> Result<Start, String> {
             native_term_app::i18n::set_language(Some(&language));
         }
     }
-    Ok(Start::Run(Box::new(Setup { options, _lock: lock, install, shim, core, data_dir, data_source, notices })))
+    Ok(Start::Run(Box::new(Setup {
+        options,
+        _lock: lock,
+        #[cfg(windows)]
+        install,
+        shim,
+        core,
+        data_dir,
+        data_source,
+        notices,
+    })))
 }
 
 fn main() {
@@ -311,13 +345,12 @@ const WINDOW_SETTING: &str = "window";
 
 /// Chinese text needs a system font; egui's own fonts have no CJK.
 pub(crate) fn install_fonts(ctx: &egui::Context) {
-    let windir = std::env::var_os("WINDIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    use native_term_os::fonts;
     // mapped, not read: egui would keep two private copies of a 20 MB file
-    let dir = windir.join("Fonts");
     let mut fonts = egui::FontDefinitions::default();
-    let cjk = ["msyh.ttc", "simsun.ttc"].iter().find_map(|f| native_term_os::fonts::map_file(&dir.join(f)).ok());
+    let cjk = fonts::cjk_file().and_then(|f| fonts::map_file(&f).ok());
     // icons last: their code points (private use area) are in no other font
-    let glyphs = icons::font_file(&dir).and_then(|f| native_term_os::fonts::map_file(&f).ok());
+    let glyphs = fonts::icon_file().and_then(|f| fonts::map_file(&f).ok());
     for (name, bytes) in [("cjk", cjk), ("icons", glyphs)] {
         let Some(bytes) = bytes else { continue };
         fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));
@@ -339,7 +372,7 @@ impl window::Ui for Fatal {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use native_term_platform::windows_terminal::install::{Kind, Version};

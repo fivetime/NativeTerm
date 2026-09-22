@@ -9,6 +9,7 @@ use std::sync::Arc;
 use native_term_app::import::{self, Line};
 use native_term_app::t;
 use native_term_config::ops::ImportOutcome;
+#[cfg(windows)]
 use native_term_config::putty;
 use native_term_config::securecrt::{self, Origin, Plan, Scan};
 use native_term_config::SessionTree;
@@ -64,7 +65,10 @@ impl ImportDialog {
 
     /// PuTTY's saved sessions, previewed right away.
     pub fn putty(ssh_dir: PathBuf, data_dir: PathBuf, ctx: &egui::Context) -> ImportDialog {
+        #[cfg(windows)]
         let path = format!(r"HKEY_CURRENT_USER\{}", putty::sessions_key());
+        #[cfg(not(windows))]
+        let path = String::new();
         let mut dialog =
             ImportDialog { origin: Origin::Putty, path, step: Step::Choose, error: None, ssh_dir, data_dir };
         dialog.preview(ctx);
@@ -79,7 +83,10 @@ impl ImportDialog {
         std::thread::spawn(move || {
             let scanned = match origin {
                 Origin::SecureCrt => securecrt::scan(&path),
+                #[cfg(windows)]
                 Origin::Putty => putty::scan(),
+                #[cfg(not(windows))]
+                Origin::Putty => Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "no PuTTY here")),
             };
             let result = scanned.map_err(|e| e.to_string()).map(|scan| {
                 let mut lines = Vec::new();

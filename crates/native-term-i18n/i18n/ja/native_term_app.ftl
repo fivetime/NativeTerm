@@ -372,6 +372,7 @@ settings-terminal-pick = 使用する Windows Terminal:
 settings-terminal-picked = 次回 NativeTerm を起動したときから { $dir } を使います。
 settings-terminal-picked-current = { $dir } はすでに実行中のものです。NativeTerm はこれを使い続けます。
 notice-no-pipe = NativeTerm がパイプを開けません: { $error }
+notice-no-terminal-backend = このシステムではまだ操作できるターミナルがありません。一覧と設定は使えますが、タブは開けません。
 notice-tab-menu-unavailable = NativeTerm のタブメニューを使えません: { $error }
 notice-agent-forwarding = いま開いた { $total } 台のうち { $count } 台が ssh-agent を転送します（{ $names }…）。接続している間、そのホストで root を取れる人はあなたの鍵を使えます。不要なところではセッションのオプション → 認証 で切ってください。
 notice-move-failed = { $alias } の移動に失敗しました: { $error }
@@ -395,6 +396,7 @@ profile-install-hint = { $path } に書き込みます（このユーザーの�
 profile-install-update = インストール / 更新
 profile-remove = 削除
 profile-install-failed = プロファイルのインストールに失敗しました: { $error }
+profile-no-terminal = このシステムにはプロファイルを入れるターミナルがありません
 profile-remove-failed = プロファイルの削除に失敗しました: { $error }
 profile-no-localappdata = LOCALAPPDATA が設定されていません
 

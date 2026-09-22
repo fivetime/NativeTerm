@@ -4424,7 +4424,11 @@ program owns.
   desktop's tools, or an honest "not here" (`Unsupported`, an empty
   list, `None`). What only Windows has (registry, docking, layered
   windows, the picker) is reachable through it under `cfg(windows)` only
-- `native-term-app` — the `egui` GUI
+- `native-term-app` — the `egui` GUI. Off Windows it builds against
+  `native_term_platform::stub::NoTerminal` (no terminal driven yet) and
+  a stand-in Terminal profile (`terminal_profile_stub.rs`); everything
+  Windows-only in it is behind `cfg(windows)`, and the whole binary
+  passes clippy on the Linux and macOS targets
 - `native-term-i18n` (planned) — translations shared by app and shim
 
 ## Platform sequencing
@@ -4522,7 +4526,8 @@ targets (done); the trait above with `Core` on dynamic dispatch (done);
 a `WindowId` newtype in place of the raw `HWND` (done); a `FakeBackend` so
 `Core` is tested without a terminal on any platform (done); a `native-term-os`
 facade for the one-line OS helpers (local time, process identity, the
-shell, credentials, folder watching; done) with `cfg` splits in the binaries;
+shell, credentials, folder watching; done) with `cfg` splits in the binaries
+(done for the app);
 the session pipe and the shim on Unix (`AF_UNIX`, `SO_PEERCRED` /
 `LOCAL_PEERPID`, termios; the first shim runs ssh on the inherited tty
 and leaves typing and screen reads to the backend); then the backends:

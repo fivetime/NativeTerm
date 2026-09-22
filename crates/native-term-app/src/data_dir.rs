@@ -32,13 +32,25 @@ impl Inputs {
             command_line,
             env: std::env::var_os(ENV).filter(|v| !v.is_empty()).map(PathBuf::from),
             program_dir: exe.parent().map(Path::to_path_buf).unwrap_or_default(),
-            registry: native_term_os::desktop::user_registry_string(REGISTRY_KEY, REGISTRY_VALUE)
-                .ok()
-                .flatten()
-                .filter(|v| !v.is_empty())
-                .map(PathBuf::from),
-            app_data: std::env::var_os("APPDATA").map(PathBuf::from),
+            registry: registry_pointer(),
+            app_data: native_term_os::home::app_data(),
         })
+    }
+}
+
+/// `HKCU\Software\NativeTerm\DataDir`, where there is a registry.
+fn registry_pointer() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        native_term_os::desktop::user_registry_string(REGISTRY_KEY, REGISTRY_VALUE)
+            .ok()
+            .flatten()
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    }
+    #[cfg(not(windows))]
+    {
+        None
     }
 }
 
@@ -76,8 +88,11 @@ fn choose(inputs: &Inputs) -> io::Result<(PathBuf, &'static str)> {
     if writable(&portable) {
         return Ok((portable, "program folder"));
     }
-    let app_data = inputs.app_data.as_ref().ok_or_else(|| io::Error::other("APPDATA is not set"))?;
-    Ok((app_data.join("NativeTerm"), "%APPDATA%"))
+    let app_data = inputs
+        .app_data
+        .as_ref()
+        .ok_or_else(|| io::Error::other(format!("{} is not set", native_term_os::home::APP_DATA_SOURCE)))?;
+    Ok((app_data.join("NativeTerm"), native_term_os::home::APP_DATA_SOURCE))
 }
 
 fn pointer(program_dir: &Path) -> io::Result<Option<PathBuf>> {
@@ -130,10 +145,13 @@ pub fn set_pointer(pointer: Pointer, program_dir: &Path, dir: &Path) -> io::Resu
             std::fs::write(&temp, text)?;
             std::fs::rename(&temp, &file)
         }
+        #[cfg(windows)]
         Pointer::Registry => native_term_os::registry::write_user_values(
             REGISTRY_KEY,
             &[(REGISTRY_VALUE, native_term_os::registry::RegValue::Str(dir.display().to_string()))],
         ),
+        #[cfg(not(windows))]
+        Pointer::Registry => Err(io::Error::new(io::ErrorKind::Unsupported, "no registry to point from")),
     }
 }
 
@@ -244,7 +262,7 @@ mod tests {
         assert_eq!(pointer_for(ENV), Pointer::Fixed);
         assert_eq!(pointer_for("program folder"), Pointer::File);
         assert_eq!(pointer_for(POINTER_FILE), Pointer::File);
-        assert_eq!(pointer_for("%APPDATA%"), Pointer::Registry);
+        assert_eq!(pointer_for(native_term_os::home::APP_DATA_SOURCE), Pointer::Registry);
 
         let tmp = tempfile::tempdir().unwrap();
         let target = tmp.path().join("elsewhere");
@@ -303,6 +321,9 @@ mod tests {
         let file = tmp.path().join("not-a-folder");
         std::fs::write(&file, "").unwrap();
         let i = inputs(&file);
-        assert_eq!(choose(&i).unwrap(), (PathBuf::from(r"C:\AppData\NativeTerm"), "%APPDATA%"));
+        assert_eq!(
+            choose(&i).unwrap(),
+            (PathBuf::from(r"C:\AppData\NativeTerm"), native_term_os::home::APP_DATA_SOURCE)
+        );
     }
 }

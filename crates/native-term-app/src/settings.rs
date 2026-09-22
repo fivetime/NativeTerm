@@ -69,7 +69,7 @@ pub struct Settings {
 /// This computer's name, as the section is called.
 #[must_use]
 pub fn machine_name() -> String {
-    std::env::var("COMPUTERNAME").ok().filter(|n| !n.is_empty()).unwrap_or_else(|| "this-computer".to_string())
+    Some(native_term_os::host::name()).filter(|n| !n.is_empty()).unwrap_or_else(|| "this-computer".to_string())
 }
 
 /// Whether `key` is kept per machine.

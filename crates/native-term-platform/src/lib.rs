@@ -6,7 +6,9 @@ pub mod backend;
 pub mod claim;
 pub mod contract;
 pub mod fake;
+pub mod jsonc;
 pub mod overlay;
+pub mod stub;
 #[cfg(windows)]
 pub mod windows_terminal;
 

@@ -183,7 +183,7 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
     let writer = Writer::new(data_dir.join("backups"));
     let program = native_term_session::ssh_program();
     let ssh = program.as_path();
-    let home_ssh = std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".ssh"));
+    let home_ssh = native_term_os::home::ssh_dir();
     let editor =
         if home_ssh.as_deref().is_some_and(|h| h.to_string_lossy().eq_ignore_ascii_case(&ssh_dir.to_string_lossy())) {
             Editor::new(ssh_dir, writer, ssh)
@@ -198,10 +198,27 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
     }
 }
 
+/// Whether PuTTY has saved sessions to import (its registry key).
+fn putty_has_sessions() -> bool {
+    #[cfg(windows)]
+    {
+        native_term_config::putty::has_sessions()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
 impl App {
     pub fn new(ctx: &egui::Context, setup: Setup) -> App {
-        let Setup { options, _lock, install, shim, core, data_dir, data_source, mut notices } = setup;
+        #[cfg(windows)]
+        let install = setup.install.clone();
+        let Setup { options, _lock, shim, core, data_dir, data_source, mut notices, .. } = setup;
+        #[cfg(windows)]
         let mut profile = ProfileSetup::new(install, shim.clone(), data_dir.join("backups"));
+        #[cfg(not(windows))]
+        let mut profile = ProfileSetup::new(shim.clone(), data_dir.join("backups"));
         if let Some(core) = &core {
             core.set_audit_dir(data_dir.join("audit"));
         }
@@ -306,7 +323,7 @@ impl App {
             notes,
             notes_generation: 0,
             sync_roots: native_term_os::cloud::sync_roots(),
-            putty_sessions: native_term_config::putty::has_sessions(),
+            putty_sessions: putty_has_sessions(),
             wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
             securecrt: native_term_app::import::securecrt_config_path(),
         }
@@ -314,6 +331,7 @@ impl App {
 
     /// The favorite hosts as Windows Terminal profiles, when the user
     /// asked for that; nothing otherwise.
+    #[cfg(windows)]
     fn terminal_favorites(&self) -> Vec<native_term_platform::windows_terminal::profile::Favorite> {
         let on = self.core.as_ref().and_then(|c| c.setting(crate::terminal_profile::FAVORITES_SETTING)).as_deref()
             == Some("1");
@@ -338,12 +356,17 @@ impl App {
     }
 
     /// Write the favorites into the fragment when they changed.
+    #[cfg(windows)]
     fn refresh_terminal_favorites(&mut self) {
         let favorites = self.terminal_favorites();
         if let Some(problem) = self.profile.set_favorites(favorites) {
             self.notices.push(problem);
         }
     }
+
+    /// No fragment to write them into here.
+    #[cfg(not(windows))]
+    fn refresh_terminal_favorites(&mut self) {}
 
     fn reload(&mut self) {
         self.tree = SessionTree::load(&self.ssh_dir);
@@ -775,7 +798,7 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.label(t!("folders-current", path = current.display().to_string()));
             if ui.small_button(t!("wizard-open-folder")).clicked() {
-                let _ = std::process::Command::new("explorer.exe").arg(&current).spawn();
+                let _ = native_term_os::shell::open_folder(&current);
             }
         });
         let Some(path) = self.folders_move.as_mut() else {
@@ -863,7 +886,7 @@ impl App {
         ui.horizontal_wrapped(|ui| {
             ui.label(t!("data-dir-current", path = self.data_dir.display().to_string(), source = self.data_source));
             if ui.small_button(t!("wizard-open-folder")).clicked() {
-                let _ = std::process::Command::new("explorer.exe").arg(&self.data_dir).spawn();
+                let _ = native_term_os::shell::open_folder(&self.data_dir);
             }
         });
         if pointer == Pointer::Fixed {
@@ -1163,7 +1186,7 @@ impl App {
                     self.move_data(&path);
                 }
                 WizardAction::OpenFolder(path) => {
-                    let _ = std::process::Command::new("explorer.exe").arg(path).spawn();
+                    let _ = native_term_os::shell::open_folder(&path);
                 }
                 WizardAction::Done => {
                     if let Some(core) = &self.core {
