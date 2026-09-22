@@ -1024,9 +1024,15 @@ impl Core {
                 report.skipped.push(label);
                 continue;
             };
-            let ok = lines
-                .iter()
-                .all(|(line, enter)| link.send(&AppMessage::SendText { text: line.clone(), enter: *enter }).is_ok());
+            // a terminal the shim can't type into (it shares the terminal
+            // with ssh on Unix): the backend types instead
+            let ok = if self.shared.terminal.capabilities().type_text {
+                self.type_through_terminal(&label, &lines)
+            } else {
+                lines
+                    .iter()
+                    .all(|(line, enter)| link.send(&AppMessage::SendText { text: line.clone(), enter: *enter }).is_ok())
+            };
             if ok {
                 report.sent.push(label.clone());
                 audit.push(format!("{label} ({alias})"));
@@ -1040,6 +1046,16 @@ impl Core {
             }
         }
         report
+    }
+
+    /// Type `lines` into the tab claimed for `label` through the backend.
+    fn type_through_terminal(&self, label: &str, lines: &[(String, bool)]) -> bool {
+        let snapshot = self.snapshot();
+        let Some((window, tab)) = snapshot.find(label) else { return false };
+        lines.iter().all(|(line, enter)| {
+            let text = if *enter { format!("{line}\r") } else { line.clone() };
+            self.shared.terminal.type_text(window.handle, tab, &text).is_ok()
+        })
     }
 
     /// Records a send made some other way (tmux on the server) in the

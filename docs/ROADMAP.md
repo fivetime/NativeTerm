@@ -908,8 +908,20 @@
         targets, the Windows tests unchanged (2026-09-22). Left for the
         machines: running it; typing and screen reads are the backend's
         (P4/P5); "never reached" is Linux-only; no rz/sz dialogs
-  - [ ] P4 — Linux backend: WezTerm (`wezterm cli`; also runs on Windows
-        for end-to-end checks before a Linux machine is at hand)
+  - [x] P4 — `native-term-wezterm`: WezTerm through `wezterm cli`
+        (`spawn`, `list --format json`, `set-tab-title`, `activate-tab`,
+        `kill-pane`, `get-text`, `send-text --no-paste`; the GUI started
+        when none runs; a 1 s poll for changes), the `type_text` trait
+        method the app uses for "send" where the shim can't type, and
+        `nativeterm --terminal wezterm[=<folder>]` (the default off
+        Windows when `wezterm` is on `PATH`). Unit tests over the CLI's
+        JSON and argument lists; `meets_the_contract` (`#[ignore]`)
+        against a live WezTerm (2026-09-22). Not run end to end here:
+        on this machine `wezterm cli` cannot reach the GUI — its Unix
+        socket connect fails with WSAENETDOWN (10050) on both the
+        20240203 release and the 2026-09-17 nightly, most likely a
+        security product's socket filter — so the live test waits for
+        the Linux machine (or another Windows one)
   - [ ] P5 — macOS backend: iTerm2 (JXA through `osascript`)
 
 ## Explicitly not planned

@@ -3,9 +3,12 @@
 //! reconnect, disconnect, close.
 //!
 //! `nativeterm [--terminal-dir <portable Terminal folder>] [--ssh-dir <dir>]
-//! [--data-dir <dir>]` (also `NATIVETERM_TERMINAL_DIR`). Without a folder
-//! the installed Windows Terminal is used. `--from-shim`: started by a
-//! restored tab; exits quietly if NativeTerm is already running.
+//! [--data-dir <dir>] [--terminal wezterm[=<folder>]]` (also
+//! `NATIVETERM_TERMINAL_DIR`). Without a folder the installed Windows
+//! Terminal is used; `--terminal wezterm` drives WezTerm through its CLI
+//! instead (the default off Windows, when `wezterm` is on `PATH`).
+//! `--from-shim`: started by a restored tab; exits quietly if NativeTerm
+//! is already running.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -59,6 +62,9 @@ pub struct Options {
     /// driven.
     #[cfg_attr(not(windows), allow(dead_code))]
     terminal_dir: Option<PathBuf>,
+    /// `--terminal wezterm[=<folder>]`: WezTerm instead of the platform's
+    /// own terminal; the folder holds `wezterm` and `wezterm-gui`.
+    wezterm: Option<Option<PathBuf>>,
     pub ssh_dir: PathBuf,
     data_dir: Option<PathBuf>,
     from_shim: bool,
@@ -73,6 +79,7 @@ fn options() -> Result<Options, String> {
     let mut ssh_dir = default_ssh_dir();
     let mut data_dir = None;
     let mut from_shim = false;
+    let mut wezterm = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().map(PathBuf::from).ok_or(format!("{arg} needs a value"));
@@ -81,10 +88,19 @@ fn options() -> Result<Options, String> {
             "--ssh-dir" => ssh_dir = Some(value()?),
             "--data-dir" => data_dir = Some(value()?),
             "--from-shim" => from_shim = true,
+            "--terminal" => {
+                let which = value()?;
+                let which = which.to_string_lossy();
+                wezterm = Some(match which.split_once('=') {
+                    Some(("wezterm", dir)) => Some(PathBuf::from(dir)),
+                    None if which == "wezterm" => None,
+                    _ => return Err(format!("unknown terminal {which} (wezterm, wezterm=<folder>)")),
+                });
+            }
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    Ok(Options { terminal_dir, ssh_dir: ssh_dir.ok_or("the home folder is not known")?, data_dir, from_shim })
+    Ok(Options { terminal_dir, wezterm, ssh_dir: ssh_dir.ok_or("the home folder is not known")?, data_dir, from_shim })
 }
 
 /// The Terminal to drive: the one `--terminal-dir` names, the one that was
@@ -214,6 +230,43 @@ fn setup() -> Result<Start, String> {
     if !shim.exists() {
         notices.push(t!("notice-shim-missing", path = shim.display().to_string()));
     }
+    // WezTerm through its CLI, asked for, or the default where there is no
+    // terminal of the platform's own to drive
+    let wezterm = options
+        .wezterm
+        .clone()
+        .or_else(|| (!cfg!(windows) && native_term_wezterm::WezTerm::new(None, &shim).available()).then_some(None));
+    if let Some(dir) = wezterm {
+        let mut terminal = native_term_wezterm::WezTerm::new(dir.as_deref(), &shim);
+        if Some(&options.ssh_dir) != default_ssh_dir().as_ref() {
+            terminal = terminal.with_ssh_dir(&options.ssh_dir);
+        }
+        if !terminal.available() {
+            return Err(t!("notice-wezterm-missing"));
+        }
+        let core = start_core(terminal, registry, options.from_shim, &mut notices);
+        let core = match core {
+            Ok(core) => core,
+            Err(start) => return Ok(start),
+        };
+        if let Some(core) = &core {
+            core.set_settings(settings.clone());
+            if let Some(language) = core.language_setting() {
+                native_term_app::i18n::set_language(Some(&language));
+            }
+        }
+        return Ok(Start::Run(Box::new(Setup {
+            options,
+            _lock: lock,
+            #[cfg(windows)]
+            install: install_for_wezterm(&settings, &mut notices)?,
+            shim,
+            core,
+            data_dir,
+            data_source,
+            notices,
+        })));
+    }
     // which Terminal, and is it one NativeTerm can work with (the settings
     // hold the choice, so this waits for the database)
     #[cfg(windows)]
@@ -240,15 +293,9 @@ fn setup() -> Result<Start, String> {
         notices.push(t!("notice-no-terminal-backend"));
         native_term_platform::stub::NoTerminal::new(&shim)
     };
-    let core = match Core::start(terminal, registry) {
-        Ok(core) => Some(core),
-        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            return Ok(Start::AlreadyRunning { quiet: options.from_shim });
-        }
-        Err(e) => {
-            notices.push(t!("notice-no-pipe", error = e.to_string()));
-            None
-        }
+    let core = match start_core(terminal, registry, options.from_shim, &mut notices) {
+        Ok(core) => core,
+        Err(start) => return Ok(start),
     };
     if let Some(core) = &core {
         core.set_settings(settings.clone());
@@ -267,6 +314,32 @@ fn setup() -> Result<Start, String> {
         data_source,
         notices,
     })))
+}
+
+/// The core on the pipe, or nothing (said in `notices`); `Err` when
+/// another NativeTerm already serves it.
+fn start_core(
+    terminal: impl native_term_platform::TerminalBackend,
+    registry: Option<Registry>,
+    from_shim: bool,
+    notices: &mut Vec<String>,
+) -> Result<Option<Core>, Start> {
+    match Core::start(terminal, registry) {
+        Ok(core) => Ok(Some(core)),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => Err(Start::AlreadyRunning { quiet: from_shim }),
+        Err(e) => {
+            notices.push(t!("notice-no-pipe", error = e.to_string()));
+            Ok(None)
+        }
+    }
+}
+
+/// The Windows Terminal install the settings and profile pages are about,
+/// found the usual way, when the tabs go to WezTerm instead.
+#[cfg(windows)]
+fn install_for_wezterm(settings: &settings::Settings, notices: &mut Vec<String>) -> Result<Install, String> {
+    let chosen = settings.get(terminal_profile::INSTALL_SETTING).filter(|dir| !dir.is_empty()).map(PathBuf::from);
+    choose_install(None, chosen.as_deref(), notices)
 }
 
 fn main() {

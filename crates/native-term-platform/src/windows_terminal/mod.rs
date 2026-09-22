@@ -349,6 +349,7 @@ impl crate::TerminalBackend for WindowsTerminal {
             tab_rects: true,
             profile_install: true,
             named_windows: true,
+            type_text: false,
         }
     }
 

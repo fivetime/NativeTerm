@@ -362,6 +362,7 @@ settings-terminal-picked = 下次啟動 NativeTerm 時改用 { $dir }。
 settings-terminal-picked-current = { $dir } 就是正在使用的那份，NativeTerm 繼續用它。
 notice-no-pipe = NativeTerm 無法提供管道服務：{ $error }
 notice-no-terminal-backend = 本系統上還沒有可驅動的終端機：清單和設定可用，無法開啟分頁。
+notice-wezterm-missing = 指定了 WezTerm，但沒有找到 wezterm 程式（PATH 裡或所給資料夾中）。
 notice-tab-menu-unavailable = NativeTerm 的分頁選單不可用：{ $error }
 notice-agent-forwarding = 剛開啟的 { $total } 台主機中有 { $count } 台開啟了 ssh-agent 轉發（{ $names }…）：連線期間，這些主機上有 root 權限的人可以使用你的金鑰。不需要的主機請在「工作階段選項 → 認證」裡關閉。
 notice-move-failed = 移動 { $alias } 失敗：{ $error }

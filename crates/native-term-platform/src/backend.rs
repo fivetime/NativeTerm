@@ -97,6 +97,10 @@ pub struct Capabilities {
     /// `Target::Named` is honoured: a window the terminal finds again by
     /// its name.
     pub named_windows: bool,
+    /// `type_text` types into a tab from outside. Where the shim can't
+    /// (it shares the terminal with ssh on Unix), the program sends text
+    /// this way.
+    pub type_text: bool,
 }
 
 /// One terminal program driven from outside.
@@ -158,6 +162,12 @@ pub trait TerminalBackend: Send + Sync + 'static {
     /// backend can't picture windows, or this one is minimized.
     fn capture(&self, _window: WindowId, _content_top: Option<i32>, _width: i32) -> Option<Image> {
         None
+    }
+
+    /// Type `text` into the tab as if at its keyboard (`\r` for Enter).
+    /// `Capabilities::type_text` says whether this does anything.
+    fn type_text(&self, _window: WindowId, _tab: &TabView, _text: &str) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "this terminal can't be typed into from outside"))
     }
 
     /// NativeTerm's own menu over this terminal's tab strip, if the

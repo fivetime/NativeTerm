@@ -1914,6 +1914,7 @@ dependencies = [
  "native-term-platform",
  "native-term-session",
  "native-term-sftp",
+ "native-term-wezterm",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2009,6 +2010,15 @@ dependencies = [
  "tempfile",
  "windows 0.62.2",
  "zmodem2",
+]
+
+[[package]]
+name = "native-term-wezterm"
+version = "0.1.0"
+dependencies = [
+ "native-term-platform",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

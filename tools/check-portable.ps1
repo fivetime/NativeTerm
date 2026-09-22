@@ -29,7 +29,8 @@ param(
         "native-term-os",
         "native-term-platform",
         "native-term-app",
-        "native-term-shim"
+        "native-term-shim",
+        "native-term-wezterm"
     )
 )
 

@@ -377,6 +377,7 @@ settings-terminal-picked = { $dir } is used the next time NativeTerm starts.
 settings-terminal-picked-current = { $dir } is the one already running; NativeTerm keeps using it.
 notice-no-pipe = NativeTerm can't serve its pipe: { $error }
 notice-no-terminal-backend = No terminal can be driven on this system yet: the list and the settings work, tabs cannot be opened.
+notice-wezterm-missing = WezTerm was asked for, but no wezterm program was found (on PATH, or in the folder given).
 notice-tab-menu-unavailable = NativeTerm's tab menu isn't available: { $error }
 notice-agent-forwarding = { $count } of the { $total } hosts just opened forward your ssh-agent ({ $names }…): while connected, anyone with root there can use your keys. Turn it off in Session Options → Authentication where it isn't needed.
 notice-move-failed = Moving { $alias } failed: { $error }

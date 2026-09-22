@@ -4461,6 +4461,8 @@ program owns.
   desktop's tools, or an honest "not here" (`Unsupported`, an empty
   list, `None`). What only Windows has (registry, docking, layered
   windows, the picker) is reachable through it under `cfg(windows)` only
+- `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
+  `wezterm cli` (Linux first; builds everywhere)
 - `native-term-app` — the `egui` GUI. Off Windows it builds against
   `native_term_platform::stub::NoTerminal` (no terminal driven yet) and
   a stand-in Terminal profile (`terminal_profile_stub.rs`); everything
@@ -4563,6 +4565,28 @@ profile and `disabledProfileSources`, `wt` command lines, UIA, the
 watchdog worker, the hooks and popup behind the menu. Each of those is
 Windows Terminal's business.
 
+### The WezTerm backend
+
+`native-term-wezterm` drives WezTerm through `wezterm cli`, on any of
+the three systems. A session tab is `spawn -- <shim> --session … <alias>`
+(`--new-window`, or `--window-id` for `Target::Recent`, which is the
+window last activated or made, and for `Target::Named`, remembered for
+the process's lifetime); when no WezTerm runs, `wezterm-gui start --
+<shim …>` makes the first window. Each tab is then `set-tab-title`d with
+its label, which the claimer's first rule finds. `list --format json` is
+the whole state — panes grouped into tabs and windows, a tab named by
+its set title or its active pane's, the active tab selected, no
+rectangles — and, WezTerm having no events, a subscription polls it
+every second and reports `Windows` or `Tabs` when the shape changed.
+`select` is `activate-tab`, `close` kills the tab's panes, `activate` is
+`activate-pane` (the CLI can't raise a window; `foreground` is the
+window last activated), `screen_text` is `get-text`, and `type_text` is
+`send-text --no-paste`: on Unix the shim shares the terminal with ssh
+and can't type into it, so `Core::send_text` goes through the backend
+wherever `Capabilities::type_text` says it can. `cli.rs` is pure and
+tested; `meets_the_contract` runs `contract::exercise` against a live
+WezTerm (`#[ignore]`, `NATIVETERM_TEST_WEZTERM_DIR`).
+
 ### Where the other platforms are going
 
 The plan (2026-09-22) is staged so Windows behaves the same after every
@@ -4577,12 +4601,10 @@ the session pipe and the shim on Unix (`AF_UNIX`, `SO_PEERCRED` /
 `LOCAL_PEERPID`, termios; the first shim runs ssh on the inherited tty
 and leaves typing and screen reads to the backend); then the backends:
 
-- **Linux**: WezTerm first (`wezterm cli spawn / list / activate-tab /
-  set-tab-title / get-text / send-text / kill-pane`, `WEZTERM_PANE` as
-  the per-tab id; no events, so a 1 s poll). It also runs on Windows, so
-  the whole chain is verified here before a Linux machine is at hand.
-  VTE-based terminals, GNOME Terminal and Konsole have no usable API for
-  reading tabs or text; Ghostty can't be read either.
+- **Linux**: WezTerm first, done as `native-term-wezterm` (see "The
+  WezTerm backend" below). VTE-based terminals, GNOME Terminal and
+  Konsole have no usable API for reading tabs or text; Ghostty can't be
+  read either.
 - **macOS**: iTerm2 (JXA through `osascript`: `createTabWithDefaultProfile
   ({command})`, `session.uniqueId / name / contents / write`,
   `ITERM_SESSION_ID` as the per-tab id; 1 s poll). Terminal.app can only
