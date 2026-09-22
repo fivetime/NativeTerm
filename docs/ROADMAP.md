@@ -1009,14 +1009,20 @@
         Seen on Deepin: sz and rz of 30 MB in about a second each, Esc
         cancels with a `.ntpart` kept; the Ctrl+C in a tab reaches the
         remote command (exit 130) and the shim stays. See `RZSZ.md`
-  - [ ] Wayland is untested: the Deepin VM's only Wayland session
-        (Treeland) starts `dde-session` but no compositor there (no DRM
-        in the VM), so no client can connect; tried 2026-09-22 through
-        a lightdm autologin drop-in, put back to X11 afterwards. What is
-        known: docking answers nothing on Wayland by design, and a
-        session whose portal never answers now costs the appearance
-        reading one second per key, not four (busctl is tried only where
-        dbus-send is missing)
+  - [x] Wayland (2026-09-23, Zorin OS 18.1: GNOME 46 on Wayland,
+        Ubuntu 24.04 base, glibc 2.39, built from source there): the
+        window runs natively on Wayland with GNOME's own decorations,
+        and both WezTerm live tests pass with WezTerm on Wayland (open,
+        find, focus, read, close; login through the FIFO, text typed,
+        disconnect and reconnect, closed from the terminal). GNOME's
+        default leaves every appearance source silent (portal "no
+        preference", gsettings `default`, no GTK ini or kdeglobals), and
+        the toolkit knows no theme on Wayland either and would fall back
+        to dark: off Windows the "system" theme is now light when nothing
+        could be read. Docking answers nothing there by design. Not
+        driven by hand: neither xdotool through Xwayland nor ydotool 0.1
+        reached the window, so the double-click and the menu are
+        unverified on Wayland (they are the same code as on X11)
   - [x] A second distribution (2026-09-22): Lingmo OS 3.0 (Debian 12,
         glibc 2.36, its own Qt desktop on kwin_x11) builds the tree from
         source in 5½ minutes with rustup and libsqlite3-dev, and runs

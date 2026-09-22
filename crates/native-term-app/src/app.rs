@@ -1741,12 +1741,15 @@ pub fn apply_theme(ctx: &egui::Context, setting: Option<&str>) {
 
 /// What "system" means for the window: on Windows the toolkit knows
 /// (and follows changes as they happen); elsewhere it is what
-/// `native-term-os` read from the desktop, when it could.
+/// `native-term-os` read from the desktop, and light where it could
+/// read nothing (the toolkit knows nothing on X11 or Wayland either,
+/// and would fall back to dark; a desktop with no preference set, GNOME
+/// by default, is light).
 fn system_dark() -> Option<bool> {
     if cfg!(windows) {
         None
     } else {
-        native_term_os::appearance::cached().dark
+        Some(native_term_os::appearance::cached().dark.unwrap_or(false))
     }
 }
 

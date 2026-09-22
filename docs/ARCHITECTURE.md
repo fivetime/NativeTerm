@@ -4507,7 +4507,10 @@ program owns.
   does write. The font is fontconfig's `monospace` match only when its
   spacing says monospace (Lingmo matches it to a proportional CJK font).
   Windows reads the registry (`AppsUseLightTheme`, the DWM accent),
-  macOS `defaults` (`AppleInterfaceStyle`, `AppleAccentColor`)
+  macOS `defaults` (`AppleInterfaceStyle`, `AppleAccentColor`). A GNOME
+  left at its defaults (Zorin OS 18) answers nothing at all — portal
+  "no preference", gsettings `default`, no accent key before GNOME 47 —
+  and reads as light, which is what such a desktop shows
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
 - `native-term-iterm2` — iTerm2 as a `TerminalBackend`, through JXA and
