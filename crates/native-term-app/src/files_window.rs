@@ -443,9 +443,9 @@ impl FilesWindow {
             remote_rect: None,
             edit_dir: std::env::temp_dir().join("NativeTerm-edit"),
             computer: std::env::var("COMPUTERNAME").unwrap_or_default(),
-            local_roots: native_term_win::shell::user_folders()
+            local_roots: native_term_os::shell::user_folders()
                 .into_iter()
-                .chain(native_term_win::shell::drives())
+                .chain(native_term_os::shell::drives())
                 .map(|p| {
                     (p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(p.display().to_string()), p)
                 })
@@ -469,7 +469,7 @@ impl FilesWindow {
 
     fn log(&mut self, tab: u64, text: String, error: bool) {
         if let Some(t) = self.tab(tab) {
-            let time = native_term_win::local_time_of_day(unix_now());
+            let time = native_term_os::time::local_time_of_day(unix_now());
             t.log.push((time, text, error));
             if t.log.len() > LOG_LINES {
                 t.log.remove(0);
@@ -596,7 +596,7 @@ impl FilesWindow {
             let path = std::env::var_os("NATIVETERM_LOCAL_START")
                 .map(PathBuf::from)
                 .or_else(|| recall(memory.as_ref(), &local_key_for(&alias)).map(PathBuf::from).filter(|p| p.is_dir()))
-                .or_else(native_term_win::shell::downloads_folder);
+                .or_else(native_term_os::shell::downloads_folder);
             let result = list_local(path.as_deref()).map_err(|e| e.to_string());
             What::LocalListed { path, result }
         });
@@ -648,7 +648,7 @@ impl FilesWindow {
                 native_term_config::effective::effective_with(&ssh, config.as_deref(), &alias).unwrap_or_default();
             let target = native_term_config::password::target(&effective, credential.as_deref());
             let saved = target.as_ref().is_some_and(|t| {
-                native_term_win::credentials::read(&t.name)
+                native_term_os::credentials::read(&t.name)
                     .ok()
                     .flatten()
                     .is_some_and(|s| s.comment != native_term_config::password::REFUSED)
@@ -688,9 +688,9 @@ impl FilesWindow {
                     // the saved password was given and refused: marked, not tried again
                     if served.load(Ordering::SeqCst) && text.contains("Permission denied") {
                         if let Some(t) = &target {
-                            if let Ok(Some(mut s)) = native_term_win::credentials::read(&t.name) {
+                            if let Ok(Some(mut s)) = native_term_os::credentials::read(&t.name) {
                                 s.comment = native_term_config::password::REFUSED.to_string();
-                                let _ = native_term_win::credentials::write(&t.name, &s);
+                                let _ = native_term_os::credentials::write(&t.name, &s);
                             }
                         }
                     }
@@ -1243,7 +1243,7 @@ impl FilesWindow {
     }
 
     fn recycle_local(&mut self, id: u64, paths: Vec<PathBuf>) {
-        self.spawn(id, move || match native_term_win::shell::recycle(&paths) {
+        self.spawn(id, move || match native_term_os::shell::recycle(&paths) {
             Ok(()) => What::LocalRefresh,
             Err(e) => What::Notice(e.to_string(), true),
         });
@@ -1339,7 +1339,7 @@ impl FilesWindow {
                 Ok(a) => a,
                 Err(e) => return set(t!("files-edit-failed", error = e.to_string())),
             };
-            if let Err(e) = native_term_win::shell::open_file(&local) {
+            if let Err(e) = native_term_os::shell::open_file(&local) {
                 return set(t!("files-edit-failed", error = e.to_string()));
             }
             set(t!("files-edit-watching"));
@@ -1563,7 +1563,7 @@ impl FilesWindow {
         let Some(row) = self.tabs.get(self.active).and_then(|t| t.local.rows.get(i)).cloned() else { return };
         if row.dir {
             self.list_local(id, Some(row.path));
-        } else if let Err(e) = native_term_win::shell::open_file(&row.path) {
+        } else if let Err(e) = native_term_os::shell::open_file(&row.path) {
             self.log(id, e.to_string(), true);
         }
     }
@@ -2526,7 +2526,7 @@ fn list(
                     painter.text(
                         egui::pos2(name_right + size_w + 8.0, y),
                         egui::Align2::LEFT_CENTER,
-                        native_term_win::local_date_time(m),
+                        native_term_os::time::local_date_time(m),
                         font.clone(),
                         color,
                     );
@@ -2824,7 +2824,7 @@ fn list_remote(sftp: &Session, names: Names, path: Vec<u8>) -> What {
 /// A local folder's entries (folders first, by name), or the drives.
 fn list_local(path: Option<&Path>) -> std::io::Result<Vec<LocalRow>> {
     let Some(path) = path else {
-        return Ok(native_term_win::shell::drives()
+        return Ok(native_term_os::shell::drives()
             .into_iter()
             .map(|d| LocalRow { name: d.display().to_string(), path: d, dir: true, size: None, modified: None })
             .collect());
@@ -2882,8 +2882,8 @@ fn serve_questions(
         while let Ok(conn) = listener.accept() {
             let Ok(Some(prompt)) = conn.recv::<String>(Duration::from_secs(5)) else { continue };
             let helper = conn.client_pid().unwrap_or(0);
-            let ours =
-                native_term_win::parent_pid(helper).is_some_and(|p| p != 0 && p == ssh_pid.load(Ordering::SeqCst));
+            let ours = native_term_os::process::parent_pid(helper)
+                .is_some_and(|p| p != 0 && p == ssh_pid.load(Ordering::SeqCst));
             if !ours {
                 let _ = conn.send(&None::<String>);
                 continue;
@@ -2891,7 +2891,7 @@ fn serve_questions(
             let saved = target
                 .as_ref()
                 .filter(|t| t.answers(&prompt))
-                .and_then(|t| native_term_win::credentials::read(&t.name).ok().flatten())
+                .and_then(|t| native_term_os::credentials::read(&t.name).ok().flatten())
                 .filter(|s| s.comment != native_term_config::password::REFUSED);
             let answer = match saved {
                 Some(s) => {
@@ -2972,7 +2972,7 @@ fn watch_and_upload(
                 if let Ok(a) = sftp.stat(remote) {
                     attrs = Attrs { permissions: attrs.permissions, ..a };
                 }
-                let time = native_term_win::local_time_of_day(unix_now());
+                let time = native_term_os::time::local_time_of_day(unix_now());
                 set(t!("files-edit-uploaded", time = time));
             }
             Err(e) => set(t!("files-edit-failed", error = e.to_string())),

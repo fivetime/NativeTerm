@@ -379,7 +379,7 @@ impl ServerSessionsDialog {
         egui::Grid::new(("server-sessions", alias)).num_columns(4).spacing([14.0, 6.0]).show(ui, |ui| {
             for session in sessions {
                 ui.label(&session.name);
-                let when = session.created.map(native_term_win::local_date_time).unwrap_or_default();
+                let when = session.created.map(native_term_os::time::local_date_time).unwrap_or_default();
                 ui.weak(format!("{} {when}", session.program.name()));
                 // a tab of this NativeTerm has it: show that tab
                 let tab = in_tab(tabs, alias, &session.name);

@@ -96,7 +96,7 @@ impl Env {
 
     fn close_all_windows(&self) {
         for w in self.terminal_windows() {
-            native_term_win::desktop::close_window(w);
+            native_term_os::desktop::close_window(w);
         }
         let deadline = Instant::now() + Duration::from_secs(20);
         while !self.terminal_windows().is_empty() {

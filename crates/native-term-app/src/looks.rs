@@ -127,7 +127,7 @@ fn gray(v: u8) -> egui::Color32 {
 
 /// The Windows accent colour, as the taskbar and window borders use it.
 fn accent_color() -> Option<egui::Color32> {
-    let (r, g, b) = native_term_win::desktop::accent()?;
+    let (r, g, b) = native_term_os::desktop::accent()?;
     Some(egui::Color32::from_rgb(r, g, b))
 }
 

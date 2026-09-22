@@ -868,9 +868,15 @@
   - [x] P1c — `FakeBackend` and `core_fake` tests: `Core` tested without
         a terminal, on any platform; `contract::exercise` for every
         backend (2026-09-22)
-  - [ ] P2 — `native-term-os` facade for the OS helpers, `cfg` splits in
-        the binaries, `NoTerminal` stub, `Icon` enum (Segoe on Windows,
-        Phosphor elsewhere), portable-check script in the checklist
+  - [x] P2a — `native-term-os` facade for the OS helpers: the app no
+        longer names `native-term-win`; Unix sides over libc (`localtime_r`,
+        `/proc`, `proc_pidinfo`, `mmap`), `notify` for folder watching,
+        `xdg-open`/`open`, and `Unsupported` for passwords, the
+        wastebasket and global shortcuts (2026-09-22)
+  - [ ] P2b — `cfg` splits in the binaries, `NoTerminal` stub, `Icon`
+        enum (Segoe on Windows, Phosphor elsewhere): the app `cargo check`s
+        on the Linux and macOS targets
+  - [ ] P2c — portable-check script in the checklist
   - [ ] P3 — session pipe (`AF_UNIX`) and shim on Unix (ssh on the
         inherited tty; typing and screen reads through the backend)
   - [ ] P4 — Linux backend: WezTerm (`wezterm cli`; also runs on Windows

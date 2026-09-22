@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use native_term_app::t;
-use native_term_win::cloud::{cloud_state, CloudState};
+use native_term_os::cloud::{cloud_state, CloudState};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Health {

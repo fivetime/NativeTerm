@@ -13,7 +13,7 @@
 //! so they paint independently.
 //!
 //! The floating button's window is shown a second way: its frame carries
-//! its own transparency (`native_term_win::layered`), so the button can
+//! its own transparency (`native_term_os::layered`), so the button can
 //! be a round, slightly see-through shape instead of a rectangle. The
 //! renderer is the same; only the way the pixels reach the screen
 //! differs.
@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use egui::ViewportId;
 use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
 use egui_winit::accesskit_winit;
-use native_term_win::dock as win;
+use native_term_os::dock as win;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
@@ -172,7 +172,7 @@ struct Pane {
     info: egui::ViewportInfo,
     ui: Box<dyn Ui>,
     /// Shown with its own transparency (the floating button).
-    layered: Option<native_term_win::layered::Layered>,
+    layered: Option<native_term_os::layered::Layered>,
     shown: bool,
     last_paint: Option<Instant>,
     repaint_at: Option<Instant>,
@@ -216,7 +216,7 @@ impl Pane {
         let mut info = egui::ViewportInfo::default();
         egui_winit::update_viewport_info(&mut info, &ctx, &window, true);
         let ui = factory(&ctx);
-        let layered = layered.then(|| native_term_win::layered::Layered::take_over(hwnd));
+        let layered = layered.then(|| native_term_os::layered::Layered::take_over(hwnd));
         Ok(Pane {
             ctx,
             window,
@@ -586,7 +586,7 @@ impl Runner {
         }
         // someone who turned Windows' animations off gets none of ours:
         // the window arrives at once (the same path, already over)
-        let started = match native_term_win::desktop::animations() {
+        let started = match native_term_os::desktop::animations() {
             true => Instant::now(),
             false => Instant::now().checked_sub(dock::SLIDE).unwrap_or_else(Instant::now),
         };

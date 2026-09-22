@@ -21,15 +21,12 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06"] }
 native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
 native-term-platform = { path = "../native-term-platform" }
+native-term-os = { path = "../native-term-os" }
 serde_json = "1"
 native-term-sftp = { path = "../native-term-sftp" }
 rusqlite = { version = "0.37", features = ["bundled"] }
 toml = "0.9"
 serde = { version = "1", features = ["derive"] }
-
-# the Win32 helpers exist only there; the crate is empty elsewhere
-[target.'cfg(windows)'.dependencies]
-native-term-win = { path = "../native-term-win" }
 
 [dev-dependencies]
 tempfile = "3"

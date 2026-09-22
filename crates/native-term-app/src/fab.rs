@@ -5,7 +5,7 @@
 //! ended sessions, and the main window. Dragging moves it.
 //!
 //! The window carries its own transparency (`window.rs` shows it with
-//! `native_term_win::layered`), so the button is a round, slightly
+//! `native_term_os::layered`), so the button is a round, slightly
 //! see-through disc rather than a square: the corners are not part of
 //! the window at all, and a click there reaches whatever is behind it.
 

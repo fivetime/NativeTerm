@@ -4,6 +4,7 @@ members = [
     "crates/native-term-app",
     "crates/native-term-config",
     "crates/native-term-i18n",
+    "crates/native-term-os",
     "crates/native-term-session",
     "crates/native-term-platform",
     "crates/native-term-sftp",

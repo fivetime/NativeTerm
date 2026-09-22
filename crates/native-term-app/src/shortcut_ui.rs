@@ -8,7 +8,7 @@ use std::sync::mpsc::{self, Receiver};
 
 use native_term_app::shortcuts::{self, Combo, Command, Problem, Shortcuts};
 use native_term_app::{t, Core};
-use native_term_win::hotkey::Hotkeys;
+use native_term_os::hotkey::Hotkeys;
 
 const SETTING: &str = "shortcuts";
 const RED: egui::Color32 = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);

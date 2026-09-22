@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use native_term_app::t;
-use native_term_win::service::ServiceState;
+use native_term_os::service::ServiceState;
 
 use crate::agent::Status as AgentStatus;
 

@@ -1309,7 +1309,7 @@ impl Core {
 /// Whether the shim recorded for a session still runs (unknown: assumed,
 /// the tab is looked for as before).
 fn shim_alive(shim: Option<(u32, u64)>) -> bool {
-    shim.is_none_or(|(pid, started)| native_term_win::process_started(pid) == Some(started))
+    shim.is_none_or(|(pid, started)| native_term_os::process::started(pid) == Some(started))
 }
 
 fn record_for(spec: &TabSpec) -> Record {
@@ -1626,7 +1626,7 @@ fn same_program(one: &Path, two: &Path) -> bool {
 /// `docs/ARCHITECTURE.md`).
 fn our_shim(shared: &Shared, conn: &PipeConnection) -> Result<(), String> {
     let pid = conn.client_pid().map_err(|e| e.to_string())?;
-    let image = native_term_win::desktop::process_image(pid).ok_or_else(|| format!("pid {pid}"))?;
+    let image = native_term_os::process::image(pid).ok_or_else(|| format!("pid {pid}"))?;
     match same_program(&image, shared.terminal.shim_path()) {
         true => Ok(()),
         false => Err(image.display().to_string()),
@@ -1798,7 +1798,7 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
         })
         .flatten();
     shared.db("hello", |r| r.seen_terminal_session(&id, current.as_deref()));
-    if let Some(started) = native_term_win::process_started(pid) {
+    if let Some(started) = native_term_os::process::started(pid) {
         shared.db("shim", |r| r.set_shim(&id, pid, started));
     }
     shared.refresh_soon();

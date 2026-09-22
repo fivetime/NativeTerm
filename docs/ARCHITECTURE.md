@@ -4411,6 +4411,14 @@ program owns.
 - `native-term-win` — small Windows helpers shared by the crates above
   (current user SID, logon session id, SDDL security descriptors, file
   ACLs)
+- `native-term-os` — the operating system as the app needs it: local
+  time, process identity, the shell and its folders, the desktop, saved
+  passwords, cloud-synced files, folder watching, global shortcuts,
+  services, font files. On Windows each name is the `native-term-win`
+  helper it always was; elsewhere the same name over libc and the
+  desktop's tools, or an honest "not here" (`Unsupported`, an empty
+  list, `None`). What only Windows has (registry, docking, layered
+  windows, the picker) is reachable through it under `cfg(windows)` only
 - `native-term-app` — the `egui` GUI
 - `native-term-i18n` (planned) — translations shared by app and shim
 
@@ -4509,7 +4517,7 @@ targets (done); the trait above with `Core` on dynamic dispatch (done);
 a `WindowId` newtype in place of the raw `HWND` (done); a `FakeBackend` so
 `Core` is tested without a terminal on any platform (done); a `native-term-os`
 facade for the one-line OS helpers (local time, process identity, the
-shell, credentials, folder watching) with `cfg` splits in the binaries;
+shell, credentials, folder watching; done) with `cfg` splits in the binaries;
 the session pipe and the shim on Unix (`AF_UNIX`, `SO_PEERCRED` /
 `LOCAL_PEERPID`, termios; the first shim runs ssh on the inherited tty
 and leaves typing and screen reads to the backend); then the backends:

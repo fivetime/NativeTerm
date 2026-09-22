@@ -83,13 +83,13 @@ fn watch_folders(
     ssh_dir: &Path,
     flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ctx: &egui::Context,
-) -> Option<native_term_win::watch::FolderWatcher> {
+) -> Option<native_term_os::watch::FolderWatcher> {
     let dir = folders_dir(ssh_dir);
     if dir.starts_with(ssh_dir) {
         return None;
     }
     let (flag, wake) = (std::sync::Arc::clone(flag), ctx.clone());
-    native_term_win::watch::FolderWatcher::start(&dir, false, move || {
+    native_term_os::watch::FolderWatcher::start(&dir, false, move || {
         flag.store(true, std::sync::atomic::Ordering::Relaxed);
         wake.request_repaint();
     })
@@ -120,9 +120,9 @@ pub struct App {
     /// Says this data directory is ours for as long as NativeTerm runs.
     _data_lock: Option<native_term_app::data_lock::DataLock>,
     /// Keeps the `~/.ssh` watcher alive.
-    _watcher: Option<native_term_win::watch::FolderWatcher>,
+    _watcher: Option<native_term_os::watch::FolderWatcher>,
     /// And the one on the folder files, when they live elsewhere.
-    folders_watcher: Option<native_term_win::watch::FolderWatcher>,
+    folders_watcher: Option<native_term_os::watch::FolderWatcher>,
     /// "Move session folders": the new path being typed.
     folders_move: Option<String>,
     ssh_changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -246,7 +246,7 @@ impl App {
         let ssh_changed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = std::sync::Arc::clone(&ssh_changed);
         let wake = ctx.clone();
-        let watcher = native_term_win::watch::FolderWatcher::start(&options.ssh_dir, true, move || {
+        let watcher = native_term_os::watch::FolderWatcher::start(&options.ssh_dir, true, move || {
             flag.store(true, std::sync::atomic::Ordering::Relaxed);
             wake.request_repaint();
         })
@@ -305,7 +305,7 @@ impl App {
             toasts: Default::default(),
             notes,
             notes_generation: 0,
-            sync_roots: native_term_win::cloud::sync_roots(),
+            sync_roots: native_term_os::cloud::sync_roots(),
             putty_sessions: native_term_config::putty::has_sessions(),
             wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
             securecrt: native_term_app::import::securecrt_config_path(),
@@ -1826,7 +1826,7 @@ fn session_card(
                     ui.weak(t!("session-kept-on-server")).on_hover_text(t!("session-kept-on-server-hint"));
                 }
                 if let Some(since) = s.quiet_since {
-                    let time = native_term_win::local_time_of_day(since);
+                    let time = native_term_os::time::local_time_of_day(since);
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), t!("session-quiet", time = time))
                         .on_hover_text(t!("session-quiet-hint"));
                 }
@@ -2104,7 +2104,7 @@ impl crate::window::Ui for App {
         self.show_dialog(ctx);
         self.show_wizard(ctx);
         // over everything else, in the corner
-        self.toasts.show(ctx, native_term_win::desktop::animations());
+        self.toasts.show(ctx, native_term_os::desktop::animations());
     }
 }
 

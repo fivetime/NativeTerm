@@ -15,8 +15,8 @@ use std::path::PathBuf;
 use native_term_app::t;
 use native_term_config::password;
 use native_term_config::traces::Traces;
+use native_term_os::credentials;
 use native_term_platform::windows_terminal::profile::Status;
-use native_term_win::credentials;
 
 use crate::dialogs::Outcome;
 
@@ -62,7 +62,7 @@ impl Cleanup {
             traces: native_term_config::traces::find(ssh_dir, folders, shim),
             data_dir,
             credentials: saved_entries(),
-            registry: native_term_win::desktop::user_registry_string(
+            registry: native_term_os::desktop::user_registry_string(
                 native_term_app::data_dir::REGISTRY_KEY,
                 native_term_app::data_dir::REGISTRY_VALUE,
             )
@@ -145,7 +145,7 @@ impl CleanupDialog {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(t!("cleanup-data", path = self.cleanup.data_dir.display().to_string()));
                         if ui.small_button(t!("wizard-open-folder")).clicked() {
-                            let _ = native_term_win::shell::open_file(&self.cleanup.data_dir);
+                            let _ = native_term_os::shell::open_file(&self.cleanup.data_dir);
                         }
                     });
                     if let Some(value) = self.cleanup.registry.clone() {
@@ -221,7 +221,7 @@ impl CleanupDialog {
                     self.cleanup.credentials = saved_entries();
                 }
                 Step::Registry => {
-                    let result = native_term_win::registry::delete_user_value(
+                    let result = native_term_os::registry::delete_user_value(
                         native_term_app::data_dir::REGISTRY_KEY,
                         native_term_app::data_dir::REGISTRY_VALUE,
                     );

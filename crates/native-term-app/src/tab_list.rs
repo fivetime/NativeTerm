@@ -333,7 +333,7 @@ fn last_lines(lines: &[String], count: usize) -> String {
 
 fn taken_text(preview: &Preview) -> String {
     let unix = preview.taken.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    t!("tabs-seen-at", time = native_term_win::local_time_of_day(unix))
+    t!("tabs-seen-at", time = native_term_os::time::local_time_of_day(unix))
 }
 
 /// The name a tab is shown with: NativeTerm's label, then its title.

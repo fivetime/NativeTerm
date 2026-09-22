@@ -72,7 +72,7 @@ impl PlinkDialog {
 
     fn from_session(title: String, alias: Option<String>, file: Option<PathBuf>, s: &PlinkSession) -> PlinkDialog {
         let serial = s.serial.clone().unwrap_or_else(|| Serial::new(""));
-        let ports = native_term_win::registry::serial_ports();
+        let ports = native_term_os::registry::serial_ports();
         let line =
             if serial.line.is_empty() { ports.first().cloned().unwrap_or_default() } else { serial.line.clone() };
         PlinkDialog {

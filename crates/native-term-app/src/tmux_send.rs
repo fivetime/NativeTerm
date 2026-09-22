@@ -79,7 +79,7 @@ pub fn send(
     if output.status.success() {
         return Ok(());
     }
-    let text = native_term_win::ssh_message(&output.stderr);
+    let text = native_term_os::ssh::message(&output.stderr);
     if text.contains(MISSING) {
         return Err(Failure::NoSession);
     }

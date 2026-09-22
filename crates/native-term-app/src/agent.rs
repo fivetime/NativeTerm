@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use native_term_app::{t, Core};
 use native_term_config::keys::{self, AgentKeys};
-use native_term_win::service::{service_state, ServiceState};
+use native_term_os::service::{service_state, ServiceState};
 
 use crate::icons;
 
@@ -107,6 +107,7 @@ impl AgentCheck {
             ServiceState::Stopped => t!("agent-stopped"),
             ServiceState::Disabled => t!("agent-disabled"),
             ServiceState::NotInstalled => t!("agent-missing"),
+            ServiceState::Unavailable => t!("agent-unavailable"),
         };
         ui.label(t!("agent-service", state = service));
         if status.keys.is_empty() {

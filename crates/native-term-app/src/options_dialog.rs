@@ -9,7 +9,7 @@ use native_term_app::t;
 use native_term_config::options::{self, Category, Kind, Names, Values};
 use native_term_config::password::REFUSED;
 use native_term_config::proxy::{self, Proxy};
-use native_term_win::credentials::{self, Saved};
+use native_term_os::credentials::{self, Saved};
 
 use crate::dialogs::Outcome;
 

@@ -25,6 +25,7 @@ agent-running = 运行中
 agent-stopped = 已停止
 agent-disabled = 已禁用（Windows 默认）
 agent-missing = 未安装
+agent-unavailable = 本系统上不是服务
 agent-no-keys = { $dir } 里没有密钥对。
 agent-key-protected = 设了私钥密码
 agent-key-open = 没有私钥密码

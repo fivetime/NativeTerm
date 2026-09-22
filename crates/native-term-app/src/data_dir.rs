@@ -32,7 +32,7 @@ impl Inputs {
             command_line,
             env: std::env::var_os(ENV).filter(|v| !v.is_empty()).map(PathBuf::from),
             program_dir: exe.parent().map(Path::to_path_buf).unwrap_or_default(),
-            registry: native_term_win::desktop::user_registry_string(REGISTRY_KEY, REGISTRY_VALUE)
+            registry: native_term_os::desktop::user_registry_string(REGISTRY_KEY, REGISTRY_VALUE)
                 .ok()
                 .flatten()
                 .filter(|v| !v.is_empty())
@@ -130,9 +130,9 @@ pub fn set_pointer(pointer: Pointer, program_dir: &Path, dir: &Path) -> io::Resu
             std::fs::write(&temp, text)?;
             std::fs::rename(&temp, &file)
         }
-        Pointer::Registry => native_term_win::registry::write_user_values(
+        Pointer::Registry => native_term_os::registry::write_user_values(
             REGISTRY_KEY,
-            &[(REGISTRY_VALUE, native_term_win::registry::RegValue::Str(dir.display().to_string()))],
+            &[(REGISTRY_VALUE, native_term_os::registry::RegValue::Str(dir.display().to_string()))],
         ),
     }
 }

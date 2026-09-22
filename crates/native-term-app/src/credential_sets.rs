@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use native_term_app::t;
 use native_term_config::password::{self, REFUSED};
 use native_term_config::tree::SessionTree;
-use native_term_win::credentials::{self, Saved};
+use native_term_os::credentials::{self, Saved};
 
 use crate::dialogs::{no_ime, Outcome};
 

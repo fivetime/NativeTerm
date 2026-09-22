@@ -240,8 +240,8 @@ fn main() {
         Ok(Start::AlreadyRunning { quiet }) => {
             if !quiet {
                 if let Ok(exe) = std::env::current_exe() {
-                    for window in native_term_win::desktop::windows_of_other_instances(&exe) {
-                        native_term_win::desktop::bring_to_front(window);
+                    for window in native_term_os::desktop::windows_of_other_instances(&exe) {
+                        native_term_os::desktop::bring_to_front(window);
                     }
                 }
             }
@@ -273,7 +273,7 @@ fn main() {
     });
     if let Err(e) = result {
         diag::close(&format!("window failed: {e}"));
-        native_term_win::desktop::message_box("NativeTerm", &t!("fatal-window", error = e));
+        native_term_os::desktop::message_box("NativeTerm", &t!("fatal-window", error = e));
         std::process::exit(1);
     }
     diag::close("NativeTerm stopped");
@@ -315,9 +315,9 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
     // mapped, not read: egui would keep two private copies of a 20 MB file
     let dir = windir.join("Fonts");
     let mut fonts = egui::FontDefinitions::default();
-    let cjk = ["msyh.ttc", "simsun.ttc"].iter().find_map(|f| native_term_win::map_file_for_process(&dir.join(f)).ok());
+    let cjk = ["msyh.ttc", "simsun.ttc"].iter().find_map(|f| native_term_os::fonts::map_file(&dir.join(f)).ok());
     // icons last: their code points (private use area) are in no other font
-    let glyphs = icons::font_file(&dir).and_then(|f| native_term_win::map_file_for_process(&f).ok());
+    let glyphs = icons::font_file(&dir).and_then(|f| native_term_os::fonts::map_file(&f).ok());
     for (name, bytes) in [("cjk", cjk), ("icons", glyphs)] {
         let Some(bytes) = bytes else { continue };
         fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));

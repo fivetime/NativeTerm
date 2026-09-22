@@ -9,7 +9,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
-pub use native_term_win::dock::Bounds;
+pub use native_term_os::dock::Bounds;
 
 /// Visible strip of a hidden window, in physical pixels.
 pub const STRIP: i32 = 4;

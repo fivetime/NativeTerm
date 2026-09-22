@@ -7,7 +7,7 @@ use native_term_app::t;
 use native_term_config::ops::HostDraft;
 use native_term_config::password::{self, Target, REFUSED};
 use native_term_config::persistent;
-use native_term_win::credentials::{self, Saved};
+use native_term_os::credentials::{self, Saved};
 
 pub enum Outcome<T> {
     Open,

@@ -28,6 +28,7 @@ agent-running = 実行中
 agent-stopped = 停止
 agent-disabled = 無効（Windows の既定）
 agent-missing = 未インストール
+agent-unavailable = このシステムではサービスではありません
 agent-no-keys = { $dir } に鍵ペアがありません。
 agent-key-protected = パスフレーズあり
 agent-key-open = パスフレーズなし

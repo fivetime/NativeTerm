@@ -375,7 +375,7 @@ fn meta_text(meta: Option<&Meta>) -> String {
         None => "—".to_string(),
         Some(m) if m.dir => t!("files-sync-folder"),
         Some(m) => {
-            let when = m.modified.map(native_term_win::local_date_time).unwrap_or_default();
+            let when = m.modified.map(native_term_os::time::local_date_time).unwrap_or_default();
             format!("{}  {when}", size_text(m.size))
         }
     }
