@@ -1009,6 +1009,14 @@
         Seen on Deepin: sz and rz of 30 MB in about a second each, Esc
         cancels with a `.ntpart` kept; the Ctrl+C in a tab reaches the
         remote command (exit 130) and the shim stays. See `RZSZ.md`
+  - [ ] Wayland is untested: the Deepin VM's only Wayland session
+        (Treeland) starts `dde-session` but no compositor there (no DRM
+        in the VM), so no client can connect; tried 2026-09-22 through
+        a lightdm autologin drop-in, put back to X11 afterwards. What is
+        known: docking answers nothing on Wayland by design, and a
+        session whose portal never answers now costs the appearance
+        reading one second per key, not four (busctl is tried only where
+        dbus-send is missing)
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

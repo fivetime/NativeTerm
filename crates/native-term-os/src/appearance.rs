@@ -208,8 +208,14 @@ mod imp {
 
     /// What `program args` printed, when it ran and succeeded.
     fn output(program: &str, args: &[&str]) -> Option<String> {
+        ran(program, args)?.ok()
+    }
+
+    /// `None` when `program` could not be run at all (not installed);
+    /// else what it printed, or `Err` when it failed.
+    fn ran(program: &str, args: &[&str]) -> Option<Result<String, ()>> {
         let out = Command::new(program).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        Some(if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).into_owned()) } else { Err(()) })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -220,12 +226,12 @@ mod imp {
         const PATH: &str = "/org/freedesktop/portal/desktop";
         const NAMESPACE: &str = "org.freedesktop.appearance";
         let dbus_send = || {
-            output(
+            ran(
                 "dbus-send",
                 &[
                     "--session",
                     "--print-reply",
-                    "--reply-timeout=2000",
+                    "--reply-timeout=1000",
                     &format!("--dest={DEST}"),
                     PATH,
                     "org.freedesktop.portal.Settings.Read",
@@ -239,7 +245,7 @@ mod imp {
                 "busctl",
                 &[
                     "--user",
-                    "--timeout=2",
+                    "--timeout=1",
                     "call",
                     DEST,
                     PATH,
@@ -251,7 +257,12 @@ mod imp {
                 ],
             )
         };
-        dbus_send().or_else(busctl)
+        // busctl only where dbus-send is not installed: a portal that does
+        // not answer (a session without one) must not cost both timeouts
+        match dbus_send() {
+            Some(reply) => reply.ok(),
+            None => busctl(),
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
