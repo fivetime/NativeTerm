@@ -1017,6 +1017,17 @@
         session whose portal never answers now costs the appearance
         reading one second per key, not four (busctl is tried only where
         dbus-send is missing)
+  - [x] A second distribution (2026-09-22): Lingmo OS 3.0 (Debian 12,
+        glibc 2.36, its own Qt desktop on kwin_x11) builds the tree from
+        source in 5½ minutes with rustup and libsqlite3-dev, and runs
+        it: the window (light, from GTK's settings.ini; the accent from
+        kdeglobals on the selected WezTerm tab; no monospace font of its
+        own, so WezTerm's JetBrains Mono), the wizard naming WezTerm, a
+        host double-clicked opens and logs in, Ctrl+Shift+M shows the
+        menu. A binary built on Deepin (glibc 2.38) would not run there:
+        release builds have to be made on the oldest glibc to be
+        supported (Debian 12, or cargo-zigbuild with a glibc version),
+        which is a packaging matter
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a
