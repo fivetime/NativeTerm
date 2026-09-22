@@ -929,7 +929,13 @@ fn proxy_login_from_credential_manager() {
         child.stdin.take().unwrap().write_all(input).unwrap();
         child.wait_with_output().unwrap()
     };
-    let ok = run(b"ssh-2.0\n");
+    // now and then on this machine a fresh process's first connection to
+    // the loopback listener is refused (10061) although it is listening;
+    // such a run never reached the server, so trying again is transparent
+    let ok = (0..3)
+        .map(|_| run(b"ssh-2.0\n"))
+        .find(|o| !String::from_utf8_lossy(&o.stderr).contains("Couldn't connect to the proxy"))
+        .unwrap();
     let refused = run(b"");
     let again = run(b"");
     let marked = credentials::read(&entry).unwrap().unwrap();
