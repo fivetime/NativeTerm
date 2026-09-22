@@ -57,7 +57,7 @@ use super::hover;
 use super::menu_draw::Painter;
 use super::switcher;
 use super::theme::{self, Look};
-use crate::Rect;
+use crate::{Rect, WindowId};
 
 /// Window class of the popup (tests look for it).
 pub const POPUP_CLASS: PCWSTR = w!("NativeTermMenuPopup");
@@ -205,8 +205,9 @@ impl TabMenu {
         // the windows they are in, for the keyboard hook
         let mut windows: Vec<isize> = Vec::new();
         for tab in &tabs {
-            if !windows.contains(&tab.window) && windows.len() < WINDOWS {
-                windows.push(tab.window);
+            let window = tab.window.hwnd();
+            if !windows.contains(&window) && windows.len() < WINDOWS {
+                windows.push(window);
             }
         }
         for (at, slot) in self.shared.our_windows.iter().enumerate() {
@@ -277,9 +278,9 @@ impl TabMenu {
     }
 
     /// The tab the grid would switch to: window and index.
-    pub fn switcher_pick(&self) -> Option<(isize, usize)> {
+    pub fn switcher_pick(&self) -> Option<(WindowId, usize)> {
         let index = self.shared.pick[1].load(Ordering::SeqCst);
-        (index > 0).then(|| (self.shared.pick[0].load(Ordering::SeqCst), index as usize - 1))
+        (index > 0).then(|| (WindowId::from_hwnd(self.shared.pick[0].load(Ordering::SeqCst)), index as usize - 1))
     }
 
     /// Grids shown, and tabs switched by one (diagnostics, tests).
@@ -399,7 +400,7 @@ fn hit_test(s: &Shared, pt: POINT) -> Option<MenuTab> {
     }
     let root = unsafe { GetAncestor(WindowFromPoint(pt), GA_ROOT) }.0 as isize;
     let tabs = s.tabs.try_lock().ok()?;
-    tabs.iter().find(|t| t.window == root && contains(&t.rect, pt)).cloned()
+    tabs.iter().find(|t| t.window.hwnd() == root && contains(&t.rect, pt)).cloned()
 }
 
 /// Since when this hook has been running.
@@ -536,7 +537,7 @@ fn hover_here(pt: POINT) {
     let Some(s) = shared() else { return };
     match hit_test(s, pt) {
         Some(tab) => {
-            s.hover_tab[0].store(tab.window, Ordering::Relaxed);
+            s.hover_tab[0].store(tab.window.hwnd(), Ordering::Relaxed);
             s.hover_tab[1].store(tab.index as isize + 1, Ordering::Relaxed);
             for (at, v) in [tab.rect.left, tab.rect.top, tab.rect.right, tab.rect.bottom].into_iter().enumerate() {
                 s.hover_rect[at].store(v, Ordering::Relaxed);
@@ -979,7 +980,7 @@ fn open_grid(back: bool) {
     close_card();
     close_grid();
     let window = PENDING_GRID.load(Ordering::SeqCst);
-    let tabs = s.provider.tiles(window);
+    let tabs = s.provider.tiles(WindowId::from_hwnd(window));
     if tabs.len() < 2 {
         return; // nothing to switch between
     }
@@ -1035,7 +1036,16 @@ fn open_grid(back: bool) {
         );
         let look = theme::look(&s.settings);
         switcher::GRID.with(|g| {
-            *g.borrow_mut() = Some(switcher::Grid { popup, window, tabs, pick, look, scale, size, columns });
+            *g.borrow_mut() = Some(switcher::Grid {
+                popup,
+                window: WindowId::from_hwnd(window),
+                tabs,
+                pick,
+                look,
+                scale,
+                size,
+                columns,
+            });
         });
         for (at, v) in [x, y, x + size.cx, y + size.cy].into_iter().enumerate() {
             s.grid_rect[at].store(v, Ordering::Relaxed);
@@ -1052,7 +1062,7 @@ fn open_grid(back: bool) {
 fn remember_pick(s: &Shared) {
     match switcher::picked() {
         Some((window, index, _)) => {
-            s.pick[0].store(window, Ordering::SeqCst);
+            s.pick[0].store(window.hwnd(), Ordering::SeqCst);
             s.pick[1].store(index as isize + 1, Ordering::SeqCst);
         }
         None => s.pick[1].store(0, Ordering::SeqCst),
@@ -1611,7 +1621,7 @@ impl crate::overlay::OverlayMenu for TabMenu {
         TabMenu::switcher_open(self)
     }
 
-    fn switcher_pick(&self) -> Option<(isize, usize)> {
+    fn switcher_pick(&self) -> Option<(WindowId, usize)> {
         TabMenu::switcher_pick(self)
     }
 

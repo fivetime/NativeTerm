@@ -15,7 +15,7 @@ use native_term_app::{Core, HostRequest, SessionView, State};
 use native_term_platform::windows_terminal::command;
 use native_term_platform::windows_terminal::install::{Install, Kind};
 use native_term_platform::windows_terminal::WindowsTerminal;
-use native_term_platform::Target;
+use native_term_platform::{Target, WindowId};
 
 const WAIT: Duration = Duration::from_secs(30);
 
@@ -203,7 +203,7 @@ fn a_program_that_is_not_the_helper_is_refused() {
 }
 
 /// Tab titles of a window, now.
-fn tab_names(core: &Core, window: isize) -> Vec<String> {
+fn tab_names(core: &Core, window: WindowId) -> Vec<String> {
     let snapshot = core.terminal().snapshot(&Default::default());
     snapshot
         .windows

@@ -851,7 +851,7 @@
   - [x] P1a — `TerminalBackend` and `OverlayMenu` contracts in
         `native-term-platform`; `Core` holds `Arc<dyn TerminalBackend>`
         and no longer names Windows Terminal (2026-09-22)
-  - [ ] P1b — `WindowId` newtype in place of the raw `HWND`
+  - [x] P1b — `WindowId` newtype in place of the raw `HWND` (2026-09-22)
   - [ ] P1c — `FakeBackend` and `core_fake` tests: `Core` tested without
         a terminal, on any platform
   - [ ] P2 — `native-term-os` facade for the OS helpers, `cfg` splits in

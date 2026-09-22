@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
 use native_term_app::{fuzzy, t, Core, Preview, Screen, SessionView, State};
-use native_term_platform::Snapshot;
+use native_term_platform::{Snapshot, WindowId};
 
 use crate::icons;
 
@@ -32,13 +32,13 @@ pub struct TabList {
     /// The view, once read from `state.db`: pictures, or the list.
     pictures: Option<bool>,
     /// Pictures on the GPU, by window and tab: when taken, and the texture.
-    textures: HashMap<(isize, usize), (SystemTime, egui::TextureHandle)>,
+    textures: HashMap<(WindowId, usize), (SystemTime, egui::TextureHandle)>,
 }
 
 /// One tab, ready to show.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
-    pub window: isize,
+    pub window: WindowId,
     pub window_number: Option<usize>,
     pub index: usize,
     pub title: String,
@@ -59,11 +59,11 @@ pub type ScreenText<'a> = &'a dyn Fn(&Entry) -> Option<String>;
 pub fn entries(
     snapshot: &Snapshot,
     sessions: &[SessionView],
-    window_number: impl Fn(isize) -> Option<usize>,
+    window_number: impl Fn(WindowId) -> Option<usize>,
     query: &str,
     text: ScreenText,
 ) -> Vec<Entry> {
-    let by_place: HashMap<(isize, usize), &SessionView> = sessions
+    let by_place: HashMap<(WindowId, usize), &SessionView> = sessions
         .iter()
         .filter(|s| s.state.is_open())
         .filter_map(|s| s.location.as_ref().map(|l| ((l.window, l.tab_index), s)))
@@ -530,14 +530,14 @@ mod tests {
         Snapshot {
             windows: vec![
                 WindowView {
-                    handle: 20,
+                    handle: WindowId(20),
                     pid: 1,
                     foreground: false,
                     unresponsive: false,
                     tabs: vec![tab(0, "claude", true)],
                 },
                 WindowView {
-                    handle: 10,
+                    handle: WindowId(10),
                     pid: 1,
                     foreground: true,
                     unresponsive: false,
@@ -548,7 +548,8 @@ mod tests {
         }
     }
 
-    fn session(label: &str, window: isize, tab_index: usize, state: State) -> SessionView {
+    fn session(label: &str, window: u64, tab_index: usize, state: State) -> SessionView {
+        let window = WindowId(window);
         SessionView {
             id: label.into(),
             label: label.into(),
@@ -577,7 +578,7 @@ mod tests {
     #[test]
     fn all_tabs_in_window_order() {
         let sessions = [session("web01", 10, 1, State::Connected)];
-        let number = |h: isize| Some(if h == 10 { 1 } else { 2 });
+        let number = |h: WindowId| Some(if h.0 == 10 { 1 } else { 2 });
         let nothing = |_: &Entry| None;
         let list = entries(&snapshot(), &sessions, number, "", &nothing);
         let titles: Vec<&str> = list.iter().map(|e| e.title.as_str()).collect();
@@ -588,7 +589,7 @@ mod tests {
 
     #[test]
     fn search_ranks_and_filters() {
-        let number = |h: isize| Some(if h == 10 { 1 } else { 2 });
+        let number = |h: WindowId| Some(if h.0 == 10 { 1 } else { 2 });
         let nothing = |_: &Entry| None;
         let list = entries(&snapshot(), &[], number, "note", &nothing);
         assert_eq!(list.len(), 1);

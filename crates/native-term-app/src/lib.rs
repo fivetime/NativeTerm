@@ -32,7 +32,7 @@ use std::time::{Duration, Instant, SystemTime};
 #[cfg(windows)]
 use native_term_platform::windows_terminal::WindowsTerminal;
 use native_term_platform::{Change, MenuTab, OverlayMenu, Subscription, TerminalBackend};
-use native_term_platform::{Snapshot, TabSpec, Target};
+use native_term_platform::{Snapshot, TabSpec, Target, WindowId};
 use native_term_session::pipe::{self, PipeConnection, PipeListener};
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 use native_term_session::{classify_exit, SessionEnd, PROTOCOL_VERSION};
@@ -129,7 +129,7 @@ impl State {
 pub struct Location {
     /// Stable number of the window (order of first appearance).
     pub window_number: usize,
-    pub window: isize,
+    pub window: WindowId,
     pub tab_index: usize,
     pub title: String,
     pub selected: bool,
@@ -285,7 +285,7 @@ impl Session {
 struct Placeholder {
     session: String,
     conn: Arc<PipeConnection>,
-    window: Option<isize>,
+    window: Option<WindowId>,
 }
 
 type Repaint = Box<dyn Fn() + Send + Sync>;
@@ -295,7 +295,7 @@ pub struct SwitcherState {
     /// The grid is on screen.
     pub open: bool,
     /// The window and tab index it would switch to.
-    pub pick: Option<(isize, usize)>,
+    pub pick: Option<(WindowId, usize)>,
     /// How many grids were shown, and how many switched a tab.
     pub shown: u32,
     pub switched: u32,
@@ -315,7 +315,7 @@ pub(crate) struct Shared {
     snapshot: Mutex<Snapshot>,
     /// Terminal windows in the order NativeTerm first saw them, for
     /// stable window numbers (Z order changes with every activation).
-    window_order: Mutex<Vec<isize>>,
+    window_order: Mutex<Vec<WindowId>>,
     repaint: Mutex<Option<Repaint>>,
     wake: Mutex<Sender<()>>,
     /// Keeps the Terminal change notifications alive.
@@ -338,7 +338,7 @@ pub(crate) struct Shared {
     /// no pictures, those follow Terminal's notifications only.
     titles_only: std::sync::atomic::AtomicBool,
     /// The Terminal window that was last in front.
-    last_terminal: std::sync::atomic::AtomicIsize,
+    last_terminal: std::sync::atomic::AtomicU64,
     /// A program that isn't our helper tried the pipe: said once.
     told_of_stranger: std::sync::atomic::AtomicBool,
     /// Where sent commands are recorded (`<data dir>\\audit`).
@@ -558,7 +558,7 @@ impl Core {
                 Change::Foreground => {
                     if let Some(shared) = weak.upgrade() {
                         if let Some(front) = shared.terminal.foreground() {
-                            shared.last_terminal.store(front, std::sync::atomic::Ordering::Relaxed);
+                            shared.last_terminal.store(front.0, std::sync::atomic::Ordering::Relaxed);
                         }
                     }
                     return;
@@ -862,9 +862,9 @@ impl Core {
                 .filter(|s| s.state.is_open() && s.location.is_none())
                 .filter_map(|s| s.last_position)
                 .collect();
-            let numbers: Vec<(isize, Option<usize>)> =
+            let numbers: Vec<(WindowId, Option<usize>)> =
                 candidates.iter().map(|(w, _)| (*w, core.window_number(*w))).collect();
-            let number = |handle: isize| numbers.iter().find(|(w, _)| *w == handle).and_then(|(_, n)| *n);
+            let number = |handle: WindowId| numbers.iter().find(|(w, _)| *w == handle).and_then(|(_, n)| *n);
             likely_first(&mut candidates, &hints, number);
             let mut looked_at = 0;
             for (window, tab) in candidates {
@@ -920,13 +920,13 @@ impl Core {
 
     /// The picture of the tab at `index` in `window` from when it was
     /// last seen selected.
-    pub fn preview(&self, window: isize, index: usize) -> Option<Preview> {
+    pub fn preview(&self, window: WindowId, index: usize) -> Option<Preview> {
         lock(&self.shared.previews).get(window, index)
     }
 
     /// What was on that tab's screen when it was last pictured (a tab
     /// NativeTerm doesn't run has no console of its own to ask).
-    pub fn preview_text(&self, window: isize, index: usize) -> Option<std::sync::Arc<Vec<String>>> {
+    pub fn preview_text(&self, window: WindowId, index: usize) -> Option<std::sync::Arc<Vec<String>>> {
         lock(&self.shared.previews).text(window, index).filter(|lines| !lines.is_empty())
     }
 
@@ -939,14 +939,14 @@ impl Core {
 
     /// The stable number of a Terminal window (1-based), as in the session
     /// list.
-    pub fn window_number(&self, handle: isize) -> Option<usize> {
+    pub fn window_number(&self, handle: WindowId) -> Option<usize> {
         lock(&self.shared.window_order).iter().position(|h| *h == handle).map(|i| i + 1)
     }
 
     /// Switch to any tab (the user's own too): the tab at `index` in
     /// `window`, if it still has the title `name`, else a tab with that
     /// title in the same window.
-    pub fn select_tab(&self, window: isize, index: usize, name: &str) {
+    pub fn select_tab(&self, window: WindowId, index: usize, name: &str) {
         let shared = Arc::clone(&self.shared);
         let name = name.to_string();
         std::thread::spawn(move || {
@@ -1060,7 +1060,7 @@ impl Core {
     /// itself has the focus).
     pub fn active_session(&self) -> Option<SessionView> {
         let snapshot = self.snapshot();
-        let last = self.shared.last_terminal.load(std::sync::atomic::Ordering::Relaxed);
+        let last = WindowId(self.shared.last_terminal.load(std::sync::atomic::Ordering::Relaxed));
         let window = snapshot
             .windows
             .iter()
@@ -1433,7 +1433,7 @@ fn replace_placeholders(shared: &Shared, queued: Receiver<Placeholder>) {
         while let Ok(next) = queued.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
             batch.push(next);
         }
-        let mut windows: Vec<Option<isize>> = Vec::new();
+        let mut windows: Vec<Option<WindowId>> = Vec::new();
         for p in &batch {
             if !windows.contains(&p.window) {
                 windows.push(p.window);
@@ -1730,7 +1730,7 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
         match restored {
             Some(session) => {
                 let _ = conn.send(&AppMessage::Hold);
-                let placeholder = Placeholder { session, conn, window: terminal_window.map(|w| w as isize) };
+                let placeholder = Placeholder { session, conn, window: terminal_window.map(WindowId::from_wire) };
                 let _ = lock(&shared.placeholders).send(placeholder);
             }
             None => {
@@ -1971,7 +1971,7 @@ fn utc(secs: i64) -> (String, String) {
 }
 
 /// Watch, while the tab's shim is ending, whether its window goes too.
-fn check_window_closed(shared: &Shared, id: &str, window: isize) {
+fn check_window_closed(shared: &Shared, id: &str, window: WindowId) {
     let deadline = Instant::now() + WINDOW_CLOSE_CHECK;
     while Instant::now() < deadline {
         if !shared.terminal.window_ids().contains(&window) {
@@ -1988,9 +1988,9 @@ fn check_window_closed(shared: &Shared, id: &str, window: isize) {
 /// sweep usually stops after one selection. `number`: the stable window
 /// number of a window handle, as the hints were written with.
 fn likely_first(
-    candidates: &mut [(isize, native_term_platform::TabView)],
+    candidates: &mut [(WindowId, native_term_platform::TabView)],
     hints: &std::collections::HashSet<(usize, usize)>,
-    number: impl Fn(isize) -> Option<usize>,
+    number: impl Fn(WindowId) -> Option<usize>,
 ) {
     candidates.sort_by_key(|(window, tab)| {
         let hinted = number(*window).is_some_and(|w| hints.contains(&(w, tab.index)));
@@ -2142,27 +2142,28 @@ mod tests {
             claim: None,
         };
         // window handle 10 is window 1, handle 20 is window 2
-        let number = |handle: isize| match handle {
+        let number = |handle: WindowId| match handle.0 {
             10 => Some(1),
             20 => Some(2),
             _ => None,
         };
-        let mut candidates = vec![(10, tab(0)), (10, tab(3)), (20, tab(1)), (20, tab(5))];
+        let w = WindowId;
+        let mut candidates = vec![(w(10), tab(0)), (w(10), tab(3)), (w(20), tab(1)), (w(20), tab(5))];
         let hints = std::collections::HashSet::from([(2, 1), (1, 3)]);
         likely_first(&mut candidates, &hints, number);
-        let order: Vec<(isize, usize)> = candidates.iter().map(|(w, t)| (*w, t.index)).collect();
+        let order: Vec<(u64, usize)> = candidates.iter().map(|(w, t)| (w.0, t.index)).collect();
         assert_eq!(order, vec![(10, 3), (20, 1), (10, 0), (20, 5)]);
 
         // without hints the order is steady (window, then strip order)
-        let mut candidates = vec![(20, tab(5)), (10, tab(3)), (10, tab(0))];
+        let mut candidates = vec![(w(20), tab(5)), (w(10), tab(3)), (w(10), tab(0))];
         likely_first(&mut candidates, &Default::default(), number);
-        let order: Vec<(isize, usize)> = candidates.iter().map(|(w, t)| (*w, t.index)).collect();
+        let order: Vec<(u64, usize)> = candidates.iter().map(|(w, t)| (w.0, t.index)).collect();
         assert_eq!(order, vec![(10, 0), (10, 3), (20, 5)]);
 
         // a window NativeTerm has no number for is simply not hinted
-        let mut candidates = vec![(30, tab(1)), (10, tab(3))];
+        let mut candidates = vec![(w(30), tab(1)), (w(10), tab(3))];
         likely_first(&mut candidates, &hints, number);
-        assert_eq!(candidates[0].0, 10);
+        assert_eq!(candidates[0].0, w(10));
     }
 
     #[test]

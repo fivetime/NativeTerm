@@ -28,11 +28,12 @@ pub(super) const TITLE_H: f32 = 20.0;
 pub(super) const NOTE_H: f32 = 16.0;
 
 pub use crate::overlay::HoverCard;
+use crate::WindowId;
 
 pub(super) struct Card {
     pub(super) popup: HWND,
     /// The tab it is for (window handle, tab index).
-    pub(super) tab: (isize, usize),
+    pub(super) tab: (WindowId, usize),
     pub(super) card: HoverCard,
     pub(super) look: Look,
     pub(super) scale: f32,
@@ -50,7 +51,7 @@ pub(super) fn size_for(scale: f32) -> SIZE {
 }
 
 /// Which tab the card on show is for.
-pub(super) fn showing() -> Option<(isize, usize)> {
+pub(super) fn showing() -> Option<(WindowId, usize)> {
     CARD.with(|c| c.borrow().as_ref().map(|card| card.tab))
 }
 

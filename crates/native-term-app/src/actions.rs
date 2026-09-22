@@ -166,8 +166,9 @@ impl Core {
 pub(crate) mod tests {
     use super::*;
     use crate::Location;
+    use native_term_platform::WindowId;
 
-    pub(crate) fn session(id: &str, window: isize, tab_index: usize, state: State) -> SessionView {
+    pub(crate) fn session(id: &str, window: u64, tab_index: usize, state: State) -> SessionView {
         SessionView {
             id: id.into(),
             label: id.into(),
@@ -178,7 +179,7 @@ pub(crate) mod tests {
             linked: true,
             location: Some(Location {
                 window_number: window as usize,
-                window,
+                window: WindowId(window),
                 tab_index,
                 title: id.into(),
                 selected: false,

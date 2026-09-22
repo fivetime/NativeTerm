@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use native_term_platform::Snapshot;
-use native_term_platform::{Image, TerminalBackend};
+use native_term_platform::{Image, TerminalBackend, WindowId};
 
 /// A tab seen this recently isn't pictured again.
 const FRESH: Duration = Duration::from_secs(3);
@@ -40,11 +40,11 @@ pub struct Preview {
 /// By window and tab position.
 #[derive(Default)]
 pub struct Previews {
-    map: HashMap<(isize, usize), Preview>,
+    map: HashMap<(WindowId, usize), Preview>,
 }
 
 impl Previews {
-    pub fn get(&self, window: isize, index: usize) -> Option<Preview> {
+    pub fn get(&self, window: WindowId, index: usize) -> Option<Preview> {
         self.map.get(&(window, index)).cloned()
     }
 
@@ -66,7 +66,7 @@ impl Previews {
 
     /// The selected tabs that need a picture: (window, tab position,
     /// title, where the tab strip ends).
-    pub fn wanted(&self, snapshot: &Snapshot) -> Vec<(isize, usize, String, Option<i32>)> {
+    pub fn wanted(&self, snapshot: &Snapshot) -> Vec<(WindowId, usize, String, Option<i32>)> {
         snapshot
             .windows
             .iter()
@@ -81,7 +81,7 @@ impl Previews {
             .collect()
     }
 
-    pub fn insert(&mut self, window: isize, index: usize, title: String, image: Image, text: Vec<String>) {
+    pub fn insert(&mut self, window: WindowId, index: usize, title: String, image: Image, text: Vec<String>) {
         let preview = Preview {
             title,
             taken: SystemTime::now(),
@@ -93,7 +93,7 @@ impl Previews {
     }
 
     /// What was on a tab, for the search.
-    pub fn text(&self, window: isize, index: usize) -> Option<Arc<Vec<String>>> {
+    pub fn text(&self, window: WindowId, index: usize) -> Option<Arc<Vec<String>>> {
         self.map.get(&(window, index)).map(|p| Arc::clone(&p.text))
     }
 }
@@ -124,8 +124,8 @@ mod tests {
         TabView { index, name: name.into(), selected, rect: Some(rect), claim: None }
     }
 
-    fn window(handle: isize, tabs: Vec<TabView>) -> WindowView {
-        WindowView { handle, pid: 1, foreground: false, unresponsive: false, tabs }
+    fn window(handle: u64, tabs: Vec<TabView>) -> WindowView {
+        WindowView { handle: WindowId(handle), pid: 1, foreground: false, unresponsive: false, tabs }
     }
 
     fn snapshot(windows: Vec<WindowView>) -> Snapshot {
@@ -136,8 +136,8 @@ mod tests {
         Image { width: 1, height: 1, rgba: vec![0, 0, 0, 255] }
     }
 
-    fn insert(previews: &mut Previews, window: isize, index: usize, title: &str) {
-        previews.insert(window, index, title.to_string(), image(), Vec::new());
+    fn insert(previews: &mut Previews, window: u64, index: usize, title: &str) {
+        previews.insert(WindowId(window), index, title.to_string(), image(), Vec::new());
     }
 
     #[test]
@@ -148,7 +148,10 @@ mod tests {
         ]);
         let mut previews = Previews::default();
         let wanted = previews.wanted(&now);
-        assert_eq!(wanted, vec![(1, 1, "web01".into(), Some(40)), (2, 0, "claude".into(), Some(40))]);
+        assert_eq!(
+            wanted,
+            vec![(WindowId(1), 1, "web01".into(), Some(40)), (WindowId(2), 0, "claude".into(), Some(40))]
+        );
         insert(&mut previews, 1, 1, "web01");
         assert_eq!(previews.wanted(&now).len(), 1, "web01 was just pictured");
         // a new title there: pictured again
@@ -172,13 +175,13 @@ mod tests {
             window(2, vec![tab(0, "claude", true)]),
         ]);
         previews.prune(&before, &retitled);
-        assert!(previews.get(1, 0).is_some());
+        assert!(previews.get(WindowId(1), 0).is_some());
         // "pwsh" closed: the others moved up; window 2 closed
         let closed = snapshot(vec![window(1, vec![tab(0, "web01", false), tab(1, "db", true)])]);
         previews.prune(&retitled, &closed);
-        assert!(previews.get(1, 0).is_none(), "web01's place had pwsh's picture");
-        assert!(previews.get(1, 1).is_none());
-        assert!(previews.get(1, 2).is_none(), "no tab there");
-        assert!(previews.get(2, 0).is_none(), "window gone");
+        assert!(previews.get(WindowId(1), 0).is_none(), "web01's place had pwsh's picture");
+        assert!(previews.get(WindowId(1), 1).is_none());
+        assert!(previews.get(WindowId(1), 2).is_none(), "no tab there");
+        assert!(previews.get(WindowId(2), 0).is_none(), "window gone");
     }
 }

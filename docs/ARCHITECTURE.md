@@ -4437,7 +4437,11 @@ once; nothing in it runs on the GUI thread.
   pipe must be (`our_shim` compares the peer's image against it).
 - `window_ids()`, `foreground()`, `activate(window)` — the terminal's
   windows (responsive or not), the one in front if it is the terminal's,
-  and bringing one forward. `activate` also decides what the next
+  and bringing one forward. A window is a `WindowId(u64)`: the `HWND` on
+  Windows (`from_hwnd`/`hwnd` exist only there), iTerm2's or WezTerm's
+  window id elsewhere; the program only compares it and hands it back.
+  The shim reports it as a signed integer (`Hello.terminal_window`,
+  `from_wire`/`to_wire`), so the wire format did not change. `activate` also decides what the next
   `Target::Recent` means (the `-w 0` dance on Windows: activate, then
   open into the most recent window).
 - `snapshot(labels)` — every window and tab, claimed for the open
@@ -4487,7 +4491,7 @@ Windows Terminal's business.
 The plan (2026-09-22) is staged so Windows behaves the same after every
 step: dependencies gated so the portable crates build on Linux and macOS
 targets (done); the trait above with `Core` on dynamic dispatch (done);
-a `WindowId` newtype in place of the raw `HWND`; a `FakeBackend` so
+a `WindowId` newtype in place of the raw `HWND` (done); a `FakeBackend` so
 `Core` is tested without a terminal on any platform; a `native-term-os`
 facade for the one-line OS helpers (local time, process identity, the
 shell, credentials, folder watching) with `cfg` splits in the binaries;

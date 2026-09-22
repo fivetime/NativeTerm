@@ -8,6 +8,44 @@ pub mod overlay;
 #[cfg(windows)]
 pub mod windows_terminal;
 
+/// A terminal window, as its backend names it: the `HWND` on Windows,
+/// the window id iTerm2 or WezTerm gives out elsewhere. The program only
+/// ever compares it and hands it back; `0` is never a window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct WindowId(pub u64);
+
+impl WindowId {
+    /// As the shim reports it (`Hello.terminal_window`): the same number,
+    /// signed on the wire.
+    #[must_use]
+    pub fn from_wire(id: i64) -> WindowId {
+        WindowId(id as u64)
+    }
+
+    #[must_use]
+    pub fn to_wire(self) -> i64 {
+        self.0 as i64
+    }
+
+    #[cfg(windows)]
+    #[must_use]
+    pub fn from_hwnd(handle: isize) -> WindowId {
+        WindowId(handle as u64)
+    }
+
+    #[cfg(windows)]
+    #[must_use]
+    pub fn hwnd(self) -> isize {
+        self.0 as isize
+    }
+}
+
+impl std::fmt::Display for WindowId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 pub use backend::{Capabilities, Change, ChangeCounts, Image, Notify, OpenReport, Subscription, TerminalBackend};
 pub use overlay::{Entry, HoverCard, MenuProvider, MenuTab, OverlayMenu, SwitcherTab};
 
@@ -81,7 +119,7 @@ pub struct TabView {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WindowView {
     /// Native window handle.
-    pub handle: isize,
+    pub handle: WindowId,
     pub pid: u32,
     pub foreground: bool,
     /// The window didn't answer and was skipped; its tabs are unknown.

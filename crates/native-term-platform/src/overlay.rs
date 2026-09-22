@@ -7,12 +7,12 @@
 
 use std::time::Duration;
 
-use crate::Rect;
+use crate::{Rect, WindowId};
 
 /// A NativeTerm tab as the menu knows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuTab {
-    pub window: isize,
+    pub window: WindowId,
     pub rect: Rect,
     /// The session label the tab was claimed for.
     pub label: String,
@@ -61,7 +61,7 @@ impl HoverCard {
 /// One tab in the Ctrl+Tab grid.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SwitcherTab {
-    pub window: isize,
+    pub window: WindowId,
     pub index: usize,
     /// What the tile says: the session's name, or the tab's title.
     pub title: String,
@@ -93,13 +93,13 @@ pub trait MenuProvider: Send + Sync {
     /// Every tab of `window` in strip order, for the Ctrl+Tab grid, with
     /// the selected one marked. Fewer than two: no grid. Called on the
     /// menu thread: don't block.
-    fn tiles(&self, _window: isize) -> Vec<SwitcherTab> {
+    fn tiles(&self, _window: WindowId) -> Vec<SwitcherTab> {
         Vec::new()
     }
 
     /// Switch to the tab the grid picked (by index, or by title if the
     /// strip moved under it). Called on the menu thread: don't block.
-    fn switch(&self, _window: isize, _index: usize, _title: &str) {}
+    fn switch(&self, _window: WindowId, _index: usize, _title: &str) {}
 }
 
 /// The menu once it is up: what the program tells it and asks of it.
@@ -122,7 +122,7 @@ pub trait OverlayMenu: Send + Sync {
     /// Whether the grid is on screen.
     fn switcher_open(&self) -> bool;
     /// The tab the grid would switch to: window and index.
-    fn switcher_pick(&self) -> Option<(isize, usize)>;
+    fn switcher_pick(&self) -> Option<(WindowId, usize)>;
     /// Grids shown, and tabs switched by one (diagnostics, tests).
     fn switcher_counts(&self) -> (u32, u32);
     /// Known tabs, stale flag, hooks installed, right-clicks seen.

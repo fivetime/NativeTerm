@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use native_term_platform::windows_terminal::install::Install;
 use native_term_platform::windows_terminal::window;
 use native_term_platform::windows_terminal::WindowsTerminal;
+use native_term_platform::WindowId;
 
 struct Env {
     terminal: PathBuf,
@@ -49,13 +50,13 @@ impl Output {
             .unwrap_or_else(|| panic!("no session {label}:\n{}", self.text))
     }
 
-    fn windows(&self) -> Vec<(isize, String)> {
+    fn windows(&self) -> Vec<(WindowId, String)> {
         self.text
             .lines()
             .filter_map(|l| l.strip_prefix("WINDOW "))
             .map(|l| {
                 let (handle, tabs) = l.split_once(' ').unwrap();
-                (handle.parse().unwrap(), tabs.to_string())
+                (WindowId(handle.parse().unwrap()), tabs.to_string())
             })
             .collect()
     }
@@ -267,7 +268,7 @@ fn tabs_closed_on_exit_are_not_looked_for() {
     drop(registry);
     // only its own window goes: the tabs close by themselves
     let deadline = Instant::now() + Duration::from_secs(20);
-    while window.is_some_and(|w| env.terminal_windows().contains(&w)) {
+    while window.is_some_and(|w| env.terminal_windows().contains(&w.hwnd())) {
         assert!(Instant::now() < deadline, "the tabs' window is still open");
         std::thread::sleep(Duration::from_millis(200));
     }

@@ -25,7 +25,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::claim::{strip_admin_prefix, Claimer};
-use crate::{Snapshot, TabSpec, TabView, Target, WindowView};
+use crate::{Snapshot, TabSpec, TabView, Target, WindowId, WindowView};
 use install::Install;
 use window::TerminalWindow;
 use worker::Worker;
@@ -128,7 +128,8 @@ impl WindowsTerminal {
     /// What is on the screen of `window`'s selected tab, at most
     /// `max_lines` lines (see `uia::screen_text`). `None` when the window
     /// didn't answer in time or has no text to give.
-    pub fn screen_text(&self, window: isize, max_lines: usize) -> Option<Vec<String>> {
+    pub fn screen_text(&self, window: WindowId, max_lines: usize) -> Option<Vec<String>> {
+        let window = window.hwnd();
         lock(&self.worker).run(UIA_TIMEOUT, move |a| uia::screen_text(a, window, max_lines).ok())?
     }
 
@@ -146,20 +147,20 @@ impl WindowsTerminal {
                 None
             };
             let mut view = WindowView {
-                handle,
+                handle: WindowId::from_hwnd(handle),
                 pid: w.pid,
                 foreground: handle == foreground,
                 unresponsive: read.is_none(),
                 tabs: Vec::new(),
             };
             match read.flatten() {
-                Some(tabs) => view.tabs = lock(&self.claimer).claim(handle, &tabs, labels),
+                Some(tabs) => view.tabs = lock(&self.claimer).claim(view.handle, &tabs, labels),
                 None => complete = false,
             }
             views.push(view);
         }
         if complete {
-            lock(&self.claimer).retain(&windows.iter().map(|w| w.handle).collect::<Vec<_>>());
+            lock(&self.claimer).retain(&windows.iter().map(|w| WindowId::from_hwnd(w.handle)).collect::<Vec<_>>());
         }
         Snapshot { windows: views, complete }
     }
@@ -172,7 +173,7 @@ impl WindowsTerminal {
             if self.install.has_saved_workspace(name, false) {
                 let before = self.handles();
                 launch::run(&self.launcher(), &["-w".into(), name.into()])?;
-                report.window = self.wait_for_new_window(&before, NEW_WINDOW_TIMEOUT);
+                report.window = self.wait_for_new_window(&before, NEW_WINDOW_TIMEOUT).map(WindowId::from_hwnd);
             }
         }
         let mut previous: &[TabSpec] = &[];
@@ -182,7 +183,9 @@ impl WindowsTerminal {
                 // Terminal builds tabs asynchronously: a batch sent while the
                 // previous one is still being built gets interleaved with it
                 let titles: Vec<&str> = previous.iter().map(|t| t.label.as_str()).collect();
-                if !self.wait_for_titles(&titles, BATCH_TIMEOUT) || (new_window && self.user_left(report.window)) {
+                if !self.wait_for_titles(&titles, BATCH_TIMEOUT)
+                    || (new_window && self.user_left(report.window.map(WindowId::hwnd)))
+                {
                     // or the rest would land in the Terminal window the user went to
                     report.pending = tabs[report.launched..].to_vec();
                     return Ok(report);
@@ -197,7 +200,7 @@ impl WindowsTerminal {
             }
             report.launched += chunk.len();
             if new_window && i == 0 {
-                report.window = self.wait_for_new_window(&before, NEW_WINDOW_TIMEOUT);
+                report.window = self.wait_for_new_window(&before, NEW_WINDOW_TIMEOUT).map(WindowId::from_hwnd);
                 if report.window.is_none() {
                     report.pending = tabs[report.launched..].to_vec();
                     return Ok(report);
@@ -292,25 +295,26 @@ impl WindowsTerminal {
 
     /// Bring the window forward and select the tab. `Ok(false)` if the tab
     /// changed since the snapshot.
-    pub fn select(&self, window: isize, tab: &TabView) -> io::Result<bool> {
+    pub fn select(&self, window: WindowId, tab: &TabView) -> io::Result<bool> {
         self.act(window, tab, uia::select_tab).inspect(|&done| {
             if done {
-                window::activate(window);
+                window::activate(window.hwnd());
             }
         })
     }
 
     /// Close a tab through its close button (fallback only).
-    pub fn close(&self, window: isize, tab: &TabView) -> io::Result<bool> {
+    pub fn close(&self, window: WindowId, tab: &TabView) -> io::Result<bool> {
         self.act(window, tab, uia::close_tab)
     }
 
     fn act(
         &self,
-        window: isize,
+        window: WindowId,
         tab: &TabView,
         action: fn(&uiautomation::UIAutomation, isize, usize, &str) -> uia::Result<bool>,
     ) -> io::Result<bool> {
+        let window = window.hwnd();
         if !window::responds(window::hwnd(window)) {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "Windows Terminal is not responding"));
         }
@@ -352,17 +356,17 @@ impl crate::TerminalBackend for WindowsTerminal {
         self.shim()
     }
 
-    fn window_ids(&self) -> Vec<isize> {
-        self.handles()
+    fn window_ids(&self) -> Vec<WindowId> {
+        self.handles().into_iter().map(WindowId::from_hwnd).collect()
     }
 
-    fn foreground(&self) -> Option<isize> {
+    fn foreground(&self) -> Option<WindowId> {
         let front = window::foreground();
-        self.handles().contains(&front).then_some(front)
+        self.handles().contains(&front).then(|| WindowId::from_hwnd(front))
     }
 
-    fn activate(&self, window: isize) -> bool {
-        window::activate(window)
+    fn activate(&self, window: WindowId) -> bool {
+        window::activate(window.hwnd())
     }
 
     fn snapshot(&self, labels: &HashSet<String>) -> Snapshot {
@@ -377,11 +381,11 @@ impl crate::TerminalBackend for WindowsTerminal {
         WindowsTerminal::open_tool(self, title, shim_args)
     }
 
-    fn select(&self, window: isize, tab: &TabView) -> io::Result<bool> {
+    fn select(&self, window: WindowId, tab: &TabView) -> io::Result<bool> {
         WindowsTerminal::select(self, window, tab)
     }
 
-    fn close(&self, window: isize, tab: &TabView) -> io::Result<bool> {
+    fn close(&self, window: WindowId, tab: &TabView) -> io::Result<bool> {
         WindowsTerminal::close(self, window, tab)
     }
 
@@ -389,12 +393,12 @@ impl crate::TerminalBackend for WindowsTerminal {
         Box::new(WindowsSubscription(events::Watcher::start(self.install.clone(), notify)))
     }
 
-    fn screen_text(&self, window: isize, max_lines: usize) -> Option<Vec<String>> {
+    fn screen_text(&self, window: WindowId, max_lines: usize) -> Option<Vec<String>> {
         WindowsTerminal::screen_text(self, window, max_lines)
     }
 
-    fn capture(&self, window: isize, content_top: Option<i32>, width: i32) -> Option<crate::Image> {
-        capture::capture(window, content_top, width)
+    fn capture(&self, window: WindowId, content_top: Option<i32>, width: i32) -> Option<crate::Image> {
+        capture::capture(window.hwnd(), content_top, width)
     }
 
     fn start_overlay_menu(

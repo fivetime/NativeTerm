@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{Claim, Rect, TabView};
+use crate::{Claim, Rect, TabView, WindowId};
 
 /// A pane of the selected tab (`TermControl`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -52,7 +52,7 @@ pub fn strip_admin_prefix(title: &str) -> &str {
 /// Remembers each window's previous tab list and claims.
 #[derive(Default)]
 pub struct Claimer {
-    windows: HashMap<isize, Vec<(String, Option<Claim>)>>,
+    windows: HashMap<WindowId, Vec<(String, Option<Claim>)>>,
 }
 
 impl Claimer {
@@ -61,7 +61,7 @@ impl Claimer {
     }
 
     /// Claim the tabs of window `key` for the open sessions' `labels`.
-    pub fn claim(&mut self, key: isize, tabs: &WindowTabs, labels: &HashSet<String>) -> Vec<TabView> {
+    pub fn claim(&mut self, key: WindowId, tabs: &WindowTabs, labels: &HashSet<String>) -> Vec<TabView> {
         let names = &tabs.names;
         let previous = self.windows.get(&key).map(Vec::as_slice).unwrap_or(&[]);
         let mut claims: Vec<Option<Claim>> =
@@ -118,7 +118,7 @@ impl Claimer {
     }
 
     /// Forget windows that are gone. Call only after a complete scan.
-    pub fn retain(&mut self, keys: &[isize]) {
+    pub fn retain(&mut self, keys: &[WindowId]) {
         self.windows.retain(|k, _| keys.contains(k));
     }
 }
@@ -198,7 +198,7 @@ mod tests {
     fn rule1_by_name_and_admin_prefix() {
         let mut c = Claimer::new();
         let l = labels(&["web01", "db01"]);
-        let v = c.claim(1, &window(&["pwsh", "web01", "管理员: db01"], Some(0), &["pwsh"]), &l);
+        let v = c.claim(WindowId(1), &window(&["pwsh", "web01", "管理员: db01"], Some(0), &["pwsh"]), &l);
         assert_eq!(claimed(&v), vec![None, Some(("web01", false)), Some(("db01", false))]);
     }
 
@@ -206,10 +206,10 @@ mod tests {
     fn rule2_split_tab_with_foreign_focus() {
         let mut c = Claimer::new();
         let l = labels(&["web01"]);
-        let v = c.claim(1, &window(&["pwsh", "命令提示符"], Some(1), &["web01", "命令提示符"]), &l);
+        let v = c.claim(WindowId(1), &window(&["pwsh", "命令提示符"], Some(1), &["web01", "命令提示符"]), &l);
         assert_eq!(claimed(&v), vec![None, Some(("web01", true))]);
         // selecting another tab keeps the claim and the mixed flag
-        let v = c.claim(1, &window(&["pwsh", "命令提示符"], Some(0), &["pwsh"]), &l);
+        let v = c.claim(WindowId(1), &window(&["pwsh", "命令提示符"], Some(0), &["pwsh"]), &l);
         assert_eq!(claimed(&v), vec![None, Some(("web01", true))]);
     }
 
@@ -217,7 +217,7 @@ mod tests {
     fn rule2_does_not_claim_a_label_twice() {
         let mut c = Claimer::new();
         let l = labels(&["web01"]);
-        let v = c.claim(1, &window(&["web01", "cmd"], Some(1), &["web01"]), &l);
+        let v = c.claim(WindowId(1), &window(&["web01", "cmd"], Some(1), &["web01"]), &l);
         assert_eq!(claimed(&v), vec![Some(("web01", false)), None]);
     }
 
@@ -225,26 +225,26 @@ mod tests {
     fn carried_through_rename_and_moves() {
         let mut c = Claimer::new();
         let l = labels(&["a", "b"]);
-        c.claim(1, &window(&["a", "x", "b"], None, &[]), &l);
+        c.claim(WindowId(1), &window(&["a", "x", "b"], None, &[]), &l);
         // renamed in place
-        let v = c.claim(1, &window(&["a", "x", "my b"], None, &[]), &l);
+        let v = c.claim(WindowId(1), &window(&["a", "x", "my b"], None, &[]), &l);
         assert_eq!(claimed(&v), vec![Some(("a", false)), None, Some(("b", false))]);
         // dragged to the front, a tab opened at the end
-        let v = c.claim(1, &window(&["my b", "a", "x", "y"], None, &[]), &l);
+        let v = c.claim(WindowId(1), &window(&["my b", "a", "x", "y"], None, &[]), &l);
         assert_eq!(claimed(&v), vec![Some(("b", false)), Some(("a", false)), None, None]);
         // the renamed one closed
-        let v = c.claim(1, &window(&["a", "x", "y"], None, &[]), &l);
+        let v = c.claim(WindowId(1), &window(&["a", "x", "y"], None, &[]), &l);
         assert_eq!(claimed(&v), vec![Some(("a", false)), None, None]);
     }
 
     #[test]
     fn claims_end_with_the_session_or_the_window() {
         let mut c = Claimer::new();
-        c.claim(1, &window(&["a", "renamed"], Some(1), &["b"]), &labels(&["a", "b"]));
-        let v = c.claim(1, &window(&["a", "renamed"], None, &[]), &labels(&["a"]));
+        c.claim(WindowId(1), &window(&["a", "renamed"], Some(1), &["b"]), &labels(&["a", "b"]));
+        let v = c.claim(WindowId(1), &window(&["a", "renamed"], None, &[]), &labels(&["a"]));
         assert_eq!(claimed(&v), vec![Some(("a", false)), None]);
         c.retain(&[]);
-        let v = c.claim(1, &window(&["x", "renamed"], None, &[]), &labels(&["a", "b"]));
+        let v = c.claim(WindowId(1), &window(&["x", "renamed"], None, &[]), &labels(&["a", "b"]));
         assert_eq!(claimed(&v), vec![None, None]);
     }
 
@@ -252,9 +252,9 @@ mod tests {
     fn exact_name_wins_over_a_carried_claim() {
         let mut c = Claimer::new();
         let l = labels(&["a"]);
-        c.claim(1, &window(&["a", "x"], None, &[]), &l);
+        c.claim(WindowId(1), &window(&["a", "x"], None, &[]), &l);
         // the claimed tab changed its title, another tab now carries the label
-        let v = c.claim(1, &window(&["y", "a"], None, &[]), &l);
+        let v = c.claim(WindowId(1), &window(&["y", "a"], None, &[]), &l);
         assert_eq!(claimed(&v), vec![None, Some(("a", false))]);
     }
 
@@ -264,10 +264,10 @@ mod tests {
         let names: Vec<String> = (0..64).map(|i| format!("nt-{i}")).collect();
         let l: HashSet<String> = names.iter().cloned().collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        c.claim(1, &window(&refs, Some(10), &["nt-10", "cmd"]), &l);
+        c.claim(WindowId(1), &window(&refs, Some(10), &["nt-10", "cmd"]), &l);
         let mut renamed = refs.clone();
         renamed[10] = "cmd";
-        let v = c.claim(1, &window(&renamed, Some(63), &["nt-63"]), &l);
+        let v = c.claim(WindowId(1), &window(&renamed, Some(63), &["nt-63"]), &l);
         assert_eq!(v.iter().filter(|t| t.claim.is_some()).count(), 64);
         assert_eq!(v[10].claim, Some(Claim { label: "nt-10".into(), mixed: true }));
     }

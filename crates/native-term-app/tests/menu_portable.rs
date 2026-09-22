@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use native_term_app::{tab_menu, Core, HostRequest, SessionView, State};
 use native_term_platform::windows_terminal::install::{Install, Kind};
 use native_term_platform::windows_terminal::{launch, WindowsTerminal};
-use native_term_platform::{Rect, Target};
+use native_term_platform::{Rect, Target, WindowId};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, MOUSEEVENTF_RIGHTDOWN,
@@ -121,7 +121,7 @@ fn session<'a>(sessions: &'a [SessionView], label: &str) -> &'a SessionView {
 }
 
 /// The tab's rectangle and the window, from a fresh snapshot.
-fn tab_rect(core: &Core, name: &str) -> (isize, Rect) {
+fn tab_rect(core: &Core, name: &str) -> (WindowId, Rect) {
     let started = Instant::now();
     loop {
         let snapshot = core.snapshot();
@@ -158,7 +158,7 @@ fn tab_menu_on_nativeterm_tabs_only() {
     .unwrap();
     let (window, user_rect) = tab_rect(&core, "user tab");
     unsafe {
-        let _ = SetForegroundWindow(windows::Win32::Foundation::HWND(window as *mut _));
+        let _ = SetForegroundWindow(windows::Win32::Foundation::HWND(window.hwnd() as *mut _));
     }
     std::thread::sleep(Duration::from_millis(500));
 
@@ -233,7 +233,7 @@ fn ctrl_tab_shows_the_grid_and_switches() {
     });
     let (window, _) = tab_rect(&core, "s a");
     unsafe {
-        let _ = SetForegroundWindow(windows::Win32::Foundation::HWND(window as *mut _));
+        let _ = SetForegroundWindow(windows::Win32::Foundation::HWND(window.hwnd() as *mut _));
     }
     std::thread::sleep(Duration::from_millis(500));
 

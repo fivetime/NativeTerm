@@ -8,6 +8,7 @@ use std::time::Duration;
 use native_term_platform::windows_terminal::hover::HoverCard;
 use native_term_platform::windows_terminal::menu::{Entry, MenuTab, Provider};
 use native_term_platform::windows_terminal::switcher::SwitcherTab;
+use native_term_platform::WindowId;
 
 use crate::actions::{close_set, CloseSet, Closing, SessionCommand};
 use crate::{t, Core, SessionView, Shared, State};
@@ -203,7 +204,7 @@ impl Provider for Actions {
     /// Every tab of the window Ctrl+Tab was pressed over, with the
     /// picture each was last seen with. Only asked for when the grid is
     /// turned on (the menu thread holds that flag).
-    fn tiles(&self, window: isize) -> Vec<SwitcherTab> {
+    fn tiles(&self, window: WindowId) -> Vec<SwitcherTab> {
         let Some(shared) = self.core.upgrade() else { return Vec::new() };
         let core = Core { shared };
         let snapshot = core.snapshot();
@@ -253,7 +254,7 @@ impl Provider for Actions {
             .collect()
     }
 
-    fn switch(&self, window: isize, index: usize, name: &str) {
+    fn switch(&self, window: WindowId, index: usize, name: &str) {
         let Some(shared) = self.core.upgrade() else { return };
         Core { shared }.select_tab(window, index, name);
     }

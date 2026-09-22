@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::overlay::{MenuProvider, OverlayMenu};
-use crate::{Snapshot, TabSpec, TabView, Target};
+use crate::{Snapshot, TabSpec, TabView, Target, WindowId};
 
 /// What `open` did.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -30,7 +30,7 @@ pub struct OpenReport {
     /// an earlier batch didn't show up in time.
     pub pending: Vec<TabSpec>,
     /// The window created for `Target::NewWindow` (or a restored workspace).
-    pub window: Option<isize>,
+    pub window: Option<WindowId>,
 }
 
 /// An RGBA picture, rows top to bottom.
@@ -107,14 +107,14 @@ pub trait TerminalBackend: Send + Sync + 'static {
     fn shim_path(&self) -> &Path;
 
     /// Every window of this terminal, responsive or not.
-    fn window_ids(&self) -> Vec<isize>;
+    fn window_ids(&self) -> Vec<WindowId>;
 
     /// The window in front, if it is one of this terminal's.
-    fn foreground(&self) -> Option<isize>;
+    fn foreground(&self) -> Option<WindowId>;
 
     /// Bring a window forward; false if it couldn't be. It is then also
     /// the window `Target::Recent` means.
-    fn activate(&self, window: isize) -> bool;
+    fn activate(&self, window: WindowId) -> bool;
 
     /// All windows and tabs, claimed for the open sessions' `labels`.
     /// Claims are kept only for labels in `labels`; a window that can't
@@ -137,10 +137,10 @@ pub trait TerminalBackend: Send + Sync + 'static {
 
     /// Bring the window forward and select the tab. `Ok(false)` if the tab
     /// changed since the snapshot (its index or name no longer match).
-    fn select(&self, window: isize, tab: &TabView) -> io::Result<bool>;
+    fn select(&self, window: WindowId, tab: &TabView) -> io::Result<bool>;
 
     /// Close a tab from outside (a fallback: normally the shim closes it).
-    fn close(&self, window: isize, tab: &TabView) -> io::Result<bool>;
+    fn close(&self, window: WindowId, tab: &TabView) -> io::Result<bool>;
 
     /// Change notifications. A backend without events of its own polls
     /// and reports what it saw change.
@@ -149,14 +149,14 @@ pub trait TerminalBackend: Send + Sync + 'static {
     /// What is on the screen of `window`'s selected tab, at most
     /// `max_lines` lines. `None` when the window didn't answer in time,
     /// has no text to give, or the backend can't read screens.
-    fn screen_text(&self, _window: isize, _max_lines: usize) -> Option<Vec<String>> {
+    fn screen_text(&self, _window: WindowId, _max_lines: usize) -> Option<Vec<String>> {
         None
     }
 
     /// A picture of the window below `content_top` (a screen y, to leave
     /// the tab strip out), scaled to `width` pixels. `None` when the
     /// backend can't picture windows, or this one is minimized.
-    fn capture(&self, _window: isize, _content_top: Option<i32>, _width: i32) -> Option<Image> {
+    fn capture(&self, _window: WindowId, _content_top: Option<i32>, _width: i32) -> Option<Image> {
         None
     }
 

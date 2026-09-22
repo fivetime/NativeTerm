@@ -37,10 +37,11 @@ pub(super) const MAX_COLUMNS: usize = 5;
 pub const MAX_TILES: usize = 20;
 
 pub use crate::overlay::SwitcherTab;
+use crate::WindowId;
 
 pub(super) struct Grid {
     pub(super) popup: HWND,
-    pub(super) window: isize,
+    pub(super) window: WindowId,
     pub(super) tabs: Vec<SwitcherTab>,
     /// Which tile is highlighted.
     pub(super) pick: usize,
@@ -76,7 +77,7 @@ pub(super) fn is_grid(hwnd: HWND) -> bool {
 }
 
 /// The tab the grid would switch to.
-pub(super) fn picked() -> Option<(isize, usize, String)> {
+pub(super) fn picked() -> Option<(WindowId, usize, String)> {
     GRID.with(|g| {
         let grid = g.borrow();
         let grid = grid.as_ref()?;
@@ -251,7 +252,7 @@ mod tests {
         let (size, columns) = layout(count, 1.0);
         let tabs = (0..count)
             .map(|i| SwitcherTab {
-                window: 7,
+                window: WindowId(7),
                 index: i,
                 title: format!("tab {i}"),
                 name: format!("shell {i}"),
@@ -261,7 +262,7 @@ mod tests {
             .collect();
         Grid {
             popup: HWND(std::ptr::null_mut()),
-            window: 7,
+            window: WindowId(7),
             tabs,
             pick: 0,
             look: crate::windows_terminal::theme::look(std::path::Path::new("no-such-settings.json")),
@@ -308,7 +309,7 @@ mod tests {
         with_grid(3, || {
             step(2);
             // the tile says "tab 2"; the strip is searched for "shell 2"
-            assert_eq!(picked(), Some((7, 2, "shell 2".to_string())));
+            assert_eq!(picked(), Some((WindowId(7), 2, "shell 2".to_string())));
         });
     }
 

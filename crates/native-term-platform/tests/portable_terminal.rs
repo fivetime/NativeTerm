@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use native_term_platform::windows_terminal::install::{Install, Kind};
 use native_term_platform::windows_terminal::{command, launch, WindowsTerminal};
-use native_term_platform::{TabSpec, Target};
+use native_term_platform::{TabSpec, Target, WindowId};
 use native_term_session::pipe::{self, PipeConnection, PipeListener};
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 
@@ -138,9 +138,9 @@ impl Drop for OpenTabs {
     }
 }
 
-fn wait_gone(wt: &WindowsTerminal, window: isize) {
+fn wait_gone(wt: &WindowsTerminal, window: WindowId) {
     let deadline = Instant::now() + WAIT;
-    while wt.windows().iter().any(|w| w.handle == window) {
+    while wt.windows().iter().any(|w| WindowId::from_hwnd(w.handle) == window) {
         assert!(Instant::now() < deadline, "window {window} still open");
         std::thread::sleep(Duration::from_millis(200));
     }
@@ -237,7 +237,7 @@ fn batches_through_the_shell() {
     let shims = hellos(&rx, &tabs);
     let (snapshot, missing) = wt.wait_for(&labels, &expected, WAIT);
     assert!(missing.is_empty(), "missing {} tabs", missing.len());
-    let windows: HashSet<isize> = expected.iter().map(|l| snapshot.find(l).unwrap().0.handle).collect();
+    let windows: HashSet<WindowId> = expected.iter().map(|l| snapshot.find(l).unwrap().0.handle).collect();
     assert_eq!(windows, HashSet::from([window]), "all batches in the new window");
     // strip order is the requested order
     let order: Vec<&str> =
