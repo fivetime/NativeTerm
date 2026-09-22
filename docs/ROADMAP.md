@@ -941,7 +941,11 @@
       located, focus, screen read, close, window gone — 1.2 s) all pass;
       the window itself runs (CJK text, Phosphor icons, the wizard, the
       tree; a host double-clicked opens in WezTerm and its shim reports
-      the failed login and offers R/C). Follow-ups seen there:
+      the failed login and offers R/C). A second live test logs in to
+      the machine itself over ssh: the login signal through the FIFO,
+      text typed through WezTerm and run by the shell, disconnect and
+      reconnect (attempt 2), and the tab closed from WezTerm's side
+      (SIGHUP → `Closing` → closed) — 1.1 s. Follow-ups seen there:
   - [ ] The wizard and the profile page speak of Windows Terminal on
         every platform; they should name the terminal being driven (a
         `TerminalBackend::name`) and skip the profile step where there
