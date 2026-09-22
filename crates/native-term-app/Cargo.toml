@@ -23,6 +23,7 @@ native-term-session = { path = "../native-term-session" }
 native-term-platform = { path = "../native-term-platform" }
 native-term-os = { path = "../native-term-os" }
 native-term-wezterm = { path = "../native-term-wezterm" }
+native-term-iterm2 = { path = "../native-term-iterm2" }
 serde_json = "1"
 native-term-sftp = { path = "../native-term-sftp" }
 # SQLite compiled in on Windows; the system's own library elsewhere

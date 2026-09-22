@@ -4463,6 +4463,8 @@ program owns.
   windows, the picker) is reachable through it under `cfg(windows)` only
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
+- `native-term-iterm2` — iTerm2 as a `TerminalBackend`, through JXA and
+  `osascript` (macOS; the scripts build and test everywhere)
 - `native-term-app` — the `egui` GUI. Off Windows it builds against
   `native_term_platform::stub::NoTerminal` (no terminal driven yet) and
   a stand-in Terminal profile (`terminal_profile_stub.rs`); everything
@@ -4587,6 +4589,28 @@ wherever `Capabilities::type_text` says it can. `cli.rs` is pure and
 tested; `meets_the_contract` runs `contract::exercise` against a live
 WezTerm (`#[ignore]`, `NATIVETERM_TEST_WEZTERM_DIR`).
 
+### The iTerm2 backend
+
+`native-term-iterm2` drives iTerm2 through JavaScript for Automation,
+each call one script run with `osascript -l JavaScript` (50–100 ms, so
+one script lists every window, tab and session at once, with which tab
+and session are current and whether iTerm2 is frontmost). A session tab
+is `createTabWithDefaultProfile({command})` in the window
+`Target::Recent` or `Target::Named` means (or
+`createWindowWithDefaultProfile` for a new one, which also starts
+iTerm2), the command being the shim quoted for `sh`; the session is then
+named with the label, which is what the tab shows and what the
+claimer's first rule finds. `select` is `tab.select()` and
+`window.select()`, `close` closes the tab's sessions, `activate` selects
+the window and activates the app, `foreground` is the current window
+while iTerm2 is frontmost, `screen_text` is `contents`, `type_text` is
+`write({text, newline: false})`; a subscription polls every second. The
+shim reports the tab's id from `ITERM_SESSION_ID` (the unique id after
+the colon). The first script asks the person whether NativeTerm may
+control iTerm2 (Automation permission), which macOS remembers per app
+bundle — a packaging constraint. `jxa.rs` is pure and tested;
+`meets_the_contract` runs the backend contract on a Mac (`#[ignore]`).
+
 ### Where the other platforms are going
 
 The plan (2026-09-22) is staged so Windows behaves the same after every
@@ -4605,9 +4629,6 @@ and leaves typing and screen reads to the backend); then the backends:
   WezTerm backend" below). VTE-based terminals, GNOME Terminal and
   Konsole have no usable API for reading tabs or text; Ghostty can't be
   read either.
-- **macOS**: iTerm2 (JXA through `osascript`: `createTabWithDefaultProfile
-  ({command})`, `session.uniqueId / name / contents / write`,
-  `ITERM_SESSION_ID` as the per-tab id; 1 s poll). Terminal.app can only
-  open tabs by simulated keystrokes. First use asks for Automation
-  permission, which macOS remembers only for an `.app` bundle — a
-  packaging constraint.
+- **macOS**: iTerm2, done as `native-term-iterm2` (see "The iTerm2
+  backend" below). Terminal.app can only open tabs by simulated
+  keystrokes.

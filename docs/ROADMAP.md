@@ -922,7 +922,17 @@
         20240203 release and the 2026-09-17 nightly, most likely a
         security product's socket filter — so the live test waits for
         the Linux machine (or another Windows one)
-  - [ ] P5 — macOS backend: iTerm2 (JXA through `osascript`)
+  - [x] P5 — `native-term-iterm2`: iTerm2 through JXA scripts run with
+        `osascript` (`createWindowWithDefaultProfile` /
+        `createTabWithDefaultProfile` with the shim as the command, the
+        session named with the label; one script lists windows, tabs
+        and sessions; `select`, `close`, `write`, `contents`; a 1 s
+        poll), the default on macOS where iTerm2 is installed, and
+        `--terminal iterm2`. The shim takes its tab id from
+        `ITERM_SESSION_ID` or `WEZTERM_PANE` when there is no
+        `WT_SESSION`. Scripts and JSON tested here; `meets_the_contract`
+        (`#[ignore]`) waits for the Mac, where the first run asks for
+        Automation permission (2026-09-22)
 
 ## Explicitly not planned
 - Self-rendered terminal emulation of any kind

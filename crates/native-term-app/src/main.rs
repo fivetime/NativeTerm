@@ -3,10 +3,12 @@
 //! reconnect, disconnect, close.
 //!
 //! `nativeterm [--terminal-dir <portable Terminal folder>] [--ssh-dir <dir>]
-//! [--data-dir <dir>] [--terminal wezterm[=<folder>]]` (also
+//! [--data-dir <dir>] [--terminal wezterm[=<folder>]|iterm2]` (also
 //! `NATIVETERM_TERMINAL_DIR`). Without a folder the installed Windows
 //! Terminal is used; `--terminal wezterm` drives WezTerm through its CLI
-//! instead (the default off Windows, when `wezterm` is on `PATH`).
+//! instead, `--terminal iterm2` iTerm2 through its scripting. Off Windows
+//! the default is iTerm2 where it is installed, else WezTerm when
+//! `wezterm` is on `PATH`.
 //! `--from-shim`: started by a restored tab; exits quietly if NativeTerm
 //! is already running.
 
@@ -62,9 +64,9 @@ pub struct Options {
     /// driven.
     #[cfg_attr(not(windows), allow(dead_code))]
     terminal_dir: Option<PathBuf>,
-    /// `--terminal wezterm[=<folder>]`: WezTerm instead of the platform's
-    /// own terminal; the folder holds `wezterm` and `wezterm-gui`.
-    wezterm: Option<Option<PathBuf>>,
+    /// `--terminal …`: which terminal to drive instead of the platform's
+    /// own.
+    terminal: Option<Chosen>,
     pub ssh_dir: PathBuf,
     data_dir: Option<PathBuf>,
     from_shim: bool,
@@ -79,7 +81,7 @@ fn options() -> Result<Options, String> {
     let mut ssh_dir = default_ssh_dir();
     let mut data_dir = None;
     let mut from_shim = false;
-    let mut wezterm = None;
+    let mut terminal = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut value = || args.next().map(PathBuf::from).ok_or(format!("{arg} needs a value"));
@@ -91,16 +93,17 @@ fn options() -> Result<Options, String> {
             "--terminal" => {
                 let which = value()?;
                 let which = which.to_string_lossy();
-                wezterm = Some(match which.split_once('=') {
-                    Some(("wezterm", dir)) => Some(PathBuf::from(dir)),
-                    None if which == "wezterm" => None,
-                    _ => return Err(format!("unknown terminal {which} (wezterm, wezterm=<folder>)")),
+                terminal = Some(match which.split_once('=') {
+                    Some(("wezterm", dir)) => Chosen::WezTerm(Some(PathBuf::from(dir))),
+                    None if which == "wezterm" => Chosen::WezTerm(None),
+                    None if which == "iterm2" => Chosen::ITerm2,
+                    _ => return Err(format!("unknown terminal {which} (wezterm, wezterm=<folder>, iterm2)")),
                 });
             }
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    Ok(Options { terminal_dir, wezterm, ssh_dir: ssh_dir.ok_or("the home folder is not known")?, data_dir, from_shim })
+    Ok(Options { terminal_dir, terminal, ssh_dir: ssh_dir.ok_or("the home folder is not known")?, data_dir, from_shim })
 }
 
 /// The Terminal to drive: the one `--terminal-dir` names, the one that was
@@ -230,21 +233,40 @@ fn setup() -> Result<Start, String> {
     if !shim.exists() {
         notices.push(t!("notice-shim-missing", path = shim.display().to_string()));
     }
-    // WezTerm through its CLI, asked for, or the default where there is no
-    // terminal of the platform's own to drive
-    let wezterm = options
-        .wezterm
-        .clone()
-        .or_else(|| (!cfg!(windows) && native_term_wezterm::WezTerm::new(None, &shim).available()).then_some(None));
-    if let Some(dir) = wezterm {
-        let mut terminal = native_term_wezterm::WezTerm::new(dir.as_deref(), &shim);
-        if Some(&options.ssh_dir) != default_ssh_dir().as_ref() {
-            terminal = terminal.with_ssh_dir(&options.ssh_dir);
+    // another terminal than the platform's own: asked for, or the default
+    // where there is none of the platform's own to drive
+    let chosen = options.terminal.clone().or_else(|| {
+        if cfg!(windows) {
+            None
+        } else if cfg!(target_os = "macos") && native_term_iterm2::ITerm2::available() {
+            Some(Chosen::ITerm2)
+        } else if native_term_wezterm::WezTerm::new(None, &shim).available() {
+            Some(Chosen::WezTerm(None))
+        } else {
+            None
         }
-        if !terminal.available() {
-            return Err(t!("notice-wezterm-missing"));
-        }
-        let core = start_core(terminal, registry, options.from_shim, &mut notices);
+    });
+    if let Some(chosen) = chosen {
+        let other_ssh_dir = Some(&options.ssh_dir) != default_ssh_dir().as_ref();
+        let core = match chosen {
+            Chosen::WezTerm(dir) => {
+                let mut terminal = native_term_wezterm::WezTerm::new(dir.as_deref(), &shim);
+                if other_ssh_dir {
+                    terminal = terminal.with_ssh_dir(&options.ssh_dir);
+                }
+                if !terminal.available() {
+                    return Err(t!("notice-wezterm-missing"));
+                }
+                start_core(terminal, registry, options.from_shim, &mut notices)
+            }
+            Chosen::ITerm2 => {
+                let mut terminal = native_term_iterm2::ITerm2::new(&shim);
+                if other_ssh_dir {
+                    terminal = terminal.with_ssh_dir(&options.ssh_dir);
+                }
+                start_core(terminal, registry, options.from_shim, &mut notices)
+            }
+        };
         let core = match core {
             Ok(core) => core,
             Err(start) => return Ok(start),
@@ -314,6 +336,14 @@ fn setup() -> Result<Start, String> {
         data_source,
         notices,
     })))
+}
+
+/// A terminal asked for with `--terminal`, instead of the platform's own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Chosen {
+    /// WezTerm, from this folder or from `PATH`.
+    WezTerm(Option<PathBuf>),
+    ITerm2,
 }
 
 /// The core on the pipe, or nothing (said in `notices`); `Err` when
