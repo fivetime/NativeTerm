@@ -148,6 +148,10 @@ fn authenticated(shim_pid: u32) {
             terminal_window: None,
         });
         let _ = conn.send(&ShimMessage::Authenticated);
+        // NativeTerm checks what program is at the other end before it
+        // reads a word (on Unix through /proc, which a process that has
+        // exited no longer has): stay until it hangs up, briefly
+        let _ = conn.recv::<AppMessage>(Duration::from_millis(300));
     }
 }
 

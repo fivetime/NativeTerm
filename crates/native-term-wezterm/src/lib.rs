@@ -62,6 +62,9 @@ pub struct WezTerm {
     gui: PathBuf,
     shim: PathBuf,
     shim_args: Vec<OsString>,
+    /// NativeTerm's own configuration for the windows it opens, when the
+    /// person has none.
+    config: Option<PathBuf>,
     claimer: Mutex<Claimer>,
     state: Mutex<State>,
 }
@@ -79,9 +82,28 @@ impl WezTerm {
             gui: exe("wezterm-gui"),
             shim: shim.to_path_buf(),
             shim_args: Vec::new(),
+            config: None,
             claimer: Mutex::new(Claimer::new()),
             state: Mutex::new(State::default()),
         }
+    }
+
+    /// Windows NativeTerm opens use `<dir>/wezterm.lua` (written here) when
+    /// the person has no WezTerm configuration of their own.
+    pub fn with_config_dir(mut self, dir: &Path) -> WezTerm {
+        if cli::user_config_exists() {
+            return self;
+        }
+        let path = dir.join("wezterm.lua");
+        let wanted = cli::default_config();
+        let current = std::fs::read_to_string(&path).ok();
+        if current.as_deref() != Some(wanted.as_str())
+            && std::fs::create_dir_all(dir).and_then(|()| std::fs::write(&path, wanted)).is_err()
+        {
+            return self;
+        }
+        self.config = Some(path);
+        self
     }
 
     /// Session tabs look sessions up in `ssh_dir` instead of `~/.ssh`.
@@ -95,9 +117,19 @@ impl WezTerm {
         Command::new(&self.exe).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
     }
 
+    /// `wezterm` or `wezterm-gui` with NativeTerm's configuration, when
+    /// it has one, in the environment (see `cli::start_args`).
+    fn command(&self, exe: &Path) -> Command {
+        let mut command = Command::new(exe);
+        if let Some(config) = &self.config {
+            command.env("WEZTERM_CONFIG_FILE", config);
+        }
+        command
+    }
+
     /// Run `wezterm <args>`; its stdout, or what it said on stderr.
     fn run(&self, args: &[OsString]) -> io::Result<String> {
-        let output = Command::new(&self.exe).args(args).stdin(Stdio::null()).output()?;
+        let output = self.command(&self.exe).args(args).stdin(Stdio::null()).output()?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
@@ -162,7 +194,7 @@ impl WezTerm {
     fn new_window(&self, program: &[OsString], before: &[ListedWindow]) -> io::Result<u64> {
         let known: HashSet<u64> = before.iter().map(|w| w.window_id).collect();
         let (pane, timeout) = if before.is_empty() && self.run(&cli::list_args()).is_err() {
-            Command::new(&self.gui)
+            self.command(&self.gui)
                 .args(cli::start_args(program))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -235,6 +267,10 @@ fn shape(windows: &[ListedWindow], focused: &[u64]) -> (Vec<u64>, Vec<TabShape>,
 }
 
 impl TerminalBackend for WezTerm {
+    fn name(&self) -> &'static str {
+        "WezTerm"
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities { screen_text: true, type_text: true, ..Capabilities::default() }
     }

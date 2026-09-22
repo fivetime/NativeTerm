@@ -242,10 +242,52 @@ pub fn send_text_args(pane_id: u64, text: &str) -> Vec<OsString> {
 }
 
 /// `wezterm-gui start -- program`: the first window, when no WezTerm runs.
+/// (A configuration goes in `WEZTERM_CONFIG_FILE`, never `--config-file`:
+/// a GUI started with the flag publishes no discovery socket, and no
+/// `wezterm cli` finds it.)
 pub fn start_args(program: &[OsString]) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec!["start".into(), "--".into()];
     args.extend(program.iter().cloned());
     args
+}
+
+/// Whether the person has a WezTerm configuration of their own
+/// (`WEZTERM_CONFIG_FILE`, `~/.wezterm.lua`, `~/.config/wezterm/`): then
+/// NativeTerm leaves the look to it.
+pub fn user_config_exists() -> bool {
+    if std::env::var_os("WEZTERM_CONFIG_FILE").is_some_and(|f| !f.is_empty()) {
+        return true;
+    }
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(std::path::PathBuf::from);
+    let config_home = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| home.as_ref().map(|h| h.join(".config")));
+    home.as_ref().is_some_and(|h| h.join(".wezterm.lua").is_file())
+        || config_home.is_some_and(|c| c.join("wezterm").join("wezterm.lua").is_file())
+}
+
+/// The configuration NativeTerm's WezTerm windows use when the person has
+/// none: the desktop's light or dark, no questions when a tab is closed
+/// from outside, the tab bar always there.
+pub fn default_config() -> String {
+    r#"-- Written by NativeTerm for the WezTerm windows it opens, and used only
+-- while you have no WezTerm configuration of your own (~/.wezterm.lua or
+-- ~/.config/wezterm/wezterm.lua): make one and this file is ignored.
+local wezterm = require("wezterm")
+local config = wezterm.config_builder()
+
+-- follow the desktop
+config.color_scheme = wezterm.gui.get_appearance():find("Dark") and "Builtin Tango Dark" or "Builtin Tango Light"
+config.font_size = 11.0
+
+-- NativeTerm closes tabs itself; the tab strip is where it looks
+config.window_close_confirmation = "NeverPrompt"
+config.hide_tab_bar_if_only_one_tab = false
+config.use_fancy_tab_bar = true
+
+return config
+"#
+    .to_string()
 }
 
 /// The screen as `get-text` printed it: lines, trailing spaces and empty
@@ -334,6 +376,7 @@ mod tests {
         );
         assert_eq!(strings(&spawn_args(Into::NewWindow, &program))[3], "--new-window");
         assert_eq!(strings(&start_args(&program))[..2], ["start", "--"]);
+        assert!(default_config().contains("wezterm.config_builder()"));
     }
 
     #[test]

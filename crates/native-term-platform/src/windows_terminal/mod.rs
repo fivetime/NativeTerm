@@ -341,6 +341,10 @@ impl crate::Subscription for WindowsSubscription {
 }
 
 impl crate::TerminalBackend for WindowsTerminal {
+    fn name(&self) -> &'static str {
+        "Windows Terminal"
+    }
+
     fn capabilities(&self) -> crate::Capabilities {
         crate::Capabilities {
             capture: true,

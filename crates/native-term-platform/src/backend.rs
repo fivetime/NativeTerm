@@ -105,6 +105,9 @@ pub struct Capabilities {
 
 /// One terminal program driven from outside.
 pub trait TerminalBackend: Send + Sync + 'static {
+    /// What the terminal is called, for the person ("Windows Terminal").
+    fn name(&self) -> &'static str;
+
     fn capabilities(&self) -> Capabilities;
 
     /// The helper every tab runs (what a client on the pipe must be).

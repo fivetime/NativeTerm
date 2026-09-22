@@ -250,7 +250,7 @@ fn setup() -> Result<Start, String> {
         let other_ssh_dir = Some(&options.ssh_dir) != default_ssh_dir().as_ref();
         let core = match chosen {
             Chosen::WezTerm(dir) => {
-                let mut terminal = native_term_wezterm::WezTerm::new(dir.as_deref(), &shim);
+                let mut terminal = native_term_wezterm::WezTerm::new(dir.as_deref(), &shim).with_config_dir(&data_dir);
                 if other_ssh_dir {
                     terminal = terminal.with_ssh_dir(&options.ssh_dir);
                 }

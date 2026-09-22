@@ -159,6 +159,10 @@ fn shape(listing: &Listing) -> (Vec<u64>, Vec<TabShape>, Option<u64>) {
 }
 
 impl TerminalBackend for ITerm2 {
+    fn name(&self) -> &'static str {
+        "iTerm2"
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities { screen_text: true, type_text: true, ..Capabilities::default() }
     }

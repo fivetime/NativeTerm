@@ -298,6 +298,7 @@ impl Pane {
             if self.layered.take().is_some() {
                 // it could not be handed over with its transparency: from
                 // here on this window is shown the ordinary way, square
+                #[cfg(windows)]
                 eprintln!("the floating button is shown without transparency: {}", std::io::Error::last_os_error());
             }
             self.surface.resize(width, height).map_err(|e| e.to_string())?;

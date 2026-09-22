@@ -90,7 +90,14 @@ impl ProfileSetup {
         PathBuf::new()
     }
 
-    pub fn settings_ui(&mut self, ui: &mut egui::Ui, _core: Option<&Core>, _notices: &mut [String]) {
-        ui.weak(t!("profile-no-terminal"));
+    pub fn settings_ui(&mut self, ui: &mut egui::Ui, core: Option<&Core>, _notices: &mut [String]) {
+        match core {
+            Some(core) if !core.has_profile() && core.terminal_name() != "no terminal" => {
+                ui.weak(t!("profile-driven-by", terminal = core.terminal_name()));
+            }
+            _ => {
+                ui.weak(t!("profile-no-terminal"));
+            }
+        }
     }
 }

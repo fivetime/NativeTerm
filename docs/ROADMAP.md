@@ -946,15 +946,15 @@
       text typed through WezTerm and run by the shell, disconnect and
       reconnect (attempt 2), and the tab closed from WezTerm's side
       (SIGHUP → `Closing` → closed) — 1.1 s. Follow-ups seen there:
-  - [ ] The wizard and the profile page speak of Windows Terminal on
-        every platform; they should name the terminal being driven (a
-        `TerminalBackend::name`) and skip the profile step where there
-        is no profile
-  - [ ] The floating button's fallback line prints a stale OS error off
-        Windows ("Invalid argument"); say only that it is square there
-  - [ ] WezTerm shows its own default look; a `wezterm.lua` NativeTerm
-        writes (or a `--config-file`) could follow the desktop's theme,
-        font and tab bar
+  - [x] The wizard and the profile page name the terminal being driven
+        (`TerminalBackend::name`) and skip the profile step where there
+        is no profile; the ssh-missing advice is the platform's
+  - [x] The floating button's fallback line is Windows-only (elsewhere it
+        is simply square)
+  - [x] WezTerm windows NativeTerm opens use a `wezterm.lua` it writes
+        into the data folder — the desktop's light or dark scheme, no
+        close prompts, the tab bar always there — unless the person has
+        a WezTerm configuration of their own, which is left alone
   - [ ] `rustup component add … -q` is not an option; the box's
         toolchain got its components from `rust-toolchain.toml` anyway
 

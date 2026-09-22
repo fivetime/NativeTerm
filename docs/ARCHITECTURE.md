@@ -4583,7 +4583,15 @@ every second and reports `Windows` or `Tabs` when the shape changed.
 `select` is `activate-tab`, `close` kills the tab's panes, `activate` is
 `activate-pane` (the CLI can't raise a window; `foreground` is the
 window last activated), `screen_text` is `get-text`, and `type_text` is
-`send-text --no-paste`: on Unix the shim shares the terminal with ssh
+`send-text --no-paste`. A GUI NativeTerm starts, and every `cli` call,
+carries `WEZTERM_CONFIG_FILE=<data dir>/wezterm.lua`, written by
+NativeTerm (the desktop's light or dark scheme, no close prompts, the
+tab bar always shown), unless the person has a WezTerm configuration of
+their own, which is left alone. The environment, not `--config-file`: a
+GUI started with the flag publishes no discovery socket, and no
+`wezterm cli` finds it. A GUI killed outright can leave a stale
+discovery socket behind that answers for nobody; WezTerm's own clean
+exit removes it: on Unix the shim shares the terminal with ssh
 and can't type into it, so `Core::send_text` goes through the backend
 wherever `Capabilities::type_text` says it can. `cli.rs` is pure and
 tested; `meets_the_contract` runs `contract::exercise` against a live

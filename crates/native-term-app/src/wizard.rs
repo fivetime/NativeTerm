@@ -39,6 +39,10 @@ pub enum WizardAction {
 
 /// What the wizard shows, gathered by the app each frame.
 pub struct Facts<'a> {
+    /// What the terminal being driven is called.
+    pub terminal_name: String,
+    /// It has a profile NativeTerm installs (Windows Terminal).
+    pub has_profile: bool,
     pub terminal: String,
     /// What stands in the way of the chosen Terminal, if anything.
     pub terminal_problem: Option<String>,
@@ -131,24 +135,31 @@ impl Wizard {
     }
 
     fn check(&self, ui: &mut egui::Ui, facts: &Facts, actions: &mut Vec<WizardAction>) {
-        ui.label(t!("wizard-check-intro"));
+        ui.label(t!("wizard-check-intro", terminal = facts.terminal_name.as_str()));
         match self.ssh.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             None => {
                 ui.weak(t!("wizard-ssh-checking"));
             }
             Some(Ok(version)) => check_line(ui, true, t!("wizard-ssh-ok", version = version)),
-            Some(Err(e)) => check_line(ui, false, t!("wizard-ssh-missing", error = e)),
+            Some(Err(e)) if cfg!(windows) => check_line(ui, false, t!("wizard-ssh-missing", error = e)),
+            Some(Err(e)) => check_line(ui, false, t!("wizard-ssh-missing-unix", error = e)),
         }
-        check_line(ui, facts.terminal_problem.is_none(), t!("wizard-terminal", terminal = facts.terminal.as_str()));
+        check_line(
+            ui,
+            facts.terminal_problem.is_none(),
+            t!("wizard-terminal", name = facts.terminal_name.as_str(), terminal = facts.terminal.as_str()),
+        );
         if let Some(problem) = &facts.terminal_problem {
             ui.label(problem);
         }
-        ui.horizontal_wrapped(|ui| {
-            check_line(ui, facts.profile_usable, t!("wizard-profile", status = facts.profile.as_str()));
-            if !facts.profile_usable && ui.button(t!("profile-install")).clicked() {
-                actions.push(WizardAction::InstallProfile);
-            }
-        });
+        if facts.has_profile {
+            ui.horizontal_wrapped(|ui| {
+                check_line(ui, facts.profile_usable, t!("wizard-profile", status = facts.profile.as_str()));
+                if !facts.profile_usable && ui.button(t!("profile-install")).clicked() {
+                    actions.push(WizardAction::InstallProfile);
+                }
+            });
+        }
         match &facts.agent {
             None => {
                 ui.weak(t!("agent-checking"));

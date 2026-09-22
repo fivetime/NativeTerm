@@ -35,6 +35,10 @@ impl Subscription for Silence {
 }
 
 impl TerminalBackend for NoTerminal {
+    fn name(&self) -> &'static str {
+        "no terminal"
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities::default()
     }

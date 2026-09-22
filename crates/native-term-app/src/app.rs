@@ -198,6 +198,15 @@ pub(crate) fn editor_for(ssh_dir: &Path, data_dir: &Path) -> Editor {
     }
 }
 
+/// What the terminal is called when no core says: the platform's own.
+fn default_terminal_name() -> String {
+    if cfg!(windows) {
+        "Windows Terminal".into()
+    } else {
+        t!("terminal-none")
+    }
+}
+
 /// Whether PuTTY has saved sessions to import (its registry key).
 fn putty_has_sessions() -> bool {
     #[cfg(windows)]
@@ -1121,9 +1130,18 @@ impl App {
         }
         let Some(wizard) = self.wizard.as_mut() else { return };
         let folders_dir = self.editor.folders_dir();
+        let core = self.core.as_ref();
         let facts = crate::wizard::Facts {
-            terminal: self.profile.terminal_text(),
-            terminal_problem: self.profile.terminal_problem(),
+            terminal_name: core.map_or(default_terminal_name(), |c| c.terminal_name().to_string()),
+            has_profile: core.map_or(cfg!(windows), Core::has_profile),
+            terminal: match core {
+                Some(c) if !c.has_profile() => t!("terminal-found"),
+                _ => self.profile.terminal_text(),
+            },
+            terminal_problem: match core {
+                Some(c) if !c.has_profile() => None,
+                _ => self.profile.terminal_problem(),
+            },
             profile: self.profile.describe(),
             profile_usable: self.profile.status.usable(),
             agent: self.agent.status(),

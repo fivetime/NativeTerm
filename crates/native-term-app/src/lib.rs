@@ -713,6 +713,16 @@ impl Core {
         &*self.shared.terminal
     }
 
+    /// What the terminal being driven is called, for the person.
+    pub fn terminal_name(&self) -> &'static str {
+        self.shared.terminal.name()
+    }
+
+    /// Whether that terminal has a profile NativeTerm installs.
+    pub fn has_profile(&self) -> bool {
+        self.shared.terminal.capabilities().profile_install
+    }
+
     /// The Windows Terminal behind the backend, for what only it has
     /// (its install, its profile fragment).
     #[cfg(windows)]

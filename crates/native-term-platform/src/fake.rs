@@ -222,6 +222,10 @@ impl Drop for FakeSubscription {
 }
 
 impl TerminalBackend for FakeBackend {
+    fn name(&self) -> &'static str {
+        "a terminal in memory"
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities { named_windows: true, ..Capabilities::default() }
     }
