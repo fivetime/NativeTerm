@@ -63,6 +63,11 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The tab a window shows: the one known, else the only one there is.
+fn shown_or_only(known: Option<usize>, tabs: usize) -> Option<usize> {
+    known.or_else(|| (tabs == 1).then_some(0))
+}
+
 /// `path` holding `wanted`: written when it doesn't yet. Whether it
 /// does now.
 fn write_if_changed(path: &Path, wanted: &str) -> bool {
@@ -210,7 +215,18 @@ impl WezTerm {
     /// The tab `window` shows, as far as it is known.
     fn shown_tab(&self, window: &ListedWindow) -> Option<usize> {
         let focused = self.focused_panes();
-        self.selected_tabs(std::slice::from_ref(window), &focused).get(&window.window_id).copied()
+        let known = self.selected_tabs(std::slice::from_ref(window), &focused).get(&window.window_id).copied();
+        shown_or_only(known, window.tabs.len())
+    }
+
+    /// A tab this made is the one its window shows (WezTerm switches to
+    /// what it spawns), whether or not the GUI ever reports a focus — on
+    /// a desktop that keeps a new window from taking the focus (GNOME
+    /// with a window opened from elsewhere) it never does.
+    fn note_shown(&self, window: u64, pane: u64) {
+        if let Some(tab) = self.window(window).and_then(|w| w.tab_of_pane(pane).map(|i| w.tabs[i].tab_id)) {
+            lock(&self.state).selected.insert(window, Chosen { tab_id: tab, at: Instant::now() });
+        }
     }
 
     /// The window `Target::Recent` means: the one last activated or made,
@@ -251,6 +267,9 @@ impl WezTerm {
                 None => !known.contains(&w.window_id),
             });
             if let Some(w) = found {
+                if let Some(pane) = w.tabs.first().and_then(|t| t.active_pane()) {
+                    self.note_shown(w.window_id, pane);
+                }
                 return Ok(w.window_id);
             }
             if started.elapsed() >= timeout {
@@ -266,6 +285,7 @@ impl WezTerm {
         let pane = cli::parse_spawned(&out)
             .ok_or_else(|| io::Error::other(format!("wezterm spawn said {:?}, not a pane id", out.trim())))?;
         self.run(&cli::set_tab_title_args(pane, title))?;
+        self.note_shown(window, pane);
         Ok(pane)
     }
 
@@ -556,6 +576,14 @@ mod tests {
         let selected = w.selected_tabs(only_one, &[]);
         assert_eq!(selected.get(&1), None, "window 1 is gone");
         assert_eq!(selected.get(&7), Some(&0));
+    }
+
+    #[test]
+    fn a_window_with_one_tab_shows_it() {
+        assert_eq!(shown_or_only(None, 1), Some(0));
+        assert_eq!(shown_or_only(None, 2), None, "two tabs: not known");
+        assert_eq!(shown_or_only(Some(1), 2), Some(1));
+        assert_eq!(shown_or_only(None, 0), None);
     }
 
     /// A tab selected here is what the window shows until the person acts

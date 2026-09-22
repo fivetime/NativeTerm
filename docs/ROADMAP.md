@@ -1034,6 +1034,20 @@
         release builds have to be made on the oldest glibc to be
         supported (Debian 12, or cargo-zigbuild with a glibc version),
         which is a packaging matter
+  - [x] Fedora 44 Workstation (2026-09-23: GNOME 50 on Wayland, glibc
+        2.43, built from source with gcc, sqlite-devel and rustup; WezTerm
+        from its fedora39 rpm): the window runs natively on Wayland, the
+        portal gives the accent (`#3584e4`, GNOME 47+ has one) which
+        goes on the selected WezTerm tab, and both WezTerm live tests
+        pass. They passed only after a fix: GNOME keeps a window opened
+        from elsewhere from taking the focus, so WezTerm never reported a
+        focused pane and the backend did not know which tab a window
+        showed (`screen_text` had no target). A tab the backend spawns is
+        now noted as the one shown (WezTerm switches to it), and a window
+        with one tab shows that one. Screenshots could not be taken there
+        (`gnome-screenshot` no longer can on GNOME 50; the portal wants a
+        click), and `fc-match monospace` names a font without a spacing
+        value, so WezTerm's own font is used
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a
