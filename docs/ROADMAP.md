@@ -976,6 +976,14 @@
         D-Bus, and within the three-second poll NativeTerm's window went
         dark, `wezterm.lua` said Tango Dark and the open WezTerm tab
         reloaded to it; back to light the same way
+  - [x] The tab menu on WezTerm (2026-09-22): a right click in a tab
+        or Ctrl+Shift+M shows WezTerm's own picker with what NativeTerm's
+        menu offers that session, fed and answered through the shim's
+        `--tab-menu` helper over the socket (`ShimMessage::TabMenu` /
+        `TabAction`, `AppMessage::TabMenu`); the same entries and
+        actions as the Windows menu. Ctrl+Tab shows WezTerm's tab
+        navigator when the switcher setting is on. `core_fake` covers
+        the pipe side; the picker was driven by hand on Deepin
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

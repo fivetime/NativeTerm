@@ -46,6 +46,13 @@ pub enum Mode {
     Drop {
         paths: Vec<String>,
     },
+    /// NativeTerm's tab menu for a terminal that shows it itself: list
+    /// the items (`--tab-menu`) or choose one (`--tab-menu <id>`), for
+    /// the tab `--pane` names (else this process's own).
+    TabMenu {
+        id: Option<u32>,
+        pane: Option<String>,
+    },
     /// A ZMODEM transfer on stdin / stdout: the server ran `sz`
     /// (`download`) or `rz` (`upload`); `escape`: ask the sender to escape
     /// every control character (`--escape-control`, for Telnet); `files`:
@@ -111,6 +118,17 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 }
                 return Ok(Mode::Drop { paths });
             }
+            "--tab-menu" => {
+                let mut id = None;
+                let mut pane = None;
+                while let Some(arg) = args.next() {
+                    match arg.as_str() {
+                        "--pane" => pane = Some(args.next().ok_or("--pane needs a value")?),
+                        other => id = Some(other.parse().map_err(|_| format!("--tab-menu: not an item: {other}"))?),
+                    }
+                }
+                return Ok(Mode::TabMenu { id, pane });
+            }
             "--proxy" => {
                 let rest: Vec<String> = args.collect();
                 let [url, host, port] = rest.as_slice() else {
@@ -153,6 +171,17 @@ mod tests {
         assert!(p(&["--zmodem", "tmux", "--sideways"]).is_err());
         assert!(p(&["--zmodem", "sideways"]).is_err());
         assert!(p(&["--zmodem"]).is_err());
+    }
+
+    #[test]
+    fn tab_menu_helper() {
+        assert_eq!(p(&["--tab-menu"]).unwrap(), Mode::TabMenu { id: None, pane: None });
+        assert_eq!(
+            p(&["--tab-menu", "4", "--pane", "7"]).unwrap(),
+            Mode::TabMenu { id: Some(4), pane: Some("7".into()) }
+        );
+        assert_eq!(p(&["--tab-menu", "--pane", "7"]).unwrap(), Mode::TabMenu { id: None, pane: Some("7".into()) });
+        assert!(p(&["--tab-menu", "close"]).is_err());
     }
 
     #[test]

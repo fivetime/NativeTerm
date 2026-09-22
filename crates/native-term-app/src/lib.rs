@@ -1689,6 +1689,12 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                 .map(|s| (s.alias.clone(), s.id.clone()))
         });
         let ask = lock(&shared.ask).clone();
+        if let Ok(Some(ShimMessage::TabMenu)) = &asked {
+            // the terminal's own picker shows the menu: say what is on it
+            let items = found.as_ref().map_or_else(Vec::new, |(_, id)| tab_menu::items_for(shared, id));
+            let _ = conn.send(&AppMessage::TabMenu { items });
+            return;
+        }
         if let (Ok(Some(message)), Some((alias, session)), Some(ask)) = (asked, found, ask) {
             match message {
                 ShimMessage::OpenFiles => ask(tab_menu::MenuRequest::Files { alias, session }),
@@ -1698,6 +1704,10 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                     paths: paths.into_iter().map(std::path::PathBuf::from).collect(),
                     text,
                 }),
+                ShimMessage::TabAction { id } => {
+                    let actions = tab_menu::Actions { core: Arc::downgrade(shared), ask };
+                    tab_menu::choose_for(&actions, shared, &session, id);
+                }
                 _ => {}
             }
         }
@@ -2046,12 +2056,15 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::Unreachable
             | ShimMessage::PasswordRefused
             | ShimMessage::OpenFiles
+            | ShimMessage::TabMenu
+            | ShimMessage::TabAction { .. }
     ) {
         s.quiet_since = None;
     }
     match message {
         // only from a `Request` helper, never on a session link
-        ShimMessage::OpenFiles | ShimMessage::Dropped { .. } => {}
+        ShimMessage::OpenFiles | ShimMessage::Dropped { .. } | ShimMessage::TabMenu | ShimMessage::TabAction { .. } => {
+        }
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {
             s.authenticated = false;

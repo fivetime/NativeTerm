@@ -269,7 +269,7 @@ pub fn user_config_exists() -> bool {
 /// The configuration NativeTerm's WezTerm windows use when the person has
 /// none: the desktop's light or dark, no questions when a tab is closed
 /// from outside, the tab bar always there.
-pub fn default_config(look: &Look) -> String {
+pub fn default_config(look: &Look, shim: &Path) -> String {
     let mut lua = String::from(
         r#"-- Written by NativeTerm for the WezTerm windows it opens, and used only
 -- while you have no WezTerm configuration of your own (~/.wezterm.lua or
@@ -311,11 +311,69 @@ config.window_close_confirmation = "NeverPrompt"
 config.hide_tab_bar_if_only_one_tab = false
 config.use_fancy_tab_bar = true
 
-return config
 "#,
     );
+    lua.push_str(&MENU_LUA.replace("__SHIM__", &lua_escape(&shim.display().to_string())));
+    if look.switcher {
+        lua.push_str(SWITCHER_LUA);
+    }
+    lua.push_str("\nreturn config\n");
     lua
 }
+
+/// NativeTerm's tab menu, through WezTerm's own picker: a right click in
+/// a tab (or Ctrl+Shift+M) runs the shim's `--tab-menu` for the pane,
+/// which prints what applies to its session; the choice goes back the
+/// same way. A tab that is not NativeTerm's gets no menu (the shim
+/// prints nothing), and a right click while a program on the other side
+/// takes the mouse goes to that program, as WezTerm always does.
+const MENU_LUA: &str = r#"-- NativeTerm's tab menu: right-click in a tab, or Ctrl+Shift+M
+local shim = "__SHIM__"
+local function tab_menu(window, pane)
+  local ok, out = wezterm.run_child_process({ shim, "--tab-menu", "--pane", tostring(pane:pane_id()) })
+  if not ok then
+    return
+  end
+  local title, choices = "NativeTerm", {}
+  for line in out:gmatch("[^\r\n]+") do
+    local id, text = line:match("^(%d+)\t(.*)$")
+    if id == "0" then
+      title = text
+    elseif id then
+      table.insert(choices, { id = id, label = text })
+    end
+  end
+  if #choices == 0 then
+    return
+  end
+  window:perform_action(
+    wezterm.action.InputSelector({
+      title = title,
+      choices = choices,
+      fuzzy = false,
+      action = wezterm.action_callback(function(_, chosen_pane, id)
+        if id then
+          wezterm.run_child_process({ shim, "--tab-menu", id, "--pane", tostring(chosen_pane:pane_id()) })
+        end
+      end),
+    }),
+    pane
+  )
+end
+config.keys = {
+  { key = "m", mods = "CTRL|SHIFT", action = wezterm.action_callback(tab_menu) },
+}
+config.mouse_bindings = {
+  { event = { Down = { streak = 1, button = "Right" } }, mods = "NONE", action = wezterm.action_callback(tab_menu) },
+}
+"#;
+
+/// Ctrl+Tab shows WezTerm's tab navigator (its list of tabs), as
+/// NativeTerm's grid does on Windows; only when the person turned the
+/// switcher on, since it takes WezTerm's own next-tab key.
+const SWITCHER_LUA: &str = r#"-- Ctrl+Tab: the tab navigator (NativeTerm's "tab switcher" setting)
+table.insert(config.keys, { key = "Tab", mods = "CTRL", action = wezterm.action.ShowTabNavigator })
+"#;
 
 /// How the windows NativeTerm opens should look: what it read from the
 /// desktop, overridden by its own theme setting.
@@ -327,6 +385,8 @@ pub struct Look {
     pub accent: Option<(u8, u8, u8)>,
     /// The desktop's monospace font family.
     pub font: Option<String>,
+    /// Ctrl+Tab shows the tab navigator (NativeTerm's switcher setting).
+    pub switcher: bool,
 }
 
 /// `text` inside a Lua double-quoted string.
@@ -420,25 +480,43 @@ mod tests {
         );
         assert_eq!(strings(&spawn_args(Into::NewWindow, &program))[3], "--new-window");
         assert_eq!(strings(&start_args(&program))[..2], ["start", "--"]);
-        let unknown = default_config(&Look::default());
+        let shim = Path::new("/opt/nt/nativeterm-shim");
+        let unknown = default_config(&Look::default(), shim);
+        assert!(unknown.contains("local shim = \"/opt/nt/nativeterm-shim\"\n"));
+        assert!(unknown.contains("\"--tab-menu\""));
+        assert!(unknown.contains("InputSelector"));
+        assert!(!unknown.contains("ShowTabNavigator"), "Ctrl+Tab stays WezTerm's until asked");
+        assert!(unknown.trim_end().ends_with("return config"));
+        let with_switcher = default_config(&Look { switcher: true, ..Look::default() }, shim);
+        assert!(with_switcher.contains("ShowTabNavigator"));
+        let windows = default_config(&Look::default(), Path::new(r"C:\NT\nativeterm-shim.exe"));
+        assert!(windows.contains(r#"local shim = "C:\\NT\\nativeterm-shim.exe""#), "backslashes escaped for Lua");
         assert!(unknown.contains("wezterm.config_builder()"));
         assert!(unknown.contains("wezterm.gui.get_appearance()"), "no reading: WezTerm asks the desktop");
         assert!(!unknown.contains("config.font ="));
         assert!(!unknown.contains("config.colors"));
-        let read = default_config(&Look {
-            dark: Some(true),
-            accent: Some((0x1f, 0x6e, 0xe7)),
-            font: Some("Noto Mono".into()),
-        });
+        let read = default_config(
+            &Look {
+                dark: Some(true),
+                accent: Some((0x1f, 0x6e, 0xe7)),
+                font: Some("Noto Mono".into()),
+                switcher: false,
+            },
+            shim,
+        );
         assert!(read.contains("config.color_scheme = \"Builtin Tango Dark\"\n"));
         assert!(!read.contains("get_appearance"));
         assert!(read.contains("active_tab = { bg_color = \"#1f6ee7\", fg_color = \"#ffffff\" }"));
         assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Noto Mono\" })\n"));
-        let light = default_config(&Look {
-            dark: Some(false),
-            accent: Some((0xff, 0xc6, 0x00)),
-            font: Some("Odd \"Mono\"".into()),
-        });
+        let light = default_config(
+            &Look {
+                dark: Some(false),
+                accent: Some((0xff, 0xc6, 0x00)),
+                font: Some("Odd \"Mono\"".into()),
+                switcher: false,
+            },
+            shim,
+        );
         assert!(light.contains("\"Builtin Tango Light\""));
         assert!(light.contains("fg_color = \"#000000\""), "black on a light accent");
         assert!(light.contains("font_with_fallback({ \"Odd \\\"Mono\\\"\" })"), "quotes escaped");

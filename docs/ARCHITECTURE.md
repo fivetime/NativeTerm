@@ -4623,6 +4623,26 @@ wherever `Capabilities::type_text` says it can. `cli.rs` is pure and
 tested; `meets_the_contract` runs `contract::exercise` against a live
 WezTerm (`#[ignore]`, `NATIVETERM_TEST_WEZTERM_DIR`).
 
+WezTerm has no tab strip NativeTerm can draw its menu over, and no
+events from its tab bar, so the tab menu there is WezTerm's own picker
+fed by NativeTerm: the written configuration binds a right click in a
+tab (and Ctrl+Shift+M) to a Lua callback that runs the shim's
+`--tab-menu --pane <id>`, which connects to the socket as a `Request`
+helper with the pane id as its terminal session, sends
+`ShimMessage::TabMenu` and prints the `AppMessage::TabMenu` answer one
+item per line (`id<TAB>text`, a heading with id 0); the callback shows
+them in an `InputSelector` (headed by the menu's own header, else the
+session's label) and reports the choice with `--tab-menu <id>`, which
+`ShimMessage::TabAction` carries to the same `Actions::chosen` the
+Windows menu uses. The items are `Actions::entries` for the session's
+tab, the ones that apply, so the two menus never drift; a tab that is
+not NativeTerm's gets no menu (the shim prints nothing), and a right
+click while a program on the other side takes the mouse goes to that
+program, as WezTerm always does. Ctrl+Tab is left to WezTerm unless the
+switcher setting is on, when it shows WezTerm's tab navigator (per
+window, unlike the grid on Windows). Hover cards and the grid itself
+are not there.
+
 ### The iTerm2 backend
 
 `native-term-iterm2` drives iTerm2 through JavaScript for Automation,

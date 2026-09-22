@@ -6,6 +6,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use native_term_platform::{Entry, HoverCard, Icon, MenuProvider as Provider, MenuTab, SwitcherTab, WindowId};
+use native_term_session::protocol::MenuItem;
 
 use crate::actions::{close_set, CloseSet, Closing, SessionCommand};
 use crate::{t, Core, SessionView, Shared, State};
@@ -57,6 +58,50 @@ pub(crate) struct Actions {
     pub(crate) core: Weak<Shared>,
     /// Asks the main window; its dialogs live in the binary.
     pub(crate) ask: Arc<dyn Fn(MenuRequest) + Send + Sync>,
+}
+
+/// The menu's tab for `session`, when it is somewhere in a window.
+fn tab_of(session: &SessionView) -> Option<MenuTab> {
+    let at = session.location.as_ref()?;
+    Some(MenuTab {
+        window: at.window,
+        rect: native_term_platform::Rect::default(),
+        label: session.label.clone(),
+        title: at.title.clone(),
+        mixed: at.mixed,
+        index: at.tab_index,
+    })
+}
+
+/// The menu as a terminal that shows it itself gets it (see the shim's
+/// `--tab-menu`): the items that apply, and a heading (id 0) — the
+/// menu's own header where it has one, else the session's label.
+pub(crate) fn items_for(shared: &Arc<Shared>, session: &str) -> Vec<MenuItem> {
+    let core = Core { shared: Arc::clone(shared) };
+    let Some(view) = core.sessions().into_iter().find(|s| s.id == session) else { return Vec::new() };
+    let Some(tab) = tab_of(&view) else { return Vec::new() };
+    let actions = Actions { core: Arc::downgrade(shared), ask: Arc::new(|_| {}) };
+    let mut items = Vec::new();
+    for entry in actions.entries(&tab) {
+        match entry {
+            Entry::Header(text) => items.push(MenuItem { id: 0, text }),
+            Entry::Action { id, text, enabled: true, .. } => items.push(MenuItem { id, text }),
+            Entry::Action { .. } | Entry::Separator => {}
+        }
+    }
+    if !items.is_empty() && items[0].id != 0 {
+        items.insert(0, MenuItem { id: 0, text: view.label.clone() });
+    }
+    items
+}
+
+/// An item chosen from that menu, for `session`.
+pub(crate) fn choose_for(actions: &Actions, shared: &Arc<Shared>, session: &str, id: u32) {
+    let core = Core { shared: Arc::clone(shared) };
+    let Some(view) = core.sessions().into_iter().find(|s| s.id == session) else { return };
+    if let Some(tab) = tab_of(&view) {
+        actions.chosen(&tab, id);
+    }
 }
 
 /// `web01 (2)` → `web01`, for cloning.

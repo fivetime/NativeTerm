@@ -78,6 +78,23 @@ pub enum ShimMessage {
     /// pastes their names, which the client held back). NativeTerm asks
     /// what to do with them: upload them, or send the text after all.
     Dropped { paths: Vec<String>, text: String },
+    /// From a `Request` helper: what NativeTerm's tab menu offers the
+    /// tab's session (found by `wt_session`), answered by
+    /// `AppMessage::TabMenu`. For terminals whose tab strip NativeTerm
+    /// can't draw over (WezTerm): the terminal's own picker shows the
+    /// items.
+    TabMenu,
+    /// From a `Request` helper: the item chosen from that menu.
+    TabAction { id: u32 },
+}
+
+/// One line of the tab menu, as `AppMessage::TabMenu` lists it: an
+/// item to choose (`id` as `ShimMessage::TabAction` sends it back), or a
+/// heading (`id` 0) naming what the menu is about.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MenuItem {
+    pub id: u32,
+    pub text: String,
 }
 
 /// NativeTerm → shim.
@@ -113,6 +130,11 @@ pub enum AppMessage {
     },
     /// Asks for the tab's console screen (`ShimMessage::Screen`).
     Screen,
+    /// The tab menu `ShimMessage::TabMenu` asked for: what applies now,
+    /// in order, headings included; empty when the tab has no session.
+    TabMenu {
+        items: Vec<MenuItem>,
+    },
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
@@ -154,6 +176,8 @@ mod tests {
             ShimMessage::Specials { names: vec!["brk".into(), "ayt".into()] },
             ShimMessage::Unreachable,
             ShimMessage::PasswordRefused,
+            ShimMessage::TabMenu,
+            ShimMessage::TabAction { id: 4 },
         ];
         for m in messages {
             let line = encode(&m);
@@ -166,6 +190,10 @@ mod tests {
         assert!(matches!(decode::<ShimMessage>(old).unwrap(), ShimMessage::Hello { terminal_window: None, .. }));
         let text = AppMessage::SendText { text: "echo 你好\n😀".into(), enter: true };
         assert_eq!(decode::<AppMessage>(&encode(&text)).unwrap(), text);
+        let menu = AppMessage::TabMenu {
+            items: vec![MenuItem { id: 0, text: "web01".into() }, MenuItem { id: 1, text: "Reconnect".into() }],
+        };
+        assert_eq!(decode::<AppMessage>(&encode(&menu)).unwrap(), menu);
     }
 
     #[test]

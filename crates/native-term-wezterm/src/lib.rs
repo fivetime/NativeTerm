@@ -103,7 +103,7 @@ impl WezTerm {
             return self;
         }
         let path = dir.join("wezterm.lua");
-        if std::fs::create_dir_all(dir).is_err() || !write_if_changed(&path, &cli::default_config(look)) {
+        if std::fs::create_dir_all(dir).is_err() || !write_if_changed(&path, &cli::default_config(look, &self.shim)) {
             return self;
         }
         self.config = Some(path);
@@ -114,7 +114,7 @@ impl WezTerm {
     /// rewrite the configuration, which running WezTerm windows pick up
     /// on their own. Whether there is one to rewrite.
     pub fn set_look(&self, look: &Look) -> bool {
-        self.config.as_deref().is_some_and(|path| write_if_changed(path, &cli::default_config(look)))
+        self.config.as_deref().is_some_and(|path| write_if_changed(path, &cli::default_config(look, &self.shim)))
     }
 
     /// Session tabs look sessions up in `ssh_dir` instead of `~/.ssh`.

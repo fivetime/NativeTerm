@@ -253,7 +253,7 @@ fn setup() -> Result<Start, String> {
                 // the windows look like the desktop from the start; the theme
                 // setting is applied over it once the window is up
                 native_term_os::appearance::refresh();
-                let look = app::terminal_look(None);
+                let look = app::terminal_look(None, false);
                 let mut terminal =
                     native_term_wezterm::WezTerm::new(dir.as_deref(), &shim).with_config_dir(&data_dir, &look);
                 if other_ssh_dir {

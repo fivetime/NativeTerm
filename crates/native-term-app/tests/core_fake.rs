@@ -7,8 +7,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use native_term_app::registry::Registry;
-use native_term_app::{Core, HostRequest, SessionView, State, DETACHED_GRACE};
+use native_term_app::{tab_menu, Core, HostRequest, SessionView, State, DETACHED_GRACE};
 use native_term_platform::{Change, FakeBackend, Target, TerminalBackend};
+use native_term_session::pipe;
+use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 
 const WAIT: Duration = Duration::from_secs(10);
 const HOST: &str = "nativeterm-test.invalid";
@@ -247,4 +249,67 @@ fn sessions_of_the_last_run_are_offered_back() {
     core.forget_lost(true);
     assert!(core.lost_at_start().is_empty());
     assert!(core.sessions().is_empty(), "cleared with the finished ones");
+}
+
+/// A terminal that shows NativeTerm's tab menu itself (WezTerm's picker)
+/// asks over the pipe what is on it, and reports the choice the same
+/// way: the shim's `--tab-menu` helper, as a `Request` connection.
+#[test]
+fn a_terminal_that_shows_the_menu_itself_gets_it_over_the_pipe() {
+    let name = pipe_name();
+    // only the terminal's own shim may speak on the pipe: here, this test
+    let fake = FakeBackend::new(std::env::current_exe().unwrap());
+    let core = Core::start_with_pipe(fake.clone(), None, &name).expect("a pipe of our own");
+    core.start_tab_menu(|_| {}).unwrap();
+    let ids = core.open(&[HostRequest::new(HOST, "menu")], Target::NewWindow);
+    wait_until(&core, &ids, "located", located);
+    // the tab's terminal session id: what the shim in it would report
+    let pane = fake.calls().opened[0].1[0].terminal_session.clone();
+
+    let helper = |request: ShimMessage| {
+        let conn = pipe::connect(&name, Duration::from_secs(2)).expect("the pipe answers");
+        let hello = ShimMessage::Hello {
+            protocol: native_term_session::PROTOCOL_VERSION,
+            role: Role::Request,
+            pid: std::process::id(),
+            wt_session: Some(pane.clone()),
+            session: None,
+            alias: None,
+            terminal_window: None,
+        };
+        conn.send(&hello).unwrap();
+        conn.send(&request).unwrap();
+        conn
+    };
+    let conn = helper(ShimMessage::TabMenu);
+    assert!(matches!(conn.recv::<AppMessage>(Duration::from_secs(2)), Ok(Some(AppMessage::Welcome { .. }))));
+    let Ok(Some(AppMessage::TabMenu { items })) = conn.recv::<AppMessage>(Duration::from_secs(2)) else {
+        panic!("no menu came back");
+    };
+    assert_eq!((items[0].id, items[0].text.as_str()), (0, "menu"), "headed by the session's label: {items:?}");
+    assert!(items.iter().any(|i| i.id == tab_menu::CLOSE), "closing is always offered: {items:?}");
+    assert!(items.iter().all(|i| !i.text.is_empty()));
+
+    // a tab nobody claims gets no menu
+    let conn = pipe::connect(&name, Duration::from_secs(2)).unwrap();
+    conn.send(&ShimMessage::Hello {
+        protocol: native_term_session::PROTOCOL_VERSION,
+        role: Role::Request,
+        pid: std::process::id(),
+        wt_session: Some("no-such-pane".into()),
+        session: None,
+        alias: None,
+        terminal_window: None,
+    })
+    .unwrap();
+    conn.send(&ShimMessage::TabMenu).unwrap();
+    let _ = conn.recv::<AppMessage>(Duration::from_secs(2));
+    assert!(
+        matches!(conn.recv::<AppMessage>(Duration::from_secs(2)), Ok(Some(AppMessage::TabMenu { items })) if items.is_empty())
+    );
+
+    // the choice closes the session, and its tab with it
+    let _conn = helper(ShimMessage::TabAction { id: tab_menu::CLOSE });
+    wait_until(&core, &ids, "closed from the menu", |s| s[0].state == State::Closed);
+    wait_for("its tab is gone", || fake.window_ids().is_empty());
 }

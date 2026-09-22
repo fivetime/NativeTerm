@@ -1775,21 +1775,21 @@ fn watch_appearance(ctx: egui::Context) {
 /// How the terminal's windows should look, where NativeTerm writes their
 /// configuration (WezTerm): what the desktop says, with the theme
 /// setting (`light`/`dark`, or nothing) over it.
-pub fn terminal_look(setting: Option<&str>) -> native_term_wezterm::Look {
+pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezterm::Look {
     let desktop = native_term_os::appearance::cached();
     let dark = match setting {
         Some("light") => Some(false),
         Some("dark") => Some(true),
         _ => desktop.dark,
     };
-    native_term_wezterm::Look { dark, accent: desktop.accent, font: desktop.monospace }
+    native_term_wezterm::Look { dark, accent: desktop.accent, font: desktop.monospace, switcher }
 }
 
-/// The terminal's windows follow the theme too, where NativeTerm writes
-/// their configuration.
+/// The terminal's windows follow the theme and the switcher setting
+/// too, where NativeTerm writes their configuration.
 fn sync_terminal_look(core: &Core) {
     if let Some(wezterm) = core.terminal().as_any().downcast_ref::<native_term_wezterm::WezTerm>() {
-        wezterm.set_look(&terminal_look(core.setting(THEME_SETTING).as_deref()));
+        wezterm.set_look(&terminal_look(core.setting(THEME_SETTING).as_deref(), core.ctrl_tab()));
     }
 }
 
@@ -2110,6 +2110,7 @@ impl crate::window::Ui for App {
                             .changed()
                         {
                             core.set_ctrl_tab(switcher);
+                            sync_terminal_look(core);
                         }
                         let mut ask = self.remembered_drop().is_none();
                         let response = ui.checkbox(&mut ask, t!("drop-ask-setting")).on_hover_text(t!("drop-ask-hint"));
@@ -2229,11 +2230,12 @@ mod tests {
     /// too; without one, the desktop does (whatever it could say).
     #[test]
     fn the_terminal_follows_the_theme_setting() {
-        assert_eq!(terminal_look(Some("light")).dark, Some(false));
-        assert_eq!(terminal_look(Some("dark")).dark, Some(true));
+        assert_eq!(terminal_look(Some("light"), false).dark, Some(false));
+        assert_eq!(terminal_look(Some("dark"), false).dark, Some(true));
         let desktop = native_term_os::appearance::cached();
-        assert_eq!(terminal_look(None).dark, desktop.dark);
-        assert_eq!(terminal_look(Some("")).dark, desktop.dark);
-        assert_eq!(terminal_look(None).font, desktop.monospace);
+        assert_eq!(terminal_look(None, false).dark, desktop.dark);
+        assert_eq!(terminal_look(Some(""), false).dark, desktop.dark);
+        assert_eq!(terminal_look(None, false).font, desktop.monospace);
+        assert!(terminal_look(None, true).switcher);
     }
 }

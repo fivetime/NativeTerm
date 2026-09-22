@@ -24,6 +24,7 @@ mod i18n;
 mod keys;
 mod link;
 mod look;
+mod menu;
 mod persistent;
 #[cfg(windows)]
 mod plink;
@@ -103,6 +104,7 @@ fn main() {
         // rz / sz: stdin and stdout are the session's data
         Mode::Zmodem { mode, escape, files } => std::process::exit(zmodem::run(&mode, escape, files)),
         Mode::Drop { paths } => std::process::exit(drop::run(&paths)),
+        Mode::TabMenu { id, pane } => std::process::exit(menu::run(id, pane)),
         Mode::CreateKey { path } => {
             let code = keys::create(&path);
             wait_for_any_key();
