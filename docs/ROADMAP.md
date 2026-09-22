@@ -890,7 +890,9 @@
         code points on Windows (unchanged, pixel for pixel), Phosphor
         bundled elsewhere (`egui-phosphor` 0.12 for egui 0.34)
         (2026-09-22)
-  - [ ] P2c — portable-check script in the checklist
+  - [x] P2c — `tools\check-portable.ps1`: clippy for the portable crates
+        on the Linux and macOS targets from this machine (no linking, so
+        no cross toolchain), in the checklist (2026-09-22)
   - [x] P3a — the session channel on Unix (`native-term-session::pipe`
         split into `windows`/`unix` behind one API): a socket under
         `$XDG_RUNTIME_DIR`, one instance by connecting first, peer

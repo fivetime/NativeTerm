@@ -4501,6 +4501,14 @@ Terminal's `TabMenu` implements `OverlayMenu`; a backend that can't draw
 one returns `Ok(None)` from `start_overlay_menu` and the menu accessors on
 `Core` quietly report "no menu".
 
+`tools\check-portable.ps1` runs clippy (tests and examples included,
+warnings as errors) for every portable crate on the
+`x86_64-unknown-linux-gnu` and `aarch64-apple-darwin` targets from a
+Windows machine; nothing is linked, so no cross toolchain is needed, and
+SQLite's build script is told not to look for the library. Code behind a
+`cfg` that has no Unix side, or a Unix side that stopped compiling, shows
+up there before a Linux or macOS machine ever sees it.
+
 Two things test the contract. `native_term_platform::contract::exercise`
 drives any backend through it against a live terminal: a new window with
 two tabs, claimed, the second selected, both closed, the window gone, a
