@@ -470,8 +470,14 @@ impl Core {
     /// background threads. Fails with `AddrInUse` if another NativeTerm is
     /// running.
     pub fn start(terminal: impl TerminalBackend, registry: Option<Registry>) -> io::Result<Core> {
+        Core::start_with_pipe(terminal, registry, &pipe::pipe_name()?)
+    }
+
+    /// `start`, serving `pipe` instead of the one the shims look for: a
+    /// test's own NativeTerm beside the real one.
+    pub fn start_with_pipe(terminal: impl TerminalBackend, registry: Option<Registry>, pipe: &str) -> io::Result<Core> {
         let terminal: Arc<dyn TerminalBackend> = Arc::new(terminal);
-        let listener = PipeListener::bind(&pipe::pipe_name()?)?;
+        let listener = PipeListener::bind(pipe)?;
         let (wake, woken) = mpsc::channel();
         let (placeholders, queued) = mpsc::channel();
         let (to_connect, connect_ids) = mpsc::channel();

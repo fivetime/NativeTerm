@@ -177,6 +177,21 @@ pub fn carry(prev: &[(String, Option<Claim>)], cur: &[String]) -> Vec<Option<Cla
 mod tests {
     use super::*;
 
+    #[test]
+    fn tabs_without_rectangles_are_claimed_too() {
+        let mut c = Claimer::new();
+        let tabs = WindowTabs {
+            names: vec!["pwsh".into(), "web01".into()],
+            rects: vec![None, None],
+            selected: Some(1),
+            panes: Vec::new(),
+        };
+        let v = c.claim(WindowId(1), &tabs, &["web01".to_string()].into_iter().collect());
+        assert_eq!(v[1].claim.as_ref().map(|c| c.label.as_str()), Some("web01"));
+        assert!(v.iter().all(|t| t.rect.is_none()));
+        assert!(v[1].selected);
+    }
+
     fn labels(list: &[&str]) -> HashSet<String> {
         list.iter().map(|s| s.to_string()).collect()
     }

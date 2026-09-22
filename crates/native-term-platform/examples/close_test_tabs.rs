@@ -3,13 +3,19 @@
 //! Only run it while NativeTerm itself isn't running.
 //!
 //! `cargo run -p native-term-platform --example close_test_tabs [seconds]`
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 use native_term_session::pipe::{self, PipeListener};
 use native_term_session::protocol::{AppMessage, ShimMessage};
 
+#[cfg(not(windows))]
+fn main() {}
+
+#[cfg(windows)]
 fn main() {
     let seconds: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(10);
     let mut listener = PipeListener::bind(&pipe::pipe_name().unwrap()).expect("is NativeTerm running?");

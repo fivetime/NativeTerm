@@ -1,4 +1,3 @@
-#![cfg(windows)]
 //! Test driver: one NativeTerm core run against a portable Terminal, with
 //! a `state.db`, doing one thing and printing the sessions. Several runs in
 //! a row are NativeTerm restarts (see `tests/restore_portable.rs`).
@@ -11,13 +10,16 @@
 //!   exit-closing                    exit like NativeTerm with "close
 //!                                   tabs on exit" (on by default)
 //!   restore-terminal                start the Terminal without arguments
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use native_term_app::registry::Registry;
 use native_term_app::{Core, HostRequest, SessionView, State};
+#[cfg(windows)]
 use native_term_platform::windows_terminal::install::Install;
+#[cfg(windows)]
 use native_term_platform::windows_terminal::{launch, WindowsTerminal};
 use native_term_platform::Target;
 
@@ -53,6 +55,10 @@ fn print(core: &Core) {
     }
 }
 
+#[cfg(not(windows))]
+fn main() {}
+
+#[cfg(windows)]
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     let mut take = |flag: &str| {

@@ -4480,6 +4480,21 @@ Terminal's `TabMenu` implements `OverlayMenu`; a backend that can't draw
 one returns `Ok(None)` from `start_overlay_menu` and the menu accessors on
 `Core` quietly report "no menu".
 
+Two things test the contract. `native_term_platform::contract::exercise`
+drives any backend through it against a live terminal: a new window with
+two tabs, claimed, the second selected, both closed, the window gone, a
+tool tab with its title (each backend crate runs it as an `#[ignore]`
+test on a machine with that terminal). `native_term_platform::FakeBackend`
+is a terminal in memory: tabs titled with their labels, claimed through
+the real `Claimer` with no rectangles, and a test's hand on the rest (the
+foreground window, the user's own tabs, tabs that never appear, change
+notifications). `tests/core_fake.rs` runs `Core` against it — opening,
+locating, the batch's first tab selected, focus, close, the resend of a
+lost tab into the window the first try made, rescans on notifications,
+the active session following the foreground, sessions of the last run
+offered back — on any platform, beside a running NativeTerm
+(`Core::start_with_pipe` serves a pipe of the test's own).
+
 What stays outside the contract, by design: finding the terminal
 (`Install`, `Version`, `Kind`), the elevation mismatch check, the fragment
 profile and `disabledProfileSources`, `wt` command lines, UIA, the
@@ -4492,7 +4507,7 @@ The plan (2026-09-22) is staged so Windows behaves the same after every
 step: dependencies gated so the portable crates build on Linux and macOS
 targets (done); the trait above with `Core` on dynamic dispatch (done);
 a `WindowId` newtype in place of the raw `HWND` (done); a `FakeBackend` so
-`Core` is tested without a terminal on any platform; a `native-term-os`
+`Core` is tested without a terminal on any platform (done); a `native-term-os`
 facade for the one-line OS helpers (local time, process identity, the
 shell, credentials, folder watching) with `cfg` splits in the binaries;
 the session pipe and the shim on Unix (`AF_UNIX`, `SO_PEERCRED` /

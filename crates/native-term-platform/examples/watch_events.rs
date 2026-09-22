@@ -1,14 +1,21 @@
 //! Print Terminal change notifications for a while (diagnostics).
 //!
 //! `cargo run -p native-term-platform --example watch_events -- <terminal-dir> <seconds>`
+#![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 use native_term_platform::windows_terminal::events::{Change, Watcher};
+#[cfg(windows)]
 use native_term_platform::windows_terminal::install::Install;
 
+#[cfg(not(windows))]
+fn main() {}
+
+#[cfg(windows)]
 fn main() {
     let mut args = std::env::args().skip(1);
     let install = Install::from_dir(args.next().expect("terminal dir").as_ref()).unwrap();

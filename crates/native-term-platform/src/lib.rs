@@ -4,6 +4,8 @@
 
 pub mod backend;
 pub mod claim;
+pub mod contract;
+pub mod fake;
 pub mod overlay;
 #[cfg(windows)]
 pub mod windows_terminal;
@@ -47,6 +49,7 @@ impl std::fmt::Display for WindowId {
 }
 
 pub use backend::{Capabilities, Change, ChangeCounts, Image, Notify, OpenReport, Subscription, TerminalBackend};
+pub use fake::FakeBackend;
 pub use overlay::{Entry, HoverCard, MenuProvider, MenuTab, OverlayMenu, SwitcherTab};
 
 /// One tab to open.
