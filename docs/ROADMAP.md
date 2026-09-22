@@ -78,8 +78,18 @@
       `--suppressApplicationTitle` on the `wt` command line has no effect
       on 1.26; elevated NativeTerm lands in the elevated Terminal
       instance
-- [ ] Re-check the command-line suppression flag on the Store build
-      (1.24) and on newer releases; report upstream if still broken
+- [x] Re-check the command-line suppression flag on newer releases:
+      still broken on 1.26.2609.15001 (2026-09-22). Two tabs opened side
+      by side, `wt new-tab --title FLAG-ON --suppressApplicationTitle
+      cmd /c "title SET-BY-PROGRAM & timeout 30"` and the same without
+      the flag: both tabs ended up called SET-BY-PROGRAM, so the flag on
+      the command line does nothing and the title has to come from the
+      profile (which is what NativeTerm does). Upstream already has it —
+      microsoft/terminal #15732 (the same `wt --suppressApplicationTitle
+      --title …` case) and #19493 (October 2025, still open) — so there
+      is nothing to report that isn't there. The Store build was not
+      tested: the only Store Terminal on this machine is the one the
+      author works in
 - [x] `native-term-config` (first part): parse `~/.ssh/config` +
       `Include`-d files into a folder/host tree (sessions vs. shared
       settings, `Match` skipped); `NativeTerm*` keys and folder defaults;
