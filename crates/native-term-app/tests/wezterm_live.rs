@@ -103,9 +103,22 @@ fn local_ssh_dir() -> PathBuf {
     dir
 }
 
+/// `wezterm <args>`, as the backend runs it: with the Wayland display,
+/// and without it when that finds no GUI (the backend moves to X11 on a
+/// compositor WezTerm can't talk to, and the cli follows the display it
+/// is given).
+fn wezterm(args: &[std::ffi::OsString]) -> std::process::Output {
+    let out = std::process::Command::new("wezterm").args(args).output().unwrap();
+    let listing = args.iter().any(|a| a == "list");
+    if out.status.success() && !(listing && out.stdout.is_empty()) {
+        return out;
+    }
+    std::process::Command::new("wezterm").args(args).env_remove("WAYLAND_DISPLAY").output().unwrap()
+}
+
 /// The pane of the tab at `index` in `window`, straight from wezterm.
 fn pane_of(window: WindowId, index: usize) -> u64 {
-    let out = std::process::Command::new("wezterm").args(cli::list_args()).output().unwrap();
+    let out = wezterm(&cli::list_args());
     let windows = cli::parse_list(&String::from_utf8_lossy(&out.stdout)).unwrap();
     let w = windows.iter().find(|w| w.window_id == window.0).expect("the window is listed");
     w.tabs[index].active_pane().expect("a pane")
@@ -153,8 +166,8 @@ fn login_type_reconnect_and_close_from_the_terminal() {
     // the user closes the tab in wezterm: the shim gets SIGHUP and says so
     let index = core.sessions().into_iter().find(|s| s.id == ids[0]).unwrap().location.unwrap().tab_index;
     let pane = pane_of(window, index);
-    let killed = std::process::Command::new("wezterm").args(cli::kill_pane_args(pane)).status().unwrap();
-    assert!(killed.success());
+    let killed = wezterm(&cli::kill_pane_args(pane));
+    assert!(killed.status.success());
     wait_until(&core, &ids, "closed with its tab", |s| s[0].state == State::Closed);
     let started = Instant::now();
     while core.terminal().window_ids().contains(&window) {

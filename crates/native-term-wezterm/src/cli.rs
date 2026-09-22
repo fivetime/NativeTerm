@@ -295,6 +295,34 @@ pub fn user_config_exists() -> bool {
         || config_home.is_some_and(|c| c.join("wezterm").join("wezterm.lua").is_file())
 }
 
+/// Remove the discovery socket a GUI with `pid` left behind (it names
+/// them `gui-sock-<pid>` in its runtime folder): the cli tries every
+/// socket it finds, and a dead one answers for nobody.
+pub fn forget_gui_socket(pid: u32) {
+    let name = format!("gui-sock-{pid}");
+    let mut dirs = Vec::new();
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR").filter(|d| !d.is_empty()) {
+        dirs.push(std::path::PathBuf::from(runtime).join("wezterm"));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(std::path::PathBuf::from(home).join(".local").join("share").join("wezterm"));
+    }
+    for dir in dirs {
+        let _ = std::fs::remove_file(dir.join(&name));
+        // the per-display links (`wayland-<display>-<class>`,
+        // `x11-<display>-<class>`) the cli follows first: gone too when
+        // they point at the dead socket
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let dead = std::fs::read_link(&path).is_ok_and(|t| t.file_name().is_some_and(|f| f == name.as_str()));
+            if dead {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+}
+
 /// The configuration NativeTerm's WezTerm windows use when the person has
 /// none: the desktop's light or dark, no questions when a tab is closed
 /// from outside, the tab bar always there.

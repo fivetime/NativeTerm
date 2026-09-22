@@ -378,6 +378,13 @@ fn install_for_wezterm(settings: &settings::Settings, notices: &mut Vec<String>)
 }
 
 fn main() {
+    // Pantheon's Wayland (gala, elementary OS 8) shows no window of ours
+    // and ends WezTerm's 2024 release at once; both work through
+    // Xwayland, which is what removing the Wayland display picks
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if std::env::var_os("XDG_CURRENT_DESKTOP").is_some_and(|d| d.to_string_lossy().contains("Pantheon")) {
+        std::env::remove_var("WAYLAND_DISPLAY");
+    }
     let setup = match setup() {
         Ok(Start::AlreadyRunning { quiet }) => {
             if !quiet {

@@ -1048,6 +1048,24 @@
         (`gnome-screenshot` no longer can on GNOME 50; the portal wants a
         click), and `fc-match monospace` names a font without a spacing
         value, so WezTerm's own font is used
+  - [x] elementary OS 8 (2026-09-23: Pantheon's gala on Wayland, Ubuntu
+        24.04 base; its Ubuntu sources named the suite `circe` and had to
+        be pointed at `noble` before anything could be installed): gala's
+        Wayland shows no window of ours and ends WezTerm's 2024 release
+        at once ("Error while flushing display: Broken pipe"), after it
+        has listed its window; both work through Xwayland. So the program
+        drops the Wayland display on Pantheon before anything starts,
+        and the WezTerm backend, on any desktop, gives a GUI it started
+        on Wayland 1.5 s to die before its window counts and then runs it
+        without the Wayland display for good, removing the dead GUI's
+        discovery socket and the per-display links that point at it
+        (the cli follows those first). Both live tests pass there with
+        the Wayland display set (the fallback) and without it (the app's
+        path), and still on Deepin, Zorin and Fedora. The Pantheon portal
+        gives the accent (`#3689e6`); no zenity or kdialog there, so an
+        rz upload would open the files window. Not driven by hand:
+        xdotool's clicks do not reach windows under Xwayland on these
+        mutter-based desktops
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

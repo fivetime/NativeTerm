@@ -4646,7 +4646,12 @@ of their own, which is left alone. The environment, not `--config-file`: a
 GUI started with the flag publishes no discovery socket, and no
 `wezterm cli` finds it. A GUI killed outright can leave a stale
 discovery socket behind that answers for nobody; WezTerm's own clean
-exit removes it: on Unix the shim shares the terminal with ssh
+exit removes it. A GUI started on Wayland that dies within 1.5 s of
+listing its window (Pantheon's gala with the 2024 release) is started
+again without the Wayland display, for good, after its socket and the
+per-display links pointing at it are removed; on Pantheon the program
+itself drops the Wayland display before anything starts, since gala
+shows no window of its own either: on Unix the shim shares the terminal with ssh
 and can't type into it, so `Core::send_text` goes through the backend
 wherever `Capabilities::type_text` says it can. `cli.rs` is pure and
 tested; `meets_the_contract` runs `contract::exercise` against a live

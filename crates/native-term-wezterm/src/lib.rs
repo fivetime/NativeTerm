@@ -38,6 +38,9 @@ use cli::{Into, ListedWindow};
 const NEW_WINDOW_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the GUI may take to start and answer the CLI.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
+/// How long a GUI just started on Wayland gets to die before its window
+/// counts (see `gui_died_on_wayland`).
+const GUI_GRACE: Duration = Duration::from_millis(1500);
 /// How often a subscription looks for changes.
 const POLL: Duration = Duration::from_secs(1);
 
@@ -50,6 +53,9 @@ struct State {
     /// The tab each window shows, as last seen focused or selected here
     /// (and when it was selected here).
     selected: HashMap<u64, Chosen>,
+    /// The GUI died on Wayland before it had a window (a compositor this
+    /// WezTerm can't talk to): it runs through X11 from now on.
+    x11_only: bool,
 }
 
 /// A tab NativeTerm selected in a window, and when.
@@ -148,7 +154,37 @@ impl WezTerm {
         if let Some(config) = &self.config {
             command.env("WEZTERM_CONFIG_FILE", config);
         }
+        if lock(&self.state).x11_only {
+            command.env_remove("WAYLAND_DISPLAY");
+        }
         command
+    }
+
+    /// A GUI this started, gone while a Wayland display was set: a
+    /// compositor this WezTerm can't talk to (Pantheon's gala with the
+    /// 2024 release dies at once, after listing its window). X11 through
+    /// Xwayland works there, so from now on the GUI runs without the
+    /// Wayland display; the dead GUI's discovery socket, which the cli
+    /// would try first, is removed. Whether that is what happened.
+    fn gui_died_on_wayland(&self, child: &mut std::process::Child) -> bool {
+        let died = child.try_wait().ok().flatten().is_some();
+        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|d| !d.is_empty());
+        if !(died && wayland) || lock(&self.state).x11_only {
+            return false;
+        }
+        cli::forget_gui_socket(child.id());
+        lock(&self.state).x11_only = true;
+        true
+    }
+
+    /// Start the GUI with `program` in its first window.
+    fn start_gui(&self, program: &[OsString]) -> io::Result<std::process::Child> {
+        self.command(&self.gui)
+            .args(cli::start_args(program))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
     }
 
     /// Run `wezterm <args>`; its stdout, or what it said on stderr.
@@ -247,26 +283,48 @@ impl WezTerm {
     /// runs, else the GUI started with it; the window's id once it lists.
     fn new_window(&self, program: &[OsString], before: &[ListedWindow]) -> io::Result<u64> {
         let known: HashSet<u64> = before.iter().map(|w| w.window_id).collect();
-        let (pane, timeout) = if before.is_empty() && self.run(&cli::list_args()).is_err() {
-            self.command(&self.gui)
-                .args(cli::start_args(program))
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?;
-            (None, START_TIMEOUT)
+        let (pane, timeout, mut gui) = if before.is_empty() && self.run(&cli::list_args()).is_err() {
+            (None, START_TIMEOUT, Some(self.start_gui(program)?))
         } else {
             let out = self.run(&cli::spawn_args(Into::NewWindow, program))?;
-            (cli::parse_spawned(&out), NEW_WINDOW_TIMEOUT)
+            (cli::parse_spawned(&out), NEW_WINDOW_TIMEOUT, None)
         };
-        let started = Instant::now();
+        let mut started = Instant::now();
         loop {
+            // the GUI gone before its window came: on a Wayland compositor
+            // this WezTerm can't talk to (Pantheon's gala with the 2024
+            // release) it dies at once; X11 through Xwayland works there,
+            // so it is started once more without Wayland, for good
+            if let Some(child) = gui.as_mut() {
+                if self.gui_died_on_wayland(child) {
+                    gui = Some(self.start_gui(program)?);
+                    started = Instant::now();
+                    continue;
+                }
+            }
             let windows = self.list();
             let found = windows.iter().find(|w| match pane {
                 Some(pane) => w.tabs.iter().any(|t| t.panes.iter().any(|p| p.pane_id == pane)),
                 None => !known.contains(&w.window_id),
             });
             if let Some(w) = found {
+                // a GUI just started on Wayland lists its window and only
+                // then dies on a compositor it can't talk to: give it a
+                // moment before its window counts
+                if let Some(child) = gui.as_mut().filter(|_| !lock(&self.state).x11_only) {
+                    let grace = Instant::now() + GUI_GRACE;
+                    while Instant::now() < grace {
+                        if self.gui_died_on_wayland(child) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    if lock(&self.state).x11_only {
+                        gui = Some(self.start_gui(program)?);
+                        started = Instant::now();
+                        continue;
+                    }
+                }
                 if let Some(pane) = w.tabs.first().and_then(|t| t.active_pane()) {
                     self.note_shown(w.window_id, pane);
                 }
