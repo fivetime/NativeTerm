@@ -4611,6 +4611,20 @@ control iTerm2 (Automation permission), which macOS remembers per app
 bundle — a packaging constraint. `jxa.rs` is pure and tested;
 `meets_the_contract` runs the backend contract on a Mac (`#[ignore]`).
 
+### What the Linux machine showed
+
+The first run on a Linux desktop (Deepin 25, X11) took the whole chain
+through: the Unix socket and its tests, `core_fake`, the WezTerm
+contract, and `tests/wezterm_live.rs` — `Core` with the WezTerm backend
+and real shims, which say hello over the socket from WezTerm tabs, run
+ssh, report the failed login, are located, focused, read back through
+`get-text` and closed, the window going with them. Two things about
+WezTerm were only learnt there: `list`'s `is_active` is per pane (every
+single-pane tab is active), so which tab a window shows comes from
+`list-clients`' focused pane and is remembered per window; and a GUI
+started by the program must have its stdout and stderr detached, or it
+holds the parent's pipes open.
+
 ### Where the other platforms are going
 
 The plan (2026-09-22) is staged so Windows behaves the same after every

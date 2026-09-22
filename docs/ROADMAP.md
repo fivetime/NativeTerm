@@ -934,6 +934,26 @@
         (`#[ignore]`) waits for the Mac, where the first run asks for
         Automation permission (2026-09-22)
 
+- [x] First Linux run (Deepin 25, X11, WezTerm 20240203, 2026-09-22):
+      the Unix socket, `native-term-os`, the shim's tests, `core_fake`
+      (8/8), the WezTerm contract and `tests/wezterm_live.rs` (Core +
+      real shims over the socket + WezTerm: open, hello, ssh fails,
+      located, focus, screen read, close, window gone — 1.2 s) all pass;
+      the window itself runs (CJK text, Phosphor icons, the wizard, the
+      tree; a host double-clicked opens in WezTerm and its shim reports
+      the failed login and offers R/C). Follow-ups seen there:
+  - [ ] The wizard and the profile page speak of Windows Terminal on
+        every platform; they should name the terminal being driven (a
+        `TerminalBackend::name`) and skip the profile step where there
+        is no profile
+  - [ ] The floating button's fallback line prints a stale OS error off
+        Windows ("Invalid argument"); say only that it is square there
+  - [ ] WezTerm shows its own default look; a `wezterm.lua` NativeTerm
+        writes (or a `--config-file`) could follow the desktop's theme,
+        font and tab bar
+  - [ ] `rustup component add … -q` is not an option; the box's
+        toolchain got its components from `rust-toolchain.toml` anyway
+
 ## Explicitly not planned
 - Self-rendered terminal emulation of any kind
 - A bundled SSH implementation (always the system's own `ssh`; auth, keys,
