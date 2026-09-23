@@ -81,18 +81,50 @@ pub(crate) fn items_for(shared: &Arc<Shared>, session: &str) -> Vec<MenuItem> {
     let Some(view) = core.sessions().into_iter().find(|s| s.id == session) else { return Vec::new() };
     let Some(tab) = tab_of(&view) else { return Vec::new() };
     let actions = Actions { core: Arc::downgrade(shared), ask: Arc::new(|_| {}) };
-    let mut items = Vec::new();
+    let mut items: Vec<MenuItem> = Vec::new();
     for entry in actions.entries(&tab) {
         match entry {
-            Entry::Header(text) => items.push(MenuItem { id: 0, text }),
-            Entry::Action { id, text, enabled: true, .. } => items.push(MenuItem { id, text }),
-            Entry::Action { .. } | Entry::Separator => {}
+            Entry::Header(text) => items.push(MenuItem::new(0, text)),
+            Entry::Action { id, icon, text, enabled } => {
+                items.push(MenuItem { enabled, icon: Some(nerd_icon(icon).to_string()), ..MenuItem::new(id, text) })
+            }
+            // one between items, never first or last
+            Entry::Separator => {
+                if items.last().is_some_and(|i| !i.separator && i.id != 0) {
+                    items.push(MenuItem::separator());
+                }
+            }
         }
     }
+    while items.last().is_some_and(|i| i.separator) {
+        items.pop();
+    }
     if !items.is_empty() && items[0].id != 0 {
-        items.insert(0, MenuItem { id: 0, text: view.label.clone() });
+        items.insert(0, MenuItem::new(0, view.label.clone()));
     }
     items
+}
+
+/// The nerdfont (codicon) a terminal that draws the menu itself shows
+/// for `icon` — WezTerm carries these.
+fn nerd_icon(icon: Icon) -> &'static str {
+    match icon {
+        Icon::Refresh => "cod_refresh",
+        Icon::Disconnect => "cod_debug_disconnect",
+        Icon::Break => "cod_debug_pause",
+        Icon::Clone => "cod_copy",
+        Icon::Rename => "cod_edit",
+        Icon::Send => "cod_send",
+        Icon::ClearScreen => "cod_clear_all",
+        Icon::Lock => "cod_lock",
+        Icon::Unlock => "cod_unlock",
+        Icon::Folder => "cod_folder_opened",
+        Icon::Clear => "cod_close",
+        Icon::CloseOthers => "cod_close_all",
+        Icon::CloseRight => "cod_arrow_right",
+        Icon::CloseEnded => "cod_circle_slash",
+        _ => "cod_circle_small",
+    }
 }
 
 /// An item chosen from that menu, for `session`.

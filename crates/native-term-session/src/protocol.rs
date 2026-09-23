@@ -89,12 +89,36 @@ pub enum ShimMessage {
 }
 
 /// One line of the tab menu, as `AppMessage::TabMenu` lists it: an
-/// item to choose (`id` as `ShimMessage::TabAction` sends it back), or a
-/// heading (`id` 0) naming what the menu is about.
+/// item to choose (`id` as `ShimMessage::TabAction` sends it back), a
+/// heading (`id` 0) naming what the menu is about, or a separator. The
+/// fields after `text` are newer; missing, an item is enabled and plain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MenuItem {
     pub id: u32,
     pub text: String,
+    /// Shown, dimmed, but not chosen when false.
+    #[serde(default = "enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub separator: bool,
+    /// Its icon, as a nerdfont name (what WezTerm draws icons with).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+fn enabled() -> bool {
+    true
+}
+
+impl MenuItem {
+    /// An enabled item (or, with `id` 0, the heading) without an icon.
+    pub fn new(id: u32, text: impl Into<String>) -> MenuItem {
+        MenuItem { id, text: text.into(), enabled: true, separator: false, icon: None }
+    }
+
+    pub fn separator() -> MenuItem {
+        MenuItem { separator: true, ..MenuItem::new(0, "") }
+    }
 }
 
 /// NativeTerm → shim.
@@ -191,9 +215,20 @@ mod tests {
         let text = AppMessage::SendText { text: "echo 你好\n😀".into(), enter: true };
         assert_eq!(decode::<AppMessage>(&encode(&text)).unwrap(), text);
         let menu = AppMessage::TabMenu {
-            items: vec![MenuItem { id: 0, text: "web01".into() }, MenuItem { id: 1, text: "Reconnect".into() }],
+            items: vec![
+                MenuItem::new(0, "web01"),
+                MenuItem { icon: Some("cod_refresh".into()), ..MenuItem::new(1, "Reconnect") },
+                MenuItem::separator(),
+                MenuItem { enabled: false, ..MenuItem::new(2, "Disconnect") },
+            ],
         };
         assert_eq!(decode::<AppMessage>(&encode(&menu)).unwrap(), menu);
+        // an older NativeTerm sends id and text only
+        let old = r#"{"type":"tab_menu","items":[{"id":1,"text":"Reconnect"}]}"#;
+        assert_eq!(
+            decode::<AppMessage>(old).unwrap(),
+            AppMessage::TabMenu { items: vec![MenuItem::new(1, "Reconnect")] }
+        );
     }
 
     #[test]

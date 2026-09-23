@@ -435,44 +435,66 @@ config.colors = {
 }
 -- in points, so a Retina screen gets as much room as any other
 config.window_padding = { left = "6pt", right = "6pt", top = "3pt", bottom = "3pt" }
+-- the tab menu (and the command palette) in the same light or dark
+config.command_palette_bg_color = dark and "#2C2C2C" or "#F9F9F9"
+config.command_palette_fg_color = dark and "#FFFFFF" or "#1A1A1A"
 "##;
 
-/// NativeTerm's tab menu, through WezTerm's own picker: a right click in
-/// a tab (or Ctrl+Shift+M) runs the shim's `--tab-menu` for the pane,
-/// which prints what applies to its session; the choice goes back the
-/// same way. A tab that is not NativeTerm's gets no menu (the shim
-/// prints nothing), and a right click while a program on the other side
-/// takes the mouse goes to that program, as WezTerm always does.
+/// NativeTerm's tab menu: a right click in a tab (or Ctrl+Shift+M) runs
+/// the shim's `--tab-menu` for the pane, which prints what applies to its
+/// session; the choice goes back the same way. NativeTerm's WezTerm
+/// (github.com/fivetime/wezterm) pops it up where the mouse is
+/// (`PopupMenu`: the heading, separators, dimmed items, icons); another
+/// WezTerm lists the items that can be chosen in its picker, in the pane.
+/// A tab that is not NativeTerm's gets no menu (the shim prints nothing),
+/// and a right click while a program on the other side takes the mouse
+/// goes to that program, as WezTerm always does.
 const MENU_LUA: &str = r#"-- NativeTerm's tab menu: right-click in a tab, or Ctrl+Shift+M
 local shim = "__SHIM__"
+local popup = wezterm.has_action ~= nil and wezterm.has_action("PopupMenu")
 local function tab_menu(window, pane)
   local ok, out = wezterm.run_child_process({ shim, "--tab-menu", "--pane", tostring(pane:pane_id()) })
   if not ok then
     return
   end
-  local title, choices = "NativeTerm", {}
+  -- id, text, flags ("d": disabled), icon; "-" for a separator
+  local title, lines = "NativeTerm", {}
   for line in out:gmatch("[^\r\n]+") do
-    local id, text = line:match("^(%d+)\t(.*)$")
-    if id == "0" then
-      title = text
-    elseif id then
-      table.insert(choices, { id = id, label = text })
+    if line == "-" then
+      table.insert(lines, { separator = true })
+    else
+      local id, text, flags, icon = line:match("^(%d+)\t([^\t]*)\t?([^\t]*)\t?(.*)$")
+      if id == "0" then
+        title = text
+      elseif id then
+        table.insert(lines, { id = id, label = text, enabled = flags ~= "d", icon = icon ~= "" and icon or nil })
+      end
+    end
+  end
+  if #lines == 0 then
+    return
+  end
+  local chosen = wezterm.action_callback(function(_, chosen_pane, id)
+    if id then
+      wezterm.run_child_process({ shim, "--tab-menu", id, "--pane", tostring(chosen_pane:pane_id()) })
+    end
+  end)
+  if popup then
+    table.insert(lines, 1, { label = title, header = true })
+    window:perform_action(wezterm.action.PopupMenu({ choices = lines, action = chosen }), pane)
+    return
+  end
+  local choices = {}
+  for _, item in ipairs(lines) do
+    if item.id and item.enabled then
+      table.insert(choices, { id = item.id, label = item.label })
     end
   end
   if #choices == 0 then
     return
   end
   window:perform_action(
-    wezterm.action.InputSelector({
-      title = title,
-      choices = choices,
-      fuzzy = false,
-      action = wezterm.action_callback(function(_, chosen_pane, id)
-        if id then
-          wezterm.run_child_process({ shim, "--tab-menu", id, "--pane", tostring(chosen_pane:pane_id()) })
-        end
-      end),
-    }),
+    wezterm.action.InputSelector({ title = title, choices = choices, fuzzy = false, action = chosen }),
     pane
   )
 end
@@ -604,7 +626,10 @@ mod tests {
         let unknown = default_config(&Look::default(), shim);
         assert!(unknown.contains("local shim = \"/opt/nt/nativeterm-shim\"\n"));
         assert!(unknown.contains("\"--tab-menu\""));
-        assert!(unknown.contains("InputSelector"));
+        assert!(unknown.contains("InputSelector"), "a stock WezTerm's picker");
+        assert!(unknown.contains("wezterm.has_action(\"PopupMenu\")"), "NativeTerm's WezTerm pops the menu up");
+        assert!(unknown.contains("wezterm.action.PopupMenu({ choices = lines, action = chosen })"));
+        assert!(unknown.contains("config.command_palette_bg_color = dark and"));
         assert!(!unknown.contains("ShowTabNavigator"), "Ctrl+Tab stays WezTerm's until asked");
         assert!(unknown.trim_end().ends_with("return config"));
         let with_switcher = default_config(&Look { switcher: true, ..Look::default() }, shim);

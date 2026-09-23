@@ -288,7 +288,11 @@ fn a_terminal_that_shows_the_menu_itself_gets_it_over_the_pipe() {
     };
     assert_eq!((items[0].id, items[0].text.as_str()), (0, "menu"), "headed by the session's label: {items:?}");
     assert!(items.iter().any(|i| i.id == tab_menu::CLOSE), "closing is always offered: {items:?}");
-    assert!(items.iter().all(|i| !i.text.is_empty()));
+    assert!(items.iter().all(|i| i.separator || !i.text.is_empty()));
+    // icons for WezTerm to draw, separators only between items
+    assert!(items.iter().filter(|i| i.id != 0 && !i.separator).all(|i| i.icon.is_some()), "{items:?}");
+    assert!(!items.last().unwrap().separator && !items[1].separator, "{items:?}");
+    assert!(items.windows(2).all(|w| !(w[0].separator && w[1].separator)), "{items:?}");
 
     // a tab nobody claims gets no menu
     let conn = pipe::connect(&name, Duration::from_secs(2)).unwrap();

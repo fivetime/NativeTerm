@@ -4683,15 +4683,23 @@ tested; `meets_the_contract` runs `contract::exercise` against a live
 WezTerm (`#[ignore]`, `NATIVETERM_TEST_WEZTERM_DIR`).
 
 WezTerm has no tab strip NativeTerm can draw its menu over, and no
-events from its tab bar, so the tab menu there is WezTerm's own picker
-fed by NativeTerm: the written configuration binds a right click in a
+events from its tab bar, so the tab menu there is drawn by WezTerm, fed
+by NativeTerm: the written configuration binds a right click in a
 tab (and Ctrl+Shift+M) to a Lua callback that runs the shim's
 `--tab-menu --pane <id>`, which connects to the socket as a `Request`
 helper with the pane id as its terminal session, sends
 `ShimMessage::TabMenu` and prints the `AppMessage::TabMenu` answer one
-item per line (`id<TAB>text`, a heading with id 0); the callback shows
-them in an `InputSelector` (headed by the menu's own header, else the
-session's label) and reports the choice with `--tab-menu <id>`, which
+line per item (`id<TAB>text<TAB>flags<TAB>icon`: a heading with id 0,
+`d` for a disabled item, a nerdfont codicon name — `tab_menu::nerd_icon`
+maps NativeTerm's icons — and `-` alone for a separator; `MenuItem`'s
+newer fields default, so older ends still talk). NativeTerm's WezTerm
+(the fork at github.com/fivetime/wezterm, branch `nativeterm`) has a
+`PopupMenu` action — a menu drawn over the window where the mouse is,
+with the heading, icons, separators and dimmed items, in the command
+palette's colours, which the written look sets per light and dark — and
+the callback uses it when `wezterm.has_action("PopupMenu")`; another
+WezTerm gets the choosable items in its `InputSelector`, in the pane.
+Either way the choice goes back with `--tab-menu <id>`, which
 `ShimMessage::TabAction` carries to the same `Actions::chosen` the
 Windows menu uses. The items are `Actions::entries` for the session's
 tab, the ones that apply, so the two menus never drift; a tab that is

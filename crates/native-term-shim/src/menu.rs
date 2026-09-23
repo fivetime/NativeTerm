@@ -2,12 +2,14 @@
 //!
 //! On Windows the menu is drawn over the Terminal window. WezTerm has no
 //! tab strip to draw over, but it runs a configuration that binds a
-//! right click (and Ctrl+Shift+M) to a picker of its own; the picker's
+//! right click (and Ctrl+Shift+M) to a menu of its own; the menu's
 //! items come from here: `--tab-menu` asks NativeTerm what applies to
-//! the tab's session and prints one line per item (`id<TAB>text`, a
-//! heading with id 0), and `--tab-menu <id>` reports the choice. The tab
-//! is named by `--pane` (WezTerm's pane id, which the session's shim
-//! reported as its terminal session), since the picker runs in the GUI
+//! the tab's session and prints one line per item
+//! (`id<TAB>text<TAB>flags<TAB>icon`: a heading with id 0, `d` in the
+//! flags for a disabled item, a nerdfont name for the icon; `-` alone for
+//! a separator), and `--tab-menu <id>` reports the choice. The tab is
+//! named by `--pane` (WezTerm's pane id, which the session's shim
+//! reported as its terminal session), since the menu runs in the GUI
 //! process, not in the tab.
 
 use std::time::Duration;
@@ -15,9 +17,19 @@ use std::time::Duration;
 use native_term_session::pipe;
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 
-/// One line per item, as the picker's script reads them.
+/// One line per item, as the menu's script reads them.
 pub fn lines(items: &[native_term_session::protocol::MenuItem]) -> String {
-    items.iter().map(|i| format!("{}\t{}\n", i.id, i.text.replace(['\n', '\t'], " "))).collect()
+    let clean = |s: &str| s.replace(['\n', '\t'], " ");
+    items
+        .iter()
+        .map(|i| {
+            if i.separator {
+                return "-\n".to_string();
+            }
+            let flags = if i.enabled { "" } else { "d" };
+            format!("{}\t{}\t{flags}\t{}\n", i.id, clean(&i.text), clean(i.icon.as_deref().unwrap_or("")))
+        })
+        .collect()
 }
 
 /// Exit code 0 when NativeTerm answered (the items are on stdout for a
@@ -66,8 +78,13 @@ mod tests {
 
     #[test]
     fn one_line_per_item() {
-        let items = [MenuItem { id: 0, text: "web01".into() }, MenuItem { id: 4, text: "Close\ttab\n".into() }];
-        assert_eq!(super::lines(&items), "0\tweb01\n4\tClose tab \n");
+        let items = [
+            MenuItem::new(0, "web01"),
+            MenuItem { icon: Some("cod_close".into()), ..MenuItem::new(4, "Close\ttab\n") },
+            MenuItem::separator(),
+            MenuItem { enabled: false, ..MenuItem::new(2, "Disconnect") },
+        ];
+        assert_eq!(super::lines(&items), "0\tweb01\t\t\n4\tClose tab \t\tcod_close\n-\n2\tDisconnect\td\t\n");
         assert_eq!(super::lines(&[]), "");
     }
 }

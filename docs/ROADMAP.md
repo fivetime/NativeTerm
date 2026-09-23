@@ -977,6 +977,27 @@
       WezTerm's own JetBrains Mono there. Tried with the generated file on
       Windows (dark), the Mac (light) and Lingmo (light). The desktop's
       accent colour on the selected tab is gone with it
+- [x] A real popup tab menu on WezTerm (2026-09-24): WezTerm's picker
+      took over the pane to list the menu. NativeTerm's WezTerm fork
+      (github.com/fivetime/wezterm, branch `nativeterm`, on upstream
+      main) adds a `PopupMenu` action: a modal drawn over the window at
+      the pointer (kept inside the window), with a heading, nerdfont
+      icons, separators and dimmed items, the pointer highlighting, a
+      click choosing, a press outside dismissing, Up/Down/Enter/Escape,
+      and the choice reported as `InputSelector` reports it. Modals can
+      take the window's mouse events first for it
+      (`Modal::window_mouse_event`). NativeTerm's menu lines now carry
+      separators, disabled items and icons (`MenuItem`'s new fields,
+      `id<TAB>text<TAB>flags<TAB>icon` from the shim), and the written
+      configuration pops the menu up where `has_action("PopupMenu")`,
+      falling back to the picker elsewhere. Tried on Windows with the
+      fork's build and a test configuration (the menu drawn dark and
+      light, a click on a disabled item ignored, hover, click, keys and
+      Escape reported right); the whole chain with NativeTerm's tabs waits
+      for fork builds on the Mac and a Linux box. Building the fork on
+      Windows needs a native Perl for OpenSSL: a portable Strawberry Perl
+      in `C:\MyProjects\RustProjects\strawberry-perl`, put on `PATH` for
+      the build only (25 min the first time, 3 min after a change)
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
