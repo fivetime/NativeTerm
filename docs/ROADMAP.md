@@ -1127,7 +1127,20 @@
         its enter event. `tools/dragtest-x11.sh` drags by the title bar;
         Deepin and Lingmo pass on all three edges. Off on Windows for
         now, where Aero Snap tiles and maximizes the same way: to be
-        tried there. `NATIVETERM_DOCK_LOG=1` prints what docking decides
+        tried there. `NATIVETERM_DOCK_LOG=1` prints what docking decides.
+        Tried on Windows the same day: Aero Snap made every drag dock at
+        the top there too (the snapped left half touches the top edge);
+        with the pointer's edge and the unmaximize on, left and right
+        dock as half-screen side panels and a drag to the top is restored
+        from Aero's maximize and docked, hidden and brought back at all
+        three edges (`tools/dragtest-windows.ps1`, the test instance only,
+        the window under the pointer checked before every press)
+  - [x] Chinese input (2026-09-23): fcitx5 pinyin in the host search and
+        the command line on Deepin (X11, XIM): the candidate window at
+        the field, "你好" and "中文" committed. Under Wayland NativeTerm
+        binds `zwp_text_input_manager_v3` (EndeavourOS, KDE); typing
+        there needs a person (fcitx5 installed and set as KWin's input
+        method on that box, active after the next login)
   - [x] Docking on KDE Plasma under Wayland (2026-09-23): no program may
         place its own window or see the pointer there, but KWin can, and
         it runs scripts it is handed over D-Bus. NativeTerm loads

@@ -805,8 +805,7 @@ impl Runner {
                 let maximized = self.main.as_ref().is_some_and(|r| r.window.is_maximized());
                 // a window manager that maximizes a window dragged to the
                 // top edge (KWin): its own size back, then docked there
-                let at_top = !cfg!(windows)
-                    && maximized
+                let at_top = maximized
                     && win::work_area(hwnd)
                         .zip(win::cursor())
                         .is_some_and(|(work, (_, y))| (0..=dock::SNAP).contains(&(y - work.top)));
@@ -828,11 +827,9 @@ impl Runner {
                         // ignores a program's own moves while tiled) leaves
                         // it touching the top edge too; a side panel that
                         // tall is what docking there is for anyway
-                        // (not on Windows yet, where Aero Snap does the same:
-                        // its docking is unchanged until tried there)
-                        let at_pointer = win::cursor()
-                            .filter(|_| !cfg!(windows))
-                            .and_then(|c| dock::edge_at_pointer(c, work, monitor, win::on_a_monitor));
+                        // (Windows' Aero Snap tiles and maximizes the same way)
+                        let at_pointer =
+                            win::cursor().and_then(|c| dock::edge_at_pointer(c, work, monitor, win::on_a_monitor));
                         at_pointer.or_else(|| dock::snap_edge(frame, work, monitor, win::on_a_monitor))
                     }
                     _ => None,
