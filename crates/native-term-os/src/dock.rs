@@ -1,10 +1,10 @@
 //! Other windows' places on the screen, for docking NativeTerm's window
 //! to the screen's edge: Windows has it all; on X11 the same questions
 //! go to the X server (the frame the window manager put around the
-//! window, the work area it publishes, the pointer); on Wayland and
-//! macOS every question answers "not known", so nothing docks.
+//! window, the work area it publishes, the pointer), on macOS to AppKit;
+//! on Wayland every question answers "not known", so nothing docks.
 //!
-//! Coordinates are physical pixels of the whole screen. On X11
+//! Coordinates are physical pixels of the whole screen. On X11 and macOS
 //! `window_bounds` and `frame_bounds` are the same rectangle — the frame
 //! the window manager drew, which is also what `move_window` places (a
 //! window's requested position is its frame's corner, ICCCM's north-west
@@ -308,52 +308,159 @@ pub use x11::{
 };
 
 #[cfg(target_os = "macos")]
-mod none {
+mod mac {
+    //! AppKit measures in points from the bottom-left of the primary
+    //! screen; winit, and so docking, in physical pixels from its top-left.
+    //! Points are turned into pixels with the primary screen's scale (on
+    //! monitors of mixed scales the others are off by their ratio).
+
     use super::Bounds;
+    use objc2::rc::Retained;
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSColor, NSEvent, NSScreen, NSView, NSWindow};
+    use objc2_foundation::{NSPoint, NSRect};
 
-    pub fn window_bounds(_handle: isize) -> Option<Bounds> {
-        None
+    /// The primary screen's height in points and its scale: what turns
+    /// AppKit's coordinates into ours. `None` off the main thread.
+    fn space() -> Option<(f64, f64)> {
+        let mtm = MainThreadMarker::new()?;
+        let primary = NSScreen::screens(mtm).firstObject()?;
+        Some((primary.frame().size.height, primary.backingScaleFactor()))
     }
 
-    pub fn frame_bounds(_handle: isize) -> Option<Bounds> {
-        None
+    fn screens() -> Vec<Retained<NSScreen>> {
+        MainThreadMarker::new().map(|mtm| NSScreen::screens(mtm).iter().collect()).unwrap_or_default()
     }
 
-    pub fn work_area(_handle: isize) -> Option<Bounds> {
-        None
+    /// `rect` (points, from the bottom) in pixels from the top.
+    pub(super) fn to_pixels(rect: NSRect, (height, scale): (f64, f64)) -> Bounds {
+        let px = |v: f64| (v * scale).round() as i32;
+        Bounds {
+            left: px(rect.origin.x),
+            top: px(height - rect.origin.y - rect.size.height),
+            right: px(rect.origin.x + rect.size.width),
+            bottom: px(height - rect.origin.y),
+        }
     }
 
-    pub fn work_area_at(_x: i32, _y: i32) -> Option<Bounds> {
-        None
+    /// The window of the view winit handed out as the window's handle.
+    fn window(handle: isize) -> Option<Retained<NSWindow>> {
+        MainThreadMarker::new()?;
+        if handle == 0 {
+            return None;
+        }
+        // SAFETY: `handle` is the `NSView` of a window of ours that is
+        // still open (winit's AppKit handle), used on the main thread.
+        let view: &NSView = unsafe { &*(handle as *const NSView) };
+        view.window()
     }
 
-    pub fn monitor_bounds(_handle: isize) -> Option<Bounds> {
-        None
+    /// The window's frame, title bar included: what `move_window` places.
+    pub fn window_bounds(handle: isize) -> Option<Bounds> {
+        Some(to_pixels(window(handle)?.frame(), space()?))
     }
 
-    pub fn on_a_monitor(_x: i32, _y: i32) -> bool {
-        true
+    pub fn frame_bounds(handle: isize) -> Option<Bounds> {
+        window_bounds(handle)
     }
 
+    /// The screen the window is mostly on, its menu bar and Dock left out.
+    pub fn work_area(handle: isize) -> Option<Bounds> {
+        Some(to_pixels(window(handle)?.screen()?.visibleFrame(), space()?))
+    }
+
+    /// The screen showing a point (else the nearest), menu bar and Dock
+    /// left out.
+    pub fn work_area_at(x: i32, y: i32) -> Option<Bounds> {
+        let space = space()?;
+        let distance = |b: &Bounds| {
+            let dx = i64::from((b.left - x).max(0).max(x - (b.right - 1)));
+            let dy = i64::from((b.top - y).max(0).max(y - (b.bottom - 1)));
+            dx * dx + dy * dy
+        };
+        let screen = screens().into_iter().min_by_key(|s| distance(&to_pixels(s.frame(), space)))?;
+        Some(to_pixels(screen.visibleFrame(), space))
+    }
+
+    pub fn monitor_bounds(handle: isize) -> Option<Bounds> {
+        Some(to_pixels(window(handle)?.screen()?.frame(), space()?))
+    }
+
+    pub fn on_a_monitor(x: i32, y: i32) -> bool {
+        let Some(space) = space() else { return true };
+        screens().iter().any(|s| to_pixels(s.frame(), space).contains(x, y))
+    }
+
+    /// The pointer's pixel. AppKit's pointer reaches a screen's far edges
+    /// themselves (x = its width at the right edge), one past its last
+    /// pixel: it is kept on the screen it is at.
     pub fn cursor() -> Option<(i32, i32)> {
-        None
+        let space = space()?;
+        let at: NSPoint = NSEvent::mouseLocation();
+        let (x, y) = ((at.x * space.1).floor() as i32, ((space.0 - at.y) * space.1).floor() as i32);
+        let screens: Vec<Bounds> = screens().iter().map(|s| to_pixels(s.frame(), space)).collect();
+        if screens.iter().any(|s| s.contains(x, y)) {
+            return Some((x, y));
+        }
+        Some(screens.iter().find_map(|s| on_edge(*s, x, y)).unwrap_or((x, y)))
     }
 
+    /// `(x, y)` moved onto `screen` when it is on its right or bottom edge.
+    pub(super) fn on_edge(screen: Bounds, x: i32, y: i32) -> Option<(i32, i32)> {
+        let (cx, cy) = (x.min(screen.right - 1), y.min(screen.bottom - 1));
+        (screen.contains(cx, cy) && x <= screen.right && y <= screen.bottom).then_some((cx, cy))
+    }
+
+    /// A mouse button is held (a drag or a click in progress).
     pub fn mouse_button_down() -> bool {
-        false
+        NSEvent::pressedMouseButtons() != 0
     }
 
+    /// AppKit draws the corners.
     pub fn round_corners(_handle: isize) {}
 
+    /// Left to winit's window level (it would reset the state otherwise).
     pub fn set_topmost(_handle: isize, _on: bool) {}
 
-    pub fn move_window(_handle: isize, _left: i32, _top: i32) {}
+    /// Move the window's frame (title bar included) to `left`, `top`.
+    pub fn move_window(handle: isize, left: i32, top: i32) {
+        let (Some(w), Some((height, scale))) = (window(handle), space()) else { return };
+        w.setFrameTopLeftPoint(NSPoint::new(f64::from(left) / scale, height - f64::from(top) / scale));
+    }
 
-    pub fn fill(_handle: isize, _rgb: (u8, u8, u8)) {}
+    /// Give a window that nothing paints one plain colour (the docking
+    /// strip): its background.
+    pub fn fill(handle: isize, (r, g, b): (u8, u8, u8)) {
+        let Some(w) = window(handle) else { return };
+        let c = |v: u8| f64::from(v) / 255.0;
+        w.setBackgroundColor(Some(&NSColor::colorWithSRGBRed_green_blue_alpha(c(r), c(g), c(b), 1.0)));
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+        #[test]
+        fn points_from_the_bottom_become_pixels_from_the_top() {
+            // a 1920×1200-point Retina screen, a window 100 points from
+            // its left and 200 from its top
+            let window = NSRect::new(NSPoint::new(100.0, 1200.0 - 200.0 - 300.0), NSSize::new(400.0, 300.0));
+            let b = super::to_pixels(window, (1200.0, 2.0));
+            assert_eq!((b.left, b.top, b.right, b.bottom), (200, 400, 1000, 1000));
+        }
+
+        #[test]
+        fn the_far_edges_are_the_last_pixels() {
+            let screen = super::Bounds { left: 0, top: 0, right: 3840, bottom: 2400 };
+            assert_eq!(super::on_edge(screen, 3840, 381), Some((3839, 381)));
+            assert_eq!(super::on_edge(screen, 500, 2400), Some((500, 2399)));
+            assert_eq!(super::on_edge(screen, 3841, 381), None);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
-pub use none::{
+pub use mac::{
     cursor, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, round_corners,
     set_topmost, window_bounds, work_area, work_area_at,
 };

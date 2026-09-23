@@ -108,15 +108,17 @@ pub fn edge_at_pointer(
     monitor: Bounds,
     neighbour: impl Fn(i32, i32) -> bool,
 ) -> Option<Edge> {
+    // the pointer may be past the work area's edge, over a panel between
+    // it and the monitor's (macOS's menu bar, where a window stops)
     let mut near = [
-        (Edge::Left, x - work.left, (monitor.left - 1, y)),
-        (Edge::Right, work.right - 1 - x, (monitor.right, y)),
-        (Edge::Top, y - work.top, (x, monitor.top - 1)),
+        (Edge::Left, x - work.left, work.left - monitor.left, (monitor.left - 1, y)),
+        (Edge::Right, work.right - 1 - x, monitor.right - work.right, (monitor.right, y)),
+        (Edge::Top, y - work.top, work.top - monitor.top, (x, monitor.top - 1)),
     ];
-    near.sort_by_key(|(_, distance, _)| *distance);
+    near.sort_by_key(|(_, distance, _, _)| (*distance).max(0));
     near.into_iter()
-        .find(|(_, distance, (px, py))| (0..=SNAP).contains(distance) && !neighbour(*px, *py))
-        .map(|(edge, _, _)| edge)
+        .find(|(_, distance, panel, (px, py))| (-panel.max(&0)..=SNAP).contains(distance) && !neighbour(*px, *py))
+        .map(|(edge, _, _, _)| edge)
 }
 
 /// Where the window rectangle (`window`, borders included) goes, docked at
@@ -199,6 +201,12 @@ mod tests {
         assert_eq!(edge_at_pointer((1, 5), WORK, screen, alone), Some(Edge::Left), "nearest in a corner");
         let right_monitor = |x: i32, y: i32| (0..3840).contains(&x) && (0..1080).contains(&y);
         assert_eq!(edge_at_pointer((1919, 500), WORK, screen, right_monitor), None, "a monitor behind it");
+        // a window stops under a menu bar or panel, the pointer goes on
+        let under_menu_bar = Bounds { top: 48, ..WORK };
+        assert_eq!(edge_at_pointer((800, 10), under_menu_bar, screen, alone), Some(Edge::Top));
+        assert_eq!(edge_at_pointer((800, 58), under_menu_bar, screen, alone), Some(Edge::Top));
+        assert_eq!(edge_at_pointer((800, 70), under_menu_bar, screen, alone), None);
+        assert_eq!(edge_at_pointer((5, 10), under_menu_bar, screen, alone), Some(Edge::Top), "on the menu bar");
     }
 
     #[test]

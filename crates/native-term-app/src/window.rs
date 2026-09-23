@@ -1140,6 +1140,8 @@ fn window_handle(window: &Window) -> Option<isize> {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get()),
         RawWindowHandle::Xlib(h) => Some(h.window as isize),
         RawWindowHandle::Xcb(h) => Some(h.window.get() as isize),
+        // the window's view; `native_term_os::dock` finds its NSWindow
+        RawWindowHandle::AppKit(h) => Some(h.ns_view.as_ptr() as isize),
         _ => Some(0),
     }
 }

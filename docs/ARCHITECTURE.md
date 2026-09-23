@@ -3694,7 +3694,15 @@ Implemented (first version), on NativeTerm's main window:
   with another monitor behind it is not used (the hidden window would
   show there). On X11 each RandR monitor counts on its own: the work
   area is the published `_NET_WORKAREA` (one for all monitors) cut to
-  the monitor the window or the pointer is on. A move is "ended" once no mouse button is held (checked
+  the monitor the window or the pointer is on. On macOS AppKit answers
+  (`NSWindow` frame, `NSScreen` `visibleFrame` without the menu bar and
+  the Dock, `NSEvent` pointer and buttons), turned from points measured
+  from the bottom into pixels from the top with the primary screen's
+  scale; the pointer, which AppKit lets reach a screen's far edges
+  themselves, is kept on its last pixel. The pointer may be past the
+  work area's edge, over what lies between it and the monitor's edge (a
+  window stops under the menu bar; the pointer goes on into it), and
+  still names that edge. A move is "ended" once no mouse button is held (checked
   every 120 ms after the last move). Dragging the window away undocks
   it. Maximized windows don't dock.
 - **Hiding:** 450 ms after the pointer leaves, the window slides (160 ms,

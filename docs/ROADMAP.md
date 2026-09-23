@@ -960,6 +960,19 @@
       programs may not set it) and opens its tabs with it, falling back to
       the default profile when it is missing: the tab shows the host's
       label, and a remote `OSC 0` leaves it alone
+- [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
+      through AppKit (objc2-app-kit), the window handle being winit's
+      `NSView`; the rest is the X11 path (hidden outright, a strip left).
+      Two fixes on the way: the pointer dragged to the top ends up in the
+      menu bar, above the work area — the edge now counts the part of the
+      monitor between the work area and its edge as "at the edge" (on
+      every platform: a panel at the top of X11 or a taskbar on Windows
+      alike); and AppKit's pointer reaches x = the screen's width at the
+      right edge, one past its last pixel, so the right edge never docked
+      until the pointer was kept on its screen. Tried by hand on the Mac
+      (Retina, 2880×1800): left, right and top dock, hide and come back;
+      mixed-scale monitors are not handled yet (the primary screen's
+      scale is used)
 
 - [x] First Linux run (Deepin 25, X11, WezTerm 20240203, 2026-09-22):
       the Unix socket, `native-term-os`, the shim's tests, `core_fake`
