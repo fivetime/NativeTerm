@@ -1172,6 +1172,14 @@
         (`WINIT_X11_SCALE_FACTOR`) all three edges dock, hide and come
         back at the right place. Windows already did both (per-monitor
         work area and PerMonitorV2)
+  - [x] Four hours running (2026-09-23), sampled every minute: Deepin
+        (X11) with a session printing a line a second in WezTerm, Fedora
+        (GNOME, Wayland) idle. Resident memory 48.06 → 48.13 MB on Deepin
+        (flat for the last 1.5 h) and 42.46 → 42.48 MB on Fedora (flat
+        after the first half hour); threads and open files unchanged
+        (13/23 and 11/24); CPU 13.7 s and 11.4 s in four hours (under
+        0.1 %); no panic, both still running at the end. WezTerm's own
+        memory grew with its scrollback (171 → 188 MB) and levelled off
   - [x] Closing the window crashed on every Wayland desktop (found
         2026-09-23 on EndeavourOS): the window's clipboard worker
         (smithay-clipboard) destroyed its objects on the Wayland
