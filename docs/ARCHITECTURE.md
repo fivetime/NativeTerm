@@ -4651,7 +4651,11 @@ NativeTerm from a `Look` — light or dark (the theme setting, else what
 `native-term-os::appearance` read; only when neither knows does the file
 let WezTerm ask the desktop itself), the desktop's accent colour on the
 selected tab, the desktop's monospace font first in WezTerm's fallback
-list — plus no close prompts and the tab bar always shown; `set_look`
+list — plus no close prompts, the tab bar always shown, and the
+renderer: WebGpu (Metal, Vulkan, DirectX 12) on a real GPU, the
+integrated one first, found by the GUI itself
+(`wezterm.gui.enumerate_gpus()`), else OpenGL (a VM's software
+rendering); `set_look`
 rewrites it when any of that changes and running windows reload it on
 their own. All of it only unless the person has a WezTerm configuration
 of their own, which is left alone. The environment, not `--config-file`: a

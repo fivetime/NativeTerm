@@ -951,6 +951,16 @@
       opened from the tree logs in, and a NativeTerm started with a
       Finder-like `PATH` finds WezTerm.app and claims the open tabs. The
       login test needs ssh to the Mac itself with a key, not set up there
+- [x] WezTerm on the GPU (2026-09-24): the configuration NativeTerm
+      writes asks WezTerm's GUI for its adapters
+      (`wezterm.gui.enumerate_gpus()`, guarded: `wezterm cli` reads the
+      file too) and draws through WebGpu on a real GPU, the integrated one
+      first (it spares a laptop's battery and leaves the discrete one
+      asleep), else stays on OpenGL. The Mac lists an AMD Radeon Pro 560X
+      and an Intel UHD 630, both Metal: a window drawn on the Intel one
+      (its Metal driver loaded, the AMD one not). The Linux VMs list only
+      llvmpipe (type `Cpu`, Vulkan and GL): OpenGL as before, and WezTerm
+      starts and opens its window with the new file on Lingmo
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

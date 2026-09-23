@@ -363,6 +363,26 @@ local config = wezterm.config_builder()
     lua.push_str(
         r#"config.font_size = 11.0
 
+-- drawn by the GPU through WebGpu (Metal, Vulkan, DirectX 12) where there
+-- is a real one, the integrated one first (it spares the battery); OpenGL
+-- where there is none (a virtual machine renders in software). Only the
+-- GUI can ask: `wezterm cli` reads this file too.
+if wezterm.gui then
+  local gpu = nil
+  for _, adapter in ipairs(wezterm.gui.enumerate_gpus()) do
+    if adapter.device_type == "IntegratedGpu" then
+      gpu = adapter
+      break
+    elseif adapter.device_type == "DiscreteGpu" and gpu == nil then
+      gpu = adapter
+    end
+  end
+  if gpu then
+    config.front_end = "WebGpu"
+    config.webgpu_preferred_adapter = gpu
+  end
+end
+
 -- NativeTerm closes tabs itself; the tab strip is where it looks
 config.window_close_confirmation = "NeverPrompt"
 config.hide_tab_bar_if_only_one_tab = false
@@ -554,6 +574,8 @@ mod tests {
         let windows = default_config(&Look::default(), Path::new(r"C:\NT\nativeterm-shim.exe"));
         assert!(windows.contains(r#"local shim = "C:\\NT\\nativeterm-shim.exe""#), "backslashes escaped for Lua");
         assert!(unknown.contains("wezterm.config_builder()"));
+        assert!(unknown.contains("if wezterm.gui then"), "the renderer is chosen only where the GUI can ask");
+        assert!(unknown.contains("config.front_end = \"WebGpu\""));
         assert!(unknown.contains("wezterm.gui.get_appearance()"), "no reading: WezTerm asks the desktop");
         assert!(!unknown.contains("config.font ="));
         assert!(!unknown.contains("config.colors"));
