@@ -14,7 +14,7 @@ pub mod stub;
 pub mod windows_terminal;
 
 /// A terminal window, as its backend names it: the `HWND` on Windows,
-/// the window id iTerm2 or WezTerm gives out elsewhere. The program only
+/// the window id WezTerm gives out elsewhere. The program only
 /// ever compares it and hands it back; `0` is never a window.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WindowId(pub u64);

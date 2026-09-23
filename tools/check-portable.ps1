@@ -30,8 +30,7 @@ param(
         "native-term-platform",
         "native-term-app",
         "native-term-shim",
-        "native-term-wezterm",
-        "native-term-iterm2"
+        "native-term-wezterm"
     )
 )
 

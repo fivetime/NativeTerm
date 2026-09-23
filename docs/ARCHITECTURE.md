@@ -1966,7 +1966,7 @@ the mode that needs.
 
 What the console API can't do without owning the terminal is not done
 here: `SendText`, `ClearScreen` and `Screen` are the terminal backend's
-(WezTerm's `send-text`/`get-text`, iTerm2's `write text`/`contents`),
+(WezTerm's `send-text`/`get-text`),
 so `inject` and `screen_text` say `Unsupported`/`None`, and the app
 falls back to the backend. "Never reached" is told apart from a refused
 login on Linux only (the child's socket inodes against
@@ -4527,8 +4527,6 @@ program owns.
   and reads as light, which is what such a desktop shows
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
-- `native-term-iterm2` — iTerm2 as a `TerminalBackend`, through JXA and
-  `osascript` (macOS; the scripts build and test everywhere)
 - `native-term-app` — the `egui` GUI. Off Windows it builds against
   `native_term_platform::stub::NoTerminal` (no terminal driven yet) and
   a stand-in Terminal profile (`terminal_profile_stub.rs`); everything
@@ -4560,7 +4558,7 @@ once; nothing in it runs on the GUI thread.
 - `window_ids()`, `foreground()`, `activate(window)` — the terminal's
   windows (responsive or not), the one in front if it is the terminal's,
   and bringing one forward. A window is a `WindowId(u64)`: the `HWND` on
-  Windows (`from_hwnd`/`hwnd` exist only there), iTerm2's or WezTerm's
+  Windows (`from_hwnd`/`hwnd` exist only there), WezTerm's
   window id elsewhere; the program only compares it and hands it back.
   The shim reports it as a signed integer (`Hello.terminal_window`,
   `from_wire`/`to_wire`), so the wire format did not change. `activate` also decides what the next
@@ -4691,37 +4689,6 @@ switcher setting is on, when it shows WezTerm's tab navigator (per
 window, unlike the grid on Windows). Hover cards and the grid itself
 are not there.
 
-### The iTerm2 backend
-
-`native-term-iterm2` drives iTerm2 through JavaScript for Automation,
-each call one script run with `osascript -l JavaScript` (50–100 ms, so
-one script lists every window, tab and session at once, with which tab
-and session are current and whether iTerm2 is frontmost). iTerm2 is
-addressed by bundle id (`com.googlecode.iterm2`). A session tab is
-`createTabWithProfile("NativeTerm", {command})` in the window
-`Target::Recent` or `Target::Named` means (or `createWindowWithProfile`
-for a new one, which also starts iTerm2), the default profile when
-that one is missing, the command being the shim quoted for `sh`; the
-session is then named with the label. The "NativeTerm" profile is a
-dynamic profile NativeTerm writes at start
-(`~/Library/Application Support/iTerm2/DynamicProfiles/nativeterm.json`,
-rewritten only when it changed): the person's Default profile with the
-title only the session name and programs not allowed to set it, so the
-tab shows the label for good, as the Windows Terminal profile does.
-iTerm2 keeps a scripted session name as the name of the session's own
-copy of its profile, so the listing reads the label back with
-`profileName()` (`name()` is the title shown) and the session id with
-`id()`; the claimer's first rule finds the label. `select` is `tab.select()` and
-`window.select()`, `close` closes the tab's sessions, `activate` selects
-the window and activates the app, `foreground` is the current window
-while iTerm2 is frontmost, `screen_text` is `contents`, `type_text` is
-`write({text, newline: false})`; a subscription polls every second. The
-shim reports the tab's id from `ITERM_SESSION_ID` (the unique id after
-the colon). The first script asks the person whether NativeTerm may
-control iTerm2 (Automation permission), which macOS remembers per app
-bundle — a packaging constraint. `jxa.rs` is pure and tested;
-`meets_the_contract` runs the backend contract on a Mac (`#[ignore]`).
-
 ### What the Linux machine showed
 
 The first run on a Linux desktop (Deepin 25, X11) took the whole chain
@@ -4754,12 +4721,9 @@ and leaves typing and screen reads to the backend); then the backends:
   WezTerm backend" below). VTE-based terminals, GNOME Terminal and
   Konsole have no usable API for reading tabs or text; Ghostty can't be
   read either.
-- **macOS**: WezTerm too, the default since 2026-09-24 (the same backend
-  and generated configuration as on Linux; found on `PATH` or as
-  `WezTerm.app` in `/Applications` or `~/Applications`). It needs no
-  Automation permission (the CLI talks to WezTerm's own socket) and
-  opens only the windows asked for. iTerm2 stays as `--terminal iterm2`,
-  and is used when there is no WezTerm (`native-term-iterm2`, see "The
-  iTerm2 backend" below): its scripting asks for Automation permission
-  once, and it opens a window of its own when it starts. Terminal.app
-  can only open tabs by simulated keystrokes.
+- **macOS**: WezTerm too (the same backend and generated configuration
+  as on Linux; found on `PATH` or as `WezTerm.app` in `/Applications`
+  or `~/Applications`). The CLI talks to WezTerm's own socket, so no
+  Automation permission is asked for, and only the windows asked for
+  are opened. WezTerm is the one terminal NativeTerm drives off
+  Windows.

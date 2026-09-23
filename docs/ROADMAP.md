@@ -922,50 +922,19 @@
         20240203 release and the 2026-09-17 nightly, most likely a
         security product's socket filter — so the live test waits for
         the Linux machine (or another Windows one)
-  - [x] P5 — `native-term-iterm2`: iTerm2 through JXA scripts run with
-        `osascript` (`createWindowWithDefaultProfile` /
-        `createTabWithDefaultProfile` with the shim as the command, the
-        session named with the label; one script lists windows, tabs
-        and sessions; `select`, `close`, `write`, `contents`; a 1 s
-        poll), `--terminal iterm2` (and the default on macOS where there
-        is no WezTerm, since 2026-09-24). The shim takes its tab id from
-        `ITERM_SESSION_ID` or `WEZTERM_PANE` when there is no
-        `WT_SESSION`. Scripts and JSON tested here; `meets_the_contract`
-        (`#[ignore]`) waits for the Mac, where the first run asks for
-        Automation permission (2026-09-22)
-- [x] First macOS run (macOS 13.5 Ventura, Intel, iTerm2 3.7.3,
-      2026-09-23): the workspace builds without warnings (the Windows-only
-      prototypes left out), clippy is clean, and every test passes after
-      four fixes. The Unix socket: macOS names the peer's process
-      (`LOCAL_PEERPID`) only while it is connected, so a client that wrote
-      and exited was dropped and `accept` waited for good — it is now
-      served with its user checked and no process id; and macOS refuses
-      socket options once the peer has gone, so setting the read timeout
-      failed where the read would have returned what was left — that
-      refusal is now let through. The data folder: reading the pointer
-      file under a program "folder" that is a file says "not a directory"
-      on Unix. iTerm2: JXA finds it by bundle id (`com.googlecode.iterm2`;
-      by name only once it is in LaunchServices under that name), a
-      session's id is `id()` (`uniqueId()` does not convert), and the
-      name a script gives a session is read back as `profileName()`
-      (`name()` is what the tab shows, the running program's).
-      `meets_the_contract` passes against iTerm2: open two tabs in a new
-      window, claim, select, close, the window gone, a tool tab. The
+- [x] First macOS run (macOS 13.5 Ventura, Intel, 2026-09-23): the
+      workspace builds without warnings (the Windows-only prototypes left
+      out), clippy is clean, and every test passes after three fixes. The
+      Unix socket: macOS names the peer's process (`LOCAL_PEERPID`) only
+      while it is connected, so a client that wrote and exited was
+      dropped and `accept` waited for good — it is now served with its
+      user checked and no process id; and macOS refuses socket options
+      once the peer has gone, so setting the read timeout failed where
+      the read would have returned what was left — that refusal is now
+      let through. The data folder: reading the pointer file under a
+      program "folder" that is a file says "not a directory" on Unix. The
       window itself runs there (Chinese, icons, the tree), checked by the
       person at the Mac
-- [x] iTerm2 tab titles (2026-09-24): with the default profile a tab
-      showed the running program ("nativeterm-shim"), and a remote title
-      replaced it. NativeTerm now installs an iTerm2 dynamic profile
-      "NativeTerm" (the Default profile, title = session name only,
-      programs may not set it) and opens its tabs with it, falling back to
-      the default profile when it is missing: the tab shows the host's
-      label, and a remote `OSC 0` leaves it alone. A new tab in an
-      existing window first fell back to the default profile (JXA's
-      `createTabWithProfile(name, …)` does not convert; a window takes
-      `createTab({withProfile, command})`), so it showed "ssh"; fixed.
-      Still open: iTerm2 opens a default window of its own when it
-      starts (restoring earlier ones instead when there are any), so a
-      cold start leaves an extra shell window next to NativeTerm's
 - [x] WezTerm on macOS (2026-09-24, WezTerm 20240203): the backend
       contract passes as it is, and `wezterm_live`'s
       `open_find_focus_read_close` (open two tabs, hello, ssh fails,
@@ -974,18 +943,14 @@
       (POLLNVAL at once), so the shim waiting for R/C or a message took
       the terminal for a key, blocked reading it, and never heard
       NativeTerm's close — the tab stayed. `wait_any` uses `select` on
-      macOS. The same shim runs under iTerm2, which had it too. The login
-      test needs ssh to the Mac itself with a key, not set up there
-- [x] One terminal on Linux and macOS (2026-09-24): tried side by side
-      on the Mac, WezTerm needed no Automation permission, opened no
-      window of its own, showed the labels as tab titles from the start
-      and needed one fix (the shim's, shared with iTerm2), where iTerm2
-      needed four and still leaves a window on a cold start. WezTerm is
-      now the default on macOS as on Linux — on `PATH`, else
-      `WezTerm.app` in `/Applications` or `~/Applications`
-      (`native_term_wezterm::app_dirs`, a Finder-started app has no shell
-      `PATH`) — and iTerm2 is used only where there is no WezTerm, or
-      with `--terminal iterm2`
+      macOS. WezTerm is the terminal on macOS as on Linux — on `PATH`,
+      else `WezTerm.app` in `/Applications` or `~/Applications`
+      (`native_term_wezterm::app_dirs`: a Finder-started app has no shell
+      `PATH`): no Automation permission, no window of its own, the labels
+      as tab titles from the start. Tried by hand on the Mac: a host
+      opened from the tree logs in, and a NativeTerm started with a
+      Finder-like `PATH` finds WezTerm.app and claims the open tabs. The
+      login test needs ssh to the Mac itself with a key, not set up there
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

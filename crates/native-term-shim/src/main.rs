@@ -124,14 +124,11 @@ fn pipe_name() -> Option<String> {
     std::env::var("NATIVETERM_PIPE").ok().or_else(|| pipe::pipe_name().ok())
 }
 
-/// The id the terminal gave this tab: `WT_SESSION` (Windows Terminal),
-/// the unique id `ITERM_SESSION_ID` ends with (`w0t1p0:UUID`), or
+/// The id the terminal gave this tab: `WT_SESSION` (Windows Terminal) or
 /// `WEZTERM_PANE`.
 fn wt_session() -> Option<String> {
     let var = |name: &str| std::env::var(name).ok().filter(|s| !s.is_empty());
-    var("WT_SESSION")
-        .or_else(|| var("ITERM_SESSION_ID").map(|id| id.rsplit(':').next().unwrap_or(&id).to_string()))
-        .or_else(|| var("WEZTERM_PANE"))
+    var("WT_SESSION").or_else(|| var("WEZTERM_PANE"))
 }
 
 /// The `LocalCommand` helper: runs synchronously inside ssh, so it must be

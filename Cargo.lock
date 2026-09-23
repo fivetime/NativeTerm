@@ -1910,7 +1910,6 @@ dependencies = [
  "i18n-embed-fl",
  "native-term-config",
  "native-term-i18n",
- "native-term-iterm2",
  "native-term-os",
  "native-term-platform",
  "native-term-session",
@@ -1949,15 +1948,6 @@ dependencies = [
  "i18n-embed",
  "rust-embed",
  "unic-langid",
-]
-
-[[package]]
-name = "native-term-iterm2"
-version = "0.1.0"
-dependencies = [
- "native-term-platform",
- "serde",
- "serde_json",
 ]
 
 [[package]]
