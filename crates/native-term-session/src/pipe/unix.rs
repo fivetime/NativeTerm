@@ -72,8 +72,9 @@ fn gone(e: io::Error) -> io::Error {
     }
 }
 
-/// Who is at the other end of `stream`: their user and process ids.
-fn peer(stream: &UnixStream) -> io::Result<(u32, u32)> {
+/// Who is at the other end of `stream`: their user id, and process id
+/// where it can still be told.
+fn peer(stream: &UnixStream) -> io::Result<(u32, Option<u32>)> {
     let fd = stream.as_raw_fd();
     #[cfg(target_os = "linux")]
     {
@@ -87,7 +88,7 @@ fn peer(stream: &UnixStream) -> io::Result<(u32, u32)> {
         if got != 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok((cred.uid, cred.pid as u32))
+        Ok((cred.uid, Some(cred.pid as u32)))
     }
     #[cfg(target_os = "macos")]
     {
@@ -101,10 +102,9 @@ fn peer(stream: &UnixStream) -> io::Result<(u32, u32)> {
         // SAFETY: `pid` and `len` are ours and sized for each other;
         // LOCAL_PEERPID (2) at SOL_LOCAL (0) gives the peer's process id.
         let got = unsafe { libc::getsockopt(fd, 0, 2, (&mut pid as *mut libc::pid_t).cast(), &mut len) };
-        if got != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok((uid, pid as u32))
+        // macOS keeps the user from connect time but knows the process
+        // only while connected: a client that wrote and exited has none
+        Ok((uid, (got == 0).then_some(pid as u32)))
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
@@ -143,8 +143,8 @@ impl PipeListener {
         loop {
             let (stream, _) = self.listener.accept()?;
             match peer(&stream) {
-                Ok((peer_uid, pid)) if peer_uid == uid() => return PipeConnection::new(stream, Some(pid)),
-                // someone else's process, or nobody we can name: not served
+                Ok((peer_uid, pid)) if peer_uid == uid() => return PipeConnection::new(stream, pid),
+                // someone else's process, or no user we can name: not served
                 _ => drop(stream),
             }
         }
@@ -198,7 +198,7 @@ impl PipeConnection {
     pub fn client_pid(&self) -> io::Result<u32> {
         match self.peer_pid {
             Some(pid) => Ok(pid),
-            None => peer(&self.stream).map(|(_, pid)| pid),
+            None => peer(&self.stream)?.1.ok_or_else(|| io::Error::from_raw_os_error(libc::ENOTCONN)),
         }
     }
 
@@ -249,7 +249,13 @@ impl PipeConnection {
     fn read_some(&self, timeout: Duration) -> io::Result<Option<Vec<u8>>> {
         let _reader = self.reader.lock().unwrap_or_else(|e| e.into_inner());
         // a zero timeout would mean "wait forever"
-        self.stream.set_read_timeout(Some(timeout.max(Duration::from_millis(1))))?;
+        match self.stream.set_read_timeout(Some(timeout.max(Duration::from_millis(1)))) {
+            Ok(()) => {}
+            // macOS refuses socket options once the peer has gone; the
+            // read below then returns at once (what is left, or the end)
+            Err(e) if e.raw_os_error() == Some(libc::EINVAL) => {}
+            Err(e) => return Err(e),
+        }
         let mut buf = vec![0u8; READ_CHUNK];
         match (&self.stream).read(&mut buf) {
             Ok(0) => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "socket closed")),

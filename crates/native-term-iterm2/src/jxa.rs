@@ -96,7 +96,7 @@ pub fn parse_listing(json: &str) -> Result<Listing, serde_json::Error> {
 /// Every window, tab and session, as JSON. Doesn't start iTerm2.
 pub fn list_script() -> String {
     r#"(() => {
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   if (!app.running()) { return JSON.stringify({windows: [], frontmost: false, current_window: null}); }
   const out = [];
   const ws = app.windows();
@@ -109,13 +109,17 @@ pub fn list_script() -> String {
     for (let j = 0; j < ts.length; j++) {
       const t = ts[j];
       let currentSession = "";
-      try { currentSession = t.currentSession().uniqueId(); } catch (e) {}
+      try { currentSession = t.currentSession().id(); } catch (e) {}
       const sessions = [];
       const ss = t.sessions();
       for (let k = 0; k < ss.length; k++) {
         const s = ss[k];
-        const id = s.uniqueId();
-        sessions.push({id: id, name: s.name(), current: id === currentSession});
+        const id = s.id();
+        // the name a script gives a session is kept as its (own copy of
+        // the) profile's name; `name` reads what the tab shows
+        let name = "";
+        try { name = s.profileName(); } catch (e) { name = s.name(); }
+        sessions.push({id: id, name: name, current: id === currentSession});
       }
       tabs.push({current: t.index() === currentTab, sessions: sessions});
     }
@@ -165,7 +169,7 @@ pub fn tool_command(shim: &str, args: &[String]) -> String {
 pub fn new_window_script(command: &str, name: &str) -> String {
     format!(
         r#"(() => {{
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   app.activate();
   const w = app.createWindowWithDefaultProfile({{command: {command}}});
   w.currentSession().name = {name};
@@ -181,7 +185,7 @@ pub fn new_window_script(command: &str, name: &str) -> String {
 pub fn new_tab_script(window: u64, command: &str, name: &str) -> String {
     format!(
         r#"(() => {{
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   const w = app.windows.byId({window});
   const t = w.createTabWithDefaultProfile({{command: {command}}});
   t.currentSession().name = {name};
@@ -196,7 +200,7 @@ pub fn new_tab_script(window: u64, command: &str, name: &str) -> String {
 pub fn select_tab_script(window: u64, index: usize) -> String {
     format!(
         r#"(() => {{
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   const w = app.windows.byId({window});
   w.tabs[{index}].select();
   w.select();
@@ -209,7 +213,7 @@ pub fn select_tab_script(window: u64, index: usize) -> String {
 pub fn close_tab_script(window: u64, index: usize) -> String {
     format!(
         r#"(() => {{
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   const w = app.windows.byId({window});
   const ss = w.tabs[{index}].sessions();
   for (let k = ss.length - 1; k >= 0; k--) {{ ss[k].close(); }}
@@ -222,7 +226,7 @@ pub fn close_tab_script(window: u64, index: usize) -> String {
 pub fn activate_script(window: u64) -> String {
     format!(
         r#"(() => {{
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   app.windows.byId({window}).select();
   app.activate();
   return "ok";
@@ -234,7 +238,7 @@ pub fn activate_script(window: u64) -> String {
 pub fn contents_script(window: u64) -> String {
     format!(
         r#"(() => {{
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   return app.windows.byId({window}).currentTab().currentSession().contents();
 }})()"#
     )
@@ -245,7 +249,7 @@ pub fn contents_script(window: u64) -> String {
 pub fn write_script(window: u64, index: usize, text: &str) -> String {
     format!(
         r#"(() => {{
-  const app = Application("iTerm2");
+  const app = Application("com.googlecode.iterm2");
   app.windows.byId({window}).tabs[{index}].currentSession().write({{text: {text}, newline: false}});
   return "ok";
 }})()"#,

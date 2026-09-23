@@ -933,6 +933,24 @@
         `WT_SESSION`. Scripts and JSON tested here; `meets_the_contract`
         (`#[ignore]`) waits for the Mac, where the first run asks for
         Automation permission (2026-09-22)
+- [x] First macOS run (macOS 13.5 Ventura, Intel, iTerm2 3.7.3,
+      2026-09-23): the workspace builds without warnings (the Windows-only
+      prototypes left out), clippy is clean, and every test passes after
+      four fixes. The Unix socket: macOS names the peer's process
+      (`LOCAL_PEERPID`) only while it is connected, so a client that wrote
+      and exited was dropped and `accept` waited for good — it is now
+      served with its user checked and no process id; and macOS refuses
+      socket options once the peer has gone, so setting the read timeout
+      failed where the read would have returned what was left — that
+      refusal is now let through. The data folder: reading the pointer
+      file under a program "folder" that is a file says "not a directory"
+      on Unix. iTerm2: JXA finds it by bundle id (`com.googlecode.iterm2`;
+      by name only once it is in LaunchServices under that name), a
+      session's id is `id()` (`uniqueId()` does not convert), and the
+      name a script gives a session is read back as `profileName()`
+      (`name()` is what the tab shows, the running program's).
+      `meets_the_contract` passes against iTerm2: open two tabs in a new
+      window, claim, select, close, the window gone, a tool tab
 
 - [x] First Linux run (Deepin 25, X11, WezTerm 20240203, 2026-09-22):
       the Unix socket, `native-term-os`, the shim's tests, `core_fake`

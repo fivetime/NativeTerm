@@ -99,7 +99,8 @@ fn pointer(program_dir: &Path) -> io::Result<Option<PathBuf>> {
     let file = program_dir.join(POINTER_FILE);
     let text = match std::fs::read_to_string(&file) {
         Ok(text) => text,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        // Unix says "not a directory" where the program folder isn't one
+        Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory) => return Ok(None),
         Err(e) => return Err(e),
     };
     let value: toml::Table =
@@ -323,7 +324,7 @@ mod tests {
         let i = inputs(&file);
         assert_eq!(
             choose(&i).unwrap(),
-            (PathBuf::from(r"C:\AppData\NativeTerm"), native_term_os::home::APP_DATA_SOURCE)
+            (PathBuf::from(r"C:\AppData").join("NativeTerm"), native_term_os::home::APP_DATA_SOURCE)
         );
     }
 }
