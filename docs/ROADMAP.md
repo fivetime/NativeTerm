@@ -1078,6 +1078,21 @@
         prompt was declined. Forced through Xwayland (not a path the
         program takes on KDE) its window stayed unmapped after that
         prompt; not pursued
+  - [x] The window hung on KDE Plasma (Wayland) and burned 30 % of a CPU
+        idle on every Linux (2026-09-23). Two causes. The folder watcher
+        on Unix passed every inotify event on, reads included, and the
+        program reads the ssh folder when told of a change: each read was
+        a change, a frame per display refresh, forever. Only creations,
+        writes, renames and removals count now (idle: 280 CPU ticks per
+        10 s down to 2, on Deepin and EndeavourOS). And frames were
+        presented without `pre_present_notify`, so on Wayland winit did
+        not wait for the compositor's frame callback; with frames coming
+        that fast KWin (in a VM) held both of softbuffer's buffers and
+        `buffer_mut` blocked for good — "Not Responding". Frames now
+        follow the frame callbacks, and on Wayland the strip and the
+        floating button (docking can't work there) are not created, so no
+        surface the compositor never shows waits for its buffers.
+        `NATIVETERM_REPAINT_LOG=1` prints what asked for each frame
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

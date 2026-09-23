@@ -22,7 +22,11 @@ mod unix {
         /// the watcher's thread after each change.
         pub fn start(dir: &Path, subtree: bool, changed: impl Fn() + Send + 'static) -> io::Result<FolderWatcher> {
             let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                if event.is_ok() {
+                // a change, not a look: inotify also reports files being
+                // opened and read, and the program reads the folder when it
+                // is told of a change, which would tell it again, forever
+                // (a frame per display refresh on Linux, 30 % of a CPU)
+                if event.is_ok_and(|e| super::is_change(&e.kind)) {
                     changed();
                 }
             })
@@ -36,6 +40,35 @@ mod unix {
 
 #[cfg(unix)]
 pub use unix::FolderWatcher;
+
+/// Whether an event changes the folder (created, written, renamed,
+/// removed), rather than only looking at it (opened, read, closed
+/// without writing).
+#[cfg(unix)]
+fn is_change(kind: &notify::EventKind) -> bool {
+    use notify::event::{AccessKind, AccessMode, EventKind};
+    match kind {
+        EventKind::Access(AccessKind::Close(AccessMode::Write)) => true,
+        EventKind::Access(_) | EventKind::Any | EventKind::Other => false,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => true,
+    }
+}
+
+#[cfg(all(test, unix))]
+mod kinds {
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, EventKind, ModifyKind, RemoveKind};
+
+    #[test]
+    fn reading_is_no_change() {
+        assert!(!super::is_change(&EventKind::Access(AccessKind::Open(AccessMode::Read))));
+        assert!(!super::is_change(&EventKind::Access(AccessKind::Close(AccessMode::Read))));
+        assert!(!super::is_change(&EventKind::Access(AccessKind::Read)));
+        assert!(super::is_change(&EventKind::Access(AccessKind::Close(AccessMode::Write))));
+        assert!(super::is_change(&EventKind::Create(CreateKind::File)));
+        assert!(super::is_change(&EventKind::Modify(ModifyKind::Data(DataChange::Any))));
+        assert!(super::is_change(&EventKind::Remove(RemoveKind::File)));
+    }
+}
 
 #[cfg(test)]
 mod tests {

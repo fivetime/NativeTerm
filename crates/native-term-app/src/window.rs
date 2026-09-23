@@ -253,6 +253,10 @@ impl Pane {
         input.viewports = std::iter::once((ViewportId::ROOT, self.info.clone())).collect();
         let ui = &mut self.ui;
         let mut output = self.ctx.run_ui(input, |root| ui.ui(root));
+        if std::env::var_os("NATIVETERM_REPAINT_LOG").is_some() {
+            // what asked for the next frame (diagnostics)
+            eprintln!("repaint causes: {:?}", self.ctx.repaint_causes());
+        }
         self.info.events.clear();
         self.state.handle_platform_output(&self.window, std::mem::take(&mut output.platform_output));
         if let Some(viewport) = output.viewport_output.remove(&ViewportId::ROOT) {
@@ -314,6 +318,11 @@ impl Pane {
             // the slice borrows `buffer` for its whole life.
             let bytes = unsafe { std::slice::from_raw_parts_mut(pixels.as_mut_ptr().cast::<[u8; 4]>(), pixels.len()) };
             paint(bytes);
+            // on Wayland the next redraw then waits for the compositor's
+            // frame callback; without it frames go out faster than the
+            // compositor hands buffers back, and `buffer_mut` blocks until
+            // it does (KWin in a VM: the window stopped responding)
+            self.window.pre_present_notify();
             buffer.present().map_err(|e| e.to_string())?;
         }
         let rendered = started.elapsed();
@@ -473,8 +482,15 @@ impl Runner {
             }
         })?;
         self.main = Some(main);
+        // Wayland lets no client place or find windows: nothing docks, so
+        // the strip and the floating button are never needed there, and a
+        // surface the compositor never shows would never get its buffers
+        // back either
+        if self.main.as_ref().is_some_and(|m| on_wayland(&m.window)) {
+            self.button_spec = None;
+        }
         #[cfg(not(windows))]
-        {
+        if !self.main.as_ref().is_some_and(|m| on_wayland(&m.window)) {
             let attributes = Window::default_attributes()
                 .with_title("NativeTerm")
                 .with_decorations(false)
@@ -1030,6 +1046,12 @@ fn window_handle(window: &Window) -> Option<isize> {
         RawWindowHandle::Xcb(h) => Some(h.window.get() as isize),
         _ => Some(0),
     }
+}
+
+/// Whether the window is a Wayland surface (not X11, not Win32).
+fn on_wayland(window: &Window) -> bool {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    matches!(window.window_handle().map(|h| h.as_raw()), Ok(RawWindowHandle::Wayland(_)))
 }
 
 /// One frame at the window's monitor refresh rate (60 Hz if unknown).
