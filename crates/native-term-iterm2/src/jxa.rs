@@ -213,7 +213,9 @@ pub fn new_tab_script(window: u64, command: &str, name: &str) -> String {
   const app = Application("com.googlecode.iterm2");
   const w = app.windows.byId({window});
   let t;
-  try {{ t = w.createTabWithProfile({profile}, {{command: {command}}}); }}
+  // a window's "create tab with profile" takes the profile as
+  // `withProfile` (the form the application's own command has fails)
+  try {{ t = w.createTab({{withProfile: {profile}, command: {command}}}); }}
   catch (e) {{ t = w.createTabWithDefaultProfile({{command: {command}}}); }}
   t.currentSession().name = {name};
   return String(t.index());

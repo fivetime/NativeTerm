@@ -959,7 +959,13 @@
       "NativeTerm" (the Default profile, title = session name only,
       programs may not set it) and opens its tabs with it, falling back to
       the default profile when it is missing: the tab shows the host's
-      label, and a remote `OSC 0` leaves it alone
+      label, and a remote `OSC 0` leaves it alone. A new tab in an
+      existing window first fell back to the default profile (JXA's
+      `createTabWithProfile(name, …)` does not convert; a window takes
+      `createTab({withProfile, command})`), so it showed "ssh"; fixed.
+      Still open: iTerm2 opens a default window of its own when it
+      starts (restoring earlier ones instead when there are any), so a
+      cold start leaves an extra shell window next to NativeTerm's
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
