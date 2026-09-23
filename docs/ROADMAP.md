@@ -961,6 +961,22 @@
       (its Metal driver loaded, the AMD one not). The Linux VMs list only
       llvmpipe (type `Cpu`, Vulkan and GL): OpenGL as before, and WezTerm
       starts and opens its window with the new file on Lingmo
+- [x] NativeTerm's own look for WezTerm (2026-09-24): WezTerm's defaults
+      (JetBrains Mono, the Tango colours, a dark tab strip over a light
+      screen) looked far from Windows Terminal next to it. The written
+      configuration now carries one look for every system, modelled on
+      Windows Terminal and agreed on side by side with it on Windows:
+      Campbell when dark, One Half Light when light, the tab strip and
+      title bar following (tabs in the title bar on Windows and macOS),
+      12 pt, padding in points (8 px was cramped on a Retina screen), and
+      the system's own fonts — Cascadia Mono + Microsoft YaHei, Menlo +
+      PingFang SC, or on Linux Cascadia Mono / the desktop's monospace /
+      JetBrains Mono + fontconfig's Chinese family. Lingmo maps
+      `monospace` to Noto Sans CJK SC, which is not monospace: without a
+      monospace family first the CJK sans would draw the Latin, hence
+      WezTerm's own JetBrains Mono there. Tried with the generated file on
+      Windows (dark), the Mac (light) and Lingmo (light). The desktop's
+      accent colour on the selected tab is gone with it
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

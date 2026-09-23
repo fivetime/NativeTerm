@@ -1785,7 +1785,8 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
         Some("dark") => Some(true),
         _ => desktop.dark,
     };
-    native_term_wezterm::Look { dark, accent: desktop.accent, font: desktop.monospace, switcher }
+    let fonts = native_term_os::fonts::terminal_families(desktop.monospace.as_deref());
+    native_term_wezterm::Look { dark, fonts, switcher }
 }
 
 /// The terminal's windows follow the theme and the switcher setting
@@ -2238,7 +2239,10 @@ mod tests {
         let desktop = native_term_os::appearance::cached();
         assert_eq!(terminal_look(None, false).dark, desktop.dark);
         assert_eq!(terminal_look(Some(""), false).dark, desktop.dark);
-        assert_eq!(terminal_look(None, false).font, desktop.monospace);
+        assert_eq!(
+            terminal_look(None, false).fonts,
+            native_term_os::fonts::terminal_families(desktop.monospace.as_deref())
+        );
         assert!(terminal_look(None, true).switcher);
     }
 }

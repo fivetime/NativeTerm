@@ -110,6 +110,77 @@ fn parse_fc_match(text: &str) -> Option<(PathBuf, u32)> {
     chinese.then(|| (PathBuf::from(file), index & 0xFFFF))
 }
 
+/// The font families a terminal NativeTerm drives should use, in order of
+/// fallback, only ones this system has: Windows Terminal's Cascadia Mono
+/// (Consolas without it) and Microsoft YaHei on Windows; Menlo and
+/// PingFang SC on macOS; elsewhere Cascadia Mono where installed, the
+/// desktop's monospace font (`desktop_mono`) — WezTerm's own JetBrains
+/// Mono when there is neither — and the family fontconfig picks for
+/// Simplified Chinese.
+#[must_use]
+pub fn terminal_families(desktop_mono: Option<&str>) -> Vec<String> {
+    let mut families: Vec<String> = Vec::new();
+    if cfg!(windows) {
+        let cascadia = find_font(&["CascadiaMono.ttf"], 0).is_some();
+        families.push(if cascadia { "Cascadia Mono" } else { "Consolas" }.into());
+        families.push("Microsoft YaHei".into());
+    } else if cfg!(target_os = "macos") {
+        families.push("Menlo".into());
+        families.push("PingFang SC".into());
+    } else {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            if fontconfig_has("Cascadia Mono") {
+                families.push("Cascadia Mono".into());
+            }
+            families.extend(desktop_mono.map(str::to_string));
+            if families.is_empty() {
+                // no monospace font the desktop names (some map
+                // `monospace` to a CJK sans): WezTerm's own, which it
+                // always carries, before any CJK font takes the Latin
+                families.push("JetBrains Mono".into());
+            }
+            families.extend(fontconfig_cjk_family());
+        }
+    }
+    let _ = desktop_mono;
+    let mut seen = std::collections::HashSet::new();
+    families.retain(|f| seen.insert(f.clone()));
+    families
+}
+
+/// What `fc-match`/`fc-list` printed with these arguments.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn fontconfig(program: &str, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Whether fontconfig knows a family by this name.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn fontconfig_has(family: &str) -> bool {
+    fontconfig("fc-list", &[family, "family"]).is_some_and(|out| !out.trim().is_empty())
+}
+
+/// The family fontconfig picks for Simplified Chinese, when it covers it.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn fontconfig_cjk_family() -> Option<String> {
+    parse_fc_family(&fontconfig("fc-match", &["-f", "%{family[0]}\t%{lang}", "sans-serif:lang=zh-cn"])?)
+}
+
+/// `family\tlang|lang|…`: the family, when the languages include
+/// Simplified Chinese.
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+fn parse_fc_family(text: &str) -> Option<String> {
+    let (family, langs) = text.trim_end_matches('\n').split_once('\t')?;
+    (!family.is_empty() && langs.split('|').any(|l| l == "zh-cn")).then(|| family.to_string())
+}
+
 /// The system's icon font, where it has one NativeTerm draws with:
 /// Segoe Fluent Icons (Segoe MDL2 Assets on Windows 10).
 #[must_use]
@@ -163,6 +234,13 @@ mod tests {
         assert_eq!(super::find_file(dir.path(), "second.ttf", 1), Some(sub.join("second.ttf")));
         assert_eq!(super::find_file(dir.path(), "second.ttf", 0), None);
         assert_eq!(super::find_file(dir.path(), "third.ttf", 0), Some(dir.path().join("third.ttf")));
+    }
+
+    #[test]
+    fn reads_fontconfig_families() {
+        assert_eq!(super::parse_fc_family("Noto Sans CJK SC\ten|ja|zh-cn\n"), Some("Noto Sans CJK SC".into()));
+        assert_eq!(super::parse_fc_family("DejaVu Sans\ten|de"), None);
+        assert_eq!(super::parse_fc_family(""), None);
     }
 
     #[test]

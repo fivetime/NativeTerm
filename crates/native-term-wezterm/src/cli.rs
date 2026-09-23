@@ -336,32 +336,35 @@ pub fn default_config(look: &Look, shim: &Path) -> String {
 local wezterm = require("wezterm")
 local config = wezterm.config_builder()
 
--- the desktop's look, as NativeTerm read it
+-- NativeTerm's look, the same on every system: Windows Terminal's own
+-- (its Campbell colours when dark, One Half Light when light), light or
+-- dark as the desktop or NativeTerm's theme setting says
 "#,
     );
-    let scheme = |dark: bool| if dark { "Builtin Tango Dark" } else { "Builtin Tango Light" };
     match look.dark {
-        Some(dark) => lua.push_str(&format!("config.color_scheme = \"{}\"\n", scheme(dark))),
-        None => lua.push_str(&format!(
-            "config.color_scheme = wezterm.gui.get_appearance():find(\"Dark\") and \"{}\" or \"{}\"\n",
-            scheme(true),
-            scheme(false)
-        )),
+        Some(dark) => lua.push_str(&format!("local dark = {dark}\n")),
+        None => {
+            lua.push_str("local dark = wezterm.gui ~= nil and wezterm.gui.get_appearance():find(\"Dark\") ~= nil\n")
+        }
     }
-    if let Some((r, g, b)) = look.accent {
-        // the selected tab in the accent colour, its title in black or white
-        let light = (u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) / 1000 > 140;
-        let on_accent = if light { "#000000" } else { "#ffffff" };
-        lua.push_str(&format!(
-            "config.colors = {{ tab_bar = {{ active_tab = {{ bg_color = \"#{r:02x}{g:02x}{b:02x}\", fg_color = \"{on_accent}\" }} }} }}\n"
-        ));
+    lua.push_str(LOOK_LUA);
+    if cfg!(windows) {
+        lua.push_str("frame.font = wezterm.font({ family = \"Segoe UI\" })\nframe.font_size = 10.0\n");
     }
-    if let Some(font) = &look.font {
-        // the desktop's monospace font first; WezTerm's own fallbacks follow
-        lua.push_str(&format!("config.font = wezterm.font_with_fallback({{ \"{}\" }})\n", lua_escape(font)));
+    lua.push_str("config.window_frame = frame\n");
+    if cfg!(any(windows, target_os = "macos")) {
+        // the tabs in the title bar, as Windows Terminal has them (a Linux
+        // desktop keeps its own title bar)
+        lua.push_str("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n");
+    }
+    if !look.fonts.is_empty() {
+        // the system's fonts (see native_term_os::fonts::terminal_families);
+        // WezTerm's own fallbacks follow
+        let list: Vec<String> = look.fonts.iter().map(|f| format!("\"{}\"", lua_escape(f))).collect();
+        lua.push_str(&format!("config.font = wezterm.font_with_fallback({{ {} }})\n", list.join(", ")));
     }
     lua.push_str(
-        r#"config.font_size = 11.0
+        r#"config.font_size = 12.0
 
 -- drawn by the GPU through WebGpu (Metal, Vulkan, DirectX 12) where there
 -- is a real one, the integrated one first (it spares the battery); OpenGL
@@ -397,6 +400,42 @@ config.use_fancy_tab_bar = true
     lua.push_str("\nreturn config\n");
     lua
 }
+
+/// The colours and the tab strip, for `dark` (defined before it).
+const LOOK_LUA: &str = r##"config.color_schemes = {
+  ["NativeTerm Dark"] = {
+    foreground = "#CCCCCC", background = "#0C0C0C",
+    cursor_bg = "#FFFFFF", cursor_fg = "#0C0C0C", cursor_border = "#FFFFFF",
+    selection_bg = "#FFFFFF", selection_fg = "#0C0C0C",
+    ansi = { "#0C0C0C", "#C50F1F", "#13A10E", "#C19C00", "#0037DA", "#881798", "#3A96DD", "#CCCCCC" },
+    brights = { "#767676", "#E74856", "#16C60C", "#F9F1A5", "#3B78FF", "#B4009E", "#61D6D6", "#F2F2F2" },
+  },
+  ["NativeTerm Light"] = {
+    foreground = "#383A42", background = "#FAFAFA",
+    cursor_bg = "#4F525D", cursor_fg = "#FAFAFA", cursor_border = "#4F525D",
+    selection_bg = "#BFCEFF", selection_fg = "#383A42",
+    ansi = { "#383A42", "#E45649", "#50A14F", "#C18301", "#0184BC", "#A626A4", "#0997B3", "#FAFAFA" },
+    brights = { "#4F525D", "#DF6C75", "#98C379", "#E4C07A", "#61AFEF", "#C577DD", "#56B5C1", "#FFFFFF" },
+  },
+}
+config.color_scheme = dark and "NativeTerm Dark" or "NativeTerm Light"
+-- the tab strip in the window's own light or dark
+local strip = dark and { bar = "#202020", active = "#0C0C0C", inactive = "#2B2B2B", fg = "#FFFFFF", dim = "#A0A0A0" }
+  or { bar = "#F3F3F3", active = "#FAFAFA", inactive = "#E6E6E6", fg = "#1A1A1A", dim = "#5C5C5C" }
+local frame = { active_titlebar_bg = strip.bar, inactive_titlebar_bg = strip.bar }
+config.colors = {
+  tab_bar = {
+    active_tab = { bg_color = strip.active, fg_color = strip.fg },
+    inactive_tab = { bg_color = strip.inactive, fg_color = strip.dim },
+    inactive_tab_hover = { bg_color = strip.active, fg_color = strip.fg },
+    new_tab = { bg_color = strip.bar, fg_color = strip.dim },
+    new_tab_hover = { bg_color = strip.active, fg_color = strip.fg },
+    inactive_tab_edge = strip.bar,
+  },
+}
+-- in points, so a Retina screen gets as much room as any other
+config.window_padding = { left = "6pt", right = "6pt", top = "3pt", bottom = "3pt" }
+"##;
 
 /// NativeTerm's tab menu, through WezTerm's own picker: a right click in
 /// a tab (or Ctrl+Shift+M) runs the shim's `--tab-menu` for the pane,
@@ -458,10 +497,9 @@ table.insert(config.keys, { key = "Tab", mods = "CTRL", action = wezterm.action.
 pub struct Look {
     /// Dark or light; `None` lets WezTerm ask the desktop itself.
     pub dark: Option<bool>,
-    /// The desktop's accent colour, for the selected tab.
-    pub accent: Option<(u8, u8, u8)>,
-    /// The desktop's monospace font family.
-    pub font: Option<String>,
+    /// The font families, in order of fallback (see
+    /// `native_term_os::fonts::terminal_families`).
+    pub fonts: Vec<String>,
     /// Ctrl+Tab shows the tab navigator (NativeTerm's switcher setting).
     pub switcher: bool,
 }
@@ -577,33 +615,24 @@ mod tests {
         assert!(unknown.contains("if wezterm.gui then"), "the renderer is chosen only where the GUI can ask");
         assert!(unknown.contains("config.front_end = \"WebGpu\""));
         assert!(unknown.contains("wezterm.gui.get_appearance()"), "no reading: WezTerm asks the desktop");
-        assert!(!unknown.contains("config.font ="));
-        assert!(!unknown.contains("config.colors"));
+        assert!(!unknown.contains("config.font ="), "no fonts known: WezTerm's own");
+        assert!(unknown.contains("[\"NativeTerm Dark\"]") && unknown.contains("[\"NativeTerm Light\"]"));
+        assert!(unknown.contains("config.window_frame = frame\n"));
+        assert!(unknown.contains("config.font_size = 12.0\n"), "Windows Terminal's size");
         let read = default_config(
-            &Look {
-                dark: Some(true),
-                accent: Some((0x1f, 0x6e, 0xe7)),
-                font: Some("Noto Mono".into()),
-                switcher: false,
-            },
+            &Look { dark: Some(true), fonts: vec!["Cascadia Mono".into(), "Microsoft YaHei".into()], switcher: false },
             shim,
         );
-        assert!(read.contains("config.color_scheme = \"Builtin Tango Dark\"\n"));
+        assert!(read.contains("local dark = true\n"));
         assert!(!read.contains("get_appearance"));
-        assert!(read.contains("active_tab = { bg_color = \"#1f6ee7\", fg_color = \"#ffffff\" }"));
-        assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Noto Mono\" })\n"));
-        let light = default_config(
-            &Look {
-                dark: Some(false),
-                accent: Some((0xff, 0xc6, 0x00)),
-                font: Some("Odd \"Mono\"".into()),
-                switcher: false,
-            },
-            shim,
-        );
-        assert!(light.contains("\"Builtin Tango Light\""));
-        assert!(light.contains("fg_color = \"#000000\""), "black on a light accent");
+        assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Cascadia Mono\", \"Microsoft YaHei\" })\n"));
+        let light =
+            default_config(&Look { dark: Some(false), fonts: vec!["Odd \"Mono\"".into()], switcher: false }, shim);
+        assert!(light.contains("local dark = false\n"));
         assert!(light.contains("font_with_fallback({ \"Odd \\\"Mono\\\"\" })"), "quotes escaped");
+        // the frame is whole before it is given to the config
+        let frame_done = unknown.find("config.window_frame = frame\n").unwrap();
+        assert!(!unknown[frame_done..].contains("\nframe."));
     }
 
     #[test]

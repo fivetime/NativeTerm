@@ -4649,9 +4649,18 @@ window last activated), `screen_text` is `get-text`, and `type_text` is
 carries `WEZTERM_CONFIG_FILE=<data dir>/wezterm.lua`, written by
 NativeTerm from a `Look` — light or dark (the theme setting, else what
 `native-term-os::appearance` read; only when neither knows does the file
-let WezTerm ask the desktop itself), the desktop's accent colour on the
-selected tab, the desktop's monospace font first in WezTerm's fallback
-list — plus no close prompts, the tab bar always shown, and the
+let WezTerm ask the desktop itself) and the font families — plus
+NativeTerm's own look, the same everywhere and modelled on Windows
+Terminal: its Campbell colours when dark and One Half Light when light,
+the tab strip and title bar in the same light or dark (the tabs in the
+title bar on Windows and macOS, `INTEGRATED_BUTTONS`; a Linux desktop
+keeps its own title bar), 12 pt text, padding in points. The families
+are `native_term_os::fonts::terminal_families`, only ones the system
+has: Cascadia Mono and Microsoft YaHei on Windows, Menlo and PingFang SC
+on macOS, and on Linux Cascadia Mono where installed, the desktop's
+monospace font (else WezTerm's own JetBrains Mono, so a CJK sans never
+draws the Latin) and fontconfig's Simplified Chinese family. Also no
+close prompts, the tab bar always shown, and the
 renderer: WebGpu (Metal, Vulkan, DirectX 12) on a real GPU, the
 integrated one first, found by the GUI itself
 (`wezterm.gui.enumerate_gpus()`), else OpenGL (a VM's software
