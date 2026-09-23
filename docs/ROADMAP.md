@@ -1128,6 +1128,29 @@
         Deepin and Lingmo pass on all three edges. Off on Windows for
         now, where Aero Snap tiles and maximizes the same way: to be
         tried there. `NATIVETERM_DOCK_LOG=1` prints what docking decides
+  - [x] Docking on KDE Plasma under Wayland (2026-09-23): no program may
+        place its own window or see the pointer there, but KWin can, and
+        it runs scripts it is handed over D-Bus. NativeTerm loads
+        `native-term-os/src/kwin_dock.js` (its pid filled in) into KWin
+        through `org.kde.kwin.Scripting` when it starts on KDE Wayland and
+        unloads it on exit; one left by a NativeTerm that was killed is
+        unloaded by the next start. The script does what docking does on
+        Windows and X11: the edge the pointer is at when a drag ends,
+        above other windows, hidden 450 ms after the pointer leaves with a
+        4 px strip left, back when the pointer touches the strip or the
+        window is activated; a window maximized by a drag to the top is
+        unmaximized first. On EndeavourOS its placing was checked through
+        a self-test (docked, hidden and shown at all three edges, the
+        window back where it was) and it attaches to the window; the
+        pointer side needs a person there (Plasma asks before any program
+        may send input). No Pin toggle and no floating button there yet
+  - [x] Closing the window crashed on every Wayland desktop (found
+        2026-09-23 on EndeavourOS): the window's clipboard worker
+        (smithay-clipboard) destroyed its objects on the Wayland
+        connection after the event loop had already closed it. The
+        windows are now dropped in winit's `exiting`, while the loop still
+        has its display; the clipboard's drop waits for its worker. Clean
+        exits (0) on EndeavourOS three times, on Deepin and on Windows
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

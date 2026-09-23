@@ -426,6 +426,9 @@ struct Runner {
     /// server, brings the window back when the pointer touches it.
     #[cfg(not(windows))]
     strip: Option<Window>,
+    /// Docking done by KWin (KDE Plasma under Wayland), while this lives.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    kwin_dock: Option<native_term_os::kwin::KwinDock>,
     /// Where the floating button was last shown (see `sync_button`).
     #[cfg(not(windows))]
     button_at: Option<(i32, i32)>,
@@ -463,6 +466,8 @@ pub fn run(
         strip: None,
         #[cfg(not(windows))]
         button_at: None,
+        #[cfg(all(unix, not(target_os = "macos")))]
+        kwin_dock: None,
     };
     event_loop.run_app(&mut runner).map_err(|e| e.to_string())?;
     match runner.error {
@@ -491,6 +496,16 @@ impl Runner {
         // back either
         if self.main.as_ref().is_some_and(|m| on_wayland(&m.window)) {
             self.button_spec = None;
+            // except on KDE Plasma, where KWin docks the window itself for
+            // us: a script it runs (see native_term_os::kwin)
+            #[cfg(all(unix, not(target_os = "macos")))]
+            if native_term_os::kwin::available() {
+                let log = std::env::var_os("NATIVETERM_DOCK_LOG").is_some();
+                match native_term_os::kwin::KwinDock::start(log) {
+                    Ok(dock) => self.kwin_dock = Some(dock),
+                    Err(e) => dock_log(|| format!("KWin docking script: {e}")),
+                }
+            }
         }
         #[cfg(not(windows))]
         if !self.main.as_ref().is_some_and(|m| on_wayland(&m.window)) {
@@ -1071,6 +1086,20 @@ impl ApplicationHandler<UserEvent> for Runner {
                 }
             }
         }
+    }
+
+    /// The windows go while the event loop still has its display: on
+    /// Wayland each window's clipboard worker (smithay-clipboard) destroys
+    /// its objects on that connection when dropped, and after the loop
+    /// the connection is gone (a crash on every close).
+    fn exiting(&mut self, _: &ActiveEventLoop) {
+        self.extras.clear();
+        self.button = None;
+        #[cfg(not(windows))]
+        {
+            self.strip = None;
+        }
+        self.main = None;
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

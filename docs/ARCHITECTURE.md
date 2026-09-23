@@ -3731,7 +3731,11 @@ Implemented (first version), on NativeTerm's main window:
   moved again once mapped, to where they were. Verified on Deepin 25
   (KWin): dock at the top, hide, return through the strip, the button
   bottom-right and its panel, and docking again after a restart. On
-  Wayland none of the questions can be answered, so nothing docks.
+  Wayland no client can place its window or see the pointer, so nothing
+  docks — except on KDE Plasma, where KWin does it: NativeTerm loads a
+  script into KWin over D-Bus (`native_term_os::kwin`, the script in
+  `kwin_dock.js`) that finds the window by pid and implements the same
+  edges, delays and strip; it is unloaded on exit.
 
 ## Floating action button (FAB)
 

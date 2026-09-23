@@ -19,6 +19,8 @@ pub mod fonts;
 pub mod home;
 pub mod host;
 pub mod hotkey;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub mod kwin;
 pub mod layered;
 pub mod picker;
 pub mod process;
