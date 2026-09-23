@@ -164,35 +164,63 @@ pub fn tool_command(shim: &str, args: &[String]) -> String {
     std::iter::once(shim).chain(args.iter().map(String::as_str)).map(sh_quote).collect::<Vec<_>>().join(" ")
 }
 
-/// A new window running `command`, its session named `name`; prints the
-/// window's id. Starts iTerm2 if it isn't running.
+/// The iTerm2 profile NativeTerm's tabs open with (see `dynamic_profile`).
+pub const PROFILE: &str = "NativeTerm";
+
+/// NativeTerm's profile, as an iTerm2 dynamic profile: the person's
+/// default profile (fonts, colors), with the tab's title only its session
+/// name (the label NativeTerm gives it) and programs not allowed to change
+/// it — as NativeTerm's Windows Terminal profile does.
+pub fn dynamic_profile() -> String {
+    serde_json::json!({
+        "Profiles": [{
+            "Name": PROFILE,
+            "Guid": "6e617469-7665-4465-926d-6e6174697665",
+            "Dynamic Profile Parent Name": "Default",
+            // session name only (job, folder, … are further bits)
+            "Title Components": 1,
+            "Allow Title Setting": false,
+        }]
+    })
+    .to_string()
+}
+
+/// A new window running `command` (with NativeTerm's profile, else the
+/// default one), its session named `name`; prints the window's id. Starts
+/// iTerm2 if it isn't running.
 pub fn new_window_script(command: &str, name: &str) -> String {
     format!(
         r#"(() => {{
   const app = Application("com.googlecode.iterm2");
   app.activate();
-  const w = app.createWindowWithDefaultProfile({{command: {command}}});
+  let w;
+  try {{ w = app.createWindowWithProfile({profile}, {{command: {command}}}); }}
+  catch (e) {{ w = app.createWindowWithDefaultProfile({{command: {command}}}); }}
   w.currentSession().name = {name};
   return String(w.id());
 }})()"#,
         command = js_string(command),
         name = js_string(name),
+        profile = js_string(PROFILE),
     )
 }
 
-/// A new tab in window `window` running `command`, its session named
-/// `name`; prints the tab's index (1-based).
+/// A new tab in window `window` running `command` (with NativeTerm's
+/// profile, else the default one), its session named `name`; prints the tab's index (1-based).
 pub fn new_tab_script(window: u64, command: &str, name: &str) -> String {
     format!(
         r#"(() => {{
   const app = Application("com.googlecode.iterm2");
   const w = app.windows.byId({window});
-  const t = w.createTabWithDefaultProfile({{command: {command}}});
+  let t;
+  try {{ t = w.createTabWithProfile({profile}, {{command: {command}}}); }}
+  catch (e) {{ t = w.createTabWithDefaultProfile({{command: {command}}}); }}
   t.currentSession().name = {name};
   return String(t.index());
 }})()"#,
         command = js_string(command),
         name = js_string(name),
+        profile = js_string(PROFILE),
     )
 }
 

@@ -950,7 +950,16 @@
       name a script gives a session is read back as `profileName()`
       (`name()` is what the tab shows, the running program's).
       `meets_the_contract` passes against iTerm2: open two tabs in a new
-      window, claim, select, close, the window gone, a tool tab
+      window, claim, select, close, the window gone, a tool tab. The
+      window itself runs there (Chinese, icons, the tree), checked by the
+      person at the Mac
+- [x] iTerm2 tab titles (2026-09-24): with the default profile a tab
+      showed the running program ("nativeterm-shim"), and a remote title
+      replaced it. NativeTerm now installs an iTerm2 dynamic profile
+      "NativeTerm" (the Default profile, title = session name only,
+      programs may not set it) and opens its tabs with it, falling back to
+      the default profile when it is missing: the tab shows the host's
+      label, and a remote `OSC 0` leaves it alone
 
 - [x] First Linux run (Deepin 25, X11, WezTerm 20240203, 2026-09-22):
       the Unix socket, `native-term-os`, the shim's tests, `core_fake`

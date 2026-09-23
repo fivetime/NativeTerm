@@ -4688,13 +4688,22 @@ are not there.
 `native-term-iterm2` drives iTerm2 through JavaScript for Automation,
 each call one script run with `osascript -l JavaScript` (50–100 ms, so
 one script lists every window, tab and session at once, with which tab
-and session are current and whether iTerm2 is frontmost). A session tab
-is `createTabWithDefaultProfile({command})` in the window
-`Target::Recent` or `Target::Named` means (or
-`createWindowWithDefaultProfile` for a new one, which also starts
-iTerm2), the command being the shim quoted for `sh`; the session is then
-named with the label, which is what the tab shows and what the
-claimer's first rule finds. `select` is `tab.select()` and
+and session are current and whether iTerm2 is frontmost). iTerm2 is
+addressed by bundle id (`com.googlecode.iterm2`). A session tab is
+`createTabWithProfile("NativeTerm", {command})` in the window
+`Target::Recent` or `Target::Named` means (or `createWindowWithProfile`
+for a new one, which also starts iTerm2), the default profile when
+that one is missing, the command being the shim quoted for `sh`; the
+session is then named with the label. The "NativeTerm" profile is a
+dynamic profile NativeTerm writes at start
+(`~/Library/Application Support/iTerm2/DynamicProfiles/nativeterm.json`,
+rewritten only when it changed): the person's Default profile with the
+title only the session name and programs not allowed to set it, so the
+tab shows the label for good, as the Windows Terminal profile does.
+iTerm2 keeps a scripted session name as the name of the session's own
+copy of its profile, so the listing reads the label back with
+`profileName()` (`name()` is the title shown) and the session id with
+`id()`; the claimer's first rule finds the label. `select` is `tab.select()` and
 `window.select()`, `close` closes the tab's sessions, `activate` selects
 the window and activates the app, `foreground` is the current window
 while iTerm2 is frontmost, `screen_text` is `contents`, `type_text` is

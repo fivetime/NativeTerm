@@ -265,6 +265,10 @@ fn setup() -> Result<Start, String> {
                 start_core(terminal, registry, options.from_shim, &mut notices)
             }
             Chosen::ITerm2 => {
+                // early, so iTerm2 has read it by the first tab
+                if let Err(e) = native_term_iterm2::ITerm2::install_profile() {
+                    diag::line(&format!("iTerm2 profile not installed: {e}"));
+                }
                 let mut terminal = native_term_iterm2::ITerm2::new(&shim);
                 if other_ssh_dir {
                     terminal = terminal.with_ssh_dir(&options.ssh_dir);

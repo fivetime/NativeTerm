@@ -92,6 +92,22 @@ impl ITerm2 {
         self
     }
 
+    /// Put NativeTerm's profile in iTerm2's dynamic profiles folder
+    /// (`~/Library/Application Support/iTerm2/DynamicProfiles`), which
+    /// iTerm2 watches; unchanged, the file is left alone. Tabs open with
+    /// the default profile while it is missing.
+    pub fn install_profile() -> io::Result<()> {
+        let home = std::env::var_os("HOME").ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no $HOME"))?;
+        let dir = Path::new(&home).join("Library/Application Support/iTerm2/DynamicProfiles");
+        let file = dir.join("nativeterm.json");
+        let profile = jxa::dynamic_profile();
+        if std::fs::read_to_string(&file).is_ok_and(|now| now == profile) {
+            return Ok(());
+        }
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(file, profile)
+    }
+
     /// Whether iTerm2 is installed here (its application bundle).
     pub fn available() -> bool {
         Path::new("/Applications/iTerm.app").is_dir()
@@ -326,6 +342,7 @@ mod tests {
         let shim = built_shim();
         assert!(shim.exists(), "build the shim first");
         assert!(ITerm2::available(), "no iTerm2 here");
+        ITerm2::install_profile().unwrap();
         native_term_platform::contract::exercise(&ITerm2::new(&shim), ["nt-iterm a", "nt-iterm b"]);
     }
 
