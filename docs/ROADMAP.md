@@ -1111,6 +1111,23 @@
         rest could not be driven there (mutter stops taking synthetic
         pointer moves once the pointer is over a Wayland surface).
         elementary and Zorin were locked at the console and not tested
+  - [x] Docking by dragging with the mouse on X11 (2026-09-23): KWin
+        tiles a window dragged to the left or right edge (half the
+        screen, top to bottom, and it ignores a program's own moves,
+        resizes and unmaximize while tiled) and maximizes one dragged to
+        the top. A tiled window touches the top edge too, so the "top
+        wins in a corner" rule docked it at the top: the person could
+        only ever dock at the top. Now the edge the pointer is at when
+        the drag ends is the one meant (`dock::edge_at_pointer`); a
+        tiled window stays tiled and docks at that side as a full-height
+        side panel; one maximized by a drag to the top is unmaximized
+        (which KWin does take) and docked at the top. While hidden, the
+        pointer is also looked for over the strip every 100 ms: KWin's
+        own one-pixel screen-edge windows can sit over the strip and take
+        its enter event. `tools/dragtest-x11.sh` drags by the title bar;
+        Deepin and Lingmo pass on all three edges. Off on Windows for
+        now, where Aero Snap tiles and maximizes the same way: to be
+        tried there. `NATIVETERM_DOCK_LOG=1` prints what docking decides
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a

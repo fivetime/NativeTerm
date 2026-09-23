@@ -144,6 +144,9 @@ struct Docking {
     /// `Runner::set_hidden`), to put it back there.
     #[cfg(not(windows))]
     shown_at: Option<(i32, i32)>,
+    /// Dragged against the top edge and maximized by the window manager
+    /// for it (KWin does): unmaximized, then docked at the top.
+    top_after_restore: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -640,6 +643,7 @@ impl Runner {
     /// strip along the edge stands for it until the pointer touches it.
     fn set_hidden(&mut self, hide: bool) {
         let Some(edge) = self.docking.edge else { return };
+        dock_log(|| format!("hidden {hide} at {edge:?}, frame {:?}", self.hwnd().and_then(win::frame_bounds)));
         #[cfg(windows)]
         let _ = edge;
         self.docking.slide = None;
@@ -711,6 +715,7 @@ impl Runner {
         if self.main.is_none() {
             return;
         }
+        dock_log(|| format!("dock at {edge:?}, frame {:?}", self.hwnd().and_then(win::frame_bounds)));
         let was = self.docking.edge;
         self.docking.edge = edge;
         if self.docking.hidden {
@@ -779,15 +784,48 @@ impl Runner {
             self.docking.settle_check = None;
             if win::mouse_button_down() {
                 self.docking.settle_check = Some(now + dock::DRAG_POLL);
+            } else if std::mem::take(&mut self.docking.top_after_restore) {
+                self.dock_at(Some(Edge::Top));
             } else if let Some(hwnd) = self.hwnd() {
                 let maximized = self.main.as_ref().is_some_and(|r| r.window.is_maximized());
+                // a window manager that maximizes a window dragged to the
+                // top edge (KWin): its own size back, then docked there
+                let at_top = !cfg!(windows)
+                    && maximized
+                    && win::work_area(hwnd)
+                        .zip(win::cursor())
+                        .is_some_and(|(work, (_, y))| (0..=dock::SNAP).contains(&(y - work.top)));
+                if at_top {
+                    dock_log(|| "maximized by a drag to the top: restoring".into());
+                    if let Some(r) = &self.main {
+                        r.window.set_maximized(false);
+                    }
+                    self.docking.top_after_restore = true;
+                    self.docking.settle_check = Some(now + Duration::from_millis(300));
+                    return self.docking.settle_check;
+                }
                 let edge = match (win::frame_bounds(hwnd), win::work_area(hwnd)) {
                     (Some(frame), Some(work)) if !maximized => {
                         let monitor = win::monitor_bounds(hwnd).unwrap_or(work);
-                        dock::snap_edge(frame, work, monitor, win::on_a_monitor)
+                        // the pointer says which edge was meant: a window
+                        // manager that tiles a window dragged to a side
+                        // (KWin: half the screen, top to bottom, and it
+                        // ignores a program's own moves while tiled) leaves
+                        // it touching the top edge too; a side panel that
+                        // tall is what docking there is for anyway
+                        // (not on Windows yet, where Aero Snap does the same:
+                        // its docking is unchanged until tried there)
+                        let at_pointer = win::cursor()
+                            .filter(|_| !cfg!(windows))
+                            .and_then(|c| dock::edge_at_pointer(c, work, monitor, win::on_a_monitor));
+                        at_pointer.or_else(|| dock::snap_edge(frame, work, monitor, win::on_a_monitor))
                     }
                     _ => None,
                 };
+                dock_log(|| {
+                    let frame = win::frame_bounds(hwnd);
+                    format!("settled: frame {frame:?} cursor {:?} edge {edge:?}", win::cursor())
+                });
                 if edge.is_some() || self.docking.edge.is_some() {
                     self.dock_at(edge);
                 } else {
@@ -814,12 +852,41 @@ impl Runner {
                     // button is held
                     self.docking.leave_check = Some(now + dock::LEAVE_DELAY);
                 } else {
+                    dock_log(|| {
+                        format!(
+                            "leaving: cursor {:?} window {:?} in client {}",
+                            win::cursor(),
+                            win::window_bounds(hwnd),
+                            self.docking.cursor_in_client
+                        )
+                    });
                     self.start_slide(true);
                     return Some(now);
                 }
             }
         }
-        [self.docking.settle_check, self.docking.leave_check].into_iter().flatten().min()
+        // hidden behind the strip (X11): the pointer reaching it brings
+        // the window back. Its enter event alone is not enough: a window
+        // manager's own screen-edge windows (KWin's, a pixel wide) can sit
+        // over it and take the pointer instead
+        #[cfg(not(windows))]
+        let strip_poll = if self.docking.hidden && self.docking.edge.is_some() {
+            let over = self.strip.as_ref().and_then(window_handle).and_then(win::window_bounds).zip(win::cursor());
+            if over.is_some_and(|(b, (x, y))| {
+                // the edge pixel itself counts too
+                dock::Bounds { left: b.left - 1, top: b.top, right: b.right + 1, bottom: b.bottom }.contains(x, y)
+            }) {
+                dock_log(|| "pointer over the strip".into());
+                self.start_slide(false);
+                return Some(now);
+            }
+            Some(now + STRIP_POLL)
+        } else {
+            None
+        };
+        #[cfg(windows)]
+        let strip_poll = None;
+        [self.docking.settle_check, self.docking.leave_check, strip_poll].into_iter().flatten().min()
     }
 
     fn docking_event(&mut self, event: &WindowEvent) {
@@ -1048,6 +1115,18 @@ fn window_handle(window: &Window) -> Option<isize> {
         RawWindowHandle::Xlib(h) => Some(h.window as isize),
         RawWindowHandle::Xcb(h) => Some(h.window.get() as isize),
         _ => Some(0),
+    }
+}
+
+/// How often the pointer is looked for over the strip while the docked
+/// window is hidden outright (X11).
+#[cfg(not(windows))]
+const STRIP_POLL: Duration = Duration::from_millis(100);
+
+/// `NATIVETERM_DOCK_LOG=1`: what docking decides, on stderr (diagnostics).
+fn dock_log(what: impl FnOnce() -> String) {
+    if std::env::var_os("NATIVETERM_DOCK_LOG").is_some() {
+        eprintln!("dock: {}", what());
     }
 }
 

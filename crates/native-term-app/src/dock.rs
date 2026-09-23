@@ -96,6 +96,29 @@ pub fn snap_edge(frame: Bounds, work: Bounds, monitor: Bounds, neighbour: impl F
     candidates.into_iter().find(|(_, near, (x, y))| *near && !neighbour(*x, *y)).map(|(edge, _, _)| edge)
 }
 
+/// The edge the pointer was dragged against when the move ended, if it
+/// is at one (within `SNAP` of the work area's edge, the nearest when in a
+/// corner) and that edge has no other monitor behind it. A window manager
+/// that tiles a window dragged to the left or right edge (KWin makes it
+/// half the screen, from top to bottom) leaves a window touching the top
+/// edge too; the pointer says which edge was meant.
+pub fn edge_at_pointer(
+    (x, y): (i32, i32),
+    work: Bounds,
+    monitor: Bounds,
+    neighbour: impl Fn(i32, i32) -> bool,
+) -> Option<Edge> {
+    let mut near = [
+        (Edge::Left, x - work.left, (monitor.left - 1, y)),
+        (Edge::Right, work.right - 1 - x, (monitor.right, y)),
+        (Edge::Top, y - work.top, (x, monitor.top - 1)),
+    ];
+    near.sort_by_key(|(_, distance, _)| *distance);
+    near.into_iter()
+        .find(|(_, distance, (px, py))| (0..=SNAP).contains(distance) && !neighbour(*px, *py))
+        .map(|(edge, _, _)| edge)
+}
+
 /// Where the window rectangle (`window`, borders included) goes, docked at
 /// `edge`, shown or hidden. `frame` is the visible part of the same window.
 pub fn docked_position(edge: Edge, window: Bounds, frame: Bounds, work: Bounds, hidden: bool) -> (i32, i32) {
@@ -163,6 +186,19 @@ mod tests {
         let under_panel = Bounds { top: 24, ..WORK };
         let on_screen = |x: i32, y: i32| screen.contains(x, y);
         assert_eq!(snap_edge(window_at(300, 30).1, under_panel, screen, on_screen), Some(Edge::Top));
+    }
+
+    #[test]
+    fn the_pointer_names_the_edge() {
+        let screen = Bounds { left: 0, top: 0, right: 1920, bottom: 1080 };
+        let alone = |x: i32, y: i32| screen.contains(x, y);
+        assert_eq!(edge_at_pointer((0, 500), WORK, screen, alone), Some(Edge::Left));
+        assert_eq!(edge_at_pointer((1919, 500), WORK, screen, alone), Some(Edge::Right));
+        assert_eq!(edge_at_pointer((800, 2), WORK, screen, alone), Some(Edge::Top));
+        assert_eq!(edge_at_pointer((800, 500), WORK, screen, alone), None);
+        assert_eq!(edge_at_pointer((1, 5), WORK, screen, alone), Some(Edge::Left), "nearest in a corner");
+        let right_monitor = |x: i32, y: i32| (0..3840).contains(&x) && (0..1080).contains(&y);
+        assert_eq!(edge_at_pointer((1919, 500), WORK, screen, right_monitor), None, "a monitor behind it");
     }
 
     #[test]
