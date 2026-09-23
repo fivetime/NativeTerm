@@ -1180,6 +1180,15 @@
         (13/23 and 11/24); CPU 13.7 s and 11.4 s in four hours (under
         0.1 %); no panic, both still running at the end. WezTerm's own
         memory grew with its scrollback (171 → 188 MB) and levelled off
+  - [x] Chinese text as boxes on Fedora (2026-09-23): Fedora ships Noto
+        Sans CJK only as a variable font (`NotoSansCJK-VF.ttc`), not one
+        of the file names NativeTerm looked for, so no CJK font was
+        loaded. On Linux the font is now the one fontconfig picks for
+        Simplified Chinese (`fc-match sans-serif:lang=zh-cn`, taken only
+        when it covers Chinese), with the face it names in a collection —
+        elsewhere the Japanese face of `NotoSansCJK-Regular.ttc` was
+        used. With no CJK font at all, a Chinese or Japanese interface
+        falls back to English instead of boxes. Fedora shows Chinese now
   - [x] Closing the window crashed on every Wayland desktop (found
         2026-09-23 on EndeavourOS): the window's clipboard worker
         (smithay-clipboard) destroyed its objects on the Wayland

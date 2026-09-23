@@ -463,12 +463,14 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
     use native_term_os::fonts;
     // mapped, not read: egui would keep two private copies of a 20 MB file
     let mut fonts = egui::FontDefinitions::default();
-    let cjk = fonts::cjk_file().and_then(|f| fonts::map_file(&f).ok());
+    let cjk = fonts::cjk_font().and_then(|(f, index)| Some((fonts::map_file(&f).ok()?, index)));
     // icons last: their code points (private use area) are in no other font
-    let glyphs = fonts::icon_file().and_then(|f| fonts::map_file(&f).ok());
-    for (name, bytes) in [("cjk", cjk), ("icons", glyphs)] {
-        let Some(bytes) = bytes else { continue };
-        fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));
+    let glyphs = fonts::icon_file().and_then(|f| fonts::map_file(&f).ok()).map(|bytes| (bytes, 0));
+    for (name, font) in [("cjk", cjk), ("icons", glyphs)] {
+        let Some((bytes, index)) = font else { continue };
+        let mut data = egui::FontData::from_static(bytes);
+        data.index = index;
+        fonts.font_data.insert(name.into(), std::sync::Arc::new(data));
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
             fonts.families.entry(family).or_default().push(name.into());
         }

@@ -45,10 +45,32 @@ fn find_font(names: &[&str], depth: usize) -> Option<PathBuf> {
 }
 
 /// A font with Chinese, Japanese and Korean glyphs, if the system has
-/// one NativeTerm knows: Microsoft YaHei or SimSun, PingFang, Noto Sans
-/// CJK, WenQuanYi.
+/// one: on Linux the one fontconfig picks for Simplified Chinese (with the
+/// face in a collection it means), else one NativeTerm knows by name —
+/// Microsoft YaHei or SimSun, PingFang, Noto Sans CJK, WenQuanYi. Looked
+/// up once.
 #[must_use]
-pub fn cjk_file() -> Option<PathBuf> {
+pub fn cjk_font() -> Option<(PathBuf, u32)> {
+    static FOUND: std::sync::OnceLock<Option<(PathBuf, u32)>> = std::sync::OnceLock::new();
+    FOUND
+        .get_or_init(|| {
+            #[cfg(all(unix, not(target_os = "macos")))]
+            if let Some(found) = fontconfig_cjk() {
+                return Some(found);
+            }
+            cjk_file().map(|f| (f, 0))
+        })
+        .clone()
+}
+
+/// Whether there is a font to show Chinese, Japanese or Korean with.
+#[must_use]
+pub fn has_cjk() -> bool {
+    cjk_font().is_some()
+}
+
+/// A CJK font NativeTerm knows by name.
+fn cjk_file() -> Option<PathBuf> {
     let names: &[&str] = if cfg!(windows) {
         &["msyh.ttc", "simsun.ttc"]
     } else if cfg!(target_os = "macos") {
@@ -57,6 +79,35 @@ pub fn cjk_file() -> Option<PathBuf> {
         &["NotoSansCJK-Regular.ttc", "NotoSansCJKsc-Regular.otf", "NotoSansSC-Regular.otf", "wqy-microhei.ttc"]
     };
     find_font(names, 3)
+}
+
+/// `fc-match -f '%{file}\t%{index}\t%{lang}' sans-serif:lang=zh-cn`:
+/// fontconfig always names some font, so it counts only when the font
+/// covers Chinese.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn fontconfig_cjk() -> Option<(PathBuf, u32)> {
+    let out = std::process::Command::new("fc-match")
+        .args(["-f", "%{file}\t%{index}\t%{lang}", "sans-serif:lang=zh-cn"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    parse_fc_match(&String::from_utf8_lossy(&out.stdout)).filter(|(path, _)| path.is_file())
+}
+
+/// The file and face of `fc-match`'s answer (see `fontconfig_cjk`), when
+/// the font covers Simplified Chinese. The index's high bits name an
+/// instance of a variable font; the face is the low 16.
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
+fn parse_fc_match(text: &str) -> Option<(PathBuf, u32)> {
+    let mut fields = text.trim_end_matches('\n').split('\t');
+    let file = fields.next().filter(|f| !f.is_empty())?;
+    let index = fields.next()?.trim().parse::<u32>().ok()?;
+    let chinese = fields.next()?.split('|').any(|l| l == "zh-cn");
+    chinese.then(|| (PathBuf::from(file), index & 0xFFFF))
 }
 
 /// The system's icon font, where it has one NativeTerm draws with:
@@ -112,6 +163,15 @@ mod tests {
         assert_eq!(super::find_file(dir.path(), "second.ttf", 1), Some(sub.join("second.ttf")));
         assert_eq!(super::find_file(dir.path(), "second.ttf", 0), None);
         assert_eq!(super::find_file(dir.path(), "third.ttf", 0), Some(dir.path().join("third.ttf")));
+    }
+
+    #[test]
+    fn reads_fontconfig_answers() {
+        let vf = "/usr/share/fonts/NotoSansCJK-VF.ttc\t262146\ten|ja|ko|zh-cn|zh-tw\n";
+        assert_eq!(super::parse_fc_match(vf), Some(("/usr/share/fonts/NotoSansCJK-VF.ttc".into(), 2)));
+        // no Chinese in the font fontconfig fell back to
+        assert_eq!(super::parse_fc_match("/usr/share/fonts/DejaVuSans.ttf\t0\ten|de|fr"), None);
+        assert_eq!(super::parse_fc_match(""), None);
     }
 
     #[test]
