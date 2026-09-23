@@ -13,8 +13,8 @@
 
 #[cfg(windows)]
 pub use native_term_win::dock::{
-    cursor, frame_bounds, mouse_button_down, move_window, on_a_monitor, round_corners, set_topmost, window_bounds,
-    work_area, work_area_at, Bounds,
+    cursor, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, round_corners, set_topmost,
+    window_bounds, work_area, work_area_at, Bounds,
 };
 
 #[cfg(unix)]
@@ -144,6 +144,27 @@ mod x11 {
         work_area(0)
     }
 
+    /// The monitor the window is mostly on (RandR's monitors), else the
+    /// whole screen.
+    pub fn monitor_bounds(handle: isize) -> Option<Bounds> {
+        use x11rb::protocol::randr::ConnectionExt as _;
+        let d = display()?;
+        let screen = Bounds { left: 0, top: 0, right: d.width, bottom: d.height };
+        let Some(w) = window_bounds(handle) else { return Some(screen) };
+        let (cx, cy) = ((w.left + w.right) / 2, (w.top + w.bottom) / 2);
+        let monitors = d.conn.randr_get_monitors(d.root, true).ok().and_then(|c| c.reply().ok());
+        let found = monitors.into_iter().flat_map(|m| m.monitors).find_map(|m| {
+            let b = Bounds {
+                left: i32::from(m.x),
+                top: i32::from(m.y),
+                right: i32::from(m.x) + i32::from(m.width),
+                bottom: i32::from(m.y) + i32::from(m.height),
+            };
+            b.contains(cx, cy).then_some(b)
+        });
+        Some(found.unwrap_or(screen))
+    }
+
     /// Whether the screen shows this point (one X screen spans every
     /// monitor, so an edge with another monitor behind it is not told
     /// apart here).
@@ -171,10 +192,51 @@ mod x11 {
     pub fn set_topmost(_handle: isize, _on: bool) {}
 
     /// Move the window's frame to `left`, `top` without raising it.
+    ///
+    /// Window managers read a move request differently: by ICCCM (no
+    /// gravity given means north-west) the position is the frame's, which
+    /// KWin follows, while mutter (GNOME, and Pantheon's gala) takes it as
+    /// the window's own. So the window is given static gravity — the
+    /// position is the window's own, for every window manager — and the
+    /// frame the window manager drew is added here.
     pub fn move_window(handle: isize, left: i32, top: i32) {
         let (Some(d), Some(w)) = (display(), window(handle)) else { return };
-        let _ = d.conn.configure_window(w, &ConfigureWindowAux::new().x(left).y(top));
+        static_gravity(d, w);
+        // a window just mapped again has no frame yet: the one it had
+        static SEEN: std::sync::Mutex<Vec<(Window, (i32, i32))>> = std::sync::Mutex::new(Vec::new());
+        let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+        let now = match cardinals(d, w, d.frame_extents, 4).as_deref() {
+            Some([l, _, t, _]) if *l != 0 || *t != 0 => Some((*l as i32, *t as i32)),
+            _ => None,
+        };
+        let (l, t) = match now {
+            Some(extents) => {
+                seen.retain(|(x, _)| *x != w);
+                seen.push((w, extents));
+                extents
+            }
+            None => seen.iter().find(|(x, _)| *x == w).map_or((0, 0), |(_, e)| *e),
+        };
+        drop(seen);
+        let _ = d.conn.configure_window(w, &ConfigureWindowAux::new().x(left + l).y(top + t));
         let _ = d.conn.flush();
+    }
+
+    /// Give `w` static gravity, once (keeping the rest of its size hints).
+    fn static_gravity(d: &Display, w: Window) {
+        use x11rb::properties::WmSizeHints;
+        use x11rb::protocol::xproto::Gravity;
+        static DONE: std::sync::Mutex<Vec<Window>> = std::sync::Mutex::new(Vec::new());
+        let mut done = DONE.lock().unwrap_or_else(|e| e.into_inner());
+        if done.contains(&w) {
+            return;
+        }
+        let mut hints =
+            WmSizeHints::get_normal_hints(&d.conn, w).ok().and_then(|c| c.reply().ok()).flatten().unwrap_or_default();
+        hints.win_gravity = Some(Gravity::STATIC);
+        if hints.set_normal_hints(&d.conn, w).is_ok() {
+            done.push(w);
+        }
     }
 
     /// Give a window that nothing paints one plain colour (the docking
@@ -190,8 +252,8 @@ mod x11 {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub use x11::{
-    cursor, fill, frame_bounds, mouse_button_down, move_window, on_a_monitor, round_corners, set_topmost,
-    window_bounds, work_area, work_area_at,
+    cursor, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, round_corners,
+    set_topmost, window_bounds, work_area, work_area_at,
 };
 
 #[cfg(target_os = "macos")]
@@ -211,6 +273,10 @@ mod none {
     }
 
     pub fn work_area_at(_x: i32, _y: i32) -> Option<Bounds> {
+        None
+    }
+
+    pub fn monitor_bounds(_handle: isize) -> Option<Bounds> {
         None
     }
 
@@ -237,6 +303,6 @@ mod none {
 
 #[cfg(target_os = "macos")]
 pub use none::{
-    cursor, fill, frame_bounds, mouse_button_down, move_window, on_a_monitor, round_corners, set_topmost,
-    window_bounds, work_area, work_area_at,
+    cursor, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, round_corners,
+    set_topmost, window_bounds, work_area, work_area_at,
 };

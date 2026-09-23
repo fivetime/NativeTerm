@@ -76,6 +76,11 @@ fn monitor_info(monitor: windows::Win32::Graphics::Gdi::HMONITOR) -> Option<(Bou
     unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool().then(|| (info.rcMonitor.into(), info.rcWork.into()))
 }
 
+/// The whole of the window's monitor (taskbar included).
+pub fn monitor_bounds(handle: isize) -> Option<Bounds> {
+    monitor_info(unsafe { MonitorFromWindow(hwnd(handle), MONITOR_DEFAULTTONEAREST) }).map(|(monitor, _)| monitor)
+}
+
 /// The work area (without the taskbar) of the window's monitor.
 pub fn work_area(handle: isize) -> Option<Bounds> {
     monitor_info(unsafe { MonitorFromWindow(hwnd(handle), MONITOR_DEFAULTTONEAREST) }).map(|(_, work)| work)

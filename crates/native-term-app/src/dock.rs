@@ -82,14 +82,16 @@ pub fn set_pinned(on: bool) {
 /// The edge `frame` (what the user sees of the window) is dragged to, if
 /// any. `neighbour` tells whether a monitor continues past a point; an
 /// edge with another monitor behind it isn't used (the hidden window
-/// would show there).
-pub fn snap_edge(frame: Bounds, work: Bounds, neighbour: impl Fn(i32, i32) -> bool) -> Option<Edge> {
+/// would show there). The point looked at is just past `monitor`'s edge,
+/// not the work area's: a panel along that edge (Lingmo's status bar, a
+/// taskbar at the top) is on the same monitor, not another one.
+pub fn snap_edge(frame: Bounds, work: Bounds, monitor: Bounds, neighbour: impl Fn(i32, i32) -> bool) -> Option<Edge> {
     let mid_x = (frame.left + frame.right) / 2;
     let mid_y = (frame.top + frame.bottom) / 2;
     let candidates = [
-        (Edge::Top, (frame.top - work.top).abs() <= SNAP, (mid_x, work.top - 1)),
-        (Edge::Left, (frame.left - work.left).abs() <= SNAP, (work.left - 1, mid_y)),
-        (Edge::Right, (frame.right - work.right).abs() <= SNAP, (work.right, mid_y)),
+        (Edge::Top, (frame.top - work.top).abs() <= SNAP, (mid_x, monitor.top - 1)),
+        (Edge::Left, (frame.left - work.left).abs() <= SNAP, (monitor.left - 1, mid_y)),
+        (Edge::Right, (frame.right - work.right).abs() <= SNAP, (monitor.right, mid_y)),
     ];
     candidates.into_iter().find(|(_, near, (x, y))| *near && !neighbour(*x, *y)).map(|(edge, _, _)| edge)
 }
@@ -145,16 +147,22 @@ mod tests {
     #[test]
     fn edges() {
         let alone = |_: i32, _: i32| false;
-        assert_eq!(snap_edge(window_at(300, 8).1, WORK, alone), Some(Edge::Top));
-        assert_eq!(snap_edge(window_at(-5, 200).1, WORK, alone), Some(Edge::Left));
-        assert_eq!(snap_edge(window_at(1515, 200).1, WORK, alone), Some(Edge::Right));
-        assert_eq!(snap_edge(window_at(300, 200).1, WORK, alone), None);
+        assert_eq!(snap_edge(window_at(300, 8).1, WORK, WORK, alone), Some(Edge::Top));
+        assert_eq!(snap_edge(window_at(-5, 200).1, WORK, WORK, alone), Some(Edge::Left));
+        assert_eq!(snap_edge(window_at(1515, 200).1, WORK, WORK, alone), Some(Edge::Right));
+        assert_eq!(snap_edge(window_at(300, 200).1, WORK, WORK, alone), None);
         // top wins in the corner
-        assert_eq!(snap_edge(window_at(0, 0).1, WORK, alone), Some(Edge::Top));
+        assert_eq!(snap_edge(window_at(0, 0).1, WORK, WORK, alone), Some(Edge::Top));
         // a second monitor to the right: no docking there
         let right_monitor = |x: i32, _: i32| x >= 1920;
-        assert_eq!(snap_edge(window_at(1515, 200).1, WORK, right_monitor), None);
-        assert_eq!(snap_edge(window_at(-5, 200).1, WORK, right_monitor), Some(Edge::Left));
+        assert_eq!(snap_edge(window_at(1515, 200).1, WORK, WORK, right_monitor), None);
+        assert_eq!(snap_edge(window_at(-5, 200).1, WORK, WORK, right_monitor), Some(Edge::Left));
+        // a panel along the top: the work area starts below it, and the
+        // point past the work area's edge is on this same monitor
+        let screen = Bounds { left: 0, top: 0, right: 1920, bottom: 1080 };
+        let under_panel = Bounds { top: 24, ..WORK };
+        let on_screen = |x: i32, y: i32| screen.contains(x, y);
+        assert_eq!(snap_edge(window_at(300, 30).1, under_panel, screen, on_screen), Some(Edge::Top));
     }
 
     #[test]

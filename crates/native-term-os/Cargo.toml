@@ -15,7 +15,7 @@ notify = { version = "8", default-features = false, features = ["macos_fsevent"]
 
 # docking asks the X server about frames, the work area and the pointer
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
-x11rb = { version = "0.13", default-features = false }
+x11rb = { version = "0.13", default-features = false, features = ["randr"] }
 
 [dev-dependencies]
 tempfile = "3"

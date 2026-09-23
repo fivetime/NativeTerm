@@ -782,7 +782,10 @@ impl Runner {
             } else if let Some(hwnd) = self.hwnd() {
                 let maximized = self.main.as_ref().is_some_and(|r| r.window.is_maximized());
                 let edge = match (win::frame_bounds(hwnd), win::work_area(hwnd)) {
-                    (Some(frame), Some(work)) if !maximized => dock::snap_edge(frame, work, win::on_a_monitor),
+                    (Some(frame), Some(work)) if !maximized => {
+                        let monitor = win::monitor_bounds(hwnd).unwrap_or(work);
+                        dock::snap_edge(frame, work, monitor, win::on_a_monitor)
+                    }
                     _ => None,
                 };
                 if edge.is_some() || self.docking.edge.is_some() {

@@ -1093,6 +1093,24 @@
         floating button (docking can't work there) are not created, so no
         surface the compositor never shows waits for its buffers.
         `NATIVETERM_REPAINT_LOG=1` prints what asked for each frame
+  - [x] Docking on X11, all three edges (2026-09-23), with
+        `tools/docktest-x11.sh` (moves the window to each edge, moves the
+        pointer away, touches the strip, reports frame positions). Deepin
+        and Lingmo pass on top, left and right, the window coming back
+        exactly where it was. Three fixes on the way: a panel along the
+        top (Lingmo's status bar) made the top edge look like it had
+        another monitor behind it — the probe now looks past the
+        monitor's edge (RandR; `monitor_bounds`, on Windows too, where a
+        taskbar at the top did the same), not the work area's; window
+        managers read a move differently (KWin as the frame's position,
+        as ICCCM says, mutter as the window's own), so the window gets
+        static gravity and the frame is added by NativeTerm; and a window
+        just mapped again has no frame extents yet, so the last ones seen
+        are used. Under GNOME through Xwayland (Fedora) a right-edge dock
+        hid and came back once, and the top edge docks and hides; the
+        rest could not be driven there (mutter stops taking synthetic
+        pointer moves once the pointer is over a Wayland surface).
+        elementary and Zorin were locked at the console and not tested
   - [ ] Once on Deepin a `wezterm-gui` NativeTerm started died at once
         with a panic in `std::io::stdio` (its log said `!?`), so the tab
         never appeared and the session was later reported as without a
