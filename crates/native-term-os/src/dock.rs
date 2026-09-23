@@ -132,44 +132,95 @@ mod x11 {
         Some(Bounds { left: x as i32, top: y as i32, right: (x + w) as i32, bottom: (y + h) as i32 })
     }
 
-    /// The work area, or the whole screen where none is published.
-    pub fn work_area(_handle: isize) -> Option<Bounds> {
-        published_work_area().or_else(|| {
-            let d = display()?;
-            Some(Bounds { left: 0, top: 0, right: d.width, bottom: d.height })
-        })
+    /// The whole screen as it is now (it changes when monitors come and go).
+    fn screen(d: &Display) -> Bounds {
+        match d.conn.get_geometry(d.root).ok().and_then(|c| c.reply().ok()) {
+            Some(g) => Bounds { left: 0, top: 0, right: i32::from(g.width), bottom: i32::from(g.height) },
+            None => Bounds { left: 0, top: 0, right: d.width, bottom: d.height },
+        }
     }
 
-    pub fn work_area_at(_x: i32, _y: i32) -> Option<Bounds> {
-        work_area(0)
+    /// The monitors (RandR's), else the whole screen as one.
+    fn monitors(d: &Display) -> Vec<Bounds> {
+        use x11rb::protocol::randr::ConnectionExt as _;
+        let listed: Vec<Bounds> = d
+            .conn
+            .randr_get_monitors(d.root, true)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .map(|r| r.monitors)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| Bounds {
+                left: i32::from(m.x),
+                top: i32::from(m.y),
+                right: i32::from(m.x) + i32::from(m.width),
+                bottom: i32::from(m.y) + i32::from(m.height),
+            })
+            .collect();
+        if listed.is_empty() {
+            vec![screen(d)]
+        } else {
+            listed
+        }
+    }
+
+    /// The monitor showing a point, else the nearest one.
+    fn monitor_at(d: &Display, x: i32, y: i32) -> Bounds {
+        let all = monitors(d);
+        let distance = |b: &Bounds| {
+            let dx = (b.left - x).max(0).max(x - (b.right - 1));
+            let dy = (b.top - y).max(0).max(y - (b.bottom - 1));
+            i64::from(dx) * i64::from(dx) + i64::from(dy) * i64::from(dy)
+        };
+        all.iter().copied().min_by_key(distance).unwrap_or_else(|| screen(d))
+    }
+
+    /// The part of the published work area on `monitor` (the window
+    /// manager publishes one area spanning every monitor; its panels are
+    /// taken off the monitor they are on), or the monitor itself.
+    fn work_on(monitor: Bounds) -> Bounds {
+        match published_work_area() {
+            Some(w) => {
+                let cut = Bounds {
+                    left: w.left.max(monitor.left),
+                    top: w.top.max(monitor.top),
+                    right: w.right.min(monitor.right),
+                    bottom: w.bottom.min(monitor.bottom),
+                };
+                if cut.width() > 0 && cut.height() > 0 {
+                    cut
+                } else {
+                    monitor
+                }
+            }
+            None => monitor,
+        }
+    }
+
+    /// The work area of the monitor the window is mostly on.
+    pub fn work_area(handle: isize) -> Option<Bounds> {
+        Some(work_on(monitor_bounds(handle)?))
+    }
+
+    /// The work area of the monitor showing a point (else the nearest).
+    pub fn work_area_at(x: i32, y: i32) -> Option<Bounds> {
+        let d = display()?;
+        Some(work_on(monitor_at(d, x, y)))
     }
 
     /// The monitor the window is mostly on (RandR's monitors), else the
     /// whole screen.
     pub fn monitor_bounds(handle: isize) -> Option<Bounds> {
-        use x11rb::protocol::randr::ConnectionExt as _;
         let d = display()?;
-        let screen = Bounds { left: 0, top: 0, right: d.width, bottom: d.height };
-        let Some(w) = window_bounds(handle) else { return Some(screen) };
-        let (cx, cy) = ((w.left + w.right) / 2, (w.top + w.bottom) / 2);
-        let monitors = d.conn.randr_get_monitors(d.root, true).ok().and_then(|c| c.reply().ok());
-        let found = monitors.into_iter().flat_map(|m| m.monitors).find_map(|m| {
-            let b = Bounds {
-                left: i32::from(m.x),
-                top: i32::from(m.y),
-                right: i32::from(m.x) + i32::from(m.width),
-                bottom: i32::from(m.y) + i32::from(m.height),
-            };
-            b.contains(cx, cy).then_some(b)
-        });
-        Some(found.unwrap_or(screen))
+        let Some(w) = window_bounds(handle) else { return Some(screen(d)) };
+        Some(monitor_at(d, (w.left + w.right) / 2, (w.top + w.bottom) / 2))
     }
 
-    /// Whether the screen shows this point (one X screen spans every
-    /// monitor, so an edge with another monitor behind it is not told
-    /// apart here).
+    /// Whether a monitor shows this point (not only the screen: monitors
+    /// of different sizes leave parts of the screen nobody sees).
     pub fn on_a_monitor(x: i32, y: i32) -> bool {
-        display().is_some_and(|d| (0..d.width).contains(&x) && (0..d.height).contains(&y))
+        display().is_some_and(|d| monitors(d).iter().any(|m| m.contains(x, y)))
     }
 
     pub fn cursor() -> Option<(i32, i32)> {

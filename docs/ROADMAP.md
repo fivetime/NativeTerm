@@ -1157,6 +1157,21 @@
         window back where it was) and it attaches to the window; the
         pointer side needs a person there (Plasma asks before any program
         may send input). No Pin toggle and no floating button there yet
+  - [x] Several monitors and scaling on X11 (2026-09-23): the window
+        manager publishes one work area spanning every monitor, and
+        docking used it and the whole screen as if they were one monitor,
+        so an edge between two monitors counted as the screen's. Now each
+        RandR monitor is its own: the work area is the published one cut
+        to the monitor the window (or the pointer, `work_area_at`) is on,
+        and an edge docks only with no monitor past it. Lingmo split into
+        two logical monitors (`xrandr --setmonitor`): the edges between
+        them do not dock, the outer left and right and both tops do. A
+        monitor RandR lists without an output behind it cannot be reached
+        (the X server keeps the pointer and windows on real outputs), so
+        a real second display is still to be tried. At 1.5× scale
+        (`WINIT_X11_SCALE_FACTOR`) all three edges dock, hide and come
+        back at the right place. Windows already did both (per-monitor
+        work area and PerMonitorV2)
   - [x] Closing the window crashed on every Wayland desktop (found
         2026-09-23 on EndeavourOS): the window's clipboard worker
         (smithay-clipboard) destroyed its objects on the Wayland

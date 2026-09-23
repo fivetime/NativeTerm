@@ -3692,7 +3692,9 @@ Implemented (first version), on NativeTerm's main window:
   wins in a corner). The frame is aligned to the edge using DWM's frame
   bounds, so the invisible resize borders don't leave a gap. An edge
   with another monitor behind it is not used (the hidden window would
-  show there). A move is "ended" once no mouse button is held (checked
+  show there). On X11 each RandR monitor counts on its own: the work
+  area is the published `_NET_WORKAREA` (one for all monitors) cut to
+  the monitor the window or the pointer is on. A move is "ended" once no mouse button is held (checked
   every 120 ms after the last move). Dragging the window away undocks
   it. Maximized windows don't dock.
 - **Hiding:** 450 ms after the pointer leaves, the window slides (160 ms,
