@@ -4754,6 +4754,12 @@ and leaves typing and screen reads to the backend); then the backends:
   WezTerm backend" below). VTE-based terminals, GNOME Terminal and
   Konsole have no usable API for reading tabs or text; Ghostty can't be
   read either.
-- **macOS**: iTerm2, done as `native-term-iterm2` (see "The iTerm2
-  backend" below). Terminal.app can only open tabs by simulated
-  keystrokes.
+- **macOS**: WezTerm too, the default since 2026-09-24 (the same backend
+  and generated configuration as on Linux; found on `PATH` or as
+  `WezTerm.app` in `/Applications` or `~/Applications`). It needs no
+  Automation permission (the CLI talks to WezTerm's own socket) and
+  opens only the windows asked for. iTerm2 stays as `--terminal iterm2`,
+  and is used when there is no WezTerm (`native-term-iterm2`, see "The
+  iTerm2 backend" below): its scripting asks for Automation permission
+  once, and it opens a window of its own when it starts. Terminal.app
+  can only open tabs by simulated keystrokes.

@@ -927,8 +927,8 @@
         `createTabWithDefaultProfile` with the shim as the command, the
         session named with the label; one script lists windows, tabs
         and sessions; `select`, `close`, `write`, `contents`; a 1 s
-        poll), the default on macOS where iTerm2 is installed, and
-        `--terminal iterm2`. The shim takes its tab id from
+        poll), `--terminal iterm2` (and the default on macOS where there
+        is no WezTerm, since 2026-09-24). The shim takes its tab id from
         `ITERM_SESSION_ID` or `WEZTERM_PANE` when there is no
         `WT_SESSION`. Scripts and JSON tested here; `meets_the_contract`
         (`#[ignore]`) waits for the Mac, where the first run asks for
@@ -976,6 +976,16 @@
       NativeTerm's close — the tab stayed. `wait_any` uses `select` on
       macOS. The same shim runs under iTerm2, which had it too. The login
       test needs ssh to the Mac itself with a key, not set up there
+- [x] One terminal on Linux and macOS (2026-09-24): tried side by side
+      on the Mac, WezTerm needed no Automation permission, opened no
+      window of its own, showed the labels as tab titles from the start
+      and needed one fix (the shim's, shared with iTerm2), where iTerm2
+      needed four and still leaves a window on a cold start. WezTerm is
+      now the default on macOS as on Linux — on `PATH`, else
+      `WezTerm.app` in `/Applications` or `~/Applications`
+      (`native_term_wezterm::app_dirs`, a Finder-started app has no shell
+      `PATH`) — and iTerm2 is used only where there is no WezTerm, or
+      with `--terminal iterm2`
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

@@ -7,8 +7,9 @@
 //! `NATIVETERM_TERMINAL_DIR`). Without a folder the installed Windows
 //! Terminal is used; `--terminal wezterm` drives WezTerm through its CLI
 //! instead, `--terminal iterm2` iTerm2 through its scripting. Off Windows
-//! the default is iTerm2 where it is installed, else WezTerm when
-//! `wezterm` is on `PATH`.
+//! the default is WezTerm (on `PATH`, or on macOS its app in
+//! `/Applications` or `~/Applications`), else iTerm2 where it is
+//! installed.
 //! `--from-shim`: started by a restored tab; exits quietly if NativeTerm
 //! is already running.
 
@@ -234,14 +235,23 @@ fn setup() -> Result<Start, String> {
         notices.push(t!("notice-shim-missing", path = shim.display().to_string()));
     }
     // another terminal than the platform's own: asked for, or the default
-    // where there is none of the platform's own to drive
+    // where there is none of the platform's own to drive — WezTerm on
+    // Linux and macOS alike (on `PATH`, or its macOS app), iTerm2 only
+    // where there is no WezTerm
     let chosen = options.terminal.clone().or_else(|| {
         if cfg!(windows) {
-            None
+            return None;
+        }
+        if native_term_wezterm::WezTerm::new(None, &shim).available() {
+            return Some(Chosen::WezTerm(None));
+        }
+        let app = native_term_wezterm::app_dirs()
+            .into_iter()
+            .find(|dir| native_term_wezterm::WezTerm::new(Some(dir), &shim).available());
+        if let Some(dir) = app {
+            Some(Chosen::WezTerm(Some(dir)))
         } else if cfg!(target_os = "macos") && native_term_iterm2::ITerm2::available() {
             Some(Chosen::ITerm2)
-        } else if native_term_wezterm::WezTerm::new(None, &shim).available() {
-            Some(Chosen::WezTerm(None))
         } else {
             None
         }

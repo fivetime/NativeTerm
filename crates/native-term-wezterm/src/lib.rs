@@ -95,6 +95,22 @@ pub struct WezTerm {
     state: Mutex<State>,
 }
 
+/// Where WezTerm is when it is not on `PATH`: on macOS its application
+/// bundle in `/Applications` or `~/Applications` (an app started from the
+/// Finder gets no shell `PATH` either). The folder to give `WezTerm::new`.
+#[must_use]
+pub fn app_dirs() -> Vec<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return Vec::new();
+    }
+    let bundle = Path::new("WezTerm.app/Contents/MacOS");
+    let mut dirs = vec![Path::new("/Applications").join(bundle)];
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(Path::new(&home).join("Applications").join(bundle));
+    }
+    dirs
+}
+
 impl WezTerm {
     /// WezTerm from `dir` (its `wezterm` and `wezterm-gui` executables),
     /// or the ones on `PATH` when `dir` is `None`; tabs run `shim`.
