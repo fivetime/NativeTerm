@@ -966,6 +966,16 @@
       Still open: iTerm2 opens a default window of its own when it
       starts (restoring earlier ones instead when there are any), so a
       cold start leaves an extra shell window next to NativeTerm's
+- [x] WezTerm on macOS (2026-09-24, WezTerm 20240203): the backend
+      contract passes as it is, and `wezterm_live`'s
+      `open_find_focus_read_close` (open two tabs, hello, ssh fails,
+      located, focus, screen read, close, window gone) passes in 2.6 s
+      after one fix in the shim: macOS's `poll` does not take terminals
+      (POLLNVAL at once), so the shim waiting for R/C or a message took
+      the terminal for a key, blocked reading it, and never heard
+      NativeTerm's close — the tab stayed. `wait_any` uses `select` on
+      macOS. The same shim runs under iTerm2, which had it too. The login
+      test needs ssh to the Mac itself with a key, not set up there
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

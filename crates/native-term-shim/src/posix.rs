@@ -85,7 +85,49 @@ impl Event {
 }
 
 /// Wait until one of `handles` is readable; its index, or `None` after
+/// `timeout`. On macOS with `select`: its `poll` does not take terminals
+/// (it says POLLNVAL for them at once, so the terminal looked readable,
+/// the key read blocked, and nothing else was heard).
+#[cfg(target_os = "macos")]
+pub fn wait_any(handles: &[Handle], timeout: Option<Duration>) -> Option<usize> {
+    loop {
+        // SAFETY: an fd_set of ours, cleared, then given open descriptors
+        // below FD_SETSIZE only.
+        let mut set: libc::fd_set = unsafe { std::mem::zeroed() };
+        let mut top = -1;
+        for &fd in handles {
+            if fd < 0 || fd as usize >= libc::FD_SETSIZE {
+                return None;
+            }
+            // SAFETY: see above.
+            unsafe { libc::FD_SET(fd, &mut set) };
+            top = top.max(fd);
+        }
+        let mut limit = timeout.map(|t| libc::timeval {
+            tv_sec: t.as_secs() as libc::time_t,
+            tv_usec: t.subsec_micros() as libc::suseconds_t,
+        });
+        let limit = limit.as_mut().map_or(std::ptr::null_mut(), |t| t as *mut libc::timeval);
+        // SAFETY: `set` and `limit` are ours for the call; no write or
+        // error sets.
+        let n = unsafe { libc::select(top + 1, &mut set, std::ptr::null_mut(), std::ptr::null_mut(), limit) };
+        if n < 0 {
+            if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return None;
+        }
+        if n == 0 {
+            return None;
+        }
+        // SAFETY: `set` as select left it.
+        return handles.iter().position(|&fd| unsafe { libc::FD_ISSET(fd, &set) });
+    }
+}
+
+/// Wait until one of `handles` is readable; its index, or `None` after
 /// `timeout`.
+#[cfg(not(target_os = "macos"))]
 pub fn wait_any(handles: &[Handle], timeout: Option<Duration>) -> Option<usize> {
     let mut fds: Vec<libc::pollfd> =
         handles.iter().map(|&fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 }).collect();
