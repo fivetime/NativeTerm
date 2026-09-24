@@ -1134,6 +1134,12 @@
       shows the subsurface below at (-22,-19), the band as input region,
       a repaint on activation. Found on the way: GNOME Shell's own
       environment has no `WAYLAND_DISPLAY` (its children do)
+- [x] Moving the window by its tab bar on Wayland (2026-09-24, found by
+      hand on Zorin): with no title bar nothing moved a Wayland window —
+      WezTerm's Wayland backend never implemented `request_drag_move`
+      (X11 hands the drag to the window manager). The fork (`2dbc74a57`)
+      asks the compositor with `xdg_toplevel.move` from the last press's
+      serial; windows opened with it move, one opened before did not
 - [ ] Step 2 still to do: tiled windows on X11 (Chrome reads
       `_GTK_EDGE_CONSTRAINTS`: no shadow on a tiled side); the resize
       band tried by hand on both; WebGpu's REPLACE pipeline on a real
