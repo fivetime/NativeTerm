@@ -998,6 +998,28 @@
       Windows needs a native Perl for OpenSSL: a portable Strawberry Perl
       in `C:\MyProjects\RustProjects\strawberry-perl`, put on `PATH` for
       the build only (25 min the first time, 3 min after a change)
+      Tried end to end on Lingmo with the fork built there: a right
+      click popped NativeTerm's menu up (the heading, icons, "Reconnect"
+      dimmed while connected), and "Clone Session" opened the clone
+- [x] The tab menu on the tab, and the window buttons in the tab strip
+      (2026-09-24), as asked after trying it on Lingmo: in Windows Terminal
+      the menu is the tab's, and Chrome has no title bar of the desktop's
+      above its tabs. The fork emits `tab-right-click` (window, the tab's
+      active pane, its index; the tab navigator unless a handler returns
+      false), and the written configuration pops the menu up from it and
+      leaves the pane's right click alone (a stock WezTerm keeps the
+      pane's right click for its picker); `PopupMenu` now belongs to the
+      pane the action was performed for, the right-clicked tab's. The
+      configuration puts the buttons in the tab strip everywhere
+      (`INTEGRATED_BUTTONS|RESIZE`), on the left where the desktop puts
+      them (KWin's `ButtonsOnLeft`, GNOME's `button-layout`). On Lingmo
+      KWin still drew its frame, title bar included: WezTerm's X11 code
+      asked for a border (a FUNC_* constant in the decorations field) and
+      KWin decorates any window that asks for anything; the fork now asks
+      for none, and resizes from its own edges as Chrome does (the pointer
+      changes there; a left press hands the resize to the window manager
+      with `_NET_WM_MOVERESIZE`). On Lingmo: no frame, the buttons at the
+      right of the tabs, a corner dragged from 816×569 to 936×649
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

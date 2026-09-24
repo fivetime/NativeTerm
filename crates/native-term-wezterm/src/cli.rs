@@ -352,10 +352,11 @@ local config = wezterm.config_builder()
         lua.push_str("frame.font = wezterm.font({ family = \"Segoe UI\" })\nframe.font_size = 10.0\n");
     }
     lua.push_str("config.window_frame = frame\n");
-    if cfg!(any(windows, target_os = "macos")) {
-        // the tabs in the title bar, as Windows Terminal has them (a Linux
-        // desktop keeps its own title bar)
-        lua.push_str("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n");
+    // the tabs and the window buttons in one strip, as Windows Terminal
+    // and Chrome have them; the buttons on the side the desktop puts them
+    lua.push_str("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n");
+    if look.buttons_left && !cfg!(target_os = "macos") {
+        lua.push_str("config.integrated_title_button_alignment = \"Left\"\n");
     }
     if !look.fonts.is_empty() {
         // the system's fonts (see native_term_os::fonts::terminal_families);
@@ -440,16 +441,17 @@ config.command_palette_bg_color = dark and "#2C2C2C" or "#F9F9F9"
 config.command_palette_fg_color = dark and "#FFFFFF" or "#1A1A1A"
 "##;
 
-/// NativeTerm's tab menu: a right click in a tab (or Ctrl+Shift+M) runs
-/// the shim's `--tab-menu` for the pane, which prints what applies to its
-/// session; the choice goes back the same way. NativeTerm's WezTerm
+/// NativeTerm's tab menu: Ctrl+Shift+M, or a right click, runs the shim's
+/// `--tab-menu` for the pane, which prints what applies to its session;
+/// the choice goes back the same way. NativeTerm's WezTerm
 /// (github.com/fivetime/wezterm) pops it up where the mouse is
-/// (`PopupMenu`: the heading, separators, dimmed items, icons); another
-/// WezTerm lists the items that can be chosen in its picker, in the pane.
-/// A tab that is not NativeTerm's gets no menu (the shim prints nothing),
-/// and a right click while a program on the other side takes the mouse
-/// goes to that program, as WezTerm always does.
-const MENU_LUA: &str = r#"-- NativeTerm's tab menu: right-click in a tab, or Ctrl+Shift+M
+/// (`PopupMenu`: the heading, separators, dimmed items, icons) for a right
+/// click on the tab itself (its `tab-right-click` event), as in Windows
+/// Terminal, and leaves the pane's right click alone; another WezTerm has
+/// no such event, so there a right click in the pane lists the items that
+/// can be chosen in its picker. A tab that is not NativeTerm's gets no
+/// menu (the shim prints nothing).
+const MENU_LUA: &str = r#"-- NativeTerm's tab menu: right-click a tab, or Ctrl+Shift+M
 local shim = "__SHIM__"
 local popup = wezterm.has_action ~= nil and wezterm.has_action("PopupMenu")
 local function tab_menu(window, pane)
@@ -501,9 +503,17 @@ end
 config.keys = {
   { key = "m", mods = "CTRL|SHIFT", action = wezterm.action_callback(tab_menu) },
 }
-config.mouse_bindings = {
-  { event = { Down = { streak = 1, button = "Right" } }, mods = "NONE", action = wezterm.action_callback(tab_menu) },
-}
+if popup then
+  -- a right click on a tab, as in Windows Terminal; the pane keeps its own
+  wezterm.on("tab-right-click", function(window, pane)
+    tab_menu(window, pane)
+    return false
+  end)
+else
+  config.mouse_bindings = {
+    { event = { Down = { streak = 1, button = "Right" } }, mods = "NONE", action = wezterm.action_callback(tab_menu) },
+  }
+end
 "#;
 
 /// Ctrl+Tab shows WezTerm's tab navigator (its list of tabs), as
@@ -524,6 +534,8 @@ pub struct Look {
     pub fonts: Vec<String>,
     /// Ctrl+Tab shows the tab navigator (NativeTerm's switcher setting).
     pub switcher: bool,
+    /// The desktop puts the window buttons on the left.
+    pub buttons_left: bool,
 }
 
 /// `text` inside a Lua double-quoted string.
@@ -645,14 +657,27 @@ mod tests {
         assert!(unknown.contains("config.window_frame = frame\n"));
         assert!(unknown.contains("config.font_size = 12.0\n"), "Windows Terminal's size");
         let read = default_config(
-            &Look { dark: Some(true), fonts: vec!["Cascadia Mono".into(), "Microsoft YaHei".into()], switcher: false },
+            &Look {
+                dark: Some(true),
+                fonts: vec!["Cascadia Mono".into(), "Microsoft YaHei".into()],
+                switcher: false,
+                buttons_left: true,
+            },
             shim,
         );
         assert!(read.contains("local dark = true\n"));
         assert!(!read.contains("get_appearance"));
+        // the window buttons in the tab strip, on the desktop's side
+        assert!(read.contains("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n"));
+        assert_eq!(read.contains("config.integrated_title_button_alignment = \"Left\""), !cfg!(target_os = "macos"));
+        assert!(!unknown.contains("integrated_title_button_alignment"));
+        // the menu on a right click on the tab where WezTerm tells of one
+        assert!(read.contains("wezterm.on(\"tab-right-click\""));
         assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Cascadia Mono\", \"Microsoft YaHei\" })\n"));
-        let light =
-            default_config(&Look { dark: Some(false), fonts: vec!["Odd \"Mono\"".into()], switcher: false }, shim);
+        let light = default_config(
+            &Look { dark: Some(false), fonts: vec!["Odd \"Mono\"".into()], switcher: false, buttons_left: false },
+            shim,
+        );
         assert!(light.contains("local dark = false\n"));
         assert!(light.contains("font_with_fallback({ \"Odd \\\"Mono\\\"\" })"), "quotes escaped");
         // the frame is whole before it is given to the config

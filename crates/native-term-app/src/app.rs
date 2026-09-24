@@ -1786,7 +1786,7 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
         _ => desktop.dark,
     };
     let fonts = native_term_os::fonts::terminal_families(desktop.monospace.as_deref());
-    native_term_wezterm::Look { dark, fonts, switcher }
+    native_term_wezterm::Look { dark, fonts, switcher, buttons_left: desktop.buttons_left }
 }
 
 /// The terminal's windows follow the theme and the switcher setting

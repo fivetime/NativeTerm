@@ -33,6 +33,9 @@ pub struct Appearance {
     /// The monospace font family the desktop prefers, when fontconfig
     /// names an actual monospace font.
     pub monospace: Option<String>,
+    /// The window buttons (close first) sit on the left of the title bar:
+    /// KWin's `ButtonsOnLeft`, GNOME's `button-layout` (Linux only).
+    pub buttons_left: bool,
     /// Where `dark` came from (`portal`, `gtk`, `kdeglobals`,
     /// `gsettings`, `registry`, `defaults`), or empty.
     pub source: &'static str,
@@ -163,6 +166,21 @@ mod parse {
         Some((byte(*r), byte(*g), byte(*b)))
     }
 
+    /// KWin's `kwinrc`: whether `ButtonsOnLeft` holds the close button
+    /// (`X`); `None` without the key.
+    pub(super) fn kwin_buttons_left(kwinrc: &str) -> Option<bool> {
+        ini_value(kwinrc, "org.kde.kdecoration2", "ButtonsOnLeft").map(|buttons| buttons.contains('X'))
+    }
+
+    /// `gsettings get org.gnome.desktop.wm.preferences button-layout`
+    /// (`'appmenu:minimize,maximize,close'`): whether close is left of the
+    /// colon.
+    pub(super) fn gnome_buttons_left(output: &str) -> Option<bool> {
+        let layout = output.trim().trim_matches('\'');
+        let (left, _) = layout.split_once(':')?;
+        Some(left.split(',').any(|b| b.trim() == "close"))
+    }
+
     /// `gsettings get org.gnome.desktop.interface color-scheme`.
     pub(super) fn gsettings_scheme(output: &str) -> Option<bool> {
         match output.trim().trim_matches('\'') {
@@ -193,6 +211,7 @@ mod imp {
             dark: light.map(|v| v == 0),
             accent: native_term_win::desktop::accent(),
             monospace: None,
+            buttons_left: false,
             source: if light.is_some() { "registry" } else { "" },
         }
     }
@@ -298,7 +317,14 @@ mod imp {
             Some(6) => (0xf7, 0x4f, 0x9e),
             _ => (0x00, 0x7a, 0xff),
         };
-        Appearance { dark: Some(dark), accent: Some(accent), monospace: monospace(), source: "defaults" }
+        // the traffic lights sit on the left anyway, where WezTerm puts them
+        Appearance {
+            dark: Some(dark),
+            accent: Some(accent),
+            monospace: monospace(),
+            buttons_left: false,
+            source: "defaults",
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -335,7 +361,16 @@ mod imp {
                 source = "gsettings";
             }
         }
-        Appearance { dark, accent, monospace: monospace(), source }
+        let buttons_left = config_file("kwinrc")
+            .as_deref()
+            .and_then(super::parse::kwin_buttons_left)
+            .or_else(|| {
+                output("gsettings", &["get", "org.gnome.desktop.wm.preferences", "button-layout"])
+                    .as_deref()
+                    .and_then(super::parse::gnome_buttons_left)
+            })
+            .unwrap_or(false);
+        Appearance { dark, accent, monospace: monospace(), buttons_left, source }
     }
 }
 
@@ -392,6 +427,17 @@ mod tests {
         assert_eq!(portal_accent("v v (ddd) -1 -1 -1\n"), None, "out of range: no accent");
         assert_eq!(portal_accent("Call failed: no such setting\n"), None);
         assert_eq!(portal_accent("   variant       variant          uint32 2\n"), None, "one number is no colour");
+    }
+
+    #[test]
+    fn where_the_window_buttons_are() {
+        let kwin = "[Windows]\nBorderlessMaximizedWindows=false\n\n[org.kde.kdecoration2]\nButtonsOnLeft=XIA\nButtonsOnRight=M\n";
+        assert_eq!(kwin_buttons_left(kwin), Some(true));
+        assert_eq!(kwin_buttons_left("[org.kde.kdecoration2]\nButtonsOnLeft=M\nButtonsOnRight=IAX\n"), Some(false));
+        assert_eq!(kwin_buttons_left("[Other]\nButtonsOnLeft=X\n"), None);
+        assert_eq!(gnome_buttons_left("'appmenu:minimize,maximize,close'\n"), Some(false));
+        assert_eq!(gnome_buttons_left("'close,minimize,maximize:appmenu'"), Some(true));
+        assert_eq!(gnome_buttons_left(""), None);
     }
 
     #[test]
