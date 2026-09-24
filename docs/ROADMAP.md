@@ -1120,10 +1120,28 @@
       `xdg_surface.set_window_geometry` for the margins, the input region
       on the surface); tiled windows (Chrome takes `_GTK_EDGE_CONSTRAINTS`
       for them: no shadow on a tiled side); the resize band tried by hand
-- [ ] Step 3: on Qt desktops (KDE, UKUI, LXQt, a desktop calling
-      itself `Deepin`), the tab strip's colours from their palette as
-      Chrome's Qt backend takes them; the buttons stay the icon theme's
-      (Chrome draws its own there too)
+- [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
+      UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
+      palette's colours, the buttons the icon theme's (Chrome draws its
+      own there too: its Qt backend offers no button or frame provider,
+      "Qt prefers server-side decorations"). Chrome has the Qt style
+      draw a title bar; NativeTerm reads KDE's palette where Qt reads it,
+      `kdeglobals` (`titlebar::read_qt`): the strip in the header colours
+      KWin's title bars wear (`[Colors:Header]`, `[Colors:Header][Inactive]`,
+      else `[WM]`), the active tab in the window's colours as a KDE tab
+      bar has it — Chrome's QPalette::Button would be the header's own
+      colour in Breeze Dark (41,44,48 both) and hide the active tab; any
+      theme where they still match gets the active tab moved 8% towards
+      the text. EndeavourOS (Breeze Dark): strip `#292c30`, unfocused
+      `#202326`, active tab `#202326` (seen in the configuration only:
+      the box was locked). Lingmo turns out a GTK desktop to Chrome —
+      NativeTerm's session says `XDG_CURRENT_DESKTOP=Lingmo`, which
+      Chrome's table does not know — so it gets step 1 and 2: the Lingmo
+      GTK theme's buttons at the right, its edge with 14-px round top
+      corners (extents 34/40/48/40), the strip `#fafafa`
+- [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on);
+      a KDE colour scheme change that leaves light/dark and the accent
+      alone is not noticed until NativeTerm restarts
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

@@ -164,6 +164,56 @@ fn run_child(dir: &Path, dark: bool) -> Option<Titlebar> {
     parse(&out)
 }
 
+/// The tab strip's colours on a desktop where Chrome goes to Qt (KDE,
+/// and Lingmo, which calls itself KDE): KDE's palette, which is where Qt
+/// takes its own from there, `~/.config/kdeglobals`. Chrome has the Qt
+/// style draw a title bar and averages it; the window manager's title
+/// bars on such a desktop are KDE's header colours (`[Colors:Header]`,
+/// `[Colors:Header][Inactive]`; before Plasma 5.25 `[WM]`), so the tab
+/// strip takes those; the active tab the window's colours, as a KDE tab
+/// bar has it (Chrome's QPalette::Button is the header's own colour in
+/// Breeze Dark, which would hide it). No buttons: Chrome draws its own there
+/// too (Qt prefers the window manager's decorations). `None` without a
+/// palette.
+pub fn read_qt() -> Option<Titlebar> {
+    let home = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    qt_colors(&std::fs::read_to_string(home.join("kdeglobals")).ok()?)
+}
+
+/// `kdeglobals` to the tab strip's colours (see [`read_qt`]).
+pub fn qt_colors(kdeglobals: &str) -> Option<Titlebar> {
+    use crate::appearance::parse::ini_value;
+    let color = |section: &str, key: &str| -> Option<Rgb> {
+        let v = ini_value(kdeglobals, section, key)?;
+        let mut parts = v.split(',').map(|p| p.trim().parse::<u8>());
+        Some((parts.next()?.ok()?, parts.next()?.ok()?, parts.next()?.ok()?))
+    };
+    let window = color("Colors:Window", "BackgroundNormal")?;
+    let window_text = color("Colors:Window", "ForegroundNormal");
+    let frame =
+        color("Colors:Header", "BackgroundNormal").or_else(|| color("WM", "activeBackground")).unwrap_or(window);
+    let frame_inactive = color("Colors:Header][Inactive", "BackgroundNormal")
+        .or_else(|| color("WM", "inactiveBackground"))
+        .unwrap_or(frame);
+    let title =
+        color("Colors:Header", "ForegroundNormal").or_else(|| color("WM", "activeForeground")).or(window_text)?;
+    let title_inactive = color("Colors:Header][Inactive", "ForegroundNormal")
+        .or_else(|| color("WM", "inactiveForeground"))
+        .unwrap_or(title);
+    Some(Titlebar {
+        frame,
+        frame_inactive,
+        window,
+        text: window_text.unwrap_or(title),
+        title,
+        title_inactive,
+        ..Titlebar::default()
+    })
+}
+
 /// The child's answer, tab-separated lines: `color NAME #rrggbb`,
 /// `header PADDING_LEFT PADDING_RIGHT SPACING`, `edge TOP RIGHT BOTTOM
 /// LEFT RADIUS SLICE FOCUSED UNFOCUSED`, `button NAME W H
@@ -999,6 +1049,42 @@ mod tests {
         assert_eq!(toolkit("DDE", ""), Toolkit::Gtk, "deepin 23 says DDE, which Chrome does not know");
         assert_eq!(toolkit("", "deepin"), Toolkit::Qt);
         assert_eq!(toolkit("", ""), Toolkit::Gtk, "Chrome's default");
+    }
+
+    /// What this desktop gives: run in its session's environment with
+    /// `cargo test -p native-term-os -- --ignored --nocapture this_desktop`.
+    #[test]
+    #[ignore]
+    fn this_desktop_titlebar() {
+        let var = |name: &str| std::env::var(name).unwrap_or_default();
+        let kit = toolkit(&var("XDG_CURRENT_DESKTOP"), &var("DESKTOP_SESSION"));
+        println!("toolkit: {kit:?}");
+        if kit == Toolkit::Qt {
+            println!("qt: {:?}", read_qt());
+        }
+    }
+
+    #[test]
+    fn kdes_palette() {
+        // EndeavourOS, Breeze Dark (Plasma 6): header colours
+        let breeze_dark = "[Colors:Button]\nBackgroundNormal=41,44,48\nForegroundNormal=252,252,252\n\
+            [Colors:Header]\nBackgroundNormal=41,44,48\nForegroundNormal=252,252,252\n\
+            [Colors:Header][Inactive]\nBackgroundNormal=32,35,38\nForegroundNormal=161,169,177\n\
+            [Colors:Window]\nBackgroundNormal=32,35,38\nForegroundNormal=252,252,252\n\
+            [WM]\nactiveBackground=39,44,49\n";
+        let bar = qt_colors(breeze_dark).unwrap();
+        assert_eq!((bar.frame, bar.frame_inactive), ((41, 44, 48), (32, 35, 38)), "the header, not [WM]");
+        assert_eq!((bar.window, bar.text), ((32, 35, 38), (252, 252, 252)), "the active tab: the window's");
+        assert_eq!((bar.title, bar.title_inactive), ((252, 252, 252), (161, 169, 177)));
+        assert!(bar.buttons.is_empty() && bar.edge.is_none(), "Qt: colours only");
+        // Lingmo: no header colours, [WM] with an alpha
+        let lingmo = "[Colors:Button]\nBackgroundNormal=250,250,250\n[Colors:Window]\nBackgroundNormal=240,240,240\n\
+            ForegroundNormal=48,48,48\n[WM]\nactiveBackground=240,240,240,204\nactiveForeground=48,48,48\n\
+            inactiveBackground=240,240,240,204\ninactiveForeground=96,96,96\n";
+        let bar = qt_colors(lingmo).unwrap();
+        assert_eq!((bar.frame, bar.title_inactive), ((240, 240, 240), (96, 96, 96)));
+        assert_eq!(bar.window, (240, 240, 240));
+        assert_eq!(qt_colors("[General]\nName=x\n"), None, "no palette");
     }
 
     #[test]

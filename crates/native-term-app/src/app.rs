@@ -1800,9 +1800,9 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
     }
 }
 
-/// The title bar the desktop's GTK theme draws, on a desktop where
-/// Chrome would take GTK's (native_term_os::titlebar), rendered once per
-/// theme into the cache folder.
+/// The title bar as the desktop's toolkit has it, where Chrome would take
+/// it from (native_term_os::titlebar): GTK's drawing, rendered once per
+/// theme into the cache folder; Qt's palette colours.
 fn desktop_titlebar(
     desktop: &native_term_os::appearance::Appearance,
     dark: Option<bool>,
@@ -1812,8 +1812,9 @@ fn desktop_titlebar(
         return None;
     }
     let var = |name: &str| std::env::var(name).unwrap_or_default();
-    if titlebar::toolkit(&var("XDG_CURRENT_DESKTOP"), &var("DESKTOP_SESSION")) != titlebar::Toolkit::Gtk {
-        return None;
+    if titlebar::toolkit(&var("XDG_CURRENT_DESKTOP"), &var("DESKTOP_SESSION")) == titlebar::Toolkit::Qt {
+        // Qt's: the palette's colours, the buttons the icon theme's
+        return titlebar::read_qt();
     }
     let cache = std::env::var_os("XDG_CACHE_HOME")
         .map(std::path::PathBuf::from)

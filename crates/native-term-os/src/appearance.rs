@@ -78,7 +78,7 @@ pub fn read() -> Appearance {
 /// portal, the toolkits' files, `gsettings` and fontconfig say. (Used
 /// on Linux; tested everywhere.)
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
-mod parse {
+pub(crate) mod parse {
     /// A colour written the way the desktop files write it: `r,g,b`
     /// (kdeglobals), `#rrggbb` or `rgb(r,g,b)`.
     pub(super) fn parse_rgb(text: &str) -> Option<(u8, u8, u8)> {
@@ -103,7 +103,7 @@ mod parse {
 
     /// One key's value in an ini-style file, in `section` (case-sensitive
     /// names, `key=value`, spaces around `=` allowed).
-    pub(super) fn ini_value<'a>(text: &'a str, section: &str, key: &str) -> Option<&'a str> {
+    pub(crate) fn ini_value<'a>(text: &'a str, section: &str, key: &str) -> Option<&'a str> {
         let mut in_section = false;
         for line in text.lines() {
             let line = line.trim();

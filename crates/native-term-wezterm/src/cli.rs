@@ -570,7 +570,9 @@ fn mix(a: native_term_os::titlebar::Rgb, b: native_term_os::titlebar::Rgb, t: f3
 /// title's colour on the rest. The terminal itself keeps NativeTerm's
 /// colours.
 fn titlebar_colors(bar: &native_term_os::titlebar::Titlebar) -> String {
-    let (frame, window, title) = (hex(bar.frame), hex(bar.window), hex(bar.title));
+    // an active tab the strip's own colour would not show which it is
+    let active = if bar.window == bar.frame { mix(bar.frame, bar.title, 0.08) } else { bar.window };
+    let (frame, window, title) = (hex(bar.frame), hex(active), hex(bar.title));
     let hover = hex(mix(bar.frame, bar.title, 0.1));
     format!(
         "-- the tab strip in the desktop theme's own colours (its header bar), as Chrome has it\n\
@@ -905,6 +907,8 @@ end)
         assert!(colors.contains("active_tab = { bg_color = \"#242424\", fg_color = \"#ffffff\" },"));
         assert!(colors.contains("inactive_tab = { bg_color = \"#303030\", fg_color = \"#eeeeee\" },"));
         assert!(colors.contains("inactive_tab_hover = { bg_color = \"#434343\""), "a tenth of the way to the title");
+        let same = titlebar_colors(&Titlebar { window: bar.frame, ..bar.clone() });
+        assert!(same.contains("active_tab = { bg_color = \"#3f3f3f\""), "set apart from the strip");
         let whole = default_config(
             &Look { titlebar: Some(bar), button_layout: Some("close:maximize".into()), ..Look::default() },
             Path::new("/opt/nt/nativeterm-shim"),
