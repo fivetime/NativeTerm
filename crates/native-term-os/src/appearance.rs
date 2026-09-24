@@ -46,9 +46,31 @@ pub struct Appearance {
     /// `Adwaita`, …), Linux only; with `icon_theme` it tells when the
     /// title bar GTK draws has changed (see `titlebar`).
     pub gtk_theme: Option<String>,
+    /// The desktop's interface font (what its apps' tabs and labels are
+    /// set in, and Chrome's): GTK's `gtk-font-name` (XSETTINGS
+    /// `Gtk/FontName`, gsettings `font-name`, `settings.ini`) or KDE's
+    /// `[General] font`, Linux only.
+    pub ui_font: Option<UiFont>,
+    /// A Qt desktop's palette as the tab strip takes it (see
+    /// `titlebar::qt_colors`), so a change of colour scheme is a change.
+    pub palette: Option<crate::titlebar::Titlebar>,
     /// Where `dark` came from (`portal`, `gtk`, `kdeglobals`,
     /// `gsettings`, `registry`, `defaults`), or empty.
     pub source: &'static str,
+}
+
+/// A font family and its size.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiFont {
+    pub family: String,
+    /// The size in tenths of a point (11 pt: 110).
+    pub tenths: u32,
+}
+
+impl UiFont {
+    pub fn points(&self) -> f32 {
+        self.tenths as f32 / 10.
+    }
 }
 
 static LAST: Mutex<Option<Appearance>> = Mutex::new(None);
@@ -223,6 +245,49 @@ pub(crate) mod parse {
         ini_value(kdeglobals, "Icons", "Theme").map(str::to_string)
     }
 
+    /// A Pango font description, GTK's form (`Cantarell 11`,
+    /// `Noto Sans Bold 10.5`): the family without its style words, and the
+    /// size.
+    pub(super) fn pango_font(desc: &str) -> Option<super::UiFont> {
+        const STYLES: &[&str] = &[
+            "bold",
+            "italic",
+            "oblique",
+            "light",
+            "medium",
+            "regular",
+            "semi-bold",
+            "semibold",
+            "ultra-light",
+            "extra-light",
+            "heavy",
+            "condensed",
+            "book",
+            "black",
+            "thin",
+            "normal",
+            "demi-bold",
+        ];
+        let desc = desc.trim().trim_matches('\'').trim();
+        let (rest, size) = desc.rsplit_once(char::is_whitespace)?;
+        let size: f32 = size.trim().parse().ok()?;
+        let mut words: Vec<&str> = rest.split_whitespace().collect();
+        while words.len() > 1 && words.last().is_some_and(|w| STYLES.contains(&w.to_ascii_lowercase().as_str())) {
+            words.pop();
+        }
+        let family = words.join(" ").trim_end_matches(',').to_string();
+        (!family.is_empty() && size > 0.).then(|| super::UiFont { family, tenths: (size * 10.).round() as u32 })
+    }
+
+    /// Qt's font string, KDE's `[General] font=` (`Noto Sans,10,-1,5,50,…`):
+    /// the family and its point size (none when given in pixels, -1).
+    pub(super) fn qt_font(value: &str) -> Option<super::UiFont> {
+        let mut parts = value.split(',');
+        let family = parts.next()?.trim().to_string();
+        let size: f32 = parts.next()?.trim().parse().ok()?;
+        (!family.is_empty() && size > 0.).then(|| super::UiFont { family, tenths: (size * 10.).round() as u32 })
+    }
+
     /// GTK's `settings.ini`: `gtk-theme-name`.
     pub(super) fn gtk_theme(settings: &str) -> Option<String> {
         ini_value(settings, "Settings", "gtk-theme-name").map(|v| v.trim_matches('"').to_string())
@@ -266,6 +331,8 @@ mod imp {
             button_layout: None,
             icon_theme: None,
             gtk_theme: None,
+            ui_font: None,
+            palette: None,
             source: if light.is_some() { "registry" } else { "" },
         }
     }
@@ -379,6 +446,8 @@ mod imp {
             button_layout: None,
             icon_theme: None,
             gtk_theme: None,
+            ui_font: None,
+            palette: None,
             source: "defaults",
         }
     }
@@ -431,8 +500,11 @@ mod imp {
         let gtk = || config_file("gtk-3.0/settings.ini").or_else(|| config_file("gtk-4.0/settings.ini"));
         // (Lingmo calls itself KDE but keeps its theme in settings.ini;
         // gsettings answers a bare `Adwaita` where nothing ever set it)
-        let [x_icons, x_gtk]: [Option<String>; 2] =
-            crate::icons::xsettings(&["Net/IconThemeName", "Net/ThemeName"]).try_into().unwrap_or_default();
+        let [x_icons, x_gtk, x_font]: [Option<String>; 3] =
+            crate::icons::xsettings(&["Net/IconThemeName", "Net/ThemeName", "Gtk/FontName"])
+                .try_into()
+                .unwrap_or_default();
+        let kdeglobals = config_file("kdeglobals").unwrap_or_default();
         let icon_theme = x_icons
             .or_else(|| super::parse::kde_icon_theme(&config_file("kdeglobals").unwrap_or_default()))
             .or_else(|| gtk().as_deref().and_then(super::parse::gtk_icon_theme))
@@ -449,7 +521,39 @@ mod imp {
                     .filter(|t| !t.is_empty())
             })
             .or_else(|| gtk().as_deref().and_then(super::parse::gtk_theme));
-        Appearance { dark, accent, monospace: monospace(), button_layout, icon_theme, gtk_theme, source }
+        // the interface font as the toolkit Chrome would take it from
+        let session = std::env::var("DESKTOP_SESSION").unwrap_or_default();
+        let qt = crate::titlebar::toolkit(&desktop, &session) == crate::titlebar::Toolkit::Qt;
+        let kde_font = || super::parse::ini_value(&kdeglobals, "General", "font").and_then(super::parse::qt_font);
+        let gtk_font = || {
+            x_font
+                .as_deref()
+                .and_then(super::parse::pango_font)
+                .or_else(|| {
+                    output("gsettings", &["get", "org.gnome.desktop.interface", "font-name"])
+                        .as_deref()
+                        .and_then(super::parse::pango_font)
+                })
+                .or_else(|| {
+                    gtk().and_then(|ini| {
+                        super::parse::ini_value(&ini, "Settings", "gtk-font-name")
+                            .and_then(|v| super::parse::pango_font(v.trim_matches('"')))
+                    })
+                })
+        };
+        let ui_font = if qt { kde_font().or_else(gtk_font) } else { gtk_font().or_else(kde_font) };
+        let palette = if qt { crate::titlebar::qt_colors(&kdeglobals) } else { None };
+        Appearance {
+            dark,
+            accent,
+            monospace: monospace(),
+            button_layout,
+            icon_theme,
+            gtk_theme,
+            ui_font,
+            palette,
+            source,
+        }
     }
 }
 
@@ -528,6 +632,13 @@ mod tests {
         assert_eq!(gtk_icon_theme("[Settings]\ngtk-icon-theme-name=\"Papirus\"\n").as_deref(), Some("Papirus"));
         assert_eq!(gtk_icon_theme("[Settings]\n"), None);
         assert_eq!(gtk_theme("[Settings]\ngtk-theme-name=Adwaita-dark\n").as_deref(), Some("Adwaita-dark"));
+        let font = |f: &str, t: u32| Some(super::UiFont { family: f.to_string(), tenths: t });
+        assert_eq!(pango_font("Cantarell 11"), font("Cantarell", 110));
+        assert_eq!(pango_font("'Noto Sans CJK SC Bold 10.5'\n"), font("Noto Sans CJK SC", 105), "gsettings' quotes");
+        assert_eq!(pango_font("Inter Variable 11"), font("Inter Variable", 110));
+        assert_eq!(pango_font("Cantarell"), None, "no size");
+        assert_eq!(qt_font("Noto Sans,10,-1,5,50,0,0,0,0,0"), font("Noto Sans", 100));
+        assert_eq!(qt_font("Noto Sans,-1,13,5,400,0,0,0,0,0,0,0,0,0,0,1"), None, "in pixels");
     }
 
     #[test]

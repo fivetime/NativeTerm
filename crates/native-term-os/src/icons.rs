@@ -296,8 +296,10 @@ mod tests {
     #[test]
     #[ignore]
     fn this_desktop_icons() {
-        let theme = crate::appearance::read().icon_theme;
+        let look = crate::appearance::read();
+        let theme = look.icon_theme;
         println!("icon theme: {theme:?}");
+        println!("ui font: {:?}", look.ui_font);
         for (name, path) in super::window_icons(theme.as_deref()).named() {
             println!("{name}: {}", path.display());
         }

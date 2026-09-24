@@ -356,6 +356,13 @@ local config = wezterm.config_builder()
     }
     if cfg!(windows) {
         lua.push_str("frame.font = wezterm.font({ family = \"Segoe UI\" })\nframe.font_size = 10.0\n");
+    } else if let Some(font) = look.ui_font.as_ref().filter(|_| !cfg!(target_os = "macos")) {
+        // the tab titles in the desktop's interface font, as Chrome's
+        lua.push_str(&format!(
+            "frame.font = wezterm.font({{ family = \"{}\" }})\nframe.font_size = {size:.1}\n",
+            lua_escape(&font.family),
+            size = font.points()
+        ));
     }
     lua.push_str("config.window_frame = frame\n");
     // the tabs and the window buttons in one strip, as Windows Terminal
@@ -555,6 +562,9 @@ pub struct Look {
     /// its header bar's colours; see `native_term_os::titlebar`), where
     /// the desktop is a GTK one.
     pub titlebar: Option<native_term_os::titlebar::Titlebar>,
+    /// The desktop's interface font and its size in points, for the tab
+    /// titles, as Chrome sets its tabs in it (Linux).
+    pub ui_font: Option<native_term_os::appearance::UiFont>,
 }
 
 fn hex((r, g, b): native_term_os::titlebar::Rgb) -> String {
@@ -810,6 +820,7 @@ mod tests {
                     ("maximize", "/icons/\"odd\".svg".into()),
                 ],
                 titlebar: None,
+                ui_font: Some(native_term_os::appearance::UiFont { family: "Cantarell".into(), tenths: 110 }),
             },
             shim,
         );
@@ -820,6 +831,11 @@ mod tests {
         assert!(
             read.contains("pcall(function()\n  config.tab_strip_style = \"Chrome\"\nend)\n"),
             "Chrome's tab strip, where the WezTerm knows it"
+        );
+        assert_eq!(
+            read.contains("frame.font = wezterm.font({ family = \"Cantarell\" })\nframe.font_size = 11.0\n"),
+            cfg!(all(unix, not(target_os = "macos"))),
+            "the tab titles in the desktop's interface font (Linux)"
         );
         let desktop = "local desktop_buttons = pcall(function()\n  config.integrated_title_button_layout = \"close:maximize\"\n  config.integrated_title_button_style = \"Flat\"\n  config.integrated_title_button_icons = { close = \"/usr/share/icons/elementary/actions/symbolic/window-close-symbolic.svg\", maximize = \"/icons/\\\"odd\\\".svg\" }\nend)\nif not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n";
         assert_eq!(read.contains(desktop), !cfg!(target_os = "macos"));

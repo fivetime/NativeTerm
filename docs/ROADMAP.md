@@ -1164,6 +1164,15 @@
       background (so it joins the terminal, as Windows Terminal's does),
       with the theme's text on it. Zorin (light): the stroke drawn;
       elementary (dark): separators, no stroke
+- [x] The tab titles in the desktop's interface font, as Chrome's
+      (2026-09-24): `Appearance::ui_font` from the toolkit Chrome would
+      take it from — GTK's `gtk-font-name` (XSETTINGS `Gtk/FontName`,
+      gsettings `font-name`, `settings.ini`) or KDE's `[General] font` —
+      into the tab strip's `frame.font`. Read on the boxes: deepin Source
+      Han Sans SC 10.5, EndeavourOS Noto Sans 10, Fedora Adwaita Sans 11,
+      Zorin Inter 10, Lingmo Cantarell 11. A Qt desktop's palette is now
+      part of the appearance too, so a new KDE colour scheme is picked up
+      without a restart
 - [ ] Step 2 still to do: the resize band tried by hand on both; WebGpu's
       REPLACE pipeline on a real GPU under Linux (the boxes run OpenGL)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,

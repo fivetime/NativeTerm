@@ -1796,6 +1796,7 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
             .map(|(name, path)| (name, path.to_string_lossy().into_owned()))
             .collect(),
         titlebar: desktop_titlebar(&desktop, dark),
+        ui_font: desktop.ui_font.clone(),
         button_layout: desktop.button_layout,
     }
 }
@@ -1813,8 +1814,9 @@ fn desktop_titlebar(
     }
     let var = |name: &str| std::env::var(name).unwrap_or_default();
     if titlebar::toolkit(&var("XDG_CURRENT_DESKTOP"), &var("DESKTOP_SESSION")) == titlebar::Toolkit::Qt {
-        // Qt's: the palette's colours, the buttons the icon theme's
-        return titlebar::read_qt();
+        // Qt's: the palette's colours (read with the rest of the desktop's
+        // look, so a new colour scheme is noticed), the buttons the icon theme's
+        return desktop.palette.clone();
     }
     let cache = std::env::var_os("XDG_CACHE_HOME")
         .map(std::path::PathBuf::from)
