@@ -105,6 +105,7 @@ fn main() {
         Mode::Zmodem { mode, escape, files } => std::process::exit(zmodem::run(&mode, escape, files)),
         Mode::Drop { paths } => std::process::exit(drop::run(&paths)),
         Mode::TabMenu { id, pane } => std::process::exit(menu::run(id, pane)),
+        Mode::TabCard { pane } => std::process::exit(menu::card(pane)),
         Mode::CreateKey { path } => {
             let code = keys::create(&path);
             wait_for_any_key();

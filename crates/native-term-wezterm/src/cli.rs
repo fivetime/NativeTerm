@@ -530,6 +530,25 @@ else
     { event = { Down = { streak = 1, button = "Right" } }, mods = "NONE", action = wezterm.action_callback(tab_menu) },
   }
 end
+-- the pointer resting on a tab: its card, the session's name and state
+-- over the last lines of its screen (NativeTerm's WezTerm draws it)
+if pcall(function() config.show_tab_hover_cards = true end) then
+  wezterm.on("tab-hover-card", function(tab_id, pane_id)
+    local ok, out = wezterm.run_child_process({ shim, "--tab-card", "--pane", tostring(pane_id) })
+    if not ok then
+      return nil
+    end
+    out = out:gsub("[\r\n]+$", "")
+    if out == "off" then
+      return false
+    end
+    local title, note = out:match("^([^\t]*)\t(.*)$")
+    if not title or title == "" then
+      return nil
+    end
+    return { title = title, note = note }
+  end)
+end
 "#;
 
 /// Ctrl+Tab shows WezTerm's tab navigator (its list of tabs), as
@@ -847,6 +866,10 @@ mod tests {
         assert!(!right.contains("integrated_title_button_images"), "no GTK title bar: no pictures");
         // the menu on a right click on the tab where WezTerm tells of one
         assert!(read.contains("wezterm.on(\"tab-right-click\""));
+        // the hover card says what NativeTerm knows of the tab's session
+        assert!(read.contains("config.show_tab_hover_cards = true"));
+        assert!(read.contains("wezterm.on(\"tab-hover-card\""));
+        assert!(read.contains("{ shim, \"--tab-card\", \"--pane\", tostring(pane_id) }"));
         assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Cascadia Mono\", \"Microsoft YaHei\" })\n"));
         let light = default_config(
             &Look { dark: Some(false), fonts: vec!["Odd \"Mono\"".into()], switcher: false, ..Look::default() },

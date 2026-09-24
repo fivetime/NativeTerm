@@ -76,6 +76,22 @@ fn tab_of(session: &SessionView) -> Option<MenuTab> {
 /// The menu as a terminal that shows it itself gets it (see the shim's
 /// `--tab-menu`): the items that apply, and a heading (id 0) — the
 /// menu's own header where it has one, else the session's label.
+/// What a tab's hover card says, for a terminal that draws the card
+/// itself (WezTerm): the session's name and its state, as the Windows
+/// card has them (the terminal adds the tab's own title and its screen);
+/// nothing when cards are off (`HOVER_SETTING`).
+pub(crate) fn card_for(shared: &Arc<Shared>, session: Option<&str>) -> (String, String, bool) {
+    let core = Core { shared: Arc::clone(shared) };
+    if core.setting(HOVER_SETTING).as_deref() == Some("off") {
+        return (String::new(), String::new(), false);
+    }
+    let view = session.and_then(|id| core.sessions().into_iter().find(|s| s.id == id));
+    match view {
+        Some(view) => (view.label.clone(), view.state.describe(), true),
+        None => (String::new(), String::new(), true),
+    }
+}
+
 pub(crate) fn items_for(shared: &Arc<Shared>, session: &str) -> Vec<MenuItem> {
     let core = Core { shared: Arc::clone(shared) };
     let Some(view) = core.sessions().into_iter().find(|s| s.id == session) else { return Vec::new() };

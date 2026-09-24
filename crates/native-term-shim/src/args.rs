@@ -53,6 +53,11 @@ pub enum Mode {
         id: Option<u32>,
         pane: Option<String>,
     },
+    /// What the hover card of the tab `--pane` names (else this process's
+    /// own) says, for a terminal that draws it itself.
+    TabCard {
+        pane: Option<String>,
+    },
     /// A ZMODEM transfer on stdin / stdout: the server ran `sz`
     /// (`download`) or `rz` (`upload`); `escape`: ask the sender to escape
     /// every control character (`--escape-control`, for Telnet); `files`:
@@ -129,6 +134,14 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 }
                 return Ok(Mode::TabMenu { id, pane });
             }
+            "--tab-card" => {
+                let pane = match (args.next().as_deref(), args.next()) {
+                    (None, _) => None,
+                    (Some("--pane"), Some(pane)) => Some(pane),
+                    _ => return Err("--tab-card takes only --pane <id>".into()),
+                };
+                return Ok(Mode::TabCard { pane });
+            }
             "--proxy" => {
                 let rest: Vec<String> = args.collect();
                 let [url, host, port] = rest.as_slice() else {
@@ -182,6 +195,9 @@ mod tests {
         );
         assert_eq!(p(&["--tab-menu", "--pane", "7"]).unwrap(), Mode::TabMenu { id: None, pane: Some("7".into()) });
         assert!(p(&["--tab-menu", "close"]).is_err());
+        assert_eq!(p(&["--tab-card", "--pane", "7"]).unwrap(), Mode::TabCard { pane: Some("7".into()) });
+        assert_eq!(p(&["--tab-card"]).unwrap(), Mode::TabCard { pane: None });
+        assert!(p(&["--tab-card", "7"]).is_err());
     }
 
     #[test]

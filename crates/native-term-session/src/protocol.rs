@@ -86,6 +86,10 @@ pub enum ShimMessage {
     TabMenu,
     /// From a `Request` helper: the item chosen from that menu.
     TabAction { id: u32 },
+    /// From a `Request` helper: what the tab's hover card says (the
+    /// session's name and state), answered by `AppMessage::TabCard`. For
+    /// terminals that draw the card themselves (WezTerm).
+    TabCard,
 }
 
 /// One line of the tab menu, as `AppMessage::TabMenu` lists it: an
@@ -159,6 +163,14 @@ pub enum AppMessage {
     TabMenu {
         items: Vec<MenuItem>,
     },
+    /// The hover card `ShimMessage::TabCard` asked for: the session's
+    /// name, and under it its state; `show` false when cards are off in
+    /// the settings. Empty `title` when the tab has no session.
+    TabCard {
+        title: String,
+        note: String,
+        show: bool,
+    },
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
@@ -202,6 +214,7 @@ mod tests {
             ShimMessage::PasswordRefused,
             ShimMessage::TabMenu,
             ShimMessage::TabAction { id: 4 },
+            ShimMessage::TabCard,
         ];
         for m in messages {
             let line = encode(&m);
@@ -223,6 +236,8 @@ mod tests {
             ],
         };
         assert_eq!(decode::<AppMessage>(&encode(&menu)).unwrap(), menu);
+        let card = AppMessage::TabCard { title: "web01".into(), note: "Connected · 5 min".into(), show: true };
+        assert_eq!(decode::<AppMessage>(&encode(&card)).unwrap(), card);
         // an older NativeTerm sends id and text only
         let old = r#"{"type":"tab_menu","items":[{"id":1,"text":"Reconnect"}]}"#;
         assert_eq!(

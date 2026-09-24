@@ -4726,8 +4726,20 @@ not NativeTerm's gets no menu (the shim prints nothing), and a right
 click while a program on the other side takes the mouse goes to that
 program, as WezTerm always does. Ctrl+Tab is left to WezTerm unless the
 switcher setting is on, when it shows WezTerm's tab navigator (per
-window, unlike the grid on Windows). Hover cards and the grid itself
-are not there.
+window, unlike the grid on Windows). The grid itself is not there.
+
+The hover card is the fork's (`show_tab_hover_cards`): the pointer
+resting on a tab brings up a card with a title, a note and the last
+lines of the tab's screen. When the pointer arrives the fork emits the
+asynchronous `tab-hover-card` event with the tab's and its active
+pane's ids; NativeTerm's configuration runs `nativeterm-shim --tab-card
+--pane <id>`, which asks over the socket (`ShimMessage::TabCard`) and
+prints `title<TAB>note`, or `off` when cards are turned off in the
+settings. The app answers from the session the pane's shim said hello
+from (`tab_menu::card_for`: its name and `state.describe()`); a pane
+that is not NativeTerm's gets an empty title and so the tab's own card.
+The card waits a second past its 600 ms for the answer, then shows the
+tab's own title.
 
 ### What the Linux machine showed
 

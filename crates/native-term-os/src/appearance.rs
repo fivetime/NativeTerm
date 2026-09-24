@@ -313,6 +313,18 @@ pub(crate) mod parse {
         let (family, spacing) = output.trim().split_once('\t')?;
         matches!(spacing.trim(), "100" | "90").then(|| family.split(',').next().unwrap_or(family).trim().to_string())
     }
+
+    /// A family name as an `fc-match` pattern: `-`, `:`, `,` and `\` are
+    /// pattern syntax there.
+    pub(super) fn fc_pattern(family: &str) -> String {
+        family.chars().fold(String::new(), |mut s, c| {
+            if matches!(c, '-' | ':' | ',' | '\\') {
+                s.push('\\');
+            }
+            s.push(c);
+            s
+        })
+    }
 }
 
 #[cfg(windows)]
@@ -542,6 +554,19 @@ mod imp {
                 })
         };
         let ui_font = if qt { kde_font().or_else(gtk_font) } else { gtk_font().or_else(kde_font) };
+        // the family the toolkit ends up drawing with: a font the settings
+        // name but that is not installed (Lingmo's GTK default Cantarell)
+        // is fontconfig's substitute there too
+        let ui_font = ui_font.map(|mut font| {
+            let pattern = super::parse::fc_pattern(&font.family);
+            if let Some(family) = output("fc-match", &["-f", "%{family[0]}", &pattern])
+                .map(|f| f.trim().to_string())
+                .filter(|f| !f.is_empty())
+            {
+                font.family = family;
+            }
+            font
+        });
         let palette = if qt { crate::titlebar::qt_colors(&kdeglobals) } else { None };
         Appearance {
             dark,
@@ -650,6 +675,8 @@ mod tests {
         assert_eq!(fc_monospace("DejaVu Sans Mono,DejaVu Sans Mono Book\t100\n"), Some("DejaVu Sans Mono".to_string()));
         assert_eq!(fc_monospace("Noto Sans CJK SC\t\n"), None, "a proportional match is no monospace font");
         assert_eq!(fc_monospace("Noto Sans CJK SC\t0\n"), None);
+        assert_eq!(fc_pattern("Noto Sans CJK SC"), "Noto Sans CJK SC");
+        assert_eq!(fc_pattern("M+ 1c-light:x,y\\"), "M+ 1c\\-light\\:x\\,y\\\\");
     }
 
     #[test]

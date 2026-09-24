@@ -1170,9 +1170,23 @@
       gsettings `font-name`, `settings.ini`) or KDE's `[General] font` —
       into the tab strip's `frame.font`. Read on the boxes: deepin Source
       Han Sans SC 10.5, EndeavourOS Noto Sans 10, Fedora Adwaita Sans 11,
-      Zorin Inter 10, Lingmo Cantarell 11. A Qt desktop's palette is now
-      part of the appearance too, so a new KDE colour scheme is picked up
-      without a restart
+      Zorin Inter 10, Lingmo Cantarell 11. A family the settings name but
+      that is not installed is fontconfig's substitute, as for the toolkit
+      (`fc-match`): Lingmo's GTK default Cantarell is not there, so its
+      tabs are in Noto Sans CJK SC, not WezTerm's monospace fallback. A
+      Qt desktop's palette is now part of the appearance too, so a new KDE
+      colour scheme is picked up without a restart
+- [x] Hover cards on WezTerm (2026-09-24), as Chrome's: the pointer
+      resting 600 ms on a tab brings up a card under it with the
+      session's name, its state and the last lines of the tab's screen.
+      The fork draws it (`8fdbd5621`, `show_tab_hover_cards`); what it says comes from
+      the `tab-hover-card` event, asked asynchronously when the pointer
+      arrives, which NativeTerm's configuration answers through the
+      shim's `--tab-card` helper (`ShimMessage::TabCard`,
+      `AppMessage::TabCard`, the Windows card's hover setting honoured).
+      A tab that is not NativeTerm's gets its own title. The Chrome tab
+      titles now stop before the close button instead of running under
+      it. Seen on Lingmo (X11): "test / 已连接" over the login banner
 - [ ] Step 2 still to do: the resize band tried by hand on both; WebGpu's
       REPLACE pipeline on a real GPU under Linux (the boxes run OpenGL)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
@@ -1194,9 +1208,10 @@
       Chrome's table does not know — so it gets step 1 and 2: the Lingmo
       GTK theme's buttons at the right, its edge with 14-px round top
       corners (extents 34/40/48/40), the strip `#fafafa`
-- [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on);
-      a KDE colour scheme change that leaves light/dark and the accent
-      alone is not noticed until NativeTerm restarts
+- [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
+- [ ] The Ctrl+Tab grid on WezTerm: tiles of the window's tabs with their
+      screens' text, cycled while Ctrl is held (today WezTerm's tab
+      navigator)
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
