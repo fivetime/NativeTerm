@@ -915,7 +915,13 @@ impl Runner {
         }
         match event {
             WindowEvent::Moved(_) => {
-                let ours = self.docking.slide.is_some() || self.docking.own_move_until.is_some_and(|t| t > now);
+                // hidden, the window is unmapped (or slid away by us): a
+                // move reported then is no drag of the person's — gala
+                // (elementary) reports one for the unmapped window, which
+                // undocked it and left the strip dead
+                let ours = self.docking.hidden
+                    || self.docking.slide.is_some()
+                    || self.docking.own_move_until.is_some_and(|t| t > now);
                 if !ours {
                     self.docking.settle_check = Some(now + dock::DRAG_POLL);
                 }

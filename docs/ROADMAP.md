@@ -1020,6 +1020,14 @@
       changes there; a left press hands the resize to the window manager
       with `_NET_WM_MOVERESIZE`). On Lingmo: no frame, the buttons at the
       right of the tabs, a corner dragged from 816×569 to 936×649
+- [x] Docked at the top on elementary, the window never came back
+      (2026-09-24): gala reports a move for the window NativeTerm has
+      just unmapped (hidden outright), which was taken for the person's
+      drag — settled with the pointer at no edge, it undocked, and the
+      strip left on the screen brought nothing back. Moves while hidden
+      are now never the person's. On elementary: docked at the top under
+      the panel, hidden, back on touching the strip (under the panel, at
+      its right place), twice
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
