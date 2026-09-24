@@ -1139,7 +1139,10 @@
       WezTerm's Wayland backend never implemented `request_drag_move`
       (X11 hands the drag to the window manager). The fork (`2dbc74a57`)
       asks the compositor with `xdg_toplevel.move` from the last press's
-      serial; windows opened with it move, one opened before did not
+      serial; windows opened with it move, one opened before did not.
+      Tried by hand on all six Linux boxes (elementary, Zorin, Fedora,
+      EndeavourOS, Lingmo, deepin; X11 and Wayland): the tab bar moves
+      the window everywhere
 - [x] Tiled windows on X11 (2026-09-24): Chrome's X11Window counts a
       window tiled when it is maximized one way only
       (`_NET_WM_STATE_MAXIMIZED_VERT` or `_HORZ`, what gala and mutter set
