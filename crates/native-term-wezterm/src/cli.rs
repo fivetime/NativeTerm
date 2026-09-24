@@ -353,10 +353,10 @@ local config = wezterm.config_builder()
     }
     lua.push_str("config.window_frame = frame\n");
     // the tabs and the window buttons in one strip, as Windows Terminal
-    // and Chrome have them; the buttons on the side the desktop puts them
+    // and Chrome have them
     lua.push_str("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n");
-    if look.buttons_left && !cfg!(target_os = "macos") {
-        lua.push_str("config.integrated_title_button_alignment = \"Left\"\n");
+    if let Some(layout) = look.button_layout.as_deref().filter(|_| !cfg!(target_os = "macos")) {
+        lua.push_str(&title_buttons(layout, look.button_style));
     }
     if !look.fonts.is_empty() {
         // the system's fonts (see native_term_os::fonts::terminal_families);
@@ -534,8 +534,32 @@ pub struct Look {
     pub fonts: Vec<String>,
     /// Ctrl+Tab shows the tab navigator (NativeTerm's switcher setting).
     pub switcher: bool,
-    /// The desktop puts the window buttons on the left.
-    pub buttons_left: bool,
+    /// The desktop's window buttons, GNOME's `button-layout` form
+    /// (`close:maximize`; see `native_term_os::appearance`), or `None` for
+    /// WezTerm's own (minimize, maximize, close at the right).
+    pub button_layout: Option<String>,
+    /// How the desktop draws them: `Pantheon`, `Gnome`, `Windows`.
+    pub button_style: &'static str,
+}
+
+/// The Lua giving the window buttons the desktop's layout and look, as
+/// Chrome does: the buttons it has, where it has them (elementary: close
+/// at the left, maximize at the right, no minimize), drawn its way.
+/// NativeTerm's WezTerm takes the layout as it is; any other one refuses
+/// the setting it does not know (the config builder raises), and then
+/// only lines them all up on the close button's side.
+fn title_buttons(layout: &str, style: &str) -> String {
+    let close_left = layout.split_once(':').is_some_and(|(left, _)| left.split(',').any(|b| b == "close"));
+    let mut lua = String::from("local desktop_buttons = pcall(function()\n");
+    lua.push_str(&format!("  config.integrated_title_button_layout = \"{}\"\n", lua_escape(layout)));
+    if !style.is_empty() {
+        lua.push_str(&format!("  config.integrated_title_button_style = \"{}\"\n", lua_escape(style)));
+    }
+    lua.push_str("end)\n");
+    if close_left {
+        lua.push_str("if not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n");
+    }
+    lua
 }
 
 /// `text` inside a Lua double-quoted string.
@@ -661,21 +685,26 @@ mod tests {
                 dark: Some(true),
                 fonts: vec!["Cascadia Mono".into(), "Microsoft YaHei".into()],
                 switcher: false,
-                buttons_left: true,
+                button_layout: Some("close:maximize".into()),
+                button_style: "Pantheon",
             },
             shim,
         );
         assert!(read.contains("local dark = true\n"));
         assert!(!read.contains("get_appearance"));
-        // the window buttons in the tab strip, on the desktop's side
+        // the window buttons in the tab strip, as the desktop has them
         assert!(read.contains("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n"));
-        assert_eq!(read.contains("config.integrated_title_button_alignment = \"Left\""), !cfg!(target_os = "macos"));
-        assert!(!unknown.contains("integrated_title_button_alignment"));
+        let desktop = "local desktop_buttons = pcall(function()\n  config.integrated_title_button_layout = \"close:maximize\"\n  config.integrated_title_button_style = \"Pantheon\"\nend)\nif not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n";
+        assert_eq!(read.contains(desktop), !cfg!(target_os = "macos"));
+        assert!(!unknown.contains("integrated_title_button"), "no layout read: WezTerm's own buttons");
+        let right = title_buttons(":minimize,maximize,close", "Gnome");
+        assert!(right.contains("config.integrated_title_button_layout = \":minimize,maximize,close\"\n"));
+        assert!(!right.contains("alignment"), "WezTerm's own side already");
         // the menu on a right click on the tab where WezTerm tells of one
         assert!(read.contains("wezterm.on(\"tab-right-click\""));
         assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Cascadia Mono\", \"Microsoft YaHei\" })\n"));
         let light = default_config(
-            &Look { dark: Some(false), fonts: vec!["Odd \"Mono\"".into()], switcher: false, buttons_left: false },
+            &Look { dark: Some(false), fonts: vec!["Odd \"Mono\"".into()], switcher: false, ..Look::default() },
             shim,
         );
         assert!(light.contains("local dark = false\n"));

@@ -33,9 +33,16 @@ pub struct Appearance {
     /// The monospace font family the desktop prefers, when fontconfig
     /// names an actual monospace font.
     pub monospace: Option<String>,
-    /// The window buttons (close first) sit on the left of the title bar:
-    /// KWin's `ButtonsOnLeft`, GNOME's `button-layout` (Linux only).
-    pub buttons_left: bool,
+    /// The desktop's window buttons, in GNOME's `button-layout` form
+    /// (`close:maximize` — left of the colon at the left end of the title
+    /// bar, the rest at the right), only close, minimize and maximize
+    /// kept: GNOME's `button-layout`, KWin's `ButtonsOnLeft`/`ButtonsOnRight`
+    /// (Linux only; `None` when the desktop does not say).
+    pub button_layout: Option<String>,
+    /// How the desktop draws those buttons: `Pantheon` (elementary: a bare
+    /// cross, diagonal arrows), `Gnome` (Adwaita: symbols in circles),
+    /// `Windows` (anything else), or empty off Linux.
+    pub button_style: &'static str,
     /// Where `dark` came from (`portal`, `gtk`, `kdeglobals`,
     /// `gsettings`, `registry`, `defaults`), or empty.
     pub source: &'static str,
@@ -166,19 +173,58 @@ mod parse {
         Some((byte(*r), byte(*g), byte(*b)))
     }
 
-    /// KWin's `kwinrc`: whether `ButtonsOnLeft` holds the close button
-    /// (`X`); `None` without the key.
-    pub(super) fn kwin_buttons_left(kwinrc: &str) -> Option<bool> {
-        ini_value(kwinrc, "org.kde.kdecoration2", "ButtonsOnLeft").map(|buttons| buttons.contains('X'))
+    /// KWin's `kwinrc` buttons (`X` close, `I` minimize, `A` maximize;
+    /// the rest are menus and toggles) as a GNOME-style layout, KWin's
+    /// defaults (`M` / `IAX`) for a key left out; `None` without either key
+    /// unless `kde` (a KDE session runs on the defaults).
+    pub(super) fn kwin_layout(kwinrc: &str, kde: bool) -> Option<String> {
+        let left = ini_value(kwinrc, "org.kde.kdecoration2", "ButtonsOnLeft");
+        let right = ini_value(kwinrc, "org.kde.kdecoration2", "ButtonsOnRight");
+        if left.is_none() && right.is_none() && !kde {
+            return None;
+        }
+        let names = |letters: &str| {
+            letters
+                .chars()
+                .filter_map(|c| match c {
+                    'X' => Some("close"),
+                    'I' => Some("minimize"),
+                    'A' => Some("maximize"),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        Some(format!("{}:{}", names(left.unwrap_or("M")), names(right.unwrap_or("IAX"))))
     }
 
     /// `gsettings get org.gnome.desktop.wm.preferences button-layout`
-    /// (`'appmenu:minimize,maximize,close'`): whether close is left of the
-    /// colon.
-    pub(super) fn gnome_buttons_left(output: &str) -> Option<bool> {
+    /// (`'appmenu:minimize,maximize,close'`) with close, minimize and
+    /// maximize kept: `:minimize,maximize,close`.
+    pub(super) fn gnome_layout(output: &str) -> Option<String> {
         let layout = output.trim().trim_matches('\'');
-        let (left, _) = layout.split_once(':')?;
-        Some(left.split(',').any(|b| b.trim() == "close"))
+        let (left, right) = layout.split_once(':')?;
+        let keep = |side: &str| {
+            side.split(',')
+                .map(str::trim)
+                .filter(|b| matches!(*b, "close" | "minimize" | "maximize"))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        Some(format!("{}:{}", keep(left), keep(right)))
+    }
+
+    /// The button look for `XDG_CURRENT_DESKTOP` (`ubuntu:GNOME`,
+    /// `Pantheon`, `KDE`, …).
+    pub(super) fn button_style(desktop: &str) -> &'static str {
+        let is = |name: &str| desktop.split(':').any(|d| d.eq_ignore_ascii_case(name));
+        if is("Pantheon") {
+            "Pantheon"
+        } else if is("GNOME") {
+            "Gnome"
+        } else {
+            "Windows"
+        }
     }
 
     /// `gsettings get org.gnome.desktop.interface color-scheme`.
@@ -211,7 +257,8 @@ mod imp {
             dark: light.map(|v| v == 0),
             accent: native_term_win::desktop::accent(),
             monospace: None,
-            buttons_left: false,
+            button_layout: None,
+            button_style: "",
             source: if light.is_some() { "registry" } else { "" },
         }
     }
@@ -322,7 +369,8 @@ mod imp {
             dark: Some(dark),
             accent: Some(accent),
             monospace: monospace(),
-            buttons_left: false,
+            button_layout: None,
+            button_style: "",
             source: "defaults",
         }
     }
@@ -361,16 +409,17 @@ mod imp {
                 source = "gsettings";
             }
         }
-        let buttons_left = config_file("kwinrc")
-            .as_deref()
-            .and_then(super::parse::kwin_buttons_left)
-            .or_else(|| {
-                output("gsettings", &["get", "org.gnome.desktop.wm.preferences", "button-layout"])
-                    .as_deref()
-                    .and_then(super::parse::gnome_buttons_left)
-            })
-            .unwrap_or(false);
-        Appearance { dark, accent, monospace: monospace(), buttons_left, source }
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        let kde = desktop.split(':').any(|d| d.eq_ignore_ascii_case("KDE"));
+        let button_layout = super::parse::kwin_layout(&config_file("kwinrc").unwrap_or_default(), kde).or_else(|| {
+            // gsettings answers with the desktop's own override (Pantheon's
+            // `close:maximize`) when XDG_CURRENT_DESKTOP names it
+            output("gsettings", &["get", "org.gnome.desktop.wm.preferences", "button-layout"])
+                .as_deref()
+                .and_then(super::parse::gnome_layout)
+        });
+        let button_style = super::parse::button_style(&desktop);
+        Appearance { dark, accent, monospace: monospace(), button_layout, button_style, source }
     }
 }
 
@@ -432,12 +481,23 @@ mod tests {
     #[test]
     fn where_the_window_buttons_are() {
         let kwin = "[Windows]\nBorderlessMaximizedWindows=false\n\n[org.kde.kdecoration2]\nButtonsOnLeft=XIA\nButtonsOnRight=M\n";
-        assert_eq!(kwin_buttons_left(kwin), Some(true));
-        assert_eq!(kwin_buttons_left("[org.kde.kdecoration2]\nButtonsOnLeft=M\nButtonsOnRight=IAX\n"), Some(false));
-        assert_eq!(kwin_buttons_left("[Other]\nButtonsOnLeft=X\n"), None);
-        assert_eq!(gnome_buttons_left("'appmenu:minimize,maximize,close'\n"), Some(false));
-        assert_eq!(gnome_buttons_left("'close,minimize,maximize:appmenu'"), Some(true));
-        assert_eq!(gnome_buttons_left(""), None);
+        assert_eq!(kwin_layout(kwin, true).as_deref(), Some("close,minimize,maximize:"));
+        let kwin = "[org.kde.kdecoration2]\nButtonsOnLeft=MS\nButtonsOnRight=HIAX\n";
+        assert_eq!(kwin_layout(kwin, false).as_deref(), Some(":minimize,maximize,close"));
+        assert_eq!(kwin_layout("[org.kde.kdecoration2]\nButtonsOnRight=X\n", false).as_deref(), Some(":close"));
+        assert_eq!(kwin_layout("[Other]\nButtonsOnLeft=X\n", false), None, "not KWin's buttons");
+        assert_eq!(kwin_layout("", true).as_deref(), Some(":minimize,maximize,close"), "KDE's defaults");
+        assert_eq!(gnome_layout("'appmenu:minimize,maximize,close'\n").as_deref(), Some(":minimize,maximize,close"));
+        assert_eq!(gnome_layout("'close,minimize,maximize:appmenu'").as_deref(), Some("close,minimize,maximize:"));
+        assert_eq!(gnome_layout("'close:maximize'").as_deref(), Some("close:maximize"), "elementary");
+        assert_eq!(gnome_layout("'appmenu:close'").as_deref(), Some(":close"));
+        assert_eq!(gnome_layout(""), None);
+        assert_eq!(button_style("Pantheon"), "Pantheon");
+        assert_eq!(button_style("ubuntu:GNOME"), "Gnome");
+        assert_eq!(button_style("zorin:GNOME"), "Gnome");
+        assert_eq!(button_style("KDE"), "Windows");
+        assert_eq!(button_style("Deepin"), "Windows");
+        assert_eq!(button_style(""), "Windows");
     }
 
     #[test]

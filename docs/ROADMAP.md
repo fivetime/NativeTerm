@@ -1036,6 +1036,23 @@
       fork there is no desktop title bar either — the one elementary
       drew (close and maximize only, its design) came from the stock
       WezTerm 20240203
+- [x] The window buttons as the desktop has them, as Chrome does
+      (2026-09-24): not just "on the left" but the desktop's own
+      buttons, where it puts them, drawn its way — on elementary a bare
+      close at the left end of the tabs, maximize (diagonal arrows) at
+      the right end, no minimize, as Chrome shows it there.
+      `native_term_os::appearance` reads the whole layout (GNOME's
+      `button-layout`, which answers with Pantheon's `close:maximize`
+      override under Pantheon; KWin's `ButtonsOnLeft`/`ButtonsOnRight`,
+      KDE's defaults when a KDE session has neither) and the look from
+      `XDG_CURRENT_DESKTOP` (Pantheon, GNOME's circles, else Windows').
+      The fork (`d3ca1ef0d`) takes the layout as
+      `integrated_title_button_layout` (buttons on both ends) and draws a
+      `Pantheon` style. Any other WezTerm's config builder raises on a
+      setting it does not know — and then drops the whole file — so the
+      configuration sets these under `pcall` and, refused, only lines the
+      buttons up on the close button's side. On elementary: close alone
+      at the left end, maximize at the right end, as Chrome
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
