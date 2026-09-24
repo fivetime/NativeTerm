@@ -1028,6 +1028,14 @@
       are now never the person's. On elementary: docked at the top under
       the panel, hidden, back on touching the strip (under the panel, at
       its right place), twice
+- [x] The minimize button did nothing on X11 (2026-09-24, seen on
+      elementary): upstream WezTerm's X11 `hide()` is an empty stub. The
+      fork (`65bdb63cd`) asks the window manager to iconify the window
+      the ICCCM way (`WM_CHANGE_STATE` with IconicState, as
+      `XIconifyWindow` does); gala puts it in WM_STATE Iconic. With the
+      fork there is no desktop title bar either — the one elementary
+      drew (close and maximize only, its design) came from the stock
+      WezTerm 20240203
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
