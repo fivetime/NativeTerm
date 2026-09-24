@@ -2020,6 +2020,7 @@ dependencies = [
 name = "native-term-wezterm"
 version = "0.1.0"
 dependencies = [
+ "native-term-os",
  "native-term-platform",
  "serde",
  "serde_json",

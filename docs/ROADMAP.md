@@ -1069,6 +1069,40 @@
       has none, so Adwaita as for GTK apps there. On elementary the
       buttons match Files' and Chrome's to a pixel in size, shape and
       brightness (dark mode)
+- [x] Step 1 of taking the title bar as Chrome does (2026-09-24): on a
+      desktop where Chrome goes to GTK (its `GetDefaultSystemTheme`:
+      GNOME, Pantheon, Cinnamon, Unity, XFCE, COSMIC, anything unknown —
+      deepin 23's `DDE` included), GTK draws the window buttons and
+      names the tab strip's colours. `native_term_os::titlebar` loads
+      `libgtk-3.so.0` at run time in a child process (`nativeterm
+      --desktop-titlebar DIR dark|light`: GTK wants its main thread and
+      global state; a theme that hangs it is killed after 10 s), builds
+      the style contexts Chromium's `ui/gtk` builds
+      (`window.background.csd > headerbar.titlebar > windowcontrols >
+      button.titlebutton.close > image`), sizes each button from the CSS
+      (min size, padding, border, margins) and renders it at rest, under
+      the pointer and in an unfocused window at twice the size, with
+      `gtk-application-prefer-dark-theme` set from the theme setting (as
+      Chrome's `SetDarkTheme`). Colours as `gtk_color_mixers.cc`: the
+      header bar's background (focused, `:backdrop`) behind the tabs,
+      the window's for the active tab, the title's for the rest,
+      backgrounds rendered and averaged rather than read. Rendered once
+      per GTK theme, icon theme and light/dark into
+      `~/.cache/nativeterm/titlebar`. The fork (`f1129564d`) shows the
+      pictures (`integrated_title_button_images`), placed with GTK's
+      spacing and the header bar's padding. The terminal keeps
+      NativeTerm's colours. On elementary (dark): the header bar
+      `#2e2e2e` focused and `#373737` not — Files and Chrome, unfocused
+      beside it, measure `#373737`/`#383838`; the buttons are the
+      theme's (bare symbols, elementary's own minimize)
+- [ ] Step 2: the window's rounded top corners, border and shadow from
+      the GTK theme (Chromium's `window_frame_provider_gtk.cc`: the
+      decoration rendered and nine-sliced, the corner radius measured
+      from a sample); needs a translucent (ARGB) WezTerm window
+- [ ] Step 3: on Qt desktops (KDE, UKUI, LXQt, a desktop calling
+      itself `Deepin`), the tab strip's colours from their palette as
+      Chrome's Qt backend takes them; the buttons stay the icon theme's
+      (Chrome draws its own there too)
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
