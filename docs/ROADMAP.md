@@ -1140,10 +1140,17 @@
       (X11 hands the drag to the window manager). The fork (`2dbc74a57`)
       asks the compositor with `xdg_toplevel.move` from the last press's
       serial; windows opened with it move, one opened before did not
-- [ ] Step 2 still to do: tiled windows on X11 (Chrome reads
-      `_GTK_EDGE_CONSTRAINTS`: no shadow on a tiled side); the resize
-      band tried by hand on both; WebGpu's REPLACE pipeline on a real
-      GPU under Linux (the boxes run OpenGL)
+- [x] Tiled windows on X11 (2026-09-24): Chrome's X11Window counts a
+      window tiled when it is maximized one way only
+      (`_NET_WM_STATE_MAXIMIZED_VERT` or `_HORZ`, what gala and mutter set
+      when snapping to a side; it does not read `_GTK_EDGE_CONSTRAINTS`)
+      and then draws no shadow and no round corners. WezTerm already
+      reports either as `MAXIMIZED`, where the edge is off, so nothing
+      to change: on elementary, vertical-only maximize drops the extents
+      and the content fills the window (630x930 at 0,0); restored, the
+      edge is back. A KWin quick tile sets neither, as for Chrome
+- [ ] Step 2 still to do: the resize band tried by hand on both; WebGpu's
+      REPLACE pipeline on a real GPU under Linux (the boxes run OpenGL)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
