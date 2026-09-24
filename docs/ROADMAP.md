@@ -1044,15 +1044,31 @@
       `native_term_os::appearance` reads the whole layout (GNOME's
       `button-layout`, which answers with Pantheon's `close:maximize`
       override under Pantheon; KWin's `ButtonsOnLeft`/`ButtonsOnRight`,
-      KDE's defaults when a KDE session has neither) and the look from
-      `XDG_CURRENT_DESKTOP` (Pantheon, GNOME's circles, else Windows').
-      The fork (`d3ca1ef0d`) takes the layout as
-      `integrated_title_button_layout` (buttons on both ends) and draws a
-      `Pantheon` style. Any other WezTerm's config builder raises on a
+      KDE's defaults when a KDE session has neither). The fork
+      (`d3ca1ef0d`) takes it as `integrated_title_button_layout` (buttons
+      on both ends). Any other WezTerm's config builder raises on a
       setting it does not know — and then drops the whole file — so the
       configuration sets these under `pcall` and, refused, only lines the
-      buttons up on the close button's side. On elementary: close alone
-      at the left end, maximize at the right end, as Chrome
+      buttons up on the close button's side
+- [x] The desktop's own icons in those buttons, one logic for every
+      desktop, as Chrome gets them through GTK (2026-09-24). A first cut
+      hand-drew elementary's symbols per desktop; replaced by what GTK
+      does: `native_term_os::icons` takes the icon theme's name from
+      XSETTINGS (`Net/IconThemeName`, published by every desktop's
+      settings daemon, for XWayland too), then `kdeglobals`, GTK's
+      `settings.ini`, gsettings, KDE's `breeze`; walks the theme and what
+      it inherits, then `hicolor` and `Adwaita`, reading `index.theme`
+      for the directory nearest 16 px; and looks up the freedesktop names
+      (`window-close-symbolic`, minimize, maximize, restore). The fork
+      (`9e0566a09`) draws the SVGs (resvg) as masks in the button's
+      colour, in a `Flat` style (no backdrop, a faint rounded one under
+      the pointer). Found on every box: elementary → elementary's,
+      Fedora → Adwaita, Zorin → ZorinBlue-Light, EndeavourOS →
+      breeze-dark, Lingmo → Crule (its `settings.ini`; it calls itself
+      KDE, so KDE's default must come last), deepin → `nirvana`, which
+      has none, so Adwaita as for GTK apps there. On elementary the
+      buttons match Files' and Chrome's to a pixel in size, shape and
+      brightness (dark mode)
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

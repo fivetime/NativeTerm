@@ -1790,8 +1790,12 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
         dark,
         fonts,
         switcher,
+        button_icons: native_term_os::icons::window_icons(desktop.icon_theme.as_deref())
+            .named()
+            .into_iter()
+            .map(|(name, path)| (name, path.to_string_lossy().into_owned()))
+            .collect(),
         button_layout: desktop.button_layout,
-        button_style: desktop.button_style,
     }
 }
 

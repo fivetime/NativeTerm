@@ -356,7 +356,7 @@ local config = wezterm.config_builder()
     // and Chrome have them
     lua.push_str("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n");
     if let Some(layout) = look.button_layout.as_deref().filter(|_| !cfg!(target_os = "macos")) {
-        lua.push_str(&title_buttons(layout, look.button_style));
+        lua.push_str(&title_buttons(layout, &look.button_icons));
     }
     if !look.fonts.is_empty() {
         // the system's fonts (see native_term_os::fonts::terminal_families);
@@ -538,22 +538,29 @@ pub struct Look {
     /// (`close:maximize`; see `native_term_os::appearance`), or `None` for
     /// WezTerm's own (minimize, maximize, close at the right).
     pub button_layout: Option<String>,
-    /// How the desktop draws them: `Pantheon`, `Gnome`, `Windows`.
-    pub button_style: &'static str,
+    /// The desktop's own icons for them (`close`, `minimize`, `maximize`,
+    /// `restore`: SVG files out of its icon theme; see
+    /// `native_term_os::icons`).
+    pub button_icons: Vec<(&'static str, String)>,
 }
 
-/// The Lua giving the window buttons the desktop's layout and look, as
+/// The Lua giving the window buttons the desktop's layout and icons, as
 /// Chrome does: the buttons it has, where it has them (elementary: close
-/// at the left, maximize at the right, no minimize), drawn its way.
-/// NativeTerm's WezTerm takes the layout as it is; any other one refuses
-/// the setting it does not know (the config builder raises), and then
-/// only lines them all up on the close button's side.
-fn title_buttons(layout: &str, style: &str) -> String {
+/// at the left, maximize at the right, no minimize), with its icon
+/// theme's own symbols, flat — the same on every desktop, nothing drawn
+/// for one in particular. NativeTerm's WezTerm takes all this as it is;
+/// any other one refuses the settings it does not know (the config
+/// builder raises), and then only lines the buttons up on the close
+/// button's side.
+fn title_buttons(layout: &str, icons: &[(&str, String)]) -> String {
     let close_left = layout.split_once(':').is_some_and(|(left, _)| left.split(',').any(|b| b == "close"));
     let mut lua = String::from("local desktop_buttons = pcall(function()\n");
     lua.push_str(&format!("  config.integrated_title_button_layout = \"{}\"\n", lua_escape(layout)));
-    if !style.is_empty() {
-        lua.push_str(&format!("  config.integrated_title_button_style = \"{}\"\n", lua_escape(style)));
+    lua.push_str("  config.integrated_title_button_style = \"Flat\"\n");
+    if !icons.is_empty() {
+        let entries: Vec<String> =
+            icons.iter().map(|(name, path)| format!("{name} = \"{}\"", lua_escape(path))).collect();
+        lua.push_str(&format!("  config.integrated_title_button_icons = {{ {} }}\n", entries.join(", ")));
     }
     lua.push_str("end)\n");
     if close_left {
@@ -686,7 +693,10 @@ mod tests {
                 fonts: vec!["Cascadia Mono".into(), "Microsoft YaHei".into()],
                 switcher: false,
                 button_layout: Some("close:maximize".into()),
-                button_style: "Pantheon",
+                button_icons: vec![
+                    ("close", "/usr/share/icons/elementary/actions/symbolic/window-close-symbolic.svg".into()),
+                    ("maximize", "/icons/\"odd\".svg".into()),
+                ],
             },
             shim,
         );
@@ -694,10 +704,11 @@ mod tests {
         assert!(!read.contains("get_appearance"));
         // the window buttons in the tab strip, as the desktop has them
         assert!(read.contains("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n"));
-        let desktop = "local desktop_buttons = pcall(function()\n  config.integrated_title_button_layout = \"close:maximize\"\n  config.integrated_title_button_style = \"Pantheon\"\nend)\nif not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n";
+        let desktop = "local desktop_buttons = pcall(function()\n  config.integrated_title_button_layout = \"close:maximize\"\n  config.integrated_title_button_style = \"Flat\"\n  config.integrated_title_button_icons = { close = \"/usr/share/icons/elementary/actions/symbolic/window-close-symbolic.svg\", maximize = \"/icons/\\\"odd\\\".svg\" }\nend)\nif not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n";
         assert_eq!(read.contains(desktop), !cfg!(target_os = "macos"));
         assert!(!unknown.contains("integrated_title_button"), "no layout read: WezTerm's own buttons");
-        let right = title_buttons(":minimize,maximize,close", "Gnome");
+        let right = title_buttons(":minimize,maximize,close", &[]);
+        assert!(!right.contains("integrated_title_button_icons"), "no icons found: the drawn symbols");
         assert!(right.contains("config.integrated_title_button_layout = \":minimize,maximize,close\"\n"));
         assert!(!right.contains("alignment"), "WezTerm's own side already");
         // the menu on a right click on the tab where WezTerm tells of one

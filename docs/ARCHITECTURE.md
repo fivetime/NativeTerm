@@ -4652,9 +4652,18 @@ NativeTerm from a `Look` — light or dark (the theme setting, else what
 let WezTerm ask the desktop itself) and the font families — plus
 NativeTerm's own look, the same everywhere and modelled on Windows
 Terminal: its Campbell colours when dark and One Half Light when light,
-the tab strip and title bar in the same light or dark (the tabs in the
-title bar on Windows and macOS, `INTEGRATED_BUTTONS`; a Linux desktop
-keeps its own title bar), 12 pt text, padding in points. The families
+the tab strip and title bar in the same light or dark, the tabs in the
+title bar everywhere (`INTEGRATED_BUTTONS`, no desktop title bar), 12 pt
+text, padding in points. On Linux the window buttons are the desktop's,
+as Chrome has them through GTK: the layout it sets (`button-layout`,
+KWin's `ButtonsOn*`: which buttons, at which end) and its icon theme's
+own symbols (`native_term_os::icons`: the theme named in XSETTINGS, else
+`kdeglobals`, GTK's `settings.ini`, gsettings; the freedesktop names
+`window-close-symbolic` …, looked up through the theme's inheritance),
+drawn flat by the fork (`integrated_title_button_layout`, `_icons`,
+style `Flat`) — one logic, no desktop singled out; any other WezTerm
+refuses those settings under `pcall` and gets the buttons on the close
+button's side. The families
 are `native_term_os::fonts::terminal_families`, only ones the system
 has: Cascadia Mono and Microsoft YaHei on Windows, Menlo and PingFang SC
 on macOS, and on Linux Cascadia Mono where installed, the desktop's

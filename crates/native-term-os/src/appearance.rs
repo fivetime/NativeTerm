@@ -39,10 +39,9 @@ pub struct Appearance {
     /// kept: GNOME's `button-layout`, KWin's `ButtonsOnLeft`/`ButtonsOnRight`
     /// (Linux only; `None` when the desktop does not say).
     pub button_layout: Option<String>,
-    /// How the desktop draws those buttons: `Pantheon` (elementary: a bare
-    /// cross, diagonal arrows), `Gnome` (Adwaita: symbols in circles),
-    /// `Windows` (anything else), or empty off Linux.
-    pub button_style: &'static str,
+    /// The icon theme the desktop uses (`elementary`, `breeze-dark`,
+    /// `bloom`, …; see `icons`), Linux only.
+    pub icon_theme: Option<String>,
     /// Where `dark` came from (`portal`, `gtk`, `kdeglobals`,
     /// `gsettings`, `registry`, `defaults`), or empty.
     pub source: &'static str,
@@ -214,17 +213,15 @@ mod parse {
         Some(format!("{}:{}", keep(left), keep(right)))
     }
 
-    /// The button look for `XDG_CURRENT_DESKTOP` (`ubuntu:GNOME`,
-    /// `Pantheon`, `KDE`, …).
-    pub(super) fn button_style(desktop: &str) -> &'static str {
-        let is = |name: &str| desktop.split(':').any(|d| d.eq_ignore_ascii_case(name));
-        if is("Pantheon") {
-            "Pantheon"
-        } else if is("GNOME") {
-            "Gnome"
-        } else {
-            "Windows"
-        }
+    /// KDE's icon theme in `kdeglobals` (`[Icons] Theme`), when set; KDE
+    /// itself runs on `breeze` without it.
+    pub(super) fn kde_icon_theme(kdeglobals: &str) -> Option<String> {
+        ini_value(kdeglobals, "Icons", "Theme").map(str::to_string)
+    }
+
+    /// GTK's `settings.ini`: `gtk-icon-theme-name`.
+    pub(super) fn gtk_icon_theme(settings: &str) -> Option<String> {
+        ini_value(settings, "Settings", "gtk-icon-theme-name").map(|v| v.trim_matches('"').to_string())
     }
 
     /// `gsettings get org.gnome.desktop.interface color-scheme`.
@@ -258,7 +255,7 @@ mod imp {
             accent: native_term_win::desktop::accent(),
             monospace: None,
             button_layout: None,
-            button_style: "",
+            icon_theme: None,
             source: if light.is_some() { "registry" } else { "" },
         }
     }
@@ -370,7 +367,7 @@ mod imp {
             accent: Some(accent),
             monospace: monospace(),
             button_layout: None,
-            button_style: "",
+            icon_theme: None,
             source: "defaults",
         }
     }
@@ -418,8 +415,21 @@ mod imp {
                 .as_deref()
                 .and_then(super::parse::gnome_layout)
         });
-        let button_style = super::parse::button_style(&desktop);
-        Appearance { dark, accent, monospace: monospace(), button_layout, button_style, source }
+        // what GTK apps (Chrome too) use: XSETTINGS, which every
+        // desktop's settings daemon publishes; then each desktop's own
+        let gtk = || config_file("gtk-3.0/settings.ini").or_else(|| config_file("gtk-4.0/settings.ini"));
+        // (Lingmo calls itself KDE but keeps its theme in settings.ini;
+        // gsettings answers a bare `Adwaita` where nothing ever set it)
+        let icon_theme = crate::icons::xsettings_icon_theme()
+            .or_else(|| super::parse::kde_icon_theme(&config_file("kdeglobals").unwrap_or_default()))
+            .or_else(|| gtk().as_deref().and_then(super::parse::gtk_icon_theme))
+            .or_else(|| {
+                output("gsettings", &["get", "org.gnome.desktop.interface", "icon-theme"])
+                    .map(|t| t.trim().trim_matches('\'').to_string())
+                    .filter(|t| !t.is_empty())
+            })
+            .or_else(|| kde.then(|| "breeze".to_string()));
+        Appearance { dark, accent, monospace: monospace(), button_layout, icon_theme, source }
     }
 }
 
@@ -492,12 +502,11 @@ mod tests {
         assert_eq!(gnome_layout("'close:maximize'").as_deref(), Some("close:maximize"), "elementary");
         assert_eq!(gnome_layout("'appmenu:close'").as_deref(), Some(":close"));
         assert_eq!(gnome_layout(""), None);
-        assert_eq!(button_style("Pantheon"), "Pantheon");
-        assert_eq!(button_style("ubuntu:GNOME"), "Gnome");
-        assert_eq!(button_style("zorin:GNOME"), "Gnome");
-        assert_eq!(button_style("KDE"), "Windows");
-        assert_eq!(button_style("Deepin"), "Windows");
-        assert_eq!(button_style(""), "Windows");
+        assert_eq!(kde_icon_theme("[Icons]\nTheme=breeze-dark\n").as_deref(), Some("breeze-dark"));
+        assert_eq!(kde_icon_theme("[General]\nName=x\n"), None, "not set: the next source");
+        assert_eq!(gtk_icon_theme("[Settings]\ngtk-icon-theme-name=Crule\n").as_deref(), Some("Crule"));
+        assert_eq!(gtk_icon_theme("[Settings]\ngtk-icon-theme-name=\"Papirus\"\n").as_deref(), Some("Papirus"));
+        assert_eq!(gtk_icon_theme("[Settings]\n"), None);
     }
 
     #[test]
