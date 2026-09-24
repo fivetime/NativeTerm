@@ -361,6 +361,9 @@ local config = wezterm.config_builder()
     // the tabs and the window buttons in one strip, as Windows Terminal
     // and Chrome have them
     lua.push_str("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n");
+    // Chrome's tab strip where the WezTerm draws one (NativeTerm's: its
+    // height, tab shape, separators and colour rules)
+    lua.push_str("pcall(function()\n  config.tab_strip_style = \"Chrome\"\nend)\n");
     if let Some(layout) = look.button_layout.as_deref().filter(|_| !cfg!(target_os = "macos")) {
         lua.push_str(&title_buttons(layout, &look.button_icons, look.titlebar.as_ref()));
     }
@@ -564,15 +567,14 @@ fn mix(a: native_term_os::titlebar::Rgb, b: native_term_os::titlebar::Rgb, t: f3
     (m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
 }
 
-/// The tab strip in the GTK theme's own colours, as Chrome's frame: the
-/// header bar's background behind the tabs (focused and not), the
-/// window's background for the active tab (Chrome's toolbar), the
-/// title's colour on the rest. The terminal itself keeps NativeTerm's
-/// colours.
+/// The tab strip in the desktop theme's own colours, as Chrome's frame:
+/// the header bar's background behind the tabs (focused and not), the
+/// title's colour on them. The active tab is what lies beneath it, as
+/// Chrome's is its toolbar: the terminal's own background, so it joins
+/// the terminal, with the theme's text on it (Chrome's toolbar text); where
+/// it would not stand out from the strip, Chrome's style strokes it. The terminal keeps NativeTerm's colours.
 fn titlebar_colors(bar: &native_term_os::titlebar::Titlebar) -> String {
-    // an active tab the strip's own colour would not show which it is
-    let active = if bar.window == bar.frame { mix(bar.frame, bar.title, 0.08) } else { bar.window };
-    let (frame, window, title) = (hex(bar.frame), hex(active), hex(bar.title));
+    let (frame, title) = (hex(bar.frame), hex(bar.title));
     let hover = hex(mix(bar.frame, bar.title, 0.1));
     format!(
         "-- the tab strip in the desktop theme's own colours (its header bar), as Chrome has it\n\
@@ -580,8 +582,9 @@ fn titlebar_colors(bar: &native_term_os::titlebar::Titlebar) -> String {
          frame.inactive_titlebar_bg = \"{frame_inactive}\"\n\
          frame.active_titlebar_fg = \"{title}\"\n\
          frame.inactive_titlebar_fg = \"{title_inactive}\"\n\
+         local scheme = config.color_schemes[config.color_scheme]\n\
          config.colors.tab_bar = {{\n\
-         \x20 active_tab = {{ bg_color = \"{window}\", fg_color = \"{text}\" }},\n\
+         \x20 active_tab = {{ bg_color = scheme.background, fg_color = \"{text}\" }},\n\
          \x20 inactive_tab = {{ bg_color = \"{frame}\", fg_color = \"{title}\" }},\n\
          \x20 inactive_tab_hover = {{ bg_color = \"{hover}\", fg_color = \"{title}\" }},\n\
          \x20 new_tab = {{ bg_color = \"{frame}\", fg_color = \"{title}\" }},\n\
@@ -814,6 +817,10 @@ mod tests {
         assert!(!read.contains("get_appearance"));
         // the window buttons in the tab strip, as the desktop has them
         assert!(read.contains("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n"));
+        assert!(
+            read.contains("pcall(function()\n  config.tab_strip_style = \"Chrome\"\nend)\n"),
+            "Chrome's tab strip, where the WezTerm knows it"
+        );
         let desktop = "local desktop_buttons = pcall(function()\n  config.integrated_title_button_layout = \"close:maximize\"\n  config.integrated_title_button_style = \"Flat\"\n  config.integrated_title_button_icons = { close = \"/usr/share/icons/elementary/actions/symbolic/window-close-symbolic.svg\", maximize = \"/icons/\\\"odd\\\".svg\" }\nend)\nif not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n";
         assert_eq!(read.contains(desktop), !cfg!(target_os = "macos"));
         assert!(!unknown.contains("integrated_title_button"), "no layout read: WezTerm's own buttons");
@@ -904,11 +911,16 @@ end)
             "frame.inactive_titlebar_bg = \"#282828\"
 "
         ));
-        assert!(colors.contains("active_tab = { bg_color = \"#242424\", fg_color = \"#ffffff\" },"));
+        assert!(
+            colors.contains("active_tab = { bg_color = scheme.background, fg_color = \"#ffffff\" },"),
+            "the active tab is the terminal beneath it, with the theme's text"
+        );
         assert!(colors.contains("inactive_tab = { bg_color = \"#303030\", fg_color = \"#eeeeee\" },"));
         assert!(colors.contains("inactive_tab_hover = { bg_color = \"#434343\""), "a tenth of the way to the title");
-        let same = titlebar_colors(&Titlebar { window: bar.frame, ..bar.clone() });
-        assert!(same.contains("active_tab = { bg_color = \"#3f3f3f\""), "set apart from the strip");
+        assert!(
+            colors.find("local scheme = config.color_schemes[config.color_scheme]\n") < colors.find("active_tab"),
+            "the scheme read before its colours are used"
+        );
         let whole = default_config(
             &Look { titlebar: Some(bar), button_layout: Some("close:maximize".into()), ..Look::default() },
             Path::new("/opt/nt/nativeterm-shim"),

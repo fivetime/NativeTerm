@@ -1152,6 +1152,18 @@
       to change: on elementary, vertical-only maximize drops the extents
       and the content fills the window (630x930 at 0,0); restored, the
       edge is back. A KWin quick tile sets neither, as for Chrome
+- [x] Chrome's tab strip (2026-09-24; asked for after trying it: on some
+      themes the tabs and the strip were one colour, and the strip too
+      low). The fork (`3effee1e7`, `tab_strip_style = "Chrome"`) draws it
+      as Chrome does over a desktop theme: a 41-DIP strip, only the active
+      tab filled with feet flaring into what lies beneath, the others
+      unfilled but under the pointer, separators between them, and a
+      1-px stroke round the active tab where it contrasts under 1.3 with
+      the strip (Chrome's rule, only with a system theme). As Chrome's
+      active tab is its toolbar's colour, NativeTerm's is the terminal's
+      background (so it joins the terminal, as Windows Terminal's does),
+      with the theme's text on it. Zorin (light): the stroke drawn;
+      elementary (dark): separators, no stroke
 - [ ] Step 2 still to do: the resize band tried by hand on both; WebGpu's
       REPLACE pipeline on a real GPU under Linux (the boxes run OpenGL)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
