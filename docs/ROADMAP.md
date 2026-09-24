@@ -1116,10 +1116,28 @@
       elementary: extents 35/35/27/43, radius 6, the shadow and round
       corners over a light background, maximize dropping the edge and
       restore bringing it back
-- [ ] Step 2 still to do: Wayland (GNOME and elementary Wayland windows:
-      `xdg_surface.set_window_geometry` for the margins, the input region
-      on the surface); tiled windows (Chrome takes `_GTK_EDGE_CONSTRAINTS`
-      for them: no shadow on a tiled side); the resize band tried by hand
+- [x] Step 2 on Wayland (2026-09-24): the fork (`65dcf1fbf`) hangs a
+      subsurface beneath the content, reaching out by the margins, with
+      the theme's border and shadow and the header's colour under the
+      round top corners; the window geometry stays the content's; the
+      subsurface's input region is the 10-px resize band
+      (`xdg_toplevel.resize`, resize cursors); maximized, full screen or
+      tiled on any side, no edge; focus from the configure's ACTIVATED.
+      Wayland has no shape, so the renderer clears the content's top
+      corners itself: the window state gains `CLIENT_EDGE` (X11 reports
+      it too) and wezterm-gui draws two transparent squares last in a
+      layer drawn without blending (a REPLACE pipeline on WebGpu,
+      glium's defaults on OpenGL). The configuration is the same as on
+      X11; NativeTerm unchanged. Zorin (GNOME 46): the Zorin theme's
+      15-px round corners and shadow, its round buttons; Fedora
+      (GNOME 50, where gnome-screenshot is refused): the protocol trace
+      shows the subsurface below at (-22,-19), the band as input region,
+      a repaint on activation. Found on the way: GNOME Shell's own
+      environment has no `WAYLAND_DISPLAY` (its children do)
+- [ ] Step 2 still to do: tiled windows on X11 (Chrome reads
+      `_GTK_EDGE_CONSTRAINTS`: no shadow on a tiled side); the resize
+      band tried by hand on both; WebGpu's REPLACE pipeline on a real
+      GPU under Linux (the boxes run OpenGL)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
