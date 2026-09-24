@@ -4744,6 +4744,18 @@ that is not NativeTerm's gets an empty title and so the tab's own card.
 The card waits a second past its 600 ms for the answer, then shows the
 tab's own title.
 
+### The window's shadow and the compositor
+
+The edge (shadow, border, round top corners) is the client's own
+drawing, as Chrome's: on X11 painted into the margins of the toplevel
+around the content, on Wayland a subsurface beneath it, with
+`_GTK_FRAME_EXTENTS` telling the window manager where the window really
+is. The compositor can still discard it: Lingmo's KWin runs
+`kwin4_effect_shapecorners`, which redraws every window's edge itself and
+replaces whatever the client painted outside its frame geometry, so no
+client-side shadow shows there (Chrome's included). NativeTerm does
+what Chrome does — nothing: the shadow is the compositor's to show.
+
 ### What the Linux machine showed
 
 The first run on a Linux desktop (Deepin 25, X11) took the whole chain

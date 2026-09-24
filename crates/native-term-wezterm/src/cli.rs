@@ -358,10 +358,12 @@ local config = wezterm.config_builder()
         lua.push_str("frame.font = wezterm.font({ family = \"Segoe UI\" })\nframe.font_size = 10.0\n");
     } else if let Some(font) = look.ui_font.as_ref().filter(|_| !cfg!(target_os = "macos")) {
         // the tab titles in the desktop's interface font, as Chrome's
+        // at the whole pixel size Chrome takes it to (gtk_ui.cc rounds
+        // the points to pixels at 96 dpi), so glyphs sit on whole rows
+        let size = (font.points() * 96. / 72.).round() * 72. / 96.;
         lua.push_str(&format!(
-            "frame.font = wezterm.font({{ family = \"{}\" }})\nframe.font_size = {size:.1}\n",
+            "frame.font = wezterm.font({{ family = \"{}\" }})\nframe.font_size = {size}\n",
             lua_escape(&font.family),
-            size = font.points()
         ));
     }
     lua.push_str("config.window_frame = frame\n");
@@ -705,21 +707,33 @@ fn button_images(layout: &str, bar: &native_term_os::titlebar::Titlebar) -> Stri
     let mut entries = Vec::new();
     for b in &bar.buttons {
         let slot = if b.name == "restore" { "maximize" } else { b.name.as_str() };
+        // (Chrome: the header bar's spacing between buttons only, the tab
+        // strip 12 DIP from the outermost)
         let (ml, mr) = if let Some(i) = left.iter().position(|n| *n == slot) {
-            (b.margin_left + if i == 0 { bar.padding_left } else { 0 }, b.margin_right + bar.spacing)
+            (
+                b.margin_left + if i == 0 { bar.padding_left } else { 0 },
+                b.margin_right + if i + 1 == left.len() { 0 } else { bar.spacing },
+            )
         } else if let Some(i) = right.iter().position(|n| *n == slot) {
-            (b.margin_left + bar.spacing, b.margin_right + if i + 1 == right.len() { bar.padding_right } else { 0 })
+            (
+                b.margin_left + if i == 0 { 0 } else { bar.spacing },
+                b.margin_right + if i + 1 == right.len() { bar.padding_right } else { 0 },
+            )
         } else {
             continue;
         };
         entries.push(format!(
-            "    {} = {{ normal = \"{}\", hover = \"{}\", backdrop = \"{}\", width = {}, height = {}, margin_left = {ml}, margin_right = {mr} }},\n",
+            "    {} = {{ normal = \"{}\", hover = \"{}\", backdrop = \"{}\", width = {}, height = {}, margin_left = {ml}, margin_right = {mr}, margin_top = {}, margin_bottom = {}, header_top = {}, header_bottom = {} }},\n",
             b.name,
             lua_escape(&b.normal.to_string_lossy()),
             lua_escape(&b.hover.to_string_lossy()),
             lua_escape(&b.backdrop.to_string_lossy()),
             b.width,
             b.height,
+            b.margin_top,
+            b.margin_bottom,
+            bar.padding_top,
+            bar.padding_bottom,
         ));
     }
     if entries.is_empty() {
@@ -873,7 +887,7 @@ mod tests {
             "Chrome's tab strip, where the WezTerm knows it"
         );
         assert_eq!(
-            read.contains("frame.font = wezterm.font({ family = \"Cantarell\" })\nframe.font_size = 11.0\n"),
+            read.contains("frame.font = wezterm.font({ family = \"Cantarell\" })\nframe.font_size = 11.25\n"),
             cfg!(all(unix, not(target_os = "macos"))),
             "the tab titles in the desktop's interface font (Linux)"
         );
@@ -914,6 +928,8 @@ mod tests {
             height: 24,
             margin_left: 1,
             margin_right: 2,
+            margin_top: 3,
+            margin_bottom: 4,
             normal: format!("/c/{name}-normal.png").into(),
             hover: format!("/c/{name}-hover.png").into(),
             backdrop: format!("/c/{name}-backdrop.png").into(),
@@ -928,18 +944,20 @@ mod tests {
             padding_left: 6,
             padding_right: 7,
             spacing: 6,
+            padding_top: 5,
+            padding_bottom: 6,
             buttons: ["close", "minimize", "maximize", "restore"].map(button).to_vec(),
             edge: None,
         };
         // elementary: close at the left end, maximize at the right end
         let lua = button_images("close:maximize", &bar);
-        assert!(lua.contains("    close = { normal = \"/c/close-normal.png\", hover = \"/c/close-hover.png\", backdrop = \"/c/close-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 8 },
+        assert!(lua.contains("    close = { normal = \"/c/close-normal.png\", hover = \"/c/close-hover.png\", backdrop = \"/c/close-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 2, margin_top = 3, margin_bottom = 4, header_top = 5, header_bottom = 6 },
 "),
-            "the header bar's padding at the edge, GTK's spacing towards the tabs");
+            "the header bar's padding at the edge, GTK's spacing only between buttons");
         assert!(
             lua.contains("maximize = { normal = \"/c/maximize-normal.png\"")
                 && lua.contains(
-                    "margin_left = 7, margin_right = 9 },
+                    "margin_left = 1, margin_right = 9, margin_top = 3, margin_bottom = 4, header_top = 5, header_bottom = 6 },
     restore"
                 )
         );
@@ -947,8 +965,9 @@ mod tests {
         assert!(!lua.contains("minimize ="), "a button the layout leaves out");
         // GNOME: all three at the right, padding only at the window's edge
         let lua = button_images(":minimize,maximize,close", &bar);
-        assert!(lua.contains("minimize = { normal = \"/c/minimize-normal.png\", hover = \"/c/minimize-hover.png\", backdrop = \"/c/minimize-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 2 }"));
-        assert!(lua.contains("close = { normal = \"/c/close-normal.png\", hover = \"/c/close-hover.png\", backdrop = \"/c/close-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 9 }"));
+        assert!(lua.contains("minimize = { normal = \"/c/minimize-normal.png\", hover = \"/c/minimize-hover.png\", backdrop = \"/c/minimize-backdrop.png\", width = 24, height = 24, margin_left = 1, margin_right = 2, margin_top = 3"));
+        assert!(lua.contains("maximize = { normal = \"/c/maximize-normal.png\", hover = \"/c/maximize-hover.png\", backdrop = \"/c/maximize-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 2, margin_top = 3"));
+        assert!(lua.contains("close = { normal = \"/c/close-normal.png\", hover = \"/c/close-hover.png\", backdrop = \"/c/close-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 9, margin_top = 3"));
         assert_eq!(button_images("close:maximize", &Titlebar { buttons: vec![], ..bar.clone() }), "");
         let edge = native_term_os::titlebar::Edge {
             thickness: [2, 30, 40, 30],

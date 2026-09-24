@@ -1237,6 +1237,29 @@
         (PathType::kHighlight), not the tab's shape; the titles and
         buttons centred in it; the first tab starts past the header
         bar's padding and its own feet, clear of the window's corner
+      - then a round read out of Chromium by nine agents (2026-09-25; the
+        user's three reports from Lingmo: the pill not centred, the title
+        cut, the shadow gone). The pill: only 40 of Chrome's 41 DIP show
+        (the toolbar covers the last), so the terminal now begins at row
+        40 and the 28-DIP pill has 6 rows above and below; the tab's
+        contents centre on that 28-DIP row; the title's baseline where
+        Chrome's label puts it (the cap height centred over the 41-DIP
+        tab, RenderText::DetermineBaselineCenteringText); GTK buttons
+        placed as a header bar places them (NavButtonProviderGtk: CSS
+        margins and padding, shrunk to fit 40); the strip 12 DIP from the
+        client edge; GTK's spacing between buttons only; the desktop font
+        at Chrome's whole-pixel size (11 pt -> 15 px -> 11.25 pt). The
+        title: no clipping path exists; it sat 4-5 px low on a half pixel.
+        Measured on Lingmo after: pill rows 6..33 of 40, button hover
+        circle rows 7..32, glyph rows 12..24 (Chrome's own on that box:
+        14..24). The shadow: Lingmo's KWin loads kwin4_effect_shapecorners
+        (lingmo-kwin-plugins-roundedwindow), whose shader replaces
+        everything outside the frame geometry with its own shadow (alpha
+        0 unconfigured) — Chrome's client shadow vanishes there just the
+        same (its only WM exception is Xfwm4); not a fork bug. Remedy on
+        Lingmo: the effect's "Excluded Windows", or turning it off. Taken
+        from Chrome besides: _NET_WM_OPAQUE_REGION, the Xfwm4 exclusion,
+        16-DIP resize corners
 - [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid

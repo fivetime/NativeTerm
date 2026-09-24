@@ -39,6 +39,9 @@ pub struct Titlebar {
     pub padding_left: u32,
     pub padding_right: u32,
     pub spacing: u32,
+    /// The header bar's padding above and below its buttons.
+    pub padding_top: u32,
+    pub padding_bottom: u32,
     /// The buttons: close, minimize, maximize, restore.
     pub buttons: Vec<Button>,
     /// The window's own edge as the theme draws it (shadow, border,
@@ -75,6 +78,8 @@ pub struct Button {
     pub height: u32,
     pub margin_left: u32,
     pub margin_right: u32,
+    pub margin_top: u32,
+    pub margin_bottom: u32,
     /// The pictures (PNG, drawn at twice the size): at rest, under the
     /// pointer, in a window without the focus.
     pub normal: PathBuf,
@@ -242,6 +247,13 @@ pub fn parse(text: &str) -> Option<Titlebar> {
                 bar.padding_right = right.parse().ok()?;
                 bar.spacing = spacing.parse().ok()?;
             }
+            ["header", left, right, spacing, top, bottom] => {
+                bar.padding_left = left.parse().ok()?;
+                bar.padding_right = right.parse().ok()?;
+                bar.spacing = spacing.parse().ok()?;
+                bar.padding_top = top.parse().ok()?;
+                bar.padding_bottom = bottom.parse().ok()?;
+            }
             ["edge", top, right, bottom, left, radius, slice, focused, unfocused] => {
                 bar.edge = Some(Edge {
                     thickness: [top.parse().ok()?, right.parse().ok()?, bottom.parse().ok()?, left.parse().ok()?],
@@ -257,6 +269,19 @@ pub fn parse(text: &str) -> Option<Titlebar> {
                 height: h.parse().ok()?,
                 margin_left: ml.parse().ok()?,
                 margin_right: mr.parse().ok()?,
+                normal: PathBuf::from(normal),
+                hover: PathBuf::from(hover),
+                backdrop: PathBuf::from(backdrop),
+                ..Button::default()
+            }),
+            ["button", name, w, h, ml, mr, mt, mb, normal, hover, backdrop] => bar.buttons.push(Button {
+                name: name.to_string(),
+                width: w.parse().ok()?,
+                height: h.parse().ok()?,
+                margin_left: ml.parse().ok()?,
+                margin_right: mr.parse().ok()?,
+                margin_top: mt.parse().ok()?,
+                margin_bottom: mb.parse().ok()?,
                 normal: PathBuf::from(normal),
                 hover: PathBuf::from(hover),
                 backdrop: PathBuf::from(backdrop),
@@ -844,7 +869,15 @@ mod gtk {
         // the title bar's nodes, as nav_button_provider_gtk.cc builds them
         let header = gtk.append(Some(&gtk.append(None, "window.background.csd")), header_sel);
         let padding = gtk.padding(header.leaf());
-        let _ = writeln!(out, "header\t{}\t{}\t{}", padding.left.max(0), padding.right.max(0), HEADER_SPACING);
+        let _ = writeln!(
+            out,
+            "header\t{}\t{}\t{}\t{}\t{}",
+            padding.left.max(0),
+            padding.right.max(0),
+            HEADER_SPACING,
+            padding.top.max(0),
+            padding.bottom.max(0)
+        );
         let controls = gtk.append(Some(&header), "windowcontrols");
         for (name, class, icon) in [
             ("close", "close", "window-close-symbolic"),
@@ -875,9 +908,11 @@ mod gtk {
             }
             let _ = writeln!(
                 out,
-                "button\t{name}\t{w}\t{h}\t{}\t{}\t{}\t{}\t{}",
+                "button\t{name}\t{w}\t{h}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 margin.left.max(0),
                 margin.right.max(0),
+                margin.top.max(0),
+                margin.bottom.max(0),
                 files[0].display(),
                 files[1].display(),
                 files[2].display()
@@ -1098,6 +1133,13 @@ mod tests {
         assert_eq!(bar.title_inactive, (0x90, 0x90, 0x90));
         assert_eq!((bar.padding_left, bar.spacing), (6, 6));
         assert_eq!(bar.buttons[0].name, "close");
+        assert_eq!((bar.padding_top, bar.buttons[0].margin_top), (0, 0), "an older answer: nothing vertical");
+        let vertical = text
+            .replace("header\t6\t6\t6\n", "header\t6\t6\t6\t3\t4\n")
+            .replace("\t24\t24\t0\t0\t", "\t24\t24\t0\t0\t1\t2\t");
+        let bar = parse(&vertical).unwrap();
+        assert_eq!((bar.padding_top, bar.padding_bottom), (3, 4));
+        assert_eq!((bar.buttons[0].margin_top, bar.buttons[0].margin_bottom), (1, 2));
         assert_eq!(bar.buttons[0].hover, PathBuf::from("/t/close hover.png"), "spaces kept");
         assert_eq!(bar.edge, None, "a theme that draws no edge");
         let with_edge = format!("{text}edge\t2\t30\t40\t30\t8\t64\t/t/edge-focused.png\t/t/edge-unfocused.png\n");
