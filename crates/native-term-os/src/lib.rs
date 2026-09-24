@@ -30,6 +30,7 @@ pub mod service;
 pub mod shell;
 pub mod ssh;
 pub mod time;
+pub mod titlebar;
 pub mod watch;
 
 #[cfg(windows)]

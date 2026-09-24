@@ -4663,7 +4663,17 @@ own symbols (`native_term_os::icons`: the theme named in XSETTINGS, else
 drawn flat by the fork (`integrated_title_button_layout`, `_icons`,
 style `Flat`) — one logic, no desktop singled out; any other WezTerm
 refuses those settings under `pcall` and gets the buttons on the close
-button's side. The families
+button's side. Where Chrome would take its looks from GTK, the title bar
+is GTK's own, taken as Chromium's `ui/gtk` takes it
+(`native_term_os::titlebar`): a child process (`nativeterm
+--desktop-titlebar`) loads `libgtk-3.so.0` at run time, builds the style
+contexts of a GTK header bar and has GTK render each window button (at
+rest, hovered, unfocused) and answer the header bar's, window's and
+title's colours; the pictures go to `integrated_title_button_images`,
+the colours to the tab strip (header bar behind the tabs, the window's
+colour for the active one). The terminal area keeps NativeTerm's own
+colours — the frame is the desktop's, the content NativeTerm's, as
+Chrome keeps pages its own. The families
 are `native_term_os::fonts::terminal_families`, only ones the system
 has: Cascadia Mono and Microsoft YaHei on Windows, Menlo and PingFang SC
 on macOS, and on Linux Cascadia Mono where installed, the desktop's

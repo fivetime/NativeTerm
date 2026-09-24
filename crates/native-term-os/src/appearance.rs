@@ -42,6 +42,10 @@ pub struct Appearance {
     /// The icon theme the desktop uses (`elementary`, `breeze-dark`,
     /// `bloom`, …; see `icons`), Linux only.
     pub icon_theme: Option<String>,
+    /// The GTK theme the desktop uses (`io.elementary.stylesheet.blueberry`,
+    /// `Adwaita`, …), Linux only; with `icon_theme` it tells when the
+    /// title bar GTK draws has changed (see `titlebar`).
+    pub gtk_theme: Option<String>,
     /// Where `dark` came from (`portal`, `gtk`, `kdeglobals`,
     /// `gsettings`, `registry`, `defaults`), or empty.
     pub source: &'static str,
@@ -219,6 +223,11 @@ mod parse {
         ini_value(kdeglobals, "Icons", "Theme").map(str::to_string)
     }
 
+    /// GTK's `settings.ini`: `gtk-theme-name`.
+    pub(super) fn gtk_theme(settings: &str) -> Option<String> {
+        ini_value(settings, "Settings", "gtk-theme-name").map(|v| v.trim_matches('"').to_string())
+    }
+
     /// GTK's `settings.ini`: `gtk-icon-theme-name`.
     pub(super) fn gtk_icon_theme(settings: &str) -> Option<String> {
         ini_value(settings, "Settings", "gtk-icon-theme-name").map(|v| v.trim_matches('"').to_string())
@@ -256,6 +265,7 @@ mod imp {
             monospace: None,
             button_layout: None,
             icon_theme: None,
+            gtk_theme: None,
             source: if light.is_some() { "registry" } else { "" },
         }
     }
@@ -368,6 +378,7 @@ mod imp {
             monospace: monospace(),
             button_layout: None,
             icon_theme: None,
+            gtk_theme: None,
             source: "defaults",
         }
     }
@@ -420,7 +431,9 @@ mod imp {
         let gtk = || config_file("gtk-3.0/settings.ini").or_else(|| config_file("gtk-4.0/settings.ini"));
         // (Lingmo calls itself KDE but keeps its theme in settings.ini;
         // gsettings answers a bare `Adwaita` where nothing ever set it)
-        let icon_theme = crate::icons::xsettings_icon_theme()
+        let [x_icons, x_gtk]: [Option<String>; 2] =
+            crate::icons::xsettings(&["Net/IconThemeName", "Net/ThemeName"]).try_into().unwrap_or_default();
+        let icon_theme = x_icons
             .or_else(|| super::parse::kde_icon_theme(&config_file("kdeglobals").unwrap_or_default()))
             .or_else(|| gtk().as_deref().and_then(super::parse::gtk_icon_theme))
             .or_else(|| {
@@ -429,7 +442,14 @@ mod imp {
                     .filter(|t| !t.is_empty())
             })
             .or_else(|| kde.then(|| "breeze".to_string()));
-        Appearance { dark, accent, monospace: monospace(), button_layout, icon_theme, source }
+        let gtk_theme = x_gtk
+            .or_else(|| {
+                output("gsettings", &["get", "org.gnome.desktop.interface", "gtk-theme"])
+                    .map(|t| t.trim().trim_matches('\'').to_string())
+                    .filter(|t| !t.is_empty())
+            })
+            .or_else(|| gtk().as_deref().and_then(super::parse::gtk_theme));
+        Appearance { dark, accent, monospace: monospace(), button_layout, icon_theme, gtk_theme, source }
     }
 }
 
@@ -507,6 +527,7 @@ mod tests {
         assert_eq!(gtk_icon_theme("[Settings]\ngtk-icon-theme-name=Crule\n").as_deref(), Some("Crule"));
         assert_eq!(gtk_icon_theme("[Settings]\ngtk-icon-theme-name=\"Papirus\"\n").as_deref(), Some("Papirus"));
         assert_eq!(gtk_icon_theme("[Settings]\n"), None);
+        assert_eq!(gtk_theme("[Settings]\ngtk-theme-name=Adwaita-dark\n").as_deref(), Some("Adwaita-dark"));
     }
 
     #[test]

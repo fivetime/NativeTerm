@@ -370,6 +370,23 @@ fn install_for_wezterm(settings: &settings::Settings, notices: &mut Vec<String>)
 }
 
 fn main() {
+    // the child that renders the GTK theme's title bar (see
+    // native_term_os::titlebar): its answer on stdout, and done
+    let args: Vec<String> = std::env::args().collect();
+    if let [_, flag, dir, scheme] = args.as_slice() {
+        if flag == "--desktop-titlebar" {
+            std::process::exit(match native_term_os::titlebar::export(std::path::Path::new(dir), scheme == "dark") {
+                Ok(answer) => {
+                    print!("{answer}");
+                    0
+                }
+                Err(err) => {
+                    eprintln!("{err}");
+                    1
+                }
+            });
+        }
+    }
     // Pantheon's Wayland (gala, elementary OS 8) shows no window of ours
     // and ends WezTerm's 2024 release at once; both work through
     // Xwayland, which is what removing the Wayland display picks

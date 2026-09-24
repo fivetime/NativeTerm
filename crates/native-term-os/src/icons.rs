@@ -119,10 +119,20 @@ fn lookup(name: &str, chain: &[(String, parse::Index)], bases: &[PathBuf]) -> Op
     None
 }
 
-/// `Net/IconThemeName` from XSETTINGS: the manager's selection owner
-/// holds it in `_XSETTINGS_SETTINGS`.
+/// String settings from XSETTINGS (`Net/IconThemeName`,
+/// `Net/ThemeName`, …), each `None` when unset or empty: the manager's
+/// selection owner holds them in `_XSETTINGS_SETTINGS`.
 #[cfg(all(unix, not(target_os = "macos")))]
-pub(crate) fn xsettings_icon_theme() -> Option<String> {
+pub(crate) fn xsettings(names: &[&str]) -> Vec<Option<String>> {
+    let data = xsettings_data();
+    names
+        .iter()
+        .map(|name| data.as_deref().and_then(|d| parse::xsettings_string(d, name)).filter(|v| !v.is_empty()))
+        .collect()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn xsettings_data() -> Option<Vec<u8>> {
     use x11rb::protocol::xproto::{AtomEnum, ConnectionExt};
     let (conn, screen) = x11rb::connect(None).ok()?;
     let atom = |name: &str| conn.intern_atom(false, name.as_bytes()).ok()?.reply().ok().map(|r| r.atom);
@@ -133,7 +143,7 @@ pub(crate) fn xsettings_icon_theme() -> Option<String> {
         return None;
     }
     let reply = conn.get_property(false, owner, settings, AtomEnum::ANY, 0, u32::MAX / 4).ok()?.reply().ok()?;
-    parse::xsettings_string(&reply.value, "Net/IconThemeName").filter(|t| !t.is_empty())
+    Some(reply.value)
 }
 
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]

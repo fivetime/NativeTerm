@@ -1795,8 +1795,31 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
             .into_iter()
             .map(|(name, path)| (name, path.to_string_lossy().into_owned()))
             .collect(),
+        titlebar: desktop_titlebar(&desktop, dark),
         button_layout: desktop.button_layout,
     }
+}
+
+/// The title bar the desktop's GTK theme draws, on a desktop where
+/// Chrome would take GTK's (native_term_os::titlebar), rendered once per
+/// theme into the cache folder.
+fn desktop_titlebar(
+    desktop: &native_term_os::appearance::Appearance,
+    dark: Option<bool>,
+) -> Option<native_term_os::titlebar::Titlebar> {
+    use native_term_os::titlebar;
+    if !cfg!(all(unix, not(target_os = "macos"))) {
+        return None;
+    }
+    let var = |name: &str| std::env::var(name).unwrap_or_default();
+    if titlebar::toolkit(&var("XDG_CURRENT_DESKTOP"), &var("DESKTOP_SESSION")) != titlebar::Toolkit::Gtk {
+        return None;
+    }
+    let cache = std::env::var_os("XDG_CACHE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?;
+    let key = format!("{:?}|{:?}", desktop.gtk_theme, desktop.icon_theme);
+    titlebar::read(&cache.join("nativeterm").join("titlebar"), &key, dark.unwrap_or(false))
 }
 
 /// The terminal's windows follow the theme and the switcher setting

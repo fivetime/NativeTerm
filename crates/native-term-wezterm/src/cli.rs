@@ -348,6 +348,9 @@ local config = wezterm.config_builder()
         }
     }
     lua.push_str(LOOK_LUA);
+    if let Some(bar) = look.titlebar.as_ref().filter(|_| !cfg!(target_os = "macos")) {
+        lua.push_str(&titlebar_colors(bar));
+    }
     if cfg!(windows) {
         lua.push_str("frame.font = wezterm.font({ family = \"Segoe UI\" })\nframe.font_size = 10.0\n");
     }
@@ -356,7 +359,7 @@ local config = wezterm.config_builder()
     // and Chrome have them
     lua.push_str("config.window_decorations = \"INTEGRATED_BUTTONS|RESIZE\"\n");
     if let Some(layout) = look.button_layout.as_deref().filter(|_| !cfg!(target_os = "macos")) {
-        lua.push_str(&title_buttons(layout, &look.button_icons));
+        lua.push_str(&title_buttons(layout, &look.button_icons, look.titlebar.as_ref()));
     }
     if !look.fonts.is_empty() {
         // the system's fonts (see native_term_os::fonts::terminal_families);
@@ -542,6 +545,48 @@ pub struct Look {
     /// `restore`: SVG files out of its icon theme; see
     /// `native_term_os::icons`).
     pub button_icons: Vec<(&'static str, String)>,
+    /// The title bar as the desktop's GTK theme draws it (its buttons,
+    /// its header bar's colours; see `native_term_os::titlebar`), where
+    /// the desktop is a GTK one.
+    pub titlebar: Option<native_term_os::titlebar::Titlebar>,
+}
+
+fn hex((r, g, b): native_term_os::titlebar::Rgb) -> String {
+    format!("#{r:02x}{g:02x}{b:02x}")
+}
+
+/// `a` moved `t` of the way to `b`.
+fn mix(a: native_term_os::titlebar::Rgb, b: native_term_os::titlebar::Rgb, t: f32) -> native_term_os::titlebar::Rgb {
+    let m = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    (m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
+}
+
+/// The tab strip in the GTK theme's own colours, as Chrome's frame: the
+/// header bar's background behind the tabs (focused and not), the
+/// window's background for the active tab (Chrome's toolbar), the
+/// title's colour on the rest. The terminal itself keeps NativeTerm's
+/// colours.
+fn titlebar_colors(bar: &native_term_os::titlebar::Titlebar) -> String {
+    let (frame, window, title) = (hex(bar.frame), hex(bar.window), hex(bar.title));
+    let hover = hex(mix(bar.frame, bar.title, 0.1));
+    format!(
+        "-- the tab strip in the desktop theme's own colours (its header bar), as Chrome has it\n\
+         frame.active_titlebar_bg = \"{frame}\"\n\
+         frame.inactive_titlebar_bg = \"{frame_inactive}\"\n\
+         frame.active_titlebar_fg = \"{title}\"\n\
+         frame.inactive_titlebar_fg = \"{title_inactive}\"\n\
+         config.colors.tab_bar = {{\n\
+         \x20 active_tab = {{ bg_color = \"{window}\", fg_color = \"{text}\" }},\n\
+         \x20 inactive_tab = {{ bg_color = \"{frame}\", fg_color = \"{title}\" }},\n\
+         \x20 inactive_tab_hover = {{ bg_color = \"{hover}\", fg_color = \"{title}\" }},\n\
+         \x20 new_tab = {{ bg_color = \"{frame}\", fg_color = \"{title}\" }},\n\
+         \x20 new_tab_hover = {{ bg_color = \"{hover}\", fg_color = \"{title}\" }},\n\
+         \x20 inactive_tab_edge = \"{frame}\",\n\
+         }}\n",
+        frame_inactive = hex(bar.frame_inactive),
+        title_inactive = hex(bar.title_inactive),
+        text = hex(bar.text),
+    )
 }
 
 /// The Lua giving the window buttons the desktop's layout and icons, as
@@ -552,7 +597,7 @@ pub struct Look {
 /// any other one refuses the settings it does not know (the config
 /// builder raises), and then only lines the buttons up on the close
 /// button's side.
-fn title_buttons(layout: &str, icons: &[(&str, String)]) -> String {
+fn title_buttons(layout: &str, icons: &[(&str, String)], bar: Option<&native_term_os::titlebar::Titlebar>) -> String {
     let close_left = layout.split_once(':').is_some_and(|(left, _)| left.split(',').any(|b| b == "close"));
     let mut lua = String::from("local desktop_buttons = pcall(function()\n");
     lua.push_str(&format!("  config.integrated_title_button_layout = \"{}\"\n", lua_escape(layout)));
@@ -562,11 +607,51 @@ fn title_buttons(layout: &str, icons: &[(&str, String)]) -> String {
             icons.iter().map(|(name, path)| format!("{name} = \"{}\"", lua_escape(path))).collect();
         lua.push_str(&format!("  config.integrated_title_button_icons = {{ {} }}\n", entries.join(", ")));
     }
+    if let Some(bar) = bar {
+        lua.push_str(&button_images(layout, bar));
+    }
     lua.push_str("end)\n");
     if close_left {
         lua.push_str("if not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n");
     }
     lua
+}
+
+/// The GTK theme's own buttons (see `native_term_os::titlebar`), placed
+/// as a GTK header bar places them (nav_button_provider_gtk.cc): each
+/// with its CSS margins, GTK's spacing between them and next to the tabs,
+/// the header bar's padding at the window's edges. `restore` stands where
+/// `maximize` does.
+fn button_images(layout: &str, bar: &native_term_os::titlebar::Titlebar) -> String {
+    let (left, right) = layout.split_once(':').unwrap_or((layout, ""));
+    fn side(names: &str) -> Vec<&str> {
+        names.split(',').map(str::trim).filter(|n| !n.is_empty()).collect()
+    }
+    let (left, right) = (side(left), side(right));
+    let mut entries = Vec::new();
+    for b in &bar.buttons {
+        let slot = if b.name == "restore" { "maximize" } else { b.name.as_str() };
+        let (ml, mr) = if let Some(i) = left.iter().position(|n| *n == slot) {
+            (b.margin_left + if i == 0 { bar.padding_left } else { 0 }, b.margin_right + bar.spacing)
+        } else if let Some(i) = right.iter().position(|n| *n == slot) {
+            (b.margin_left + bar.spacing, b.margin_right + if i + 1 == right.len() { bar.padding_right } else { 0 })
+        } else {
+            continue;
+        };
+        entries.push(format!(
+            "    {} = {{ normal = \"{}\", hover = \"{}\", backdrop = \"{}\", width = {}, height = {}, margin_left = {ml}, margin_right = {mr} }},\n",
+            b.name,
+            lua_escape(&b.normal.to_string_lossy()),
+            lua_escape(&b.hover.to_string_lossy()),
+            lua_escape(&b.backdrop.to_string_lossy()),
+            b.width,
+            b.height,
+        ));
+    }
+    if entries.is_empty() {
+        return String::new();
+    }
+    format!("  config.integrated_title_button_images = {{\n{}  }}\n", entries.concat())
 }
 
 /// `text` inside a Lua double-quoted string.
@@ -697,6 +782,7 @@ mod tests {
                     ("close", "/usr/share/icons/elementary/actions/symbolic/window-close-symbolic.svg".into()),
                     ("maximize", "/icons/\"odd\".svg".into()),
                 ],
+                titlebar: None,
             },
             shim,
         );
@@ -707,10 +793,11 @@ mod tests {
         let desktop = "local desktop_buttons = pcall(function()\n  config.integrated_title_button_layout = \"close:maximize\"\n  config.integrated_title_button_style = \"Flat\"\n  config.integrated_title_button_icons = { close = \"/usr/share/icons/elementary/actions/symbolic/window-close-symbolic.svg\", maximize = \"/icons/\\\"odd\\\".svg\" }\nend)\nif not desktop_buttons then\n  config.integrated_title_button_alignment = \"Left\"\nend\n";
         assert_eq!(read.contains(desktop), !cfg!(target_os = "macos"));
         assert!(!unknown.contains("integrated_title_button"), "no layout read: WezTerm's own buttons");
-        let right = title_buttons(":minimize,maximize,close", &[]);
+        let right = title_buttons(":minimize,maximize,close", &[], None);
         assert!(!right.contains("integrated_title_button_icons"), "no icons found: the drawn symbols");
         assert!(right.contains("config.integrated_title_button_layout = \":minimize,maximize,close\"\n"));
         assert!(!right.contains("alignment"), "WezTerm's own side already");
+        assert!(!right.contains("integrated_title_button_images"), "no GTK title bar: no pictures");
         // the menu on a right click on the tab where WezTerm tells of one
         assert!(read.contains("wezterm.on(\"tab-right-click\""));
         assert!(read.contains("config.font = wezterm.font_with_fallback({ \"Cascadia Mono\", \"Microsoft YaHei\" })\n"));
@@ -723,6 +810,84 @@ mod tests {
         // the frame is whole before it is given to the config
         let frame_done = unknown.find("config.window_frame = frame\n").unwrap();
         assert!(!unknown[frame_done..].contains("\nframe."));
+    }
+
+    #[test]
+    fn the_gtk_title_bar() {
+        use native_term_os::titlebar::{Button, Titlebar};
+        let button = |name: &str| Button {
+            name: name.into(),
+            width: 24,
+            height: 24,
+            margin_left: 1,
+            margin_right: 2,
+            normal: format!("/c/{name}-normal.png").into(),
+            hover: format!("/c/{name}-hover.png").into(),
+            backdrop: format!("/c/{name}-backdrop.png").into(),
+        };
+        let bar = Titlebar {
+            frame: (0x30, 0x30, 0x30),
+            frame_inactive: (0x28, 0x28, 0x28),
+            window: (0x24, 0x24, 0x24),
+            text: (0xff, 0xff, 0xff),
+            title: (0xee, 0xee, 0xee),
+            title_inactive: (0x90, 0x90, 0x90),
+            padding_left: 6,
+            padding_right: 7,
+            spacing: 6,
+            buttons: ["close", "minimize", "maximize", "restore"].map(button).to_vec(),
+        };
+        // elementary: close at the left end, maximize at the right end
+        let lua = button_images("close:maximize", &bar);
+        assert!(lua.contains("    close = { normal = \"/c/close-normal.png\", hover = \"/c/close-hover.png\", backdrop = \"/c/close-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 8 },
+"),
+            "the header bar's padding at the edge, GTK's spacing towards the tabs");
+        assert!(
+            lua.contains("maximize = { normal = \"/c/maximize-normal.png\"")
+                && lua.contains(
+                    "margin_left = 7, margin_right = 9 },
+    restore"
+                )
+        );
+        assert!(lua.contains("restore = { normal = \"/c/restore-normal.png\""), "restore where maximize stands");
+        assert!(!lua.contains("minimize ="), "a button the layout leaves out");
+        // GNOME: all three at the right, padding only at the window's edge
+        let lua = button_images(":minimize,maximize,close", &bar);
+        assert!(lua.contains("minimize = { normal = \"/c/minimize-normal.png\", hover = \"/c/minimize-hover.png\", backdrop = \"/c/minimize-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 2 }"));
+        assert!(lua.contains("close = { normal = \"/c/close-normal.png\", hover = \"/c/close-hover.png\", backdrop = \"/c/close-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 9 }"));
+        assert_eq!(button_images("close:maximize", &Titlebar { buttons: vec![], ..bar.clone() }), "");
+        // the tab strip in the header bar's colours, the active tab the window's
+        let colors = titlebar_colors(&bar);
+        assert!(colors.contains(
+            "frame.active_titlebar_bg = \"#303030\"
+"
+        ));
+        assert!(colors.contains(
+            "frame.inactive_titlebar_bg = \"#282828\"
+"
+        ));
+        assert!(colors.contains("active_tab = { bg_color = \"#242424\", fg_color = \"#ffffff\" },"));
+        assert!(colors.contains("inactive_tab = { bg_color = \"#303030\", fg_color = \"#eeeeee\" },"));
+        assert!(colors.contains("inactive_tab_hover = { bg_color = \"#434343\""), "a tenth of the way to the title");
+        let whole = default_config(
+            &Look { titlebar: Some(bar), button_layout: Some("close:maximize".into()), ..Look::default() },
+            Path::new("/opt/nt/nativeterm-shim"),
+        );
+        assert_eq!(
+            whole.contains(
+                "config.integrated_title_button_images = {
+"
+            ),
+            !cfg!(target_os = "macos")
+        );
+        let colours_at = whole.find("frame.active_titlebar_bg = \"#303030\"");
+        let frame_given = whole.find(
+            "config.window_frame = frame
+",
+        );
+        if !cfg!(target_os = "macos") {
+            assert!(colours_at.unwrap() < frame_given.unwrap(), "the frame is whole before it is given");
+        }
     }
 
     #[test]
