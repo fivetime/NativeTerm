@@ -1818,8 +1818,13 @@ fn desktop_titlebar(
     let var = |name: &str| std::env::var(name).unwrap_or_default();
     if titlebar::toolkit(&var("XDG_CURRENT_DESKTOP"), &var("DESKTOP_SESSION")) == titlebar::Toolkit::Qt {
         // Qt's: the palette's colours (read with the rest of the desktop's
-        // look, so a new colour scheme is noticed), the buttons the icon theme's
-        return desktop.palette.clone();
+        // look, so a new colour scheme is noticed), the buttons the icon
+        // theme's. Chrome asks Qt itself; NativeTerm reads KDE's
+        // `kdeglobals`, which a Qt desktop that is not KDE may not have
+        // (deepin): then GTK's, which such a desktop themes too
+        if let Some(palette) = desktop.palette.clone() {
+            return Some(palette);
+        }
     }
     let cache = std::env::var_os("XDG_CACHE_HOME")
         .map(std::path::PathBuf::from)

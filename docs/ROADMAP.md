@@ -1228,6 +1228,10 @@
       - an icon before each title, as Chrome's favicon (16 DIP, 8 after
         it): the icon theme's own `utilities-terminal`, in its colours,
         as Windows Terminal shows its profile's icon
+      - deepin (`DESKTOP_SESSION=deepin`, which Chrome's table sends to Qt)
+        had no strip colours at all: Chrome asks Qt for the palette,
+        NativeTerm reads `kdeglobals`, which deepin lacks; now GTK's
+        export (deepin's own Nirvana theme) stands in for it
 - [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid
