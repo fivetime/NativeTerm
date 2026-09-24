@@ -41,6 +41,28 @@ pub struct Titlebar {
     pub spacing: u32,
     /// The buttons: close, minimize, maximize, restore.
     pub buttons: Vec<Button>,
+    /// The window's own edge as the theme draws it (shadow, border,
+    /// rounded top corners), where it draws one.
+    pub edge: Option<Edge>,
+}
+
+/// The theme's window decoration (Chromium's WindowFrameProviderGtk): a
+/// square picture of a window's border and shadow, to be cut in nine —
+/// corners `slice` pixels square kept, edges stretched — and what was
+/// measured of it. Pixels at 96 dpi; the pictures drawn at twice that.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Edge {
+    /// How far the drawing reaches outside the window on each side (the
+    /// shadow and border): top, right, bottom, left.
+    pub thickness: [u32; 4],
+    /// The top corners' radius.
+    pub radius: u32,
+    /// The picture's corner size: it is `4 * slice` square, the window
+    /// in the middle `2 * slice` of it.
+    pub slice: u32,
+    /// Focused and not.
+    pub focused: PathBuf,
+    pub unfocused: PathBuf,
 }
 
 /// One title button as GTK drew it.
@@ -143,7 +165,8 @@ fn run_child(dir: &Path, dark: bool) -> Option<Titlebar> {
 }
 
 /// The child's answer, tab-separated lines: `color NAME #rrggbb`,
-/// `header PADDING_LEFT PADDING_RIGHT SPACING`, `button NAME W H
+/// `header PADDING_LEFT PADDING_RIGHT SPACING`, `edge TOP RIGHT BOTTOM
+/// LEFT RADIUS SLICE FOCUSED UNFOCUSED`, `button NAME W H
 /// MARGIN_LEFT MARGIN_RIGHT NORMAL HOVER BACKDROP`.
 pub fn parse(text: &str) -> Option<Titlebar> {
     let mut bar = Titlebar::default();
@@ -168,6 +191,15 @@ pub fn parse(text: &str) -> Option<Titlebar> {
                 bar.padding_left = left.parse().ok()?;
                 bar.padding_right = right.parse().ok()?;
                 bar.spacing = spacing.parse().ok()?;
+            }
+            ["edge", top, right, bottom, left, radius, slice, focused, unfocused] => {
+                bar.edge = Some(Edge {
+                    thickness: [top.parse().ok()?, right.parse().ok()?, bottom.parse().ok()?, left.parse().ok()?],
+                    radius: radius.parse().ok()?,
+                    slice: slice.parse().ok()?,
+                    focused: PathBuf::from(focused),
+                    unfocused: PathBuf::from(unfocused),
+                })
             }
             ["button", name, w, h, ml, mr, normal, hover, backdrop] => bar.buttons.push(Button {
                 name: name.to_string(),
@@ -553,6 +585,65 @@ mod gtk {
             }
         }
 
+        /// Paints `w` by `h` (at `scale`) into a transparent surface and
+        /// returns each pixel's alpha, row by row.
+        fn paint_alpha(&self, w: c_int, h: c_int, scale: c_int, paint: impl FnOnce(Ptr)) -> Result<Vec<u8>, String> {
+            self.paint_impl(w, h, scale, None, paint)
+        }
+
+        /// As `paint_alpha`, and writes the picture to `file` (PNG).
+        fn paint(
+            &self,
+            w: c_int,
+            h: c_int,
+            scale: c_int,
+            file: &Path,
+            paint: impl FnOnce(Ptr),
+        ) -> Result<Vec<u8>, String> {
+            self.paint_impl(w, h, scale, Some(file), paint)
+        }
+
+        fn paint_impl(
+            &self,
+            w: c_int,
+            h: c_int,
+            scale: c_int,
+            file: Option<&Path>,
+            paint: impl FnOnce(Ptr),
+        ) -> Result<Vec<u8>, String> {
+            let a = &self.api;
+            // SAFETY: a new cairo image surface, painted, read and freed here
+            unsafe {
+                let (pw, ph) = (scale * w, scale * h);
+                let surface = (a.cairo_image_surface_create)(FORMAT_ARGB32, pw, ph);
+                (a.cairo_surface_set_device_scale)(surface, f64::from(scale), f64::from(scale));
+                let cr = (a.cairo_create)(surface);
+                paint(cr);
+                (a.cairo_destroy)(cr);
+                (a.cairo_surface_flush)(surface);
+                let data = (a.cairo_image_surface_get_data)(surface);
+                let stride = (a.cairo_image_surface_get_stride)(surface) as usize;
+                let mut alpha = Vec::with_capacity((pw * ph) as usize);
+                for y in 0..ph as usize {
+                    let row = std::slice::from_raw_parts(data.add(y * stride), pw as usize * 4);
+                    // ARGB32 in native (little-endian) order: B G R A
+                    alpha.extend(row.as_chunks::<4>().0.iter().map(|px| px[3]));
+                }
+                let status = match file {
+                    Some(file) => (a.cairo_surface_write_to_png)(surface, cstr(&file.to_string_lossy()).as_ptr()),
+                    None => 0,
+                };
+                (a.cairo_surface_destroy)(surface);
+                if status != 0 {
+                    return Err(format!(
+                        "could not write {}",
+                        file.map(|f| f.display().to_string()).unwrap_or_default()
+                    ));
+                }
+                Ok(alpha)
+            }
+        }
+
         fn icon(&self, name: &str, context: Ptr, scale: c_int) -> Ptr {
             let a = &self.api;
             // SAFETY: the default icon theme, an icon looked up in it and
@@ -742,7 +833,105 @@ mod gtk {
                 files[2].display()
             );
         }
+        if let Some(line) = edge(&gtk, &out_dir)? {
+            out.push_str(&line);
+        }
         Ok(out)
+    }
+
+    /// Chromium's `kMaxFrameSizeDip`: the most a theme's decoration may
+    /// reach outside the window.
+    const MAX_FRAME: i32 = 64;
+    /// Chromium's `kMaxCornerRadiusDip`.
+    const MAX_RADIUS: i32 = 32;
+
+    /// `DecorationContext` (GTK 3): the window's `decoration` node, its
+    /// bottom corners square (the content covers them).
+    fn decoration(gtk: &Gtk, focused: bool) -> Context {
+        let window = gtk.append(None, if focused { "window.background.csd" } else { "window.background.csd:backdrop" });
+        let decoration = gtk.append(Some(&window), if focused { "decoration" } else { "decoration:backdrop" });
+        gtk.apply_css(&decoration, "* { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }");
+        decoration
+    }
+
+    /// `WindowFrameProviderGtk::GetOrCreateAsset` at scale 2, then
+    /// `GetFrameThicknessDip` and `ComputeTopCornerRadius`: the edge line,
+    /// or none where the theme draws nothing around a window.
+    fn edge(gtk: &Gtk, out_dir: &Path) -> Result<Option<String>, String> {
+        let side = 4 * MAX_FRAME;
+        let mut files = Vec::new();
+        let mut thickness = [0u32; 4];
+        for focused in [true, false] {
+            let context = decoration(gtk, focused);
+            let (p, b) = (gtk.padding(context.leaf()), gtk.border(context.leaf()));
+            // the window in the middle, grown by the decoration's own
+            // padding and border
+            let x = f64::from(MAX_FRAME) - f64::from(p.left + b.left);
+            let y = f64::from(MAX_FRAME) - f64::from(p.top + b.top);
+            let w = f64::from(2 * MAX_FRAME) + f64::from(p.left + p.right + b.left + b.right);
+            let h = f64::from(2 * MAX_FRAME) + f64::from(p.top + p.bottom + b.top + b.bottom);
+            let file = out_dir.join(if focused { "edge-focused.png" } else { "edge-unfocused.png" });
+            let alpha = gtk.paint(side, side, SCALE, &file, |cr| {
+                // SAFETY: a live context and cairo context
+                unsafe {
+                    (gtk.api.gtk_render_background)(context.leaf(), cr, x, y, w, h);
+                    (gtk.api.gtk_render_frame)(context.leaf(), cr, x, y, w, h);
+                }
+            })?;
+            if focused {
+                // how far the drawing reaches out from the window, along
+                // the middle of each side
+                let px = (SCALE * side) as usize;
+                let frame = (SCALE * MAX_FRAME) as usize;
+                let at = |x: usize, y: usize| alpha[y * px + x];
+                let inset = |pixel: &dyn Fn(usize) -> u8| {
+                    (0..frame).find(|&i| pixel(i) != 0).map_or(0, |i| (frame - i) as u32).div_ceil(SCALE as u32)
+                };
+                let mid = 2 * frame;
+                thickness = [
+                    inset(&|i| at(mid, i)),
+                    inset(&|i| at(px - 1 - i, mid)),
+                    inset(&|i| at(mid, px - 1 - i)),
+                    inset(&|i| at(i, mid)),
+                ];
+            }
+            files.push(file);
+        }
+        if thickness == [0; 4] {
+            return Ok(None);
+        }
+        Ok(Some(format!(
+            "edge\t{}\t{}\t{}\t{}\t{}\t{MAX_FRAME}\t{}\t{}\n",
+            thickness[0],
+            thickness[1],
+            thickness[2],
+            thickness[3],
+            top_corner_radius(gtk),
+            files[0].display(),
+            files[1].display()
+        )))
+    }
+
+    /// `ComputeTopCornerRadius` (GTK 3): the header bar painted black
+    /// with only its top-left corner rounded, and the first pixel along
+    /// its edges that is fully covered.
+    fn top_corner_radius(gtk: &Gtk) -> u32 {
+        let window = gtk.append(None, "window.background.csd:backdrop");
+        let header = gtk.append(Some(&window), "headerbar.header-bar.titlebar:backdrop");
+        gtk.apply_css(
+            &header,
+            "window, headerbar { background-image: none; background-color: black; box-shadow: none; border: none; \
+             border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-top-right-radius: 0; }",
+        );
+        let size = MAX_RADIUS;
+        let Ok(alpha) = gtk.paint_alpha(size, size, 1, |cr| {
+            // SAFETY: a live context and cairo context
+            unsafe { (gtk.api.gtk_render_background)(header.leaf(), cr, 0., 0., f64::from(size), f64::from(size)) };
+        }) else {
+            return 0;
+        };
+        let n = size as usize;
+        (0..n).find(|&i| alpha[i * n] == 255 && alpha[i] == 255).unwrap_or(n) as u32
     }
 
     /// `NavButtonImageSource::GetImageForScale` at scale 2: the button's
@@ -824,6 +1013,11 @@ mod tests {
         assert_eq!((bar.padding_left, bar.spacing), (6, 6));
         assert_eq!(bar.buttons[0].name, "close");
         assert_eq!(bar.buttons[0].hover, PathBuf::from("/t/close hover.png"), "spaces kept");
+        assert_eq!(bar.edge, None, "a theme that draws no edge");
+        let with_edge = format!("{text}edge\t2\t30\t40\t30\t8\t64\t/t/edge-focused.png\t/t/edge-unfocused.png\n");
+        let edge = parse(&with_edge).unwrap().edge.unwrap();
+        assert_eq!((edge.thickness, edge.radius, edge.slice), ([2, 30, 40, 30], 8, 64));
+        assert_eq!(edge.unfocused, PathBuf::from("/t/edge-unfocused.png"));
         assert_eq!(parse("header\t6\t6\t6\n"), None, "no colours, no title bar");
         assert_eq!(parse(&text.replace("#2e2e2e", "#2e2e")), None, "a bad colour");
     }

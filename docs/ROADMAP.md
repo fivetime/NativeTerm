@@ -1095,10 +1095,31 @@
       `#2e2e2e` focused and `#373737` not — Files and Chrome, unfocused
       beside it, measure `#373737`/`#383838`; the buttons are the
       theme's (bare symbols, elementary's own minimize)
-- [ ] Step 2: the window's rounded top corners, border and shadow from
-      the GTK theme (Chromium's `window_frame_provider_gtk.cc`: the
-      decoration rendered and nine-sliced, the corner radius measured
-      from a sample); needs a translucent (ARGB) WezTerm window
+- [x] Step 2 on X11 (2026-09-24): the window's rounded top corners,
+      border and shadow from the GTK theme, as Chromium's
+      `window_frame_provider_gtk.cc` and X11Window do it. The child
+      renders the theme's `window.csd > decoration` (bottom corners
+      square) around a window in a 256-dip square at scale 2, focused and
+      `:backdrop`, measures how far it reaches on each side and the header
+      bar's top-corner radius (from a black sample, as
+      `ComputeTopCornerRadius`). The fork (`967cfc464`,
+      `integrated_window_edge`) grows its X window by margins (the
+      reach, at least Chrome's 10-dip resize band), keeps the rendering
+      child inside them (wezterm-gui sees the content's size and
+      coordinates, nothing else changed), paints the margins cut in nine,
+      cuts the child's top corners with a bounding shape and paints them
+      round in the header's colour beneath, sets `_GTK_FRAME_EXTENTS`,
+      and shapes the input so the shadow lets clicks through but for the
+      band, where a press resizes by `_NET_WM_MOVERESIZE`. Only with a
+      compositing manager and a window manager that knows
+      `_GTK_FRAME_EXTENTS`; maximized or full screen, none of it. On
+      elementary: extents 35/35/27/43, radius 6, the shadow and round
+      corners over a light background, maximize dropping the edge and
+      restore bringing it back
+- [ ] Step 2 still to do: Wayland (GNOME and elementary Wayland windows:
+      `xdg_surface.set_window_geometry` for the margins, the input region
+      on the surface); tiled windows (Chrome takes `_GTK_EDGE_CONSTRAINTS`
+      for them: no shadow on a tiled side); the resize band tried by hand
 - [ ] Step 3: on Qt desktops (KDE, UKUI, LXQt, a desktop calling
       itself `Deepin`), the tab strip's colours from their palette as
       Chrome's Qt backend takes them; the buttons stay the icon theme's

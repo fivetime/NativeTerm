@@ -350,6 +350,9 @@ local config = wezterm.config_builder()
     lua.push_str(LOOK_LUA);
     if let Some(bar) = look.titlebar.as_ref().filter(|_| !cfg!(target_os = "macos")) {
         lua.push_str(&titlebar_colors(bar));
+        if let Some(edge) = &bar.edge {
+            lua.push_str(&window_edge(edge));
+        }
     }
     if cfg!(windows) {
         lua.push_str("frame.font = wezterm.font({ family = \"Segoe UI\" })\nframe.font_size = 10.0\n");
@@ -617,6 +620,25 @@ fn title_buttons(layout: &str, icons: &[(&str, String)], bar: Option<&native_ter
     lua
 }
 
+/// The window's edge as the GTK theme draws it (shadow, border, rounded
+/// top corners; see `native_term_os::titlebar::Edge`), which NativeTerm's
+/// WezTerm draws around the window itself; set apart, so a WezTerm that
+/// knows the buttons but not this keeps the buttons.
+fn window_edge(edge: &native_term_os::titlebar::Edge) -> String {
+    let [top, right, bottom, left] = edge.thickness;
+    format!(
+        "-- the window's own edge (shadow, border, round top corners) as the desktop theme draws it\n\
+         pcall(function()\n\
+         \x20 config.integrated_window_edge = {{ focused = \"{}\", unfocused = \"{}\", top = {top}, right = {right}, \
+         bottom = {bottom}, left = {left}, radius = {}, slice = {} }}\n\
+         end)\n",
+        lua_escape(&edge.focused.to_string_lossy()),
+        lua_escape(&edge.unfocused.to_string_lossy()),
+        edge.radius,
+        edge.slice,
+    )
+}
+
 /// The GTK theme's own buttons (see `native_term_os::titlebar`), placed
 /// as a GTK header bar places them (nav_button_provider_gtk.cc): each
 /// with its CSS margins, GTK's spacing between them and next to the tabs,
@@ -836,6 +858,7 @@ mod tests {
             padding_right: 7,
             spacing: 6,
             buttons: ["close", "minimize", "maximize", "restore"].map(button).to_vec(),
+            edge: None,
         };
         // elementary: close at the left end, maximize at the right end
         let lua = button_images("close:maximize", &bar);
@@ -856,6 +879,19 @@ mod tests {
         assert!(lua.contains("minimize = { normal = \"/c/minimize-normal.png\", hover = \"/c/minimize-hover.png\", backdrop = \"/c/minimize-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 2 }"));
         assert!(lua.contains("close = { normal = \"/c/close-normal.png\", hover = \"/c/close-hover.png\", backdrop = \"/c/close-backdrop.png\", width = 24, height = 24, margin_left = 7, margin_right = 9 }"));
         assert_eq!(button_images("close:maximize", &Titlebar { buttons: vec![], ..bar.clone() }), "");
+        let edge = native_term_os::titlebar::Edge {
+            thickness: [2, 30, 40, 30],
+            radius: 8,
+            slice: 64,
+            focused: "/c/edge-focused.png".into(),
+            unfocused: "/c/edge-unfocused.png".into(),
+        };
+        let lua = window_edge(&edge);
+        assert!(lua.starts_with("-- the window's own edge"));
+        assert!(lua.contains("pcall(function()
+  config.integrated_window_edge = { focused = \"/c/edge-focused.png\", unfocused = \"/c/edge-unfocused.png\", top = 2, right = 30, bottom = 40, left = 30, radius = 8, slice = 64 }
+end)
+"));
         // the tab strip in the header bar's colours, the active tab the window's
         let colors = titlebar_colors(&bar);
         assert!(colors.contains(
