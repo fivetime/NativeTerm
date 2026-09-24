@@ -1260,6 +1260,13 @@
         Lingmo: the effect's "Excluded Windows", or turning it off. Taken
         from Chrome besides: _NET_WM_OPAQUE_REGION, the Xfwm4 exclusion,
         16-DIP resize corners
+      - what the user then saw on Zorin (a plain strip, no shadow) was
+        not the fork at all: NativeTerm relaunched from the desktop, with
+        no `--terminal wezterm=<folder>`, took the `wezterm` on PATH, the
+        distribution's package, which knows none of the fork's settings
+        (every pcall fails quietly). Now the folder named last is
+        remembered (`wezterm.dir` in the settings), `~/.local/bin` is
+        looked at before PATH, and the log says which WezTerm was taken
 - [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid

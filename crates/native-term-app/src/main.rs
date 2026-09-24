@@ -104,6 +104,10 @@ fn options() -> Result<Options, String> {
     Ok(Options { terminal_dir, terminal, ssh_dir: ssh_dir.ok_or("the home folder is not known")?, data_dir, from_shim })
 }
 
+/// The folder `--terminal wezterm=<folder>` named last, for a start
+/// without arguments (a desktop launcher).
+const WEZTERM_DIR_SETTING: &str = "wezterm.dir";
+
 /// The Terminal to drive: the one `--terminal-dir` names, the one that was
 /// chosen in the settings, or the first one found. Several installs are
 /// each their own single-instance app, so NativeTerm has to pick one; when
@@ -234,18 +238,40 @@ fn setup() -> Result<Start, String> {
     // another terminal than the platform's own: asked for, or the default
     // where there is none of the platform's own to drive — WezTerm on
     // Linux and macOS alike (on `PATH`, or its macOS app)
+    let wezterm_at = |dir: Option<&std::path::Path>| native_term_wezterm::WezTerm::new(dir, &shim).available();
     let chosen = options.terminal.clone().or_else(|| {
         if cfg!(windows) {
             return None;
         }
-        if native_term_wezterm::WezTerm::new(None, &shim).available() {
-            return Some(Chosen::WezTerm(None));
+        // the folder a `--terminal wezterm=<folder>` start named last time,
+        // while it holds a WezTerm: a start from the desktop has no
+        // arguments, and must not fall back to another WezTerm
+        let remembered = settings
+            .get(WEZTERM_DIR_SETTING)
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+            .filter(|dir| wezterm_at(Some(dir)));
+        if let Some(dir) = remembered {
+            return Some(Chosen::WezTerm(Some(dir)));
         }
+        // one's own WezTerm before the distribution's on PATH
         native_term_wezterm::app_dirs()
             .into_iter()
-            .find(|dir| native_term_wezterm::WezTerm::new(Some(dir), &shim).available())
+            .find(|dir| wezterm_at(Some(dir)))
             .map(|dir| Chosen::WezTerm(Some(dir)))
+            .or_else(|| wezterm_at(None).then_some(Chosen::WezTerm(None)))
     });
+    if let Some(Chosen::WezTerm(Some(dir))) = &options.terminal {
+        if let Err(e) = settings.set(WEZTERM_DIR_SETTING, &dir.to_string_lossy()) {
+            diag::line(&format!("the WezTerm folder could not be remembered: {e}"));
+        }
+    }
+    if let Some(Chosen::WezTerm(dir)) = &chosen {
+        diag::line(&format!(
+            "WezTerm from {}",
+            dir.as_ref().map_or_else(|| "PATH".to_string(), |d| d.display().to_string())
+        ));
+    }
     if let Some(chosen) = chosen {
         let other_ssh_dir = Some(&options.ssh_dir) != default_ssh_dir().as_ref();
         let core = match chosen {
