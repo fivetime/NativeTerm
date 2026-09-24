@@ -1232,6 +1232,11 @@
         had no strip colours at all: Chrome asks Qt for the palette,
         NativeTerm reads `kdeglobals`, which deepin lacks; now GTK's
         export (deepin's own Nirvana theme) stands in for it
+      - then (fork `0750dddc0`): the hover is Chrome's highlight, a
+        detached rounded rectangle 28 DIP tall over the body
+        (PathType::kHighlight), not the tab's shape; the titles and
+        buttons centred in it; the first tab starts past the header
+        bar's padding and its own feet, clear of the window's corner
 - [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid
