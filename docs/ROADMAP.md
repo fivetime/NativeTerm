@@ -1217,8 +1217,12 @@
       Esc or any other key leaves the tabs as they are, a click picks a
       tile. Text instead of Windows' pictures: the screens are WezTerm's
       own to read. A WezTerm without the action gets its tab navigator
-      (`wezterm.has_action`). Seen on Lingmo (X11): Ctrl+Tab twice to
-      the third tab, Shift+Tab back, Escape, a click on the fourth
+      (`wezterm.has_action`). The window losing focus with the grid up
+      (the Ctrl release going elsewhere) leaves the tabs as they are.
+      Seen on Lingmo (X11): Ctrl+Tab twice to the third tab, Shift+Tab
+      back, Escape, a click on the fourth, focus taken away. Wayland
+      goes through the same xkb key path (modifier releases included)
+      but was not driven: no input injection there
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).
