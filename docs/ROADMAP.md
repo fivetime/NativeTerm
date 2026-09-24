@@ -1260,6 +1260,20 @@
         Lingmo: the effect's "Excluded Windows", or turning it off. Taken
         from Chrome besides: _NET_WM_OPAQUE_REGION, the Xfwm4 exclusion,
         16-DIP resize corners
+      - the parity is now held by tests, not screenshots (2026-09-25):
+        the fork's `chrome-strip` crate computes the strip in pixels from
+        the inputs alone and `cargo test -p chrome-strip` asserts
+        Chromium's numbers; the numbers themselves are in the fork's
+        `docs-internal/chrome-strip-spec.md` (every parameter of the
+        Linux strip, contents, colours, frame, caption buttons, hover card
+        and scaling, read out of Chromium's source by seven readers and
+        seven verifiers) and `chrome-strip-parity.md` lists what is
+        implemented and what is left out. Taken over then: Chrome's tab
+        width algorithm (256/56/32, overlap 18), the toolbar's top line
+        on the strip's last row, the close button's 16-DIP highlight and
+        show rules, separators 4 DIP inside the tabs, the 200 ms hover
+        animation, the unfocused window's hover colour, the hover card's
+        256 width and delay by tab width, X11 tiled windows
       - what the user then saw on Zorin (a plain strip, no shadow) was
         not the fork at all: NativeTerm relaunched from the desktop, with
         no `--terminal wezterm=<folder>`, took the `wezterm` on PATH, the
