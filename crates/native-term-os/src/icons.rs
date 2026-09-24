@@ -52,6 +52,41 @@ pub fn window_icons(_theme: Option<&str>) -> WindowIcons {
     WindowIcons::default()
 }
 
+/// The theme's terminal icon in its own colours, for the tabs as Chrome
+/// shows a page's favicon (Windows Terminal shows its profile's icon):
+/// `utilities-terminal`, the freedesktop name every icon theme draws.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub fn terminal_icon(theme: Option<&str>) -> Option<PathBuf> {
+    let bases = search_bases();
+    let chain = theme_chain(theme.unwrap_or("hicolor"), &bases);
+    ["utilities-terminal", "org.gnome.Terminal", "terminal"]
+        .iter()
+        .find_map(|name| lookup_coloured(name, &chain, &bases))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+pub fn terminal_icon(_theme: Option<&str>) -> Option<PathBuf> {
+    None
+}
+
+/// `name`'s full-colour icon (SVG, else PNG) through the chain, in each
+/// theme the directory nearest 16 pixels.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn lookup_coloured(name: &str, chain: &[(String, parse::Index)], bases: &[PathBuf]) -> Option<PathBuf> {
+    for (theme, index) in chain {
+        for dir in index.by_nearness(16) {
+            for file in [format!("{name}.svg"), format!("{name}.png")] {
+                if let Some(path) =
+                    bases.iter().map(|base| base.join(theme).join(&dir.path).join(&file)).find(|p| p.is_file())
+                {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Where icon themes live, in the specification's order: the user's
 /// `~/.local/share/icons` and `~/.icons`, then `$XDG_DATA_DIRS/icons`.
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -303,6 +338,7 @@ mod tests {
         for (name, path) in super::window_icons(theme.as_deref()).named() {
             println!("{name}: {}", path.display());
         }
+        println!("terminal: {:?}", super::terminal_icon(theme.as_deref()));
     }
 
     const ELEMENTARY: &str = "[Icon Theme]\nName=elementary\nInherits=hicolor\n\

@@ -31,6 +31,7 @@ pub mod shell;
 pub mod ssh;
 pub mod time;
 pub mod titlebar;
+pub mod tones;
 pub mod watch;
 
 #[cfg(windows)]

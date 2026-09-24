@@ -1208,6 +1208,26 @@
       Chrome's table does not know — so it gets step 1 and 2: the Lingmo
       GTK theme's buttons at the right, its edge with 14-px round top
       corners (extents 34/40/48/40), the strip `#fafafa`
+- [x] The strip after a round of trying it on Zorin (2026-09-24; four
+      things asked for), each taken from Chrome's code (fork `0d115cd16`):
+      - the window buttons on the tabs' line: Chrome centres its GTK
+        buttons in the strip (NavButtonProviderGtk::RedrawImages), not
+        at its top as the header bar's margins alone put them
+      - a tab under the pointer that can be seen: over a desktop theme
+        Chrome fills it with kColorSysStateHeaderHover, tone 80 of the
+        Material palette its desktop's accent seeds (primary, chroma 40)
+        in light and tone 30 (secondary, chroma 16) in dark, Chrome's
+        fixed baseline without an accent (light blue #A8C7FA, #004A77);
+        `native_term_os::tones` takes those tones in CIELAB (HCT's tone
+        is L*), the text on it tone 20 / 90. Lingmo's accent: #abc7fe
+      - the hover card and the Ctrl+Tab grid apart from the terminal:
+        Chrome's bubbles are the toolkit's window colour
+        (kColorBubbleBackground = GTK's window background) and stand out
+        by their shadow; NativeTerm passes the window's colours, the fork
+        draws the shadow
+      - an icon before each title, as Chrome's favicon (16 DIP, 8 after
+        it): the icon theme's own `utilities-terminal`, in its colours,
+        as Windows Terminal shows its profile's icon
 - [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid

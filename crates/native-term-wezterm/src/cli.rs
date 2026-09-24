@@ -349,7 +349,7 @@ local config = wezterm.config_builder()
     }
     lua.push_str(LOOK_LUA);
     if let Some(bar) = look.titlebar.as_ref().filter(|_| !cfg!(target_os = "macos")) {
-        lua.push_str(&titlebar_colors(bar));
+        lua.push_str(&titlebar_colors(bar, look.accent));
         if let Some(edge) = &bar.edge {
             lua.push_str(&window_edge(edge));
         }
@@ -371,6 +371,10 @@ local config = wezterm.config_builder()
     // Chrome's tab strip where the WezTerm draws one (NativeTerm's: its
     // height, tab shape, separators and colour rules)
     lua.push_str("pcall(function()\n  config.tab_strip_style = \"Chrome\"\nend)\n");
+    if let Some(icon) = &look.tab_icon {
+        // the desktop's terminal icon before each title, as Chrome's favicon
+        lua.push_str(&format!("pcall(function()\n  config.tab_icon = \"{}\"\nend)\n", lua_escape(icon)));
+    }
     if let Some(layout) = look.button_layout.as_deref().filter(|_| !cfg!(target_os = "macos")) {
         lua.push_str(&title_buttons(layout, &look.button_icons, look.titlebar.as_ref()));
     }
@@ -591,16 +595,16 @@ pub struct Look {
     /// The desktop's interface font and its size in points, for the tab
     /// titles, as Chrome sets its tabs in it (Linux).
     pub ui_font: Option<native_term_os::appearance::UiFont>,
+    /// The desktop's accent colour, which Chrome seeds its tab hover
+    /// colour with.
+    pub accent: Option<native_term_os::titlebar::Rgb>,
+    /// The icon before every tab's title (the desktop's terminal icon),
+    /// as Chrome's favicon.
+    pub tab_icon: Option<String>,
 }
 
 fn hex((r, g, b): native_term_os::titlebar::Rgb) -> String {
     format!("#{r:02x}{g:02x}{b:02x}")
-}
-
-/// `a` moved `t` of the way to `b`.
-fn mix(a: native_term_os::titlebar::Rgb, b: native_term_os::titlebar::Rgb, t: f32) -> native_term_os::titlebar::Rgb {
-    let m = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
-    (m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
 }
 
 /// The tab strip in the desktop theme's own colours, as Chrome's frame:
@@ -609,27 +613,34 @@ fn mix(a: native_term_os::titlebar::Rgb, b: native_term_os::titlebar::Rgb, t: f3
 /// Chrome's is its toolbar: the terminal's own background, so it joins
 /// the terminal, with the theme's text on it (Chrome's toolbar text); where
 /// it would not stand out from the strip, Chrome's style strokes it. The terminal keeps NativeTerm's colours.
-fn titlebar_colors(bar: &native_term_os::titlebar::Titlebar) -> String {
+fn titlebar_colors(bar: &native_term_os::titlebar::Titlebar, accent: Option<native_term_os::titlebar::Rgb>) -> String {
     let (frame, title) = (hex(bar.frame), hex(bar.title));
-    let hover = hex(mix(bar.frame, bar.title, 0.1));
+    // a tab under the pointer as Chrome's over a desktop theme: a tone of
+    // the accent's palette, light in light, dark in dark
+    let (hover, hover_text) = native_term_os::tones::header_hover(accent, native_term_os::tones::is_dark(bar.frame));
+    let (hover, hover_text) = (hex(hover), hex(hover_text));
     format!(
         "-- the tab strip in the desktop theme's own colours (its header bar), as Chrome has it\n\
          frame.active_titlebar_bg = \"{frame}\"\n\
          frame.inactive_titlebar_bg = \"{frame_inactive}\"\n\
          frame.active_titlebar_fg = \"{title}\"\n\
          frame.inactive_titlebar_fg = \"{title_inactive}\"\n\
-         local scheme = config.color_schemes[config.color_scheme]\n\
+         -- the hover card, the tab grid and the palette as Chrome's bubbles, in the window's colours\n\
+         config.command_palette_bg_color = \"{window}\"\n\
+         config.command_palette_fg_color = \"{text}\"\n\
+         local scheme =config.color_schemes[config.color_scheme]\n\
          config.colors.tab_bar = {{\n\
          \x20 active_tab = {{ bg_color = scheme.background, fg_color = \"{text}\" }},\n\
          \x20 inactive_tab = {{ bg_color = \"{frame}\", fg_color = \"{title}\" }},\n\
-         \x20 inactive_tab_hover = {{ bg_color = \"{hover}\", fg_color = \"{title}\" }},\n\
+         \x20 inactive_tab_hover = {{ bg_color = \"{hover}\", fg_color = \"{hover_text}\" }},\n\
          \x20 new_tab = {{ bg_color = \"{frame}\", fg_color = \"{title}\" }},\n\
-         \x20 new_tab_hover = {{ bg_color = \"{hover}\", fg_color = \"{title}\" }},\n\
+         \x20 new_tab_hover = {{ bg_color = \"{hover}\", fg_color = \"{hover_text}\" }},\n\
          \x20 inactive_tab_edge = \"{frame}\",\n\
          }}\n",
         frame_inactive = hex(bar.frame_inactive),
         title_inactive = hex(bar.title_inactive),
         text = hex(bar.text),
+        window = hex(bar.window),
     )
 }
 
@@ -848,6 +859,8 @@ mod tests {
                 ],
                 titlebar: None,
                 ui_font: Some(native_term_os::appearance::UiFont { family: "Cantarell".into(), tenths: 110 }),
+                accent: None,
+                tab_icon: Some("/usr/share/icons/Adwaita/16x16/apps/utilities-terminal.png".into()),
             },
             shim,
         );
@@ -872,6 +885,8 @@ mod tests {
         assert!(right.contains("config.integrated_title_button_layout = \":minimize,maximize,close\"\n"));
         assert!(!right.contains("alignment"), "WezTerm's own side already");
         assert!(!right.contains("integrated_title_button_images"), "no GTK title bar: no pictures");
+        assert!(read.contains("config.tab_icon = \"/usr/share/icons/Adwaita/16x16/apps/utilities-terminal.png\""));
+        assert!(!unknown.contains("tab_icon"), "no icon found: none drawn");
         // the menu on a right click on the tab where WezTerm tells of one
         assert!(read.contains("wezterm.on(\"tab-right-click\""));
         // the hover card says what NativeTerm knows of the tab's session
@@ -949,7 +964,7 @@ mod tests {
 end)
 "));
         // the tab strip in the header bar's colours, the active tab the window's
-        let colors = titlebar_colors(&bar);
+        let colors = titlebar_colors(&bar, None);
         assert!(colors.contains(
             "frame.active_titlebar_bg = \"#303030\"
 "
@@ -963,7 +978,13 @@ end)
             "the active tab is the terminal beneath it, with the theme's text"
         );
         assert!(colors.contains("inactive_tab = { bg_color = \"#303030\", fg_color = \"#eeeeee\" },"));
-        assert!(colors.contains("inactive_tab_hover = { bg_color = \"#434343\""), "a tenth of the way to the title");
+        assert!(
+            colors.contains("inactive_tab_hover = { bg_color = \"#004a77\", fg_color = \"#c2e7ff\" },"),
+            "no accent, a dark strip: Chrome's baseline secondary 30 with its 90"
+        );
+        let blue = titlebar_colors(&bar, Some((0x35, 0x84, 0xe4)));
+        assert!(!blue.contains("#004a77"), "an accent seeds the hover colour instead");
+        assert!(colors.contains("config.command_palette_bg_color = \""), "bubbles in the window's colours");
         assert!(
             colors.find("local scheme = config.color_schemes[config.color_scheme]\n") < colors.find("active_tab"),
             "the scheme read before its colours are used"

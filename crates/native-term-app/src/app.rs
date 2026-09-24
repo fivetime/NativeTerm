@@ -1797,6 +1797,9 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
             .collect(),
         titlebar: desktop_titlebar(&desktop, dark),
         ui_font: desktop.ui_font.clone(),
+        accent: desktop.accent,
+        tab_icon: native_term_os::icons::terminal_icon(desktop.icon_theme.as_deref())
+            .map(|p| p.to_string_lossy().into_owned()),
         button_layout: desktop.button_layout,
     }
 }
