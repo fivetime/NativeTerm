@@ -4725,8 +4725,11 @@ tab, the ones that apply, so the two menus never drift; a tab that is
 not NativeTerm's gets no menu (the shim prints nothing), and a right
 click while a program on the other side takes the mouse goes to that
 program, as WezTerm always does. Ctrl+Tab is left to WezTerm unless the
-switcher setting is on, when it shows WezTerm's tab navigator (per
-window, unlike the grid on Windows). The grid itself is not there.
+switcher setting is on, when it shows the fork's `ShowTabSwitcher`
+grid (per window, unlike the grid on Windows): tiles of the window's
+tabs with the last lines of their screens, Ctrl released switching; a
+WezTerm without that action (`wezterm.has_action`) gets its tab
+navigator instead.
 
 The hover card is the fork's (`show_tab_hover_cards`): the pointer
 resting on a tab brings up a card with a title, a note and the last

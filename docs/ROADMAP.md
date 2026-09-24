@@ -1209,9 +1209,16 @@
       GTK theme's buttons at the right, its edge with 14-px round top
       corners (extents 34/40/48/40), the strip `#fafafa`
 - [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
-- [ ] The Ctrl+Tab grid on WezTerm: tiles of the window's tabs with their
-      screens' text, cycled while Ctrl is held (today WezTerm's tab
-      navigator)
+- [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
+      the switcher setting on, Ctrl+Tab brings up the fork's grid
+      (`6720542a6`, `ShowTabSwitcher`) of the window's tabs, each tile
+      with the tab's title and the last lines of its screen; further
+      Tab / Shift+Tab / arrows move the choice, Ctrl released switches,
+      Esc or any other key leaves the tabs as they are, a click picks a
+      tile. Text instead of Windows' pictures: the screens are WezTerm's
+      own to read. A WezTerm without the action gets its tab navigator
+      (`wezterm.has_action`). Seen on Lingmo (X11): Ctrl+Tab twice to
+      the third tab, Shift+Tab back, Escape, a click on the fourth
 - [x] Docking on macOS (2026-09-24): `native_term_os::dock` answers
       through AppKit (objc2-app-kit), the window handle being winit's
       `NSView`; the rest is the X11 path (hidden outright, a strip left).

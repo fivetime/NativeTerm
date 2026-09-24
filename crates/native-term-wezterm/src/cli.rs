@@ -554,8 +554,15 @@ end
 /// Ctrl+Tab shows WezTerm's tab navigator (its list of tabs), as
 /// NativeTerm's grid does on Windows; only when the person turned the
 /// switcher on, since it takes WezTerm's own next-tab key.
-const SWITCHER_LUA: &str = r#"-- Ctrl+Tab: the tab navigator (NativeTerm's "tab switcher" setting)
-table.insert(config.keys, { key = "Tab", mods = "CTRL", action = wezterm.action.ShowTabNavigator })
+const SWITCHER_LUA: &str = r#"-- Ctrl+Tab: the grid of the window's tabs, released Ctrl switching
+-- (NativeTerm's "tab switcher" setting); WezTerm's tab navigator where
+-- the grid is not there
+if wezterm.has_action("ShowTabSwitcher") then
+  table.insert(config.keys, { key = "Tab", mods = "CTRL", action = wezterm.action.ShowTabSwitcher(1) })
+  table.insert(config.keys, { key = "Tab", mods = "CTRL|SHIFT", action = wezterm.action.ShowTabSwitcher(-1) })
+else
+  table.insert(config.keys, { key = "Tab", mods = "CTRL", action = wezterm.action.ShowTabNavigator })
+end
 "#;
 
 /// How the windows NativeTerm opens should look: what it read from the
@@ -818,6 +825,7 @@ mod tests {
         assert!(unknown.trim_end().ends_with("return config"));
         let with_switcher = default_config(&Look { switcher: true, ..Look::default() }, shim);
         assert!(with_switcher.contains("ShowTabNavigator"));
+        assert!(with_switcher.contains("wezterm.action.ShowTabSwitcher(1)"), "the grid where the fork has it");
         let windows = default_config(&Look::default(), Path::new(r"C:\NT\nativeterm-shim.exe"));
         assert!(windows.contains(r#"local shim = "C:\\NT\\nativeterm-shim.exe""#), "backslashes escaped for Lua");
         assert!(unknown.contains("wezterm.config_builder()"));
