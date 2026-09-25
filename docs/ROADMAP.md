@@ -1210,6 +1210,17 @@
       true }` on every Qt desktop (`Titlebar::chrome_frame`), whatever
       colours it found — the GTK theme's decoration is never Chrome's
       there
+- [x] Three things seen beside Chrome on deepin (2026-09-25): a black
+      line across the strip's top — the solid frame's interior line was
+      blended the wrong way round (the frame at 0x26 over black instead
+      of black at 0x26 over the frame); the new-tab button lower than
+      Chrome's — Chrome's sits 6 DIP down (border insets 6 above, 7
+      below, centring 28 in the 40 above the toolbar's line), the fork's
+      was centred once more in the strip with that margin on; and no
+      room to drag the window by when the strip is full — Chrome's
+      `FrameGrabHandle` keeps 42 DIP free after the new-tab button
+      before the caption buttons, the tabs shrinking first
+      (`chrome_strip::GRAB_HANDLE`, under test)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
