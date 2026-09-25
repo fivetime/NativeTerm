@@ -1330,6 +1330,19 @@
       icon of its own (`native-term-wezterm/assets/tab-icon.svg`,
       written beside the configuration) and uses it wherever the desktop
       gave none; a Linux theme's own icon still wins
+- [x] Tab titles black on the dark tabs on Windows (2026-09-25;
+      measured: the active tab's title pixels were (0, 0, 0) on #0C0C0C
+      although the configuration says #FFFFFF). The fancy bar's title
+      cells carry no colour of their own and inherit the tab element's;
+      the Chrome strip wraps the title in a grouping element, which
+      passed on its own uninherited colours, so the text resolved to
+      nothing and drew black. The fork now inherits through grouping
+      elements, and applies Chrome's contrast rule to every title
+      (`tab_strip_color_mixer.cc`: `BlendForMinContrast` towards black or
+      white to 10.46 active / 7.98 inactive, 5.0 / 4.5 unfocused, the
+      unfocused colours first blended 75 % towards the tab;
+      `chrome_strip::title_colour`, tested), so a theme's text is never
+      lost on its own tab. After: white on the dark tab
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
