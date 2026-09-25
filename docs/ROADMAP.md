@@ -1343,6 +1343,16 @@
       unfocused colours first blended 75 % towards the tab;
       `chrome_strip::title_colour`, tested), so a theme's text is never
       lost on its own tab. After: white on the dark tab
+- [x] A square bite out of the buttons by the window's round corners
+      (2026-09-26, Lingmo): the tab search button's and the close
+      button's hover discs lost their corner-side quarter. The fork
+      cleared the content's whole r x r corner squares (an erasing
+      layer) so the frame's round corner beneath could show; Chrome
+      clips its painting to the rounded window shape instead. Now a
+      mask layer (`MASK_ZINDEX`, destination times source alpha, both
+      renderers) multiplies the corner squares by the arc's 4 x 4
+      sampled coverage: outside the arc cleared, inside left as drawn.
+      Measured on Lingmo: both discs whole against the round corners
 - [x] NativeTerm out of sight beside a full-screen WezTerm on macOS
       (2026-09-26): the green button took the window into native full
       screen, a Space of its own, and the docked NativeTerm window, its
