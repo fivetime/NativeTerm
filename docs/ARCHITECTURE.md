@@ -4750,7 +4750,12 @@ The edge (shadow, border, round top corners) is the client's own
 drawing, as Chrome's: on X11 painted into the margins of the toplevel
 around the content, on Wayland a subsurface beneath it, with
 `_GTK_FRAME_EXTENTS` telling the window manager where the window really
-is. The compositor can still discard it: Lingmo's KWin runs
+is. On a GTK desktop it is the theme's decoration, rendered by GTK; on
+a Qt desktop it is Chrome's own frame (Chrome's Qt backend provides
+none): a Material shadow where the window manager takes
+`_GTK_FRAME_EXTENTS`, else a solid 4-DIP border, round corners either
+way with a compositor (deepin's KWin: the solid one). The compositor
+can still discard it: Lingmo's KWin runs
 `kwin4_effect_shapecorners`, which redraws every window's edge itself and
 replaces whatever the client painted outside its frame geometry, so no
 client-side shadow shows there (Chrome's included). NativeTerm does

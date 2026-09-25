@@ -1830,7 +1830,14 @@ fn desktop_titlebar(
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".cache")))?;
     let key = format!("{:?}|{:?}", desktop.gtk_theme, desktop.icon_theme);
-    titlebar::read(&cache.join("nativeterm").join("titlebar"), &key, dark.unwrap_or(false))
+    let mut bar = titlebar::read(&cache.join("nativeterm").join("titlebar"), &key, dark.unwrap_or(false))?;
+    if titlebar::toolkit(&var("XDG_CURRENT_DESKTOP"), &var("DESKTOP_SESSION")) == titlebar::Toolkit::Qt {
+        // whatever the colours, the frame on a Qt desktop is Chrome's
+        // own, not the GTK theme's decoration
+        bar.edge = None;
+        bar.chrome_frame = true;
+    }
+    Some(bar)
 }
 
 /// The terminal's windows follow the theme and the switcher setting

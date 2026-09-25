@@ -350,7 +350,9 @@ local config = wezterm.config_builder()
     lua.push_str(LOOK_LUA);
     if let Some(bar) = look.titlebar.as_ref().filter(|_| !cfg!(target_os = "macos")) {
         lua.push_str(&titlebar_colors(bar, look.accent));
-        if let Some(edge) = &bar.edge {
+        if bar.chrome_frame {
+            lua.push_str(CHROME_EDGE_LUA);
+        } else if let Some(edge) = &bar.edge {
             lua.push_str(&window_edge(edge));
         }
     }
@@ -674,6 +676,17 @@ fn title_buttons(layout: &str, icons: &[(&str, String)], bar: Option<&native_ter
     lua
 }
 
+/// Chrome's own window frame, for a desktop whose toolkit gives Chrome
+/// none (Qt's: KDE, deepin, UKUI, LXQt): the fork draws it as
+/// `browser_frame_view_linux.cc` does, a Material shadow around round
+/// top corners where the window manager takes `_GTK_FRAME_EXTENTS`, a
+/// solid 4-DIP border where it does not (deepin's KWin).
+const CHROME_EDGE_LUA: &str = "-- the window's own edge as Chrome draws it on a Qt desktop
+pcall(function()
+  config.integrated_window_edge = { chrome = true }
+end)
+";
+
 /// The window's edge as the GTK theme draws it (shadow, border, rounded
 /// top corners; see `native_term_os::titlebar::Edge`), which NativeTerm's
 /// WezTerm draws around the window itself; set apart, so a WezTerm that
@@ -948,6 +961,7 @@ mod tests {
             padding_bottom: 6,
             buttons: ["close", "minimize", "maximize", "restore"].map(button).to_vec(),
             edge: None,
+            chrome_frame: false,
         };
         // elementary: close at the left end, maximize at the right end
         let lua = button_images("close:maximize", &bar);
@@ -978,6 +992,21 @@ mod tests {
         };
         let lua = window_edge(&edge);
         assert!(lua.starts_with("-- the window's own edge"));
+        // a Qt desktop: Chrome's own frame, whatever the pictures
+        let qt = default_config(
+            &Look {
+                titlebar: Some(Titlebar { edge: Some(edge.clone()), chrome_frame: true, ..bar.clone() }),
+                ..Look::default()
+            },
+            Path::new("/usr/bin/nativeterm-shim"),
+        );
+        assert!(qt.contains(
+            "pcall(function()
+  config.integrated_window_edge = { chrome = true }
+end)
+"
+        ));
+        assert!(!qt.contains("edge-focused.png"));
         assert!(lua.contains("pcall(function()
   config.integrated_window_edge = { focused = \"/c/edge-focused.png\", unfocused = \"/c/edge-unfocused.png\", top = 2, right = 30, bottom = 40, left = 30, radius = 8, slice = 64 }
 end)

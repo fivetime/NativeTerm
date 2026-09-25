@@ -1189,6 +1189,27 @@
       it. Seen on Lingmo (X11): "test / 已连接" over the login banner
 - [ ] Step 2 still to do: the resize band tried by hand on both; WebGpu's
       REPLACE pipeline on a real GPU under Linux (the boxes run OpenGL)
+- [x] Chrome's own frame on a Qt desktop (2026-09-25; deepin had lost its
+      round corners and shadow). The facts on deepin 25: KWin there does
+      not advertise `_GTK_FRAME_EXTENTS`, so the fork refused the GTK
+      theme's edge and drew nothing. Chrome on that desktop goes to its
+      Qt backend, which offers no frame provider, and draws the frame
+      itself (`browser_frame_view_linux.cc`, `frame_view_utils_linux.cc`):
+      where the window manager takes the extents and a compositor runs,
+      a Material shadow (elevation 16 focused, 2 not) around round top
+      corners of radius 8 with a 1-px black exterior border at 0x26, the
+      frame reaching 10/16/32/16 DIP; where it does not (deepin), a solid
+      frame — no shadow, 4 DIP of the frame's colour either side and
+      below, none above, the whole window one round-cornered outline with
+      a 1-px interior line in black or white at 0x26, the content's top
+      4 DIP resizing. The fork (`cfee2c3fe`, `chrome_strip::frame`, its
+      numbers under test) draws either from the same facts Chrome reads
+      (`_GTK_FRAME_EXTENTS` in `_NET_SUPPORTED`, not Xfwm4, `_NET_WM_CM_S*`
+      owned; square corners without a compositor; Wayland always the
+      shadow). NativeTerm emits `integrated_window_edge = { chrome =
+      true }` on every Qt desktop (`Titlebar::chrome_frame`), whatever
+      colours it found — the GTK theme's decoration is never Chrome's
+      there
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its

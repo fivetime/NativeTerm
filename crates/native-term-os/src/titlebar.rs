@@ -47,6 +47,11 @@ pub struct Titlebar {
     /// The window's own edge as the theme draws it (shadow, border,
     /// rounded top corners), where it draws one.
     pub edge: Option<Edge>,
+    /// Chrome's own frame instead (a Qt desktop, whose toolkit gives
+    /// Chrome no frame): a Material shadow around round top corners where
+    /// the window manager takes `_GTK_FRAME_EXTENTS`, else a solid
+    /// border. `edge` is then not used.
+    pub chrome_frame: bool,
 }
 
 /// The theme's window decoration (Chromium's WindowFrameProviderGtk): a
@@ -215,6 +220,7 @@ pub fn qt_colors(kdeglobals: &str) -> Option<Titlebar> {
         text: window_text.unwrap_or(title),
         title,
         title_inactive,
+        chrome_frame: true,
         ..Titlebar::default()
     })
 }
