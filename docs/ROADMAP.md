@@ -1324,6 +1324,12 @@
       wezterm process the backend starts now carries `CREATE_NO_WINDOW`
       (`quiet`). Started from a windowed parent, 8 s: no window but
       NativeTerm's own
+- [x] A tab icon on Windows and macOS (2026-09-25; the tabs there had
+      none: the favicon slot is filled from the desktop's icon theme,
+      which only Linux has). NativeTerm now bundles a 16-DIP terminal
+      icon of its own (`native-term-wezterm/assets/tab-icon.svg`,
+      written beside the configuration) and uses it wherever the desktop
+      gave none; a Linux theme's own icon still wins
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its

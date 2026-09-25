@@ -80,6 +80,26 @@ fn write_if_changed(path: &Path, wanted: &str) -> bool {
     std::fs::read_to_string(path).ok().as_deref() == Some(wanted) || std::fs::write(path, wanted).is_ok()
 }
 
+/// The icon before every tab's title where the desktop has no terminal
+/// icon to lend (Windows, macOS; a Linux icon theme without one): a
+/// terminal window of NativeTerm's own, 16 DIP, the same on every
+/// desktop.
+const TAB_ICON_SVG: &str = include_str!("../assets/tab-icon.svg");
+
+/// `look` with the bundled tab icon, written into `dir`, where the
+/// desktop gave none.
+fn look_with_icon(look: &Look, dir: &Path) -> Look {
+    if look.tab_icon.is_some() {
+        return look.clone();
+    }
+    let path = dir.join("tab-icon.svg");
+    let mut look = look.clone();
+    if write_if_changed(&path, TAB_ICON_SVG) {
+        look.tab_icon = Some(path.to_string_lossy().into_owned());
+    }
+    look
+}
+
 /// A command for `exe` that opens no console window: `wezterm` is a
 /// console program, and started by NativeTerm (a windowed program, with
 /// no console to share) every call — the poll's, once a second — would
@@ -166,7 +186,11 @@ impl WezTerm {
         }
         let dir = dir.join("wezterm");
         let path = dir.join("wezterm.lua");
-        if std::fs::create_dir_all(&dir).is_err() || !write_if_changed(&path, &cli::default_config(look, &self.shim)) {
+        if std::fs::create_dir_all(&dir).is_err() {
+            return self;
+        }
+        let look = look_with_icon(look, &dir);
+        if !write_if_changed(&path, &cli::default_config(&look, &self.shim)) {
             return self;
         }
         self.config = Some(path);
@@ -177,7 +201,10 @@ impl WezTerm {
     /// rewrite the configuration, which running WezTerm windows pick up
     /// on their own. Whether there is one to rewrite.
     pub fn set_look(&self, look: &Look) -> bool {
-        self.config.as_deref().is_some_and(|path| write_if_changed(path, &cli::default_config(look, &self.shim)))
+        self.config.as_deref().is_some_and(|path| {
+            let look = path.parent().map_or_else(|| look.clone(), |dir| look_with_icon(look, dir));
+            write_if_changed(path, &cli::default_config(&look, &self.shim))
+        })
     }
 
     /// Session tabs look sessions up in `ssh_dir` instead of `~/.ssh`.
@@ -622,6 +649,21 @@ impl TerminalBackend for WezTerm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bundled icon stands in where the desktop gave none, written
+    /// once beside the configuration; a desktop's own is left alone.
+    #[test]
+    fn bundled_tab_icon_where_the_desktop_has_none() {
+        let dir = std::env::temp_dir().join(format!("nativeterm-icon-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let look = look_with_icon(&Look::default(), &dir);
+        let path = dir.join("tab-icon.svg");
+        assert_eq!(look.tab_icon.as_deref(), Some(&*path.to_string_lossy()));
+        assert!(std::fs::read_to_string(&path).unwrap().starts_with("<svg"));
+        let own = Look { tab_icon: Some("/theme/terminal.png".into()), ..Look::default() };
+        assert_eq!(look_with_icon(&own, &dir).tab_icon.as_deref(), Some("/theme/terminal.png"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// The shim built next to this test binary (`<target>/debug`), wherever
     /// the target folder is.

@@ -4660,7 +4660,11 @@ carries `WEZTERM_CONFIG_FILE=<data dir>/wezterm/wezterm.lua` (a folder
 of its own: WezTerm watches a configuration's folder and reloads on any
 change in it, and a reload has every window resize every tab and refresh
 every title, which `state.db` beside it used to trigger on every state
-write), written by NativeTerm from a `Look` — light or dark (the theme setting, else what
+write), written by NativeTerm from a `Look` — beside it `tab-icon.svg`,
+the icon before every tab's title (Chrome's favicon slot) where the
+desktop has no terminal icon to lend: Windows, macOS, a Linux icon theme
+without one — the Linux desktops' own comes from
+`native-term-os::icons`) — light or dark (the theme setting, else what
 `native-term-os::appearance` read; only when neither knows does the file
 let WezTerm ask the desktop itself) and the font families — plus
 NativeTerm's own look, the same everywhere and modelled on Windows
