@@ -4761,6 +4761,24 @@ that is not NativeTerm's gets an empty title and so the tab's own card.
 The card waits a second past its 600 ms for the answer, then shows the
 tab's own title.
 
+**Full screen on macOS.** The title bar's green button, "Enter Full
+Screen" and Ctrl+Cmd+F send the window `toggleFullScreen:`, and a
+native full-screen window gets a Space of its own, where macOS shows no
+other application's window: not one at a floating level, not one whose
+collection behaviour joins every Space and stands beside full-screen
+windows (`CanJoinAllSpaces | FullScreenAuxiliary`, set and read back on
+NativeTerm's docked window, its strip and the floating button; measured
+off screen on 13.5, `CGWindowListCopyWindowInfo`). The one exception
+is an application with no Dock icon at all (the accessory activation
+policy from its start; switching to it later and re-ordering the window
+did nothing), which NativeTerm is not. So the fork's window class
+answers `toggleFullScreen:` itself: unless `native_macos_fullscreen_mode`
+is configured, it goes to WezTerm's own full screen — the window over
+the whole screen in the same Space, the menu bar and the Dock hidden
+while it is key (iTerm2's default kind) — over which the docked
+NativeTerm window stayed on screen. Native full screen remains a
+configuration away, without NativeTerm in it.
+
 ### The window's shadow and the compositor
 
 The edge (shadow, border, round top corners) is the client's own

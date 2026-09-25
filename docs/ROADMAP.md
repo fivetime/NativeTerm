@@ -1343,6 +1343,23 @@
       unfocused colours first blended 75 % towards the tab;
       `chrome_strip::title_colour`, tested), so a theme's text is never
       lost on its own tab. After: white on the dark tab
+- [x] NativeTerm out of sight beside a full-screen WezTerm on macOS
+      (2026-09-26): the green button took the window into native full
+      screen, a Space of its own, and the docked NativeTerm window, its
+      strip and the floating button were nowhere — not even the strip's
+      line. Measured, not guessed: `CanJoinAllSpaces | FullScreenAuxiliary`
+      set on all three (read back as 257) left them off screen; a test
+      window from an application without a Dock icon (accessory policy
+      from launch) was on screen, one switched to that policy later and
+      re-ordered was not — macOS shows no regular application's window
+      over another's native full screen. Not taken: giving up the Dock
+      icon. Taken: the fork's window answers `toggleFullScreen:` (the
+      green button, the menu item, Ctrl+Cmd+F) with WezTerm's own full
+      screen unless `native_macos_fullscreen_mode` is set — the same
+      Space, the menu bar and Dock auto-hidden while WezTerm is key —
+      over which the docked NativeTerm window stayed on screen (measured
+      with WezTerm's toggle; the button itself needs a hand on the Mac).
+      ARCHITECTURE, "Full screen on macOS"
 - [x] The tab search button at the other end where the caption buttons
       lead (2026-09-26, asked for on the Mac): with macOS's traffic
       lights, or a Linux layout with buttons on the left (elementary's
