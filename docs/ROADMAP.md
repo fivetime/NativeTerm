@@ -1347,19 +1347,22 @@
       (2026-09-26): the green button took the window into native full
       screen, a Space of its own, and the docked NativeTerm window, its
       strip and the floating button were nowhere — not even the strip's
-      line. Measured, not guessed: `CanJoinAllSpaces | FullScreenAuxiliary`
-      set on all three (read back as 257) left them off screen; a test
-      window from an application without a Dock icon (accessory policy
-      from launch) was on screen, one switched to that policy later and
-      re-ordered was not — macOS shows no regular application's window
-      over another's native full screen. Not taken: giving up the Dock
-      icon. Taken: the fork's window answers `toggleFullScreen:` (the
-      green button, the menu item, Ctrl+Cmd+F) with WezTerm's own full
-      screen unless `native_macos_fullscreen_mode` is set — the same
-      Space, the menu bar and Dock auto-hidden while WezTerm is key —
-      over which the docked NativeTerm window stayed on screen (measured
-      with WezTerm's toggle; the button itself needs a hand on the Mac).
-      ARCHITECTURE, "Full screen on macOS"
+      line. Measured, not guessed (`CGWindowListCopyWindowInfo`, small
+      Swift test applications): `CanJoinAllSpaces | FullScreenAuxiliary`
+      alone left them off screen; a window is on screen there only if
+      it was made while its application was an accessory (no Dock icon),
+      and it stays so once the application is regular again. NativeTerm
+      now starts as an accessory, makes its windows, and becomes regular
+      (`dock::regular_application`); the docked window was on screen
+      beside a full-screen WezTerm, the app "Foreground" in `lsappinfo`.
+      Tried first and dropped the same day: the fork's window answering
+      `toggleFullScreen:` with WezTerm's own full screen (`c02f243dd`,
+      reverted in `1755f93a9`) — no traffic lights, no menu bar at the
+      top, and a double-click on the tab bar left the window 82 points
+      above the screen. Chrome's way, for the record: native full screen,
+      AppKit's own traffic lights, the tab strip hosted in a title bar
+      accessory so it rides down with the menu bar. ARCHITECTURE, "Full
+      screen on macOS"
 - [x] The tab search button at the other end where the caption buttons
       lead (2026-09-26, asked for on the Mac): with macOS's traffic
       lights, or a Linux layout with buttons on the left (elementary's

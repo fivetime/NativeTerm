@@ -17,6 +17,33 @@ pub use native_term_win::dock::{
     window_bounds, work_area, work_area_at, Bounds,
 };
 
+/// Keep a floating window of ours in sight over another application's
+/// full-screen window. Only macOS needs telling: a full-screen window
+/// there gets a Space of its own, where another application's windows
+/// are shown only if they may join every Space and stand beside a
+/// full-screen window (`NSWindowCollectionBehavior`: `CanJoinAllSpaces`,
+/// `FullScreenAuxiliary`) — so the docked window, its strip and the
+/// floating button ask for that, and a window undocked again gives it
+/// up (an ordinary window belongs to one Space). Windows and X11 have
+/// no such Spaces: a topmost window is in sight over a full-screen one.
+///
+/// That behaviour alone is not enough: macOS (13.5, measured) shows a
+/// window of a regular application (one with a Dock icon) in another
+/// application's full-screen Space only if the window was *made* while
+/// the application was an accessory (no Dock icon) — whatever its level,
+/// and even when the application is regular again by the time the
+/// window is ordered in. So NativeTerm starts as an accessory, makes
+/// its windows, and becomes regular (`regular_application`) before it
+/// shows them; a window made after that is an ordinary one.
+#[cfg(not(target_os = "macos"))]
+pub fn over_fullscreen(_handle: isize, _on: bool) {}
+
+/// See `over_fullscreen`: the application takes its Dock icon and its
+/// place in Cmd-Tab, once its floating windows are made. Nothing to do
+/// elsewhere.
+#[cfg(not(target_os = "macos"))]
+pub fn regular_application() {}
+
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Bounds {
@@ -317,7 +344,10 @@ mod mac {
     use super::Bounds;
     use objc2::rc::Retained;
     use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSColor, NSEvent, NSScreen, NSView, NSWindow};
+    use objc2_app_kit::{
+        NSApplication, NSApplicationActivationPolicy, NSColor, NSEvent, NSScreen, NSView, NSWindow,
+        NSWindowCollectionBehavior,
+    };
     use objc2_foundation::{NSPoint, NSRect};
 
     /// The primary screen's height in points and its scale: what turns
@@ -422,6 +452,27 @@ mod mac {
     /// Left to winit's window level (it would reset the state otherwise).
     pub fn set_topmost(_handle: isize, _on: bool) {}
 
+    /// See the crate-level `regular_application`.
+    pub fn regular_application() {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let app = NSApplication::sharedApplication(mtm);
+        if app.activationPolicy() != NSApplicationActivationPolicy::Regular {
+            app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+        }
+    }
+
+    /// See the crate-level `over_fullscreen`: the window may join every
+    /// Space and stand beside a full-screen window, or no longer may.
+    pub fn over_fullscreen(handle: isize, on: bool) {
+        let Some(w) = window(handle) else { return };
+        let asked = NSWindowCollectionBehavior::CanJoinAllSpaces | NSWindowCollectionBehavior::FullScreenAuxiliary;
+        let was = w.collectionBehavior();
+        let now = if on { was | asked } else { was & !asked };
+        if now != was {
+            w.setCollectionBehavior(now);
+        }
+    }
+
     /// Move the window's frame (title bar included) to `left`, `top`.
     pub fn move_window(handle: isize, left: i32, top: i32) {
         let (Some(w), Some((height, scale))) = (window(handle), space()) else { return };
@@ -461,6 +512,6 @@ mod mac {
 
 #[cfg(target_os = "macos")]
 pub use mac::{
-    cursor, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, round_corners,
-    set_topmost, window_bounds, work_area, work_area_at,
+    cursor, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, over_fullscreen,
+    regular_application, round_corners, set_topmost, window_bounds, work_area, work_area_at,
 };

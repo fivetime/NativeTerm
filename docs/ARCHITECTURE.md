@@ -4762,22 +4762,37 @@ The card waits a second past its 600 ms for the answer, then shows the
 tab's own title.
 
 **Full screen on macOS.** The title bar's green button, "Enter Full
-Screen" and Ctrl+Cmd+F send the window `toggleFullScreen:`, and a
-native full-screen window gets a Space of its own, where macOS shows no
-other application's window: not one at a floating level, not one whose
-collection behaviour joins every Space and stands beside full-screen
-windows (`CanJoinAllSpaces | FullScreenAuxiliary`, set and read back on
-NativeTerm's docked window, its strip and the floating button; measured
-off screen on 13.5, `CGWindowListCopyWindowInfo`). The one exception
-is an application with no Dock icon at all (the accessory activation
-policy from its start; switching to it later and re-ordering the window
-did nothing), which NativeTerm is not. So the fork's window class
-answers `toggleFullScreen:` itself: unless `native_macos_fullscreen_mode`
-is configured, it goes to WezTerm's own full screen — the window over
-the whole screen in the same Space, the menu bar and the Dock hidden
-while it is key (iTerm2's default kind) — over which the docked
-NativeTerm window stayed on screen. Native full screen remains a
-configuration away, without NativeTerm in it.
+Screen" and Ctrl+Cmd+F send the window `toggleFullScreen:`, and the
+window gets a Space of its own, in which macOS shows no window of
+another *regular* application (one with a Dock icon): not one at a
+floating level, not one whose collection behaviour joins every Space
+and stands beside full-screen windows (`CanJoinAllSpaces |
+FullScreenAuxiliary`). Measured on 13.5 with `CGWindowListCopyWindowInfo`
+and small test applications: such a window is on screen there only if
+it was *made* while its application was an accessory (no Dock icon) —
+it then stays on screen after the application becomes regular, through
+being ordered out and in again; a window made after that never shows,
+and switching a running regular application to accessory and re-ordering
+its windows does nothing. So NativeTerm's event loop starts with the
+accessory policy, `start` makes the docked window, the edge strip and
+the floating button (each `dock::over_fullscreen`, the two behaviours
+above), and `dock::regular_application` then gives it its Dock icon and
+its place in Cmd-Tab (`lsappinfo` reports it "Foreground"); the docked
+window was on screen beside a full-screen WezTerm afterwards. A window
+undocked gives the behaviours up again, an ordinary window of one
+Space. WezTerm's own, non-native full screen (the window over the
+whole screen in the same Space) was tried first and dropped: no traffic
+lights, the menu bar not coming back at the top, and a double-click on
+the tab bar (zoom) leaving the window 82 points above the screen. Chrome
+keeps native full screen too: the traffic lights are AppKit's own
+standard buttons (Chrome only forces their alpha and reveal amount when
+"always show toolbar in full screen" is on, `BrowserWindowFrame
+maybeShowTrafficLights`), and the tab strip and toolbar ride down with
+the menu bar because Chrome hosts them in an
+`NSTitlebarAccessoryViewController` (`ImmersiveModeControllerCocoa`,
+components/remote_cocoa/app_shim/immersive_mode_controller_cocoa.mm);
+WezTerm keeps its tab strip in the content, so in full screen the
+traffic lights appear only with the revealed title bar.
 
 ### The window's shadow and the compositor
 

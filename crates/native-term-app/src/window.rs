@@ -442,7 +442,16 @@ pub fn run(
     button: Option<FloatingButton>,
     factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
 ) -> Result<(), String> {
-    let event_loop = EventLoop::<UserEvent>::with_user_event().build().map_err(|e| e.to_string())?;
+    let mut builder = EventLoop::<UserEvent>::with_user_event();
+    // an accessory (no Dock icon) until its windows are made: only a
+    // window made then stays in sight beside another application's
+    // full-screen window (see native_term_os::dock::over_fullscreen)
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        builder.with_activation_policy(ActivationPolicy::Accessory);
+    }
+    let event_loop = builder.build().map_err(|e| e.to_string())?;
     let proxy = event_loop.create_proxy();
     let mut runner = Runner {
         proxy,
@@ -520,6 +529,8 @@ impl Runner {
                 let colour = native_term_os::desktop::accent().unwrap_or((0x80, 0x80, 0x80));
                 if let Some(handle) = window_handle(&strip) {
                     win::fill(handle, colour);
+                    // in sight beside a full-screen Terminal window (macOS)
+                    win::over_fullscreen(handle, true);
                 }
                 self.strip = Some(strip);
             }
@@ -549,6 +560,10 @@ impl Runner {
                 Ok(mut pane) => {
                     // painted once, hidden, so it can appear without a flash
                     pane.paint(None, false)?;
+                    // in sight beside a full-screen Terminal window (macOS)
+                    if let Some(handle) = window_handle(&pane.window) {
+                        win::over_fullscreen(handle, true);
+                    }
                     self.button = Some(pane);
                     self.button_saver = Some(spec.save);
                 }
@@ -747,6 +762,11 @@ impl Runner {
                 winit::window::WindowLevel::Normal
             };
             r.window.set_window_level(level);
+            // docked, in sight beside a full-screen Terminal window
+            // (macOS); undocked, a window of one Space again
+            if let Some(handle) = window_handle(&r.window) {
+                win::over_fullscreen(handle, edge.is_some());
+            }
             // the top bar shows "Pin" only while docked
             r.window.request_redraw();
         }
@@ -1015,6 +1035,8 @@ impl ApplicationHandler<UserEvent> for Runner {
             if let Err(e) = self.start(event_loop).and_then(|()| self.paint(Which::Main)) {
                 self.fail(event_loop, e);
             }
+            // the windows made: a regular application from here on (macOS)
+            win::regular_application();
         }
     }
 
