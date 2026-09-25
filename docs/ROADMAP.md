@@ -1221,6 +1221,18 @@
       `FrameGrabHandle` keeps 42 DIP free after the new-tab button
       before the caption buttons, the tabs shrinking first
       (`chrome_strip::GRAB_HANDLE`, under test)
+- [x] The notch at the solid frame's top corners (2026-09-25; read off
+      deepin pixel by pixel beside Chrome's window): the content's top
+      corners are cut square, 8 x 8, and the frame picture under them
+      had the frame's colour only, so the border line's top run stopped
+      4 px short of the arc. Chrome's frame view paints the frame, the
+      line and the arc under its tab strip's clear corners; the fork's
+      picture now does the same (`6b7ec2bb9`). Two more facts from
+      Chrome's window there: `_GTK_FRAME_EXTENTS = 4, 4, 0, 4` set
+      although the window manager does not advertise the hint
+      (`X11Window::UpdateDecorationInsets` on mapping; only the shadow is
+      gated), and the opaque region the whole window less its corners;
+      the fork now reports both the same (`54562b3d5`)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
