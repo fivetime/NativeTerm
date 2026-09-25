@@ -1255,6 +1255,21 @@
       tab switcher on the active tab (a click on a tile picks, one
       elsewhere or Escape closes), standing in for Chrome's Tab Search
       bubble
+- [x] Three more things beside Chrome on deepin (2026-09-25): the
+      active tab's close button drawn at its left, over the previous
+      tab's icon, the rest of the tab bare — the tab element's padding
+      was fixed at 20 either side while Chrome lets a narrow active
+      tab's close button escape the contents (`Center(width, 16)`) and
+      centres a narrow inactive tab's favicon; the padding now runs to
+      the first and from the last thing shown, so every tab element is
+      exactly its layout width. No hover on the new buttons — the
+      earlier reading had Chrome's control buttons highlight white at
+      0.16 whatever the strip; `kColorTabStripControlButtonInkDrop` is
+      the colour contrasting most with the strip at 0.16 (black on a
+      light strip), now used for the new-tab and tab search buttons.
+      And the tab search button's icon is two overlapping windows
+      (Windows Terminal's kind) rather than Chrome's chevron, as it
+      opens the switcher's grid, not a menu
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
