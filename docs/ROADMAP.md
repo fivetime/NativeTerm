@@ -1343,6 +1343,18 @@
       unfocused colours first blended 75 % towards the tab;
       `chrome_strip::title_colour`, tested), so a theme's text is never
       lost on its own tab. After: white on the dark tab
+- [x] The Mac brought back (2026-09-26): the fork and NativeTerm
+      rebuilt there at `765b3ad41`; 40 tabs idle at 4 % of a core, `cli
+      list` 57 ms, the light strip's titles dark, the bundled icon shown.
+      Found on the way: ~/.local/share/wezterm held 36,000 `wezterm-log-*`
+      files (143 MB) — the GUI's published socket path had outlived it
+      (a reboot), every poll's `wezterm cli` failed on it and logged a
+      file, and a fresh GUI told to try that path never published its
+      own. The fork (`099a9b303`) passes over a published path nobody
+      answers on (the youngest live socket instead), and a cli told not
+      to start prints the error without a log file. A GUI started with
+      `--position` never publishes (WezTerm's rule), which misled the
+      first measurement
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
