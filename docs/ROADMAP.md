@@ -1245,8 +1245,16 @@
       centred (`center_icon_`). The fork (`cf22c1f58`, `Tab::visible`,
       tested) does the same. Not taken: Chrome's tab search button at the
       strip's leading end (`TabStripComboButton`) and its WebUI bubble —
-      the fork has the Ctrl+Tab switcher; a leading button opening it is
-      the open question
+      the fork has the Ctrl+Tab switcher
+- [x] The tab search button (2026-09-25, agreed): Chrome's
+      `TabStripComboButton` stands before the tabs on every normal
+      window — 28 round, 6 into the region, the strip's left margin 28,
+      a 16 chevron (`kExpandMoreOldIcon`), white at 0.16 under the
+      pointer as the new-tab button. The fork draws it in the same place
+      (`chrome_strip::TAB_SEARCH_*`, under test) and a click opens the
+      tab switcher on the active tab (a click on a tile picks, one
+      elsewhere or Escape closes), standing in for Chrome's Tab Search
+      bubble
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
