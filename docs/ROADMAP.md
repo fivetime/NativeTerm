@@ -1343,6 +1343,19 @@
       unfocused colours first blended 75 % towards the tab;
       `chrome_strip::title_colour`, tested), so a theme's text is never
       lost on its own tab. After: white on the dark tab
+- [x] The tab search button at the other end where the caption buttons
+      lead (2026-09-26, asked for on the Mac): with macOS's traffic
+      lights, or a Linux layout with buttons on the left (elementary's
+      close), the button stood between the caption buttons and the
+      tabs; it now stands 6 DIP after the new-tab button, the tabs'
+      room 34 the less for it (28 + the 6), the grab handle still after
+      it. Not Chrome's (which keeps it leading, traffic lights too),
+      recorded in the fork's parity doc. One rule for every platform,
+      `Config::caption_buttons_lead` (integrated buttons on, and macOS's
+      own or a layout with a left side): the fork's tab bar puts the
+      item after the new-tab button, the strip's layout places it
+      (`Inputs::tab_search_trailing`, under test); a desktop with its
+      buttons on the right (Windows, deepin, Lingmo) is unchanged
 - [x] The Mac brought back (2026-09-26): the fork and NativeTerm
       rebuilt there at `765b3ad41`; 40 tabs idle at 4 % of a core, `cli
       list` 57 ms, the light strip's titles dark, the bundled icon shown.
