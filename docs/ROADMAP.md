@@ -1300,6 +1300,23 @@
       seen on a Linux VM after moving the window could not be
       reproduced with scripted moves and drags on deepin (the strip's
       pixels matched before and after)
+- [x] Saved passwords lost when NativeTerm processes write at once
+      (2026-09-25; found as "flaky" shim tests: 5 of 25 runs failed, a
+      refused password's mark missing afterwards or unseen by the next
+      shim). The tests had distinct entry names; a probe outside the
+      shim (`native-term-win/examples/cred_race.rs`: six processes, each
+      writing its own entry, a child marking it, the parent reading
+      back) showed Credential Manager itself dropping a just-written
+      entry for good when another process writes at the same moment —
+      3 to 5 of 240 rounds. The same can happen to a user's saved
+      password when two tabs save or mark at once. `credentials::write`,
+      `delete` and the new `update` (read, change, write) now hold a
+      session-wide named mutex; the three places that marked a refused
+      password by hand (the shim's password and proxy paths, the file
+      window) use `update`. After: 0 of 720 probe rounds lost, 0 of 25
+      shim test runs failed, the whole suite green with no hung shim.
+      The two shims seen hung in one earlier full run did not recur in
+      54 runs
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its

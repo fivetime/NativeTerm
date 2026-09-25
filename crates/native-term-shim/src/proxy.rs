@@ -85,10 +85,7 @@ fn password(proxy: &Proxy) -> Result<Option<String>, Fail> {
 /// The password was refused: it isn't sent again until a new one is saved.
 fn mark_refused(proxy: &Proxy) {
     let Some(entry) = proxy.password_entry() else { return };
-    if let Ok(Some(mut saved)) = credentials::read(&entry) {
-        saved.comment = REFUSED.to_string();
-        let _ = credentials::write(&entry, &saved);
-    }
+    let _ = credentials::update(&entry, |saved| saved.comment = REFUSED.to_string());
 }
 
 /// A connection to `host:port` through the proxy.

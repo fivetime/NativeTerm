@@ -118,9 +118,6 @@ impl Attempt {
 
     /// The server refused it: keep it, marked, until the user saves a new one.
     pub fn refused(&self) {
-        if let Ok(Some(mut saved)) = credentials::read(&self.target.name) {
-            saved.comment = REFUSED.to_string();
-            let _ = credentials::write(&self.target.name, &saved);
-        }
+        let _ = credentials::update(&self.target.name, |saved| saved.comment = REFUSED.to_string());
     }
 }

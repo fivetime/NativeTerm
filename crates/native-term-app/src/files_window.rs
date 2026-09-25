@@ -688,10 +688,9 @@ impl FilesWindow {
                     // the saved password was given and refused: marked, not tried again
                     if served.load(Ordering::SeqCst) && text.contains("Permission denied") {
                         if let Some(t) = &target {
-                            if let Ok(Some(mut s)) = native_term_os::credentials::read(&t.name) {
+                            let _ = native_term_os::credentials::update(&t.name, |s| {
                                 s.comment = native_term_config::password::REFUSED.to_string();
-                                let _ = native_term_os::credentials::write(&t.name, &s);
-                            }
+                            });
                         }
                     }
                     What::Failed(text)

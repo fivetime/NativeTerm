@@ -3,7 +3,7 @@
 //! leaves the saving out.
 
 #[cfg(windows)]
-pub use native_term_win::credentials::{delete, list, read, write, Saved};
+pub use native_term_win::credentials::{delete, list, read, update, write, Saved};
 
 /// Whether this system has a store to keep passwords in.
 #[must_use]
@@ -42,10 +42,15 @@ mod unix {
     pub fn delete(_target: &str) -> io::Result<bool> {
         Ok(false)
     }
+
+    /// Whether there was one to change.
+    pub fn update(_target: &str, _change: impl FnOnce(&mut Saved)) -> io::Result<bool> {
+        Ok(false)
+    }
 }
 
 #[cfg(unix)]
-pub use unix::{delete, list, read, write, Saved};
+pub use unix::{delete, list, read, update, write, Saved};
 
 #[cfg(test)]
 mod tests {

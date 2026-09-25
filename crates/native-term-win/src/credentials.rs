@@ -7,11 +7,12 @@
 use std::io;
 
 use windows::core::{HSTRING, PWSTR};
-use windows::Win32::Foundation::FILETIME;
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows::Win32::Security::Credentials::{
     CredDeleteW, CredEnumerateW, CredFree, CredReadW, CredWriteW, CREDENTIALW, CRED_FLAGS, CRED_PERSIST_LOCAL_MACHINE,
     CRED_TYPE_GENERIC,
 };
+use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 /// A saved password and its note.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,8 +63,49 @@ fn blob_text(blob: &[u8]) -> String {
     }
 }
 
+/// Held while this session's NativeTerm processes change Credential
+/// Manager. Credential Manager can lose an entry written a moment
+/// before when another process writes at the same time — even another
+/// entry: the fresh entry, or the change to it, is gone for good
+/// (measured: about one write in a hundred with six processes writing
+/// at once, `examples/cred_race.rs`). NativeTerm's own writers (the app,
+/// every tab's shim) therefore take turns. Waiting is bounded: a holder
+/// that hung doesn't stop a save, it only loses the protection.
+struct StoreLock(Option<HANDLE>);
+
+impl StoreLock {
+    fn take() -> StoreLock {
+        const NAME: &str = r"Local\NativeTerm-credential-store";
+        let Ok(handle) = (unsafe { CreateMutexW(None, false, &HSTRING::from(NAME)) }) else {
+            return StoreLock(None);
+        };
+        match unsafe { WaitForSingleObject(handle, 5000) } {
+            // abandoned: its holder died holding it; it is ours now
+            WAIT_OBJECT_0 | WAIT_ABANDONED => StoreLock(Some(handle)),
+            _ => {
+                let _ = unsafe { CloseHandle(handle) };
+                StoreLock(None)
+            }
+        }
+    }
+}
+
+impl Drop for StoreLock {
+    fn drop(&mut self) {
+        if let Some(handle) = self.0.take() {
+            let _ = unsafe { ReleaseMutex(handle) };
+            let _ = unsafe { CloseHandle(handle) };
+        }
+    }
+}
+
 /// Create or replace the credential named `target`.
 pub fn write(target: &str, saved: &Saved) -> io::Result<()> {
+    let _turn = StoreLock::take();
+    write_locked(target, saved)
+}
+
+fn write_locked(target: &str, saved: &Saved) -> io::Result<()> {
     let mut name: Vec<u16> = target.encode_utf16().chain([0]).collect();
     let mut user: Vec<u16> = saved.user.encode_utf16().chain([0]).collect();
     let mut comment: Vec<u16> = saved.comment.encode_utf16().chain([0]).collect();
@@ -119,8 +161,20 @@ pub fn list(prefix: &str) -> io::Result<Vec<String>> {
     Ok(names)
 }
 
+/// Change the credential named `target` in place (read, `change`,
+/// write) while no other NativeTerm process writes; `Ok(false)` if there
+/// is none.
+pub fn update(target: &str, change: impl FnOnce(&mut Saved)) -> io::Result<bool> {
+    let _turn = StoreLock::take();
+    let Some(mut saved) = read(target)? else { return Ok(false) };
+    change(&mut saved);
+    write_locked(target, &saved)?;
+    Ok(true)
+}
+
 /// Remove the credential named `target`; `Ok(false)` if there was none.
 pub fn delete(target: &str) -> io::Result<bool> {
+    let _turn = StoreLock::take();
     match unsafe { CredDeleteW(&HSTRING::from(target), CRED_TYPE_GENERIC, None) } {
         Ok(()) => Ok(true),
         Err(e) if e.code() == windows::Win32::Foundation::ERROR_NOT_FOUND.to_hresult() => Ok(false),
@@ -146,6 +200,51 @@ mod tests {
         assert!(delete(&target).unwrap());
         assert!(!delete(&target).unwrap());
         assert_eq!(read(&target).unwrap(), None);
+    }
+
+    /// Changed in place, the rest kept; nothing to change is `false`.
+    #[test]
+    fn updated_in_place() {
+        let target = format!("NativeTerm-Tests-{}:update@host.invalid:22", std::process::id());
+        assert!(!update(&target, |s| s.comment = "x".into()).unwrap());
+        assert_eq!(read(&target).unwrap(), None, "nothing made");
+        let saved = Saved { user: "tester".into(), secret: "s3cret".into(), comment: String::new() };
+        write(&target, &saved).unwrap();
+        assert!(update(&target, |s| s.comment = "refused".into()).unwrap());
+        let read_back = read(&target).unwrap();
+        delete(&target).unwrap();
+        assert_eq!(read_back, Some(Saved { comment: "refused".into(), ..saved }));
+    }
+
+    /// Several writers in one process each take their turn: all their
+    /// entries are there afterwards.
+    #[test]
+    fn writers_take_turns() {
+        let prefix = format!("NativeTerm-Tests-{}-turns/", std::process::id());
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let name = format!("{prefix}{i}");
+                std::thread::spawn(move || {
+                    let saved = Saved { user: String::new(), secret: format!("s{i}"), comment: String::new() };
+                    for _ in 0..10 {
+                        write(&name, &saved).unwrap();
+                    }
+                    update(&name, |s| s.comment = "marked".into()).unwrap()
+                })
+            })
+            .collect();
+        let updated: Vec<bool> = threads.into_iter().map(|t| t.join().unwrap()).collect();
+        let found: Vec<_> = (0..8).map(|i| read(&format!("{prefix}{i}")).unwrap()).collect();
+        for i in 0..8 {
+            let _ = delete(&format!("{prefix}{i}"));
+        }
+        assert!(updated.iter().all(|u| *u));
+        for (i, saved) in found.iter().enumerate() {
+            assert_eq!(
+                saved.as_ref().map(|s| (s.secret.as_str(), s.comment.as_str())),
+                Some((&*format!("s{i}"), "marked"))
+            );
+        }
     }
 
     /// Only the names with the prefix, sorted; none is an empty list.

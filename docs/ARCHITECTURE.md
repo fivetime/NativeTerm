@@ -2165,6 +2165,16 @@ No conflict with plain `ssh` usage (e.g. typing `ssh` in PowerShell):
   is trusted in both.
 - Entries are named `NativeTerm:<user>@<host>:<port>` and are visible in
   Control Panel → Credential Manager; nothing is written under `~/.ssh`.
+- **NativeTerm's writers take turns.** Credential Manager can lose an
+  entry written a moment before when another process writes at the same
+  time, even to another entry: measured on this machine (Windows 11
+  26200) with six processes writing their own entries, about one write
+  in a hundred was gone for good (`native-term-win/examples/cred_race.rs`).
+  Every NativeTerm write, delete and read-change-write
+  (`credentials::update`, used to mark a refused password) holds the
+  session-wide mutex `Local\NativeTerm-credential-store` (at most 5 s;
+  a stuck holder only costs the protection, never the save). Writes by
+  other programs are not covered.
 
 Rules:
 
