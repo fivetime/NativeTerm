@@ -1233,6 +1233,20 @@
       (`X11Window::UpdateDecorationInsets` on mapping; only the shadow is
       gated), and the opaque region the whole window less its corners;
       the fork now reports both the same (`54562b3d5`)
+- [x] A strip fuller than the window, as Chrome's (2026-09-25; the
+      fork let the tabs run off the right edge, past the caption
+      buttons, and dropped their icons). Chrome's tabs never shrink below
+      32 (inactive) / 56 (active); its tree has no tab strip scrolling:
+      `TabContainerImpl::ShouldTabBeVisible` hides, whole, a tab past the
+      strip's trailing edge and one before the active tab that would be
+      past it were it the active one, and the new-tab button stays 6
+      past the strip's own edge (the region less 34 and the grab handle's
+      42). An inactive tab with room for nothing else shows its favicon
+      centred (`center_icon_`). The fork (`cf22c1f58`, `Tab::visible`,
+      tested) does the same. Not taken: Chrome's tab search button at the
+      strip's leading end (`TabStripComboButton`) and its WebUI bubble —
+      the fork has the Ctrl+Tab switcher; a leading button opening it is
+      the open question
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
