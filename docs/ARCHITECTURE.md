@@ -4646,8 +4646,11 @@ every second and reports `Windows` or `Tabs` when the shape changed.
 `activate-pane` (the CLI can't raise a window; `foreground` is the
 window last activated), `screen_text` is `get-text`, and `type_text` is
 `send-text --no-paste`. A GUI NativeTerm starts, and every `cli` call,
-carries `WEZTERM_CONFIG_FILE=<data dir>/wezterm.lua`, written by
-NativeTerm from a `Look` — light or dark (the theme setting, else what
+carries `WEZTERM_CONFIG_FILE=<data dir>/wezterm/wezterm.lua` (a folder
+of its own: WezTerm watches a configuration's folder and reloads on any
+change in it, and a reload has every window resize every tab and refresh
+every title, which `state.db` beside it used to trigger on every state
+write), written by NativeTerm from a `Look` — light or dark (the theme setting, else what
 `native-term-os::appearance` read; only when neither knows does the file
 let WezTerm ask the desktop itself) and the font families — plus
 NativeTerm's own look, the same everywhere and modelled on Windows

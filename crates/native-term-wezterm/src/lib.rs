@@ -137,15 +137,20 @@ impl WezTerm {
         }
     }
 
-    /// Windows NativeTerm opens use `<dir>/wezterm.lua` (written here,
-    /// for `look`) when the person has no WezTerm configuration of their
-    /// own.
+    /// Windows NativeTerm opens use `<dir>/wezterm/wezterm.lua` (written
+    /// here, for `look`) when the person has no WezTerm configuration of
+    /// their own. The file has a folder of its own because WezTerm
+    /// watches the folder a configuration lives in and reloads on any
+    /// change there: beside `state.db` and `settings.toml`, every state
+    /// write had every WezTerm window re-apply its configuration, resize
+    /// every tab and refresh every title.
     pub fn with_config_dir(mut self, dir: &Path, look: &Look) -> WezTerm {
         if cli::user_config_exists() {
             return self;
         }
+        let dir = dir.join("wezterm");
         let path = dir.join("wezterm.lua");
-        if std::fs::create_dir_all(dir).is_err() || !write_if_changed(&path, &cli::default_config(look, &self.shim)) {
+        if std::fs::create_dir_all(&dir).is_err() || !write_if_changed(&path, &cli::default_config(look, &self.shim)) {
             return self;
         }
         self.config = Some(path);

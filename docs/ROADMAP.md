@@ -1270,6 +1270,36 @@
       And the tab search button's icon is two overlapping windows
       (Windows Terminal's kind) rather than Chrome's chevron, as it
       opens the switcher's grid, not a menu
+- [x] Fifty tabs made every action slow, Windows first (2026-09-25;
+      measured, not guessed: a fresh wezterm-gui with 40 cmd tabs sat at
+      99.7 % of a core doing nothing, `cli list` took 38–60 s and
+      `activate-tab` 97 s, all on one thread). Chrome's strip, the icons
+      and the hover cards were ruled out (the same with WezTerm's own
+      strip). The thread was `LocalPane::get_title`: a shell that sets
+      no title (cmd, PowerShell) falls back to the foreground process's
+      name, which on Windows means `LocalProcessInfo::with_root_pid` —
+      a Toolhelp snapshot of every process on the system plus PEB reads
+      — per pane, cached 300 ms, and every title refresh (any pane's
+      output, a tab change, a hover crossing a tab) asks every tab, so
+      the cost grew as tabs × processes, the tabs adding processes of
+      their own. Two changes in the fork: the snapshot is taken once
+      and shared by every pane for 250 ms (`procinfo`), and a stale
+      answer is handed back while a thread of its own refreshes it
+      (`divine_process_list`, as the unix leader cache already did), so
+      the GUI thread never walks the process table. After: 0 % idle with
+      40 tabs, `cli list` and `activate-tab` at the cli's own 1-s
+      process start. Linux never had this path (`/proc` through the
+      pty's leader); its hover cost in a VM is the software GL
+      rasteriser redrawing the window (77 % in llvmpipe's JIT under
+      `perf`), not the fork. Found on the way and fixed: WezTerm
+      watches the *folder* its configuration is in, so NativeTerm's
+      `state.db` and `settings.toml` beside `wezterm.lua` made every
+      state write a configuration reload — every window re-applying its
+      dimensions, resizing every tab and refreshing every title; the
+      file now lives in `<data>/wezterm/`. Left: the "missing blocks"
+      seen on a Linux VM after moving the window could not be
+      reproduced with scripted moves and drags on deepin (the strip's
+      pixels matched before and after)
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
