@@ -80,6 +80,22 @@ fn write_if_changed(path: &Path, wanted: &str) -> bool {
     std::fs::read_to_string(path).ok().as_deref() == Some(wanted) || std::fs::write(path, wanted).is_ok()
 }
 
+/// A command for `exe` that opens no console window: `wezterm` is a
+/// console program, and started by NativeTerm (a windowed program, with
+/// no console to share) every call — the poll's, once a second — would
+/// flash a console window of its own on Windows.
+fn quiet(exe: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(exe);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
+}
+
 /// WezTerm, through its command line.
 pub struct WezTerm {
     /// `wezterm` (the CLI).
@@ -172,13 +188,13 @@ impl WezTerm {
 
     /// Whether a `wezterm` executable is where this looks for it.
     pub fn available(&self) -> bool {
-        Command::new(&self.exe).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
+        quiet(&self.exe).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
     }
 
     /// `wezterm` or `wezterm-gui` with NativeTerm's configuration, when
     /// it has one, in the environment (see `cli::start_args`).
     fn command(&self, exe: &Path) -> Command {
-        let mut command = Command::new(exe);
+        let mut command = quiet(exe);
         if let Some(config) = &self.config {
             command.env("WEZTERM_CONFIG_FILE", config);
         }
@@ -543,7 +559,7 @@ impl TerminalBackend for WezTerm {
             .name("wezterm-poll".into())
             .spawn(move || {
                 let output = |args: Vec<OsString>| {
-                    Command::new(&exe)
+                    quiet(&exe)
                         .args(args)
                         .stdin(Stdio::null())
                         .output()

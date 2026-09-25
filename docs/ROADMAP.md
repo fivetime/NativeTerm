@@ -1317,6 +1317,13 @@
       shim test runs failed, the whole suite green with no hung shim.
       The two shims seen hung in one earlier full run did not recur in
       54 runs
+- [x] Console windows flashing once a second with the WezTerm backend
+      on Windows (2026-09-25, seen at acceptance): NativeTerm is a
+      windowed program with no console to share, so every `wezterm cli`
+      call — the poll's included — opened a console of its own. Every
+      wezterm process the backend starts now carries `CREATE_NO_WINDOW`
+      (`quiet`). Started from a windowed parent, 8 s: no window but
+      NativeTerm's own
 - [x] Step 3 (2026-09-24): on a desktop where Chrome goes to Qt (KDE,
       UKUI, LXQt, one calling itself `Deepin`), the tab strip in the
       palette's colours, the buttons the icon theme's (Chrome draws its
