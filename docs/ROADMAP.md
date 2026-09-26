@@ -1379,12 +1379,44 @@
         timer from each frame's start (the executor's timers wait in
         15.6 ms ticks: 16 ms took 31), every live-resize step painted;
         `cac8c952e` X11 and macOS paced from each frame's start too.
-      Not done: macOS's window drag handed to the window server
-      (performWindowDragWithEvent: untestable here without clicks on the
-      Mac); Wayland's edge as border subsurfaces rather than one
-      window-sized buffer (now filled row by row, a memset for the
-      inside). To check by hand: dragging a window's border on Windows
-      (the modal size loop cannot be driven from outside).
+      Left then, done in the next round (below): macOS's window drag
+      handed to the window server; Wayland's edge as strips. To check by
+      hand: dragging a window's border on Windows (the modal size loop
+      cannot be driven from outside).
+- [x] The fork's remaining costs, second round (2026-09-26), each
+      measured before and after, one fork commit each:
+      - `5f5f73314` quads gathered on the CPU and the used part uploaded
+        once, OpenGL's buffers persistently mapped (the per-layer
+        read-write maps copied whole buffers: ~2.3 ms a layer on AMD's
+        GL 4.5); a frame running past the buffers grows them instead of
+        being painted twice. 1 tab printing: frame 5.6 -> 3.2 ms
+        (Windows), 15.5 -> 5.8 ms and 2 -> 17 paints/s (Lingmo,
+        llvmpipe); pixels unchanged.
+      - `ab996683d` Windows OpenGL without the 4x multisampled
+        framebuffer (EGL and macOS never asked for one): resize steps
+        mean 15 -> 10.5 ms, p90 49 -> 33. The rest of a resize step is
+        the first present at the new size (30-38 ms, the same with
+        ANGLE; not the vertical blank). Since the round's start: 1 tab
+        resize p90 87 -> 42 ms, 30 tabs maximize/restore 88 -> 53 ms.
+      - `28c864763` WebGpu: one render pass a frame, and Mailbox (or,
+        on Windows, Immediate) instead of Fifo, which fought the
+        window's own pacing: 33 -> 59 paints/s, frame 31 -> 3.4 ms.
+      - `9149c7510` a config reload (NativeTerm's theme switch)
+        evaluates the file once and off the lock; a window without
+        overrides no longer evaluates it again: the GUI held 53-75 ->
+        8-23 ms.
+      - `20f780d5c` X11: the edge kept in pixmaps on the server; an
+        Expose copies it back instead of uploading it again.
+      - `7de3792f1` Wayland: the edge as a subsurface per strip of the
+        margins, a strip unchanged by a resize only moved (Zorin,
+        20 resizes/s: 23-30 -> 43-46 paints/s; per frame gnome-shell
+        ~5 % -> ~2.8 % of a core, wezterm-gui ~4.7 % -> ~3.4 %).
+      - `693e385b4` per-frame String allocations gone (Timed's rate
+        name, the icon and picture cache keys); chrome_layout measured
+        at ~5 us and left.
+      - `b1237af75` macOS: dragging the strip hands the window to the
+        window server (performWindowDragWithEvent:, as Chrome's
+        caption does). Built; to be tested by hand on the Mac.
 - [x] A double-click on the tab strip's empty part did different things
       on different systems (2026-09-26). Chrome: the empty strip is the
       window's caption, and each platform's caption rules apply —
