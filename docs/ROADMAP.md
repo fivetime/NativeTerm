@@ -1343,6 +1343,26 @@
       unfocused colours first blended 75 % towards the tab;
       `chrome_strip::title_colour`, tested), so a theme's text is never
       lost on its own tab. After: white on the dark tab
+- [x] A double-click on the tab strip's empty part did different things
+      on different systems (2026-09-26). Chrome: the empty strip is the
+      window's caption, and each platform's caption rules apply —
+      Windows' DefWindowProc (drag, double-click maximizes/restores),
+      Linux's WindowEventFilterLinux (a press only records the drag,
+      which begins on motion past 8 px; a double-click performs the
+      desktop's caption action, default toggle maximize), macOS's title
+      bar (AppleActionOnDoubleClick, default Maximize = zoom). The fork
+      began the window manager's move on the first press (X11
+      _NET_WM_MOVERESIZE, Wayland xdg move), so the second press went to
+      the window manager's grab, and the move fought the toggle:
+      measured on Lingmo (KWin, X11), the first double-click did nothing,
+      the second maximized, the third restored the window 29 px above
+      the screen's top. Windows had it natively (the strip is
+      HTCAPTION), macOS through the fork's own drag. Now the fork's press records the drag and the move begins on
+      motion past 8 DIP (Chrome's threshold); a double-click toggles
+      maximized on every system. Lingmo after: three double-clicks
+      maximized/restored/maximized, a single click did nothing, a 60x40
+      drag moved the window 60x42. Not read: the desktop's caption
+      preference (recorded in the parity doc)
 - [x] A square bite out of the buttons by the window's round corners
       (2026-09-26, Lingmo): the tab search button's and the close
       button's hover discs lost their corner-side quarter. The fork
