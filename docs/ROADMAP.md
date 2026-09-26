@@ -1438,6 +1438,15 @@
         cannot present flip-model); NativeTerm's windows no longer use
         it. A theme switch keeping fonts and shaping measured no faster
         (the frame after a reload 22-28 ms either way), so not done.
+- [ ] macOS maximize/restore (zoom) and live resize in step with the
+      window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
+      Mac). Chrome holds the transaction that changes the frame until a
+      frame of the new size is drawn (CATransactionCoordinator, up to
+      500 ms); the fork painted when max_fps next allowed it and presented
+      apart from the transaction, so the content ran ahead of or behind the
+      frame. Now `windowDidResize:` paints at once and the Metal layer
+      presents with the transaction while the size changes (wgpu-hal
+      vendored for the one flag).
 - [x] A double-click on the tab strip's empty part did different things
       on different systems (2026-09-26). Chrome: the empty strip is the
       window's caption, and each platform's caption rules apply —
