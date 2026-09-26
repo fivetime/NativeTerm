@@ -1343,6 +1343,48 @@
       unfocused colours first blended 75 % towards the tab;
       `chrome_strip::title_colour`, tested), so a theme's text is never
       lost on its own tab. After: white on the dark tab
+- [x] Drag, maximize and new tab not as smooth as Chrome or Windows
+      Terminal (2026-09-26). Five agents read the fork's code (render
+      loop, drag/resize/maximize per platform, the new-tab path, what
+      blocks the GUI thread, the fork's own additions); then measured on
+      Windows from outside (SetWindowPos/ShowWindow and WM_NULL pings
+      return once the GUI thread handled them), 30 cmd tabs, before ->
+      after: a resize step 265 -> 26 ms (mean; p50 265 -> 8),
+      maximize/restore 308 -> 68 ms, the GUI thread held by a new tab
+      135 -> 7 ms, paints under continuous output 32 -> 60 a second, a
+      frame with the Chrome strip 48 -> 5 ms, idle 0 ms of CPU. Fork
+      commits, each measured:
+      - `179dacc56` Linux frame: the edge filled row by row (its middle
+        is stretched, so each row is two ends and one repeated value),
+        a drag's ConfigureNotify fits nothing, fit's requests unchecked,
+        focus changes redraw no picture.
+      - `734330047` Chrome tab shapes drawn from width-free pieces (two
+        ends and a stretched column): the glyph atlas no longer fills
+        with one picture per tab width and gets rebuilt whole.
+      - `98c8bf7c4` the hover card laid out once while it shows.
+      - `185a16c65` a resize resizes the shown tab at once and the others
+        250 ms later one at a time (each resizes ptys and reflows
+        scrollback); one title update per burst of notifications;
+        unchanged sizes do nothing; format-tab-title/window-title build
+        nothing without a handler.
+      - `f22126de2` an element tree drawn a layer at a time: a quad
+        allocator maps the layer's vertex buffers, 2.3 ms with OpenGL on
+        Windows, and was taken for every element: the tab bar was 46 ms
+        of a 48 ms frame.
+      - `f009fcbe0` a new tab: no `wsl.exe -l -v` per spawn (140 ms, run
+        to learn whether the local domain is a WSL one), the pty, the
+        process and the cwd lookup off the GUI thread, the first title's
+        process walk in the background.
+      - `f82bd70bf` Windows paints paced by a high-resolution waitable
+        timer from each frame's start (the executor's timers wait in
+        15.6 ms ticks: 16 ms took 31), every live-resize step painted;
+        `cac8c952e` X11 and macOS paced from each frame's start too.
+      Not done: macOS's window drag handed to the window server
+      (performWindowDragWithEvent: untestable here without clicks on the
+      Mac); Wayland's edge as border subsurfaces rather than one
+      window-sized buffer (now filled row by row, a memset for the
+      inside). To check by hand: dragging a window's border on Windows
+      (the modal size loop cannot be driven from outside).
 - [x] A double-click on the tab strip's empty part did different things
       on different systems (2026-09-26). Chrome: the empty strip is the
       window's caption, and each platform's caption rules apply —
