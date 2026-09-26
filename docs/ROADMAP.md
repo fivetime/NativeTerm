@@ -1456,7 +1456,11 @@
       OpenGL llvmpipe for all three values. Found on the way: elementary
       (scale 2) killed every new WezTerm window with a Wayland protocol
       error (an edge strip of odd height); fork `41030ba5b` fixes it.
-      Windows not checked yet.
+      Windows (MacBookPro16, AMD Radeon Pro 5600M only): power_saving and
+      performance = WebGPU DirectX 12 on the Radeon; software drew with
+      the Radeon's OpenGL driver too (opengl32.dll is a KnownDLL, so the
+      bundled Mesa was never loaded) until fork `18ff7923b` loads
+      mesa\opengl32.dll by its path: now llvmpipe (Mesa 20.1.8), painted.
 - [ ] macOS maximize/restore (zoom) and live resize in step with the
       window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
       Mac). Chrome holds the transaction that changes the frame until a
