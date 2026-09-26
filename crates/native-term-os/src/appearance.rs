@@ -39,6 +39,13 @@ pub struct Appearance {
     /// kept: GNOME's `button-layout`, KWin's `ButtonsOnLeft`/`ButtonsOnRight`
     /// (Linux only; `None` when the desktop does not say).
     pub button_layout: Option<String>,
+    /// What a double-click on a title bar does, as the WezTerm option
+    /// `titlebar_double_click` names it (`ToggleMaximize`, `Minimize`,
+    /// `Lower`, `Menu`, `None`): GTK's `gtk-titlebar-double-click`, which
+    /// Chrome follows (XSETTINGS `Gtk/TitlebarDoubleClick`, gsettings
+    /// `action-double-click-titlebar`, `settings.ini`); Linux only, `None`
+    /// when the desktop does not say or says what Chrome would not act on.
+    pub titlebar_double_click: Option<&'static str>,
     /// The icon theme the desktop uses (`elementary`, `breeze-dark`,
     /// `bloom`, …; see `icons`), Linux only.
     pub icon_theme: Option<String>,
@@ -101,6 +108,21 @@ pub fn read() -> Appearance {
 /// on Linux; tested everywhere.)
 #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
 pub(crate) mod parse {
+    /// A GTK title bar action (`gtk-titlebar-double-click`) as the WezTerm
+    /// option names it: the ones Chrome acts on (ParseActionString in
+    /// settings_provider_gtk.cc); `toggle-maximize-horizontally`,
+    /// `toggle-shade` and the like keep Chrome's default
+    pub fn titlebar_action(gtk: &str) -> Option<&'static str> {
+        match gtk.trim() {
+            "none" => Some("None"),
+            "lower" => Some("Lower"),
+            "minimize" => Some("Minimize"),
+            "toggle-maximize" => Some("ToggleMaximize"),
+            "menu" => Some("Menu"),
+            _ => None,
+        }
+    }
+
     /// A colour written the way the desktop files write it: `r,g,b`
     /// (kdeglobals), `#rrggbb` or `rgb(r,g,b)`.
     pub(super) fn parse_rgb(text: &str) -> Option<(u8, u8, u8)> {
@@ -341,6 +363,7 @@ mod imp {
             accent: native_term_win::desktop::accent(),
             monospace: None,
             button_layout: None,
+            titlebar_double_click: None,
             icon_theme: None,
             gtk_theme: None,
             ui_font: None,
@@ -456,6 +479,7 @@ mod imp {
             accent: Some(accent),
             monospace: monospace(),
             button_layout: None,
+            titlebar_double_click: None,
             icon_theme: None,
             gtk_theme: None,
             ui_font: None,
@@ -512,10 +536,24 @@ mod imp {
         let gtk = || config_file("gtk-3.0/settings.ini").or_else(|| config_file("gtk-4.0/settings.ini"));
         // (Lingmo calls itself KDE but keeps its theme in settings.ini;
         // gsettings answers a bare `Adwaita` where nothing ever set it)
-        let [x_icons, x_gtk, x_font]: [Option<String>; 3] =
-            crate::icons::xsettings(&["Net/IconThemeName", "Net/ThemeName", "Gtk/FontName"])
+        let [x_icons, x_gtk, x_font, x_double_click]: [Option<String>; 4] =
+            crate::icons::xsettings(&["Net/IconThemeName", "Net/ThemeName", "Gtk/FontName", "Gtk/TitlebarDoubleClick"])
                 .try_into()
                 .unwrap_or_default();
+        // where GTK (Chrome's GtkUi, gtk-titlebar-double-click) takes it
+        let titlebar_double_click = x_double_click
+            .or_else(|| {
+                output("gsettings", &["get", "org.gnome.desktop.wm.preferences", "action-double-click-titlebar"])
+                    .map(|v| v.trim().trim_matches('\'').to_string())
+            })
+            .or_else(|| {
+                gtk().and_then(|ini| {
+                    super::parse::ini_value(&ini, "Settings", "gtk-titlebar-double-click")
+                        .map(|v| v.trim().trim_matches('"').to_string())
+                })
+            })
+            .as_deref()
+            .and_then(super::parse::titlebar_action);
         let kdeglobals = config_file("kdeglobals").unwrap_or_default();
         let icon_theme = x_icons
             .or_else(|| super::parse::kde_icon_theme(&config_file("kdeglobals").unwrap_or_default()))
@@ -573,6 +611,7 @@ mod imp {
             accent,
             monospace: monospace(),
             button_layout,
+            titlebar_double_click,
             icon_theme,
             gtk_theme,
             ui_font,
@@ -657,6 +696,13 @@ mod tests {
         assert_eq!(gtk_icon_theme("[Settings]\ngtk-icon-theme-name=\"Papirus\"\n").as_deref(), Some("Papirus"));
         assert_eq!(gtk_icon_theme("[Settings]\n"), None);
         assert_eq!(gtk_theme("[Settings]\ngtk-theme-name=Adwaita-dark\n").as_deref(), Some("Adwaita-dark"));
+        // GTK's title bar actions, as Chrome takes them
+        assert_eq!(titlebar_action("toggle-maximize"), Some("ToggleMaximize"));
+        assert_eq!(titlebar_action("minimize\n"), Some("Minimize"));
+        assert_eq!(titlebar_action("menu"), Some("Menu"));
+        assert_eq!(titlebar_action("none"), Some("None"));
+        assert_eq!(titlebar_action("lower"), Some("Lower"));
+        assert_eq!(titlebar_action("toggle-maximize-horizontally"), None, "Chrome's default then");
         let font = |f: &str, t: u32| Some(super::UiFont { family: f.to_string(), tenths: t });
         assert_eq!(pango_font("Cantarell 11"), font("Cantarell", 110));
         assert_eq!(pango_font("'Noto Sans CJK SC Bold 10.5'\n"), font("Noto Sans CJK SC", 105), "gsettings' quotes");

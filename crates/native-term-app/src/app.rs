@@ -1800,6 +1800,7 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
         accent: desktop.accent,
         tab_icon: native_term_os::icons::terminal_icon(desktop.icon_theme.as_deref())
             .map(|p| p.to_string_lossy().into_owned()),
+        titlebar_double_click: desktop.titlebar_double_click,
         button_layout: desktop.button_layout,
     }
 }

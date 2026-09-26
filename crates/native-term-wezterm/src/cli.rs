@@ -382,6 +382,10 @@ local config = wezterm.config_builder()
     if let Some(layout) = look.button_layout.as_deref().filter(|_| !cfg!(target_os = "macos")) {
         lua.push_str(&title_buttons(layout, &look.button_icons, look.titlebar.as_ref()));
     }
+    if let Some(action) = look.titlebar_double_click {
+        // the desktop's title bar double-click, as Chrome follows it
+        lua.push_str(&format!("pcall(function()\n  config.titlebar_double_click = \"{action}\"\nend)\n"));
+    }
     if !look.fonts.is_empty() {
         // the system's fonts (see native_term_os::fonts::terminal_families);
         // WezTerm's own fallbacks follow
@@ -588,6 +592,10 @@ pub struct Look {
     /// (`close:maximize`; see `native_term_os::appearance`), or `None` for
     /// WezTerm's own (minimize, maximize, close at the right).
     pub button_layout: Option<String>,
+    /// What a double-click on the strip's empty part does: the desktop's
+    /// title bar preference (WezTerm's `titlebar_double_click`; see
+    /// `native_term_os::appearance`), `None` for the default.
+    pub titlebar_double_click: Option<&'static str>,
     /// The desktop's own icons for them (`close`, `minimize`, `maximize`,
     /// `restore`: SVG files out of its icon theme; see
     /// `native_term_os::icons`).
@@ -880,6 +888,7 @@ mod tests {
                 fonts: vec!["Cascadia Mono".into(), "Microsoft YaHei".into()],
                 switcher: false,
                 button_layout: Some("close:maximize".into()),
+                titlebar_double_click: Some("Minimize"),
                 button_icons: vec![
                     ("close", "/usr/share/icons/elementary/actions/symbolic/window-close-symbolic.svg".into()),
                     ("maximize", "/icons/\"odd\".svg".into()),
@@ -913,6 +922,11 @@ mod tests {
         assert!(!right.contains("alignment"), "WezTerm's own side already");
         assert!(!right.contains("integrated_title_button_images"), "no GTK title bar: no pictures");
         assert!(read.contains("config.tab_icon = \"/usr/share/icons/Adwaita/16x16/apps/utilities-terminal.png\""));
+        assert!(
+            read.contains("pcall(function()\n  config.titlebar_double_click = \"Minimize\"\nend)\n"),
+            "the desktop's title bar double-click"
+        );
+        assert!(!unknown.contains("titlebar_double_click"), "none read: WezTerm's default");
         assert!(!unknown.contains("tab_icon"), "no icon found: none drawn");
         // the menu on a right click on the tab where WezTerm tells of one
         assert!(read.contains("wezterm.on(\"tab-right-click\""));
