@@ -398,15 +398,21 @@ local config = wezterm.config_builder()
 -- drawn by the GPU through WebGpu (Metal, Vulkan, DirectX 12) where there
 -- is a real one, the integrated one first (it spares the battery); OpenGL
 -- where there is none (a virtual machine renders in software). Only the
--- GUI can ask: `wezterm cli` reads this file too.
+-- GUI can ask: `wezterm cli` reads this file too. Of one GPU's backends,
+-- DirectX 12 before Vulkan on Windows, as Chrome draws through Direct3D
+-- there: its swap chain follows a resize in 11 ms a step where Vulkan's
+-- took 37 (AMD, measured 2026-09-26).
 if wezterm.gui then
-  local gpu = nil
+  local kinds = { IntegratedGpu = 0, DiscreteGpu = 1 }
+  local backends = { Dx12 = 0, Metal = 0, Vulkan = 1, Gl = 2 }
+  local gpu, best = nil, nil
   for _, adapter in ipairs(wezterm.gui.enumerate_gpus()) do
-    if adapter.device_type == "IntegratedGpu" then
-      gpu = adapter
-      break
-    elseif adapter.device_type == "DiscreteGpu" and gpu == nil then
-      gpu = adapter
+    local kind = kinds[adapter.device_type]
+    if kind then
+      local rank = kind * 10 + (backends[adapter.backend] or 3)
+      if best == nil or rank < best then
+        gpu, best = adapter, rank
+      end
     end
   end
   if gpu then
