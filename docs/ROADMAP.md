@@ -1417,6 +1417,27 @@
       - `b1237af75` macOS: dragging the strip hands the window to the
         window server (performWindowDragWithEvent:, as Chrome's
         caption does). Built; to be tested by hand on the Mac.
+- [x] The strip closer to Chrome, and the last costs (2026-09-26):
+      - fork `07bf68144` a title too long for its tab fades out over its
+        last ~3 characters (gfx FADE_TAIL, Chrome's numbers), where it
+        was cut mid-glyph; titles no longer capped at 16 cells.
+      - fork `3b8a15365` hover cards fade in (200 ms), slide to the next
+        tab at once (200 ms, the text crossfading) and fade out (150 ms),
+        FAST_OUT_SLOW_IN, over an inactive window too.
+      - fork `834d3d616` Wayland: a tiled window keeps its resize band,
+        no shadow, square corners (was: no edge at all).
+      - fork `1d43644e0` + `ebe8842` a double-click on the strip does the
+        desktop's title bar action: GTK's gtk-titlebar-double-click on
+        Linux (read here, passed as `titlebar_double_click`; KWin menu
+        and lower verified on Lingmo), macOS's AppleActionOnDoubleClick.
+      - `7d52136` WezTerm on DirectX 12 before Vulkan on Windows: a
+        resize step 37 -> 11 ms (p90 50 -> 14), same paint rate.
+      - Checked and left as Chrome is: with too many tabs the active tab
+        may be hidden too (Chrome's default strip does not scroll). The
+        OpenGL path's ~35 ms first present after a resize remains (WGL
+        cannot present flip-model); NativeTerm's windows no longer use
+        it. A theme switch keeping fonts and shaping measured no faster
+        (the frame after a reload 22-28 ms either way), so not done.
 - [x] A double-click on the tab strip's empty part did different things
       on different systems (2026-09-26). Chrome: the empty strip is the
       window's caption, and each platform's caption rules apply —
