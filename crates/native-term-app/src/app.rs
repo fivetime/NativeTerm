@@ -1777,8 +1777,13 @@ fn watch_appearance(ctx: egui::Context) {
 
 /// How the terminal's windows should look, where NativeTerm writes their
 /// configuration (WezTerm): what the desktop says, with the theme
-/// setting (`light`/`dark`, or nothing) over it.
-pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezterm::Look {
+/// setting (`light`/`dark`, or nothing) over it, drawn by the GPU the
+/// `terminal.gpu` setting picks.
+pub fn terminal_look(
+    setting: Option<&str>,
+    switcher: bool,
+    gpu: native_term_wezterm::Gpu,
+) -> native_term_wezterm::Look {
     let desktop = native_term_os::appearance::cached();
     let dark = match setting {
         Some("light") => Some(false),
@@ -1802,6 +1807,7 @@ pub fn terminal_look(setting: Option<&str>, switcher: bool) -> native_term_wezte
             .map(|p| p.to_string_lossy().into_owned()),
         titlebar_double_click: desktop.titlebar_double_click,
         button_layout: desktop.button_layout,
+        gpu,
     }
 }
 
@@ -1845,7 +1851,8 @@ fn desktop_titlebar(
 /// too, where NativeTerm writes their configuration.
 fn sync_terminal_look(core: &Core) {
     if let Some(wezterm) = core.terminal().as_any().downcast_ref::<native_term_wezterm::WezTerm>() {
-        wezterm.set_look(&terminal_look(core.setting(THEME_SETTING).as_deref(), core.ctrl_tab()));
+        let gpu = native_term_wezterm::Gpu::from_setting(core.setting(native_term_wezterm::Gpu::SETTING).as_deref());
+        wezterm.set_look(&terminal_look(core.setting(THEME_SETTING).as_deref(), core.ctrl_tab(), gpu));
     }
 }
 
@@ -2286,15 +2293,15 @@ mod tests {
     /// too; without one, the desktop does (whatever it could say).
     #[test]
     fn the_terminal_follows_the_theme_setting() {
-        assert_eq!(terminal_look(Some("light"), false).dark, Some(false));
-        assert_eq!(terminal_look(Some("dark"), false).dark, Some(true));
+        assert_eq!(terminal_look(Some("light"), false, Default::default()).dark, Some(false));
+        assert_eq!(terminal_look(Some("dark"), false, Default::default()).dark, Some(true));
         let desktop = native_term_os::appearance::cached();
-        assert_eq!(terminal_look(None, false).dark, desktop.dark);
-        assert_eq!(terminal_look(Some(""), false).dark, desktop.dark);
+        assert_eq!(terminal_look(None, false, Default::default()).dark, desktop.dark);
+        assert_eq!(terminal_look(Some(""), false, Default::default()).dark, desktop.dark);
         assert_eq!(
-            terminal_look(None, false).fonts,
+            terminal_look(None, false, Default::default()).fonts,
             native_term_os::fonts::terminal_families(desktop.monospace.as_deref())
         );
-        assert!(terminal_look(None, true).switcher);
+        assert!(terminal_look(None, true, Default::default()).switcher);
     }
 }

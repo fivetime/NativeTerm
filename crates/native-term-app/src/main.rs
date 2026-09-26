@@ -277,9 +277,9 @@ fn setup() -> Result<Start, String> {
         let core = match chosen {
             Chosen::WezTerm(dir) => {
                 // the windows look like the desktop from the start; the theme
-                // setting is applied over it once the window is up
+                // and GPU settings are applied over it once the window is up
                 native_term_os::appearance::refresh();
-                let look = app::terminal_look(None, false);
+                let look = app::terminal_look(None, false, Default::default());
                 let mut terminal =
                     native_term_wezterm::WezTerm::new(dir.as_deref(), &shim).with_config_dir(&data_dir, &look);
                 if other_ssh_dir {

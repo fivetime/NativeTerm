@@ -1438,6 +1438,17 @@
         cannot present flip-model); NativeTerm's windows no longer use
         it. A theme switch keeping fonts and shaping measured no faster
         (the frame after a reload 22-28 ms either way), so not done.
+- [x] Which GPU draws the terminal is the user's choice (2026-09-27):
+      `terminal.gpu` in settings.toml, per machine — `power_saving`
+      (default, integrated first), `performance` (discrete first),
+      `software` (the CPU; fork `f2b0014a0` makes WezTerm's Software front
+      end really the CPU on macOS). Why: on the MacBook Pro 2018 a zoom
+      took 460-690 ms on the Intel GPU (WindowServer holds it during the
+      animation; frames waited 80-395 ms; not the drawable, not the
+      surface size, not presenting with the transaction — each ruled out
+      by experiment), 381 ms on the Radeon (native 352), and the CPU
+      renderer skipped the animation. An OpenGL window was as smooth only
+      because macOS moved it, and the whole screen, onto the Radeon.
 - [ ] macOS maximize/restore (zoom) and live resize in step with the
       window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
       Mac). Chrome holds the transaction that changes the frame until a

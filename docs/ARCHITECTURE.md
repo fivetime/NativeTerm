@@ -4697,10 +4697,20 @@ on macOS, and on Linux Cascadia Mono where installed, the desktop's
 monospace font (else WezTerm's own JetBrains Mono, so a CJK sans never
 draws the Latin) and fontconfig's Simplified Chinese family. Also no
 close prompts, the tab bar always shown, and the
-renderer: WebGpu (Metal, Vulkan, DirectX 12) on a real GPU, the
-integrated one first, found by the GUI itself
-(`wezterm.gui.enumerate_gpus()`), else OpenGL (a VM's software
-rendering); `set_look`
+renderer, as the per-machine setting `terminal.gpu` says
+(`native_term_wezterm::Gpu`): WebGpu (Metal, Vulkan, DirectX 12) on a
+real GPU, found by the GUI itself (`wezterm.gui.enumerate_gpus()`), the
+integrated one first (`power_saving`, the default, as WezTerm's
+`LowPower`) or the discrete one first (`performance`), else OpenGL (a
+VM's virtual GPU driver or its software rendering); or no GPU at all
+(`software`: WezTerm's Software front end, Mesa's llvmpipe on Windows and
+Linux, Apple's software renderer on macOS). A trade the user makes: on a
+Mac with two GPUs the integrated one drives the screen and, while macOS
+animates a zoom, WindowServer holds it, so a frame waited 80-395 ms and a
+zoom took 460-690 ms, against 381 on the discrete one (native: 352;
+MacBook Pro 2018, measured 2026-09-27), which costs the battery; the
+CPU renderer could not keep up with a zoom at all. A new choice applies to
+windows opened after it; `set_look`
 rewrites it when any of that changes and running windows reload it on
 their own. All of it only unless the person has a WezTerm configuration
 of their own, which is left alone. The environment, not `--config-file`: a

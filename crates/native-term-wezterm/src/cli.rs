@@ -395,32 +395,6 @@ local config = wezterm.config_builder()
     lua.push_str(
         r#"config.font_size = 12.0
 
--- drawn by the GPU through WebGpu (Metal, Vulkan, DirectX 12) where there
--- is a real one, the integrated one first (it spares the battery); OpenGL
--- where there is none (a virtual machine renders in software). Only the
--- GUI can ask: `wezterm cli` reads this file too. Of one GPU's backends,
--- DirectX 12 before Vulkan on Windows, as Chrome draws through Direct3D
--- there: its swap chain follows a resize in 11 ms a step where Vulkan's
--- took 37 (AMD, measured 2026-09-26).
-if wezterm.gui then
-  local kinds = { IntegratedGpu = 0, DiscreteGpu = 1 }
-  local backends = { Dx12 = 0, Metal = 0, Vulkan = 1, Gl = 2 }
-  local gpu, best = nil, nil
-  for _, adapter in ipairs(wezterm.gui.enumerate_gpus()) do
-    local kind = kinds[adapter.device_type]
-    if kind then
-      local rank = kind * 10 + (backends[adapter.backend] or 3)
-      if best == nil or rank < best then
-        gpu, best = adapter, rank
-      end
-    end
-  end
-  if gpu then
-    config.front_end = "WebGpu"
-    config.webgpu_preferred_adapter = gpu
-  end
-end
-
 -- NativeTerm closes tabs itself; the tab strip is where it looks
 config.window_close_confirmation = "NeverPrompt"
 config.hide_tab_bar_if_only_one_tab = false
@@ -428,6 +402,7 @@ config.use_fancy_tab_bar = true
 
 "#,
     );
+    lua.push_str(&gpu_lua(look.gpu));
     lua.push_str(&MENU_LUA.replace("__SHIM__", &lua_escape(&shim.display().to_string())));
     if look.switcher {
         lua.push_str(SWITCHER_LUA);
@@ -583,6 +558,85 @@ else
 end
 "#;
 
+/// Which GPU the terminal's windows draw with: NativeTerm's `terminal.gpu`
+/// setting, per machine, since it is a trade the user makes. On a Mac with
+/// two GPUs the integrated one drives the screen and, while macOS animates
+/// a window (zoom), WindowServer holds it: a frame drawn there waited
+/// 80-395 ms, where the discrete one drew each step in 2-18 ms and the
+/// zoom took 381 ms against 460-690 (native: 352; Intel UHD 630 / Radeon
+/// Pro 560X, measured 2026-09-27); the discrete one costs the battery.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Gpu {
+    /// The integrated GPU first (it spares the battery), as WezTerm's
+    /// default `webgpu_power_preference` (`LowPower`).
+    #[default]
+    PowerSaving,
+    /// The discrete GPU first, where there is one.
+    Performance,
+    /// No GPU: drawn by the CPU (WezTerm's `Software` front end: Mesa's
+    /// llvmpipe on Windows and Linux, Apple's software renderer on macOS).
+    Software,
+}
+
+impl Gpu {
+    pub const SETTING: &'static str = "terminal.gpu";
+
+    /// The setting's value: `power_saving` (or none), `performance`,
+    /// `software`.
+    #[must_use]
+    pub fn from_setting(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            Some("performance") => Self::Performance,
+            Some("software") => Self::Software,
+            _ => Self::PowerSaving,
+        }
+    }
+}
+
+/// The generated configuration's choice of front end and GPU.
+fn gpu_lua(gpu: Gpu) -> String {
+    if gpu == Gpu::Software {
+        return "-- drawn by the CPU (NativeTerm's `terminal.gpu` setting: software)
+config.front_end = \"Software\"
+
+"
+        .to_string();
+    }
+    let (integrated, discrete, which) = match gpu {
+        Gpu::Performance => (1, 0, "performance: the discrete one first"),
+        _ => (0, 1, "power_saving: the integrated one first, it spares the battery"),
+    };
+    format!(
+        r#"-- drawn by the GPU through WebGpu (Metal, Vulkan, DirectX 12) where there
+-- is a real one ({which}; NativeTerm's `terminal.gpu` setting); OpenGL
+-- where there is none (a virtual machine: its virtual GPU's driver or a
+-- software one). Only the GUI can ask: `wezterm cli` reads this file too.
+-- Of one GPU's backends, DirectX 12 before Vulkan on Windows, as Chrome
+-- draws through Direct3D there: its swap chain follows a resize in 11 ms
+-- a step where Vulkan's took 37 (AMD, measured 2026-09-26).
+if wezterm.gui then
+  local kinds = {{ IntegratedGpu = {integrated}, DiscreteGpu = {discrete} }}
+  local backends = {{ Dx12 = 0, Metal = 0, Vulkan = 1, Gl = 2 }}
+  local gpu, best = nil, nil
+  for _, adapter in ipairs(wezterm.gui.enumerate_gpus()) do
+    local kind = kinds[adapter.device_type]
+    if kind then
+      local rank = kind * 10 + (backends[adapter.backend] or 3)
+      if best == nil or rank < best then
+        gpu, best = adapter, rank
+      end
+    end
+  end
+  if gpu then
+    config.front_end = "WebGpu"
+    config.webgpu_preferred_adapter = gpu
+  end
+end
+
+"#
+    )
+}
+
 /// How the windows NativeTerm opens should look: what it read from the
 /// desktop, overridden by its own theme setting.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -619,6 +673,8 @@ pub struct Look {
     /// The icon before every tab's title (the desktop's terminal icon),
     /// as Chrome's favicon.
     pub tab_icon: Option<String>,
+    /// Which GPU draws them (see `Gpu`).
+    pub gpu: Gpu,
 }
 
 fn hex((r, g, b): native_term_os::titlebar::Rgb) -> String {
@@ -875,6 +931,20 @@ mod tests {
         assert!(unknown.contains("config.command_palette_bg_color = dark and"));
         assert!(!unknown.contains("ShowTabNavigator"), "Ctrl+Tab stays WezTerm's until asked");
         assert!(unknown.trim_end().ends_with("return config"));
+        assert!(unknown.contains("local kinds = { IntegratedGpu = 0, DiscreteGpu = 1 }"), "power saving by default");
+        let fast = default_config(&Look { gpu: Gpu::Performance, ..Look::default() }, shim);
+        assert!(fast.contains("local kinds = { IntegratedGpu = 1, DiscreteGpu = 0 }"));
+        let cpu = default_config(&Look { gpu: Gpu::Software, ..Look::default() }, shim);
+        assert!(
+            cpu.contains(
+                "config.front_end = \"Software\"
+"
+            ) && !cpu.contains("enumerate_gpus")
+        );
+        assert_eq!(Gpu::from_setting(None), Gpu::PowerSaving);
+        assert_eq!(Gpu::from_setting(Some("performance")), Gpu::Performance);
+        assert_eq!(Gpu::from_setting(Some(" software ")), Gpu::Software);
+        assert_eq!(Gpu::from_setting(Some("fast")), Gpu::PowerSaving);
         let with_switcher = default_config(&Look { switcher: true, ..Look::default() }, shim);
         assert!(with_switcher.contains("ShowTabNavigator"));
         assert!(with_switcher.contains("wezterm.action.ShowTabSwitcher(1)"), "the grid where the fork has it");
@@ -903,6 +973,7 @@ mod tests {
                 ui_font: Some(native_term_os::appearance::UiFont { family: "Cantarell".into(), tenths: 110 }),
                 accent: None,
                 tab_icon: Some("/usr/share/icons/Adwaita/16x16/apps/utilities-terminal.png".into()),
+                gpu: Gpu::Performance,
             },
             shim,
         );
