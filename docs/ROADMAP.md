@@ -1449,6 +1449,14 @@
       by experiment), 381 ms on the Radeon (native 352), and the CPU
       renderer skipped the animation. An OpenGL window was as smooth only
       because macOS moved it, and the whole screen, onto the Radeon.
+      Checked end to end (setting -> generated config -> the renderer a
+      window got, fork `96165a250` logs it at debug): Mac power_saving =
+      WebGPU Intel UHD 630, performance = WebGPU Radeon Pro 560X (the
+      screen stays on Intel); the six Linux boxes (VMs, llvmpipe only)
+      OpenGL llvmpipe for all three values. Found on the way: elementary
+      (scale 2) killed every new WezTerm window with a Wayland protocol
+      error (an edge strip of odd height); fork `41030ba5b` fixes it.
+      Windows not checked yet.
 - [ ] macOS maximize/restore (zoom) and live resize in step with the
       window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
       Mac). Chrome holds the transaction that changes the frame until a
