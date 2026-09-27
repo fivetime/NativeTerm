@@ -4708,12 +4708,12 @@ Windows (the bundled one) and Linux, Apple's software renderer on macOS.
 Windows' own OpenGL is 1.1 without a GPU, too old for WezTerm (a VM's
 windows failed outright unless it was reached over Remote Desktop), and
 Mesa beat WARP (Windows 10 VM, 2026-09-27: an output done in 36 s that
-WARP had not finished after 67). A trade the user makes: on a
-Mac with two GPUs the integrated one drives the screen and, while macOS
-animates a zoom, WindowServer holds it, so a frame waited 80-395 ms and a
-zoom took 460-690 ms, against 381 on the discrete one (native: 352;
-MacBook Pro 2018, measured 2026-09-27), which costs the battery; the
-CPU renderer could not keep up with a zoom at all. A new choice applies to
+WARP had not finished after 67). A trade the user makes (the
+discrete GPU costs the battery), and on a Mac with two GPUs one that buys
+less than it seems: as the screen shows it, a zoom is smooth when the
+discrete GPU drives the screen, whichever GPU and front end draw, and the
+setting leaves the screen on the integrated one (docs/ROADMAP.md,
+2026-09-27). The CPU renderer could not keep up with a zoom at all. A new choice applies to
 windows opened after it; `set_look`
 rewrites it when any of that changes and running windows reload it on
 their own. All of it only unless the person has a WezTerm configuration

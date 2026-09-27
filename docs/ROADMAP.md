@@ -1472,6 +1472,38 @@
       (checked by eye only when the user tried it): gdi32's pixel format
       and SwapBuffers reached the system's opengl32.dll, not Mesa's; fork
       `cb62625b0` calls Mesa's own wgl* for them, and the window shows.
+- [ ] macOS zoom as the screen shows it (measured 2026-09-27, MacBook
+      Pro 2018, screen 3840x2400 scaled, 20 tabs, 6 zooms each; a sampler
+      read one screen column ~50-65 times a second: how many different
+      window heights a zoom showed, over how long, the longest the screen
+      stood still). The earlier numbers (381 ms on the Radeon) were the
+      application's own timing, not the screen's.
+
+      | drawn by | screen on | heights | ms | longest still |
+      |---|---|---|---|---|
+      | a plain AppKit window (baseline) | Intel | 19.4 | 345 | 35-68 |
+      | OpenGL, Radeon | Radeon | 9.8-10.0 | 333-340 | 104-110 |
+      | WebGpu Radeon, with transaction | Radeon | 11.3 | 358 | 80 |
+      | WebGpu Radeon, without | Radeon | 11.2 | 369 | 83 |
+      | WebGpu Intel, with transaction | Radeon | 10.3 | 363 | 109 |
+      | WebGpu Intel, with transaction (the default) | Intel | 3.5-3.8 | 498-539 | 331-362 |
+      | WebGpu Intel, without | Intel | 4.7 | 718 | 378 |
+      | WebGpu Radeon, with transaction (`performance`) | Intel | 3.0 | 528 | 422 |
+      | WebGpu Radeon, without | Intel | 3.5 | 708 | 480 |
+      | OpenGL, Intel | Intel | 3.0 | 699 | 588 |
+      | WebGpu Intel, no paint in windowDidResize (before `68dd2bd42`) | Intel | 1.8 | 432 | 795 |
+
+      So: what decides is the GPU that drives the screen. On the Radeon
+      every combination shows 10-11 heights in ~360 ms; on the Intel GPU
+      none shows more than 5, whoever draws. `terminal.gpu = performance`
+      draws on the Radeon but leaves the screen on Intel, and gains
+      nothing on screen. Painting in windowDidResize (`68dd2bd42`) doubled
+      what the screen shows (1.8 -> 3.5) and presenting with the
+      transaction (the vendored wgpu-hal) shortens the zoom (530 against
+      710 ms on Intel) and had no frame whose content was of another size
+      than its window (without: 1-2 in 12 zooms): both stay. Open: make
+      `performance` move the screen to the discrete GPU; and what the
+      default can do on the Intel GPU (a native window shows 19).
 - [x] Windows: the terminal's windows follow a theme switch at once
       (2026-09-27, reported on the Windows 10 VM: the system went light,
       NativeTerm's window too, the WezTerm window stayed dark). NativeTerm

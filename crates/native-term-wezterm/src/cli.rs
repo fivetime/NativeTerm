@@ -559,12 +559,11 @@ end
 "#;
 
 /// Which GPU the terminal's windows draw with: NativeTerm's `terminal.gpu`
-/// setting, per machine, since it is a trade the user makes. On a Mac with
-/// two GPUs the integrated one drives the screen and, while macOS animates
-/// a window (zoom), WindowServer holds it: a frame drawn there waited
-/// 80-395 ms, where the discrete one drew each step in 2-18 ms and the
-/// zoom took 381 ms against 460-690 (native: 352; Intel UHD 630 / Radeon
-/// Pro 560X, measured 2026-09-27); the discrete one costs the battery.
+/// setting, per machine, since it is a trade the user makes: the discrete
+/// one costs the battery. What it buys on a Mac with two GPUs is less than
+/// it seems: what makes a zoom smooth there is the GPU that drives the
+/// screen, not the one that draws (docs/ROADMAP.md, 2026-09-27), and the
+/// screen stays on the integrated one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Gpu {
     /// The integrated GPU first (it spares the battery), as WezTerm's
