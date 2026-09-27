@@ -95,6 +95,25 @@ pub enum ShimMessage {
     /// answered by `AppMessage::Quotation` (once the person has said, where
     /// they are asked).
     PasteQuotation,
+    /// From a `Request` helper: the terminal finds text in a pane for the
+    /// person and asks what, answered by `AppMessage::Find` when they say
+    /// "Find Next" in NativeTerm's dialog (or close it). `initial`: what
+    /// the dialog's field may start with, the first time; `result`: what
+    /// the last find came to, from then on.
+    Find {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        initial: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result: Option<FindResult>,
+    },
+}
+
+/// What a find came to: the match shown, counted from the first (0: none,
+/// there is none or no more that way), and how many there are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindResult {
+    pub position: u32,
+    pub count: u32,
 }
 
 /// One line of the tab menu, as `AppMessage::TabMenu` lists it: an
@@ -184,6 +203,16 @@ pub enum AppMessage {
         between: bool,
         paste: bool,
     },
+    /// The answer to `ShimMessage::Find`: what to find and how; `find`
+    /// false: the person is done, the dialog is closed.
+    Find {
+        find: bool,
+        text: String,
+        match_case: bool,
+        whole_word: bool,
+        wrap: bool,
+        up: bool,
+    },
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
@@ -228,6 +257,8 @@ mod tests {
             ShimMessage::TabMenu,
             ShimMessage::TabAction { id: 4 },
             ShimMessage::PasteQuotation,
+            ShimMessage::Find { initial: Some("eth0".into()), result: None },
+            ShimMessage::Find { initial: None, result: Some(FindResult { position: 3, count: 17 }) },
             ShimMessage::TabCard,
         ];
         for m in messages {

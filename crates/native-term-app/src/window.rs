@@ -626,17 +626,20 @@ impl Runner {
             }
             let n = self.next_extra;
             self.next_extra += 1;
-            let viewport = request.viewport.with_visible(false);
-            let middle = request.middle;
-            let place = move |window: &Window| {
-                if let Some(middle) = middle {
-                    let size = window.outer_size();
-                    let size = (size.width as i32, size.height as i32);
-                    let (x, y) = around(middle, size, win::work_area_at(middle.0, middle.1));
-                    window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
-                }
-            };
-            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, false, place) {
+            let mut viewport = request.viewport.with_visible(false);
+            if let Some(middle) = request.middle {
+                // the window is made where it is to be: a window moved
+                // before it is shown says nothing of it to the window
+                // manager, which then puts it where it puts new windows
+                // (KWin: the screen's middle); one made at a place does
+                let scale = self.main.as_ref().map_or(1.0, |main| main.window.scale_factor());
+                let pixels = |points: f32| (f64::from(points) * scale) as i32;
+                let size = viewport.inner_size.map_or((0, 0), |size| (pixels(size.x), pixels(size.y)));
+                let (x, y) = around(middle, size, win::work_area_at(middle.0, middle.1));
+                let points = |pixels: i32| (f64::from(pixels) / scale) as f32;
+                viewport = viewport.with_position([points(x), points(y)]);
+            }
+            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, false, |_| {}) {
                 Ok(mut pane) => {
                     // painted at once: a hidden window gets no redraw
                     if let Err(e) = pane.paint(self.frame_log.as_ref(), true) {

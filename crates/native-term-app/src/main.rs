@@ -23,6 +23,7 @@ mod dock;
 mod fab;
 mod files_sync;
 mod files_window;
+mod find_window;
 mod icons;
 mod import_dialog;
 mod key_dialog;

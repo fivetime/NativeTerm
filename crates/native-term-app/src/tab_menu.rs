@@ -43,6 +43,9 @@ pub enum MenuRequest {
     /// A paste as a quotation: with which characters? The answer goes to
     /// `quotation::answer` with this ticket.
     PasteQuotation(u64),
+    /// The terminal finds in a pane: what, or what next? The answer goes
+    /// to `find::answer` with the question's ticket.
+    Find(crate::find::Question),
 }
 
 /// `off` keeps the cards away (`state.db`).

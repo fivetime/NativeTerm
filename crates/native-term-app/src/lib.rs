@@ -9,6 +9,7 @@ mod connect_queue;
 pub mod data_dir;
 pub mod data_lock;
 pub mod diag;
+pub mod find;
 pub mod fuzzy;
 pub mod i18n;
 pub mod import;
@@ -1706,6 +1707,14 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             let _ = conn.send(&AppMessage::TabCard { title, note, show });
             return;
         }
+        if let Ok(Some(ShimMessage::Find { initial, result })) = &asked {
+            // the dialog is the main program's; this connection has a
+            // thread of its own to wait for the person on
+            let found = find::ask(ask.as_deref(), initial.clone(), *result);
+            let find::Find { text, match_case, whole_word, wrap, up } = found.clone().unwrap_or_default();
+            let _ = conn.send(&AppMessage::Find { find: found.is_some(), text, match_case, whole_word, wrap, up });
+            return;
+        }
         if let Ok(Some(ShimMessage::PasteQuotation)) = &asked {
             // asked in a window of the main program's; this connection
             // has a thread of its own to wait on
@@ -2094,6 +2103,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::TabMenu
             | ShimMessage::TabCard
             | ShimMessage::PasteQuotation
+            | ShimMessage::Find { .. }
             | ShimMessage::TabAction { .. }
     ) {
         s.quiet_since = None;
@@ -2105,6 +2115,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         | ShimMessage::TabMenu
         | ShimMessage::TabCard
         | ShimMessage::PasteQuotation
+        | ShimMessage::Find { .. }
         | ShimMessage::TabAction { .. } => {}
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {

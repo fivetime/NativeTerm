@@ -1086,6 +1086,13 @@ impl App {
             self.dropped(&alias, &session, paths, &text, false);
             return;
         }
+        if let MenuRequest::Find(question) = request {
+            match &self.core {
+                Some(core) => crate::find_window::asked(question, core.clone()),
+                None => native_term_app::find::answer(question.ticket, None),
+            }
+            return;
+        }
         if let MenuRequest::PasteQuotation(ticket) = request {
             // a window of its own too, whatever dialog is open here
             match &self.core {
@@ -1115,7 +1122,10 @@ impl App {
                 None => self.notices.push(t!("notice-not-saved", alias = alias.as_str())),
             },
             // handled above
-            MenuRequest::Files { .. } | MenuRequest::Dropped { .. } | MenuRequest::PasteQuotation(_) => {}
+            MenuRequest::Files { .. }
+            | MenuRequest::Dropped { .. }
+            | MenuRequest::PasteQuotation(_)
+            | MenuRequest::Find(_) => {}
             MenuRequest::ConfirmClose(ids) => {
                 let labels = self
                     .core

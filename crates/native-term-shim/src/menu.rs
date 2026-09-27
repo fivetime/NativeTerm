@@ -141,6 +141,47 @@ pub fn quotation() -> i32 {
     1
 }
 
+/// What to find in the pane, as `find<TAB>up<TAB>case<TAB>word<TAB>wrap
+/// <TAB>text` (each `1` or `0`) on stdout, or `cancel` when the person
+/// closed the dialog. Waits for them, however long they take. Exit code 0
+/// when NativeTerm answered, 1 when it could not be reached.
+pub fn find(initial: Option<String>, result: Option<(u32, u32)>) -> i32 {
+    let Some(name) = crate::pipe_name() else { return 1 };
+    let Ok(conn) = pipe::connect(&name, Duration::from_millis(500)) else { return 1 };
+    let hello = ShimMessage::Hello {
+        protocol: native_term_session::PROTOCOL_VERSION,
+        role: Role::Request,
+        pid: std::process::id(),
+        wt_session: crate::wt_session(),
+        session: None,
+        alias: None,
+        terminal_window: None,
+    };
+    let result = result.map(|(position, count)| native_term_session::protocol::FindResult { position, count });
+    if conn.send(&hello).is_err() || conn.send(&ShimMessage::Find { initial, result }).is_err() {
+        return 1;
+    }
+    loop {
+        match conn.recv::<AppMessage>(ANSWER) {
+            Ok(Some(AppMessage::Find { find, text, match_case, whole_word, wrap, up })) => {
+                print!("{}", find_line(find, &text, [up, match_case, whole_word, wrap]));
+                return 0;
+            }
+            // `Welcome`; or nothing yet: the dialog is up, the person reads
+            Ok(_) => continue,
+            Err(_) => return 1,
+        }
+    }
+}
+
+fn find_line(find: bool, text: &str, [up, match_case, whole_word, wrap]: [bool; 4]) -> String {
+    if !find || text.is_empty() {
+        return "cancel\n".into();
+    }
+    let text = text.replace(['\n', '\r'], " ");
+    format!("find\t{}\t{}\t{}\t{}\t{text}\n", u8::from(up), u8::from(match_case), u8::from(whole_word), u8::from(wrap))
+}
+
 fn quotation_line(chars: &str, between: bool, paste: bool) -> String {
     if paste {
         format!("{}\t{}\n", u8::from(between), chars.replace(['\n', '\r'], ""))
@@ -172,6 +213,18 @@ mod tests {
         ];
         assert_eq!(super::lines(&items), "0\tweb01\t\t\n4\tClose tab \t\tcod_close\n-\n2\tDisconnect\td\t\n");
         assert_eq!(super::lines(&[]), "");
+    }
+
+    #[test]
+    fn a_find_line() {
+        assert_eq!(super::find_line(true, "eth0", [true, false, false, true]), "find\t1\t0\t0\t1\teth0\n");
+        assert_eq!(
+            super::find_line(true, "a\tb  c", [false, true, true, false]),
+            "find\t0\t1\t1\t0\ta\tb  c\n",
+            "the text is the line's rest, as it is"
+        );
+        assert_eq!(super::find_line(false, "eth0", [true; 4]), "cancel\n");
+        assert_eq!(super::find_line(true, "", [true; 4]), "cancel\n");
     }
 
     #[test]

@@ -4791,11 +4791,28 @@ ask the shim:
   `paste.quotation_between`) or, while `paste.quotation_prompt` is not
   `off`, from a small window of its own where the pointer is
   (`quotation_window`, above the others: the terminal is another
-  program's window, which it cannot be a dialog of). The connection's
+  program's window, which it cannot be a dialog of; `window::
+  open_at_pointer` makes the window at its place, since a window moved
+  before it is shown is put where the window manager puts new ones). The connection's
   thread waits for the window's answer (`quotation::ask`, ten minutes at
   most, one question at a time). The configuration then pastes the
   clipboard's lines between or after the characters; without NativeTerm,
   with SecureCRT's defaults.
+- Find…: `--find` asks over the socket (`ShimMessage::Find`) what to
+  find, and prints `find<TAB>up<TAB>case<TAB>word<TAB>wrap<TAB>text` when
+  the person says "Find Next" in NativeTerm's dialog (`find_window`,
+  SecureCRT's "Find"), or `cancel` when they close it; it waits as long
+  as they take. The configuration then has the fork find
+  (`window:find`: the match selected and brought into view) and asks
+  again with what the find came to (`--result <position>/<count>`),
+  which the dialog shows; so on, a loop in the configuration, until
+  `cancel`. The dialog is one window: the first question opens it (its
+  field starting with the pane's selection, where that is a line), a
+  question with a result goes to the open one, and is answered with
+  `cancel` when the dialog was closed meanwhile. A terminal that has
+  not asked again 15 s after "Find Next" is gone, and the dialog goes
+  too. Without NativeTerm (the shim fails) the item is WezTerm's own
+  search.
 - Print Selection: the fork's `window:print_text` where the system has a
   print panel for the window (macOS); elsewhere the selection goes into
   a file in a folder of the person's own (`XDG_RUNTIME_DIR`, `TMPDIR`,

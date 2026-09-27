@@ -676,6 +676,39 @@ __HELPERS__
       pane:send_paste(quote_lines(clip, chars, between))
     end
   end
+  local function find(window, pane, selection)
+    -- NativeTerm's dialog says what to find, each "Find Next" once: the
+    -- match is selected and brought into view, and the dialog is told
+    -- what the find came to. Without NativeTerm, WezTerm's own search
+    local args = { shim, "--find" }
+    if selection ~= "" and #selection <= 600 and not selection:find("[\r\n]") then
+      table.insert(args, "--initial")
+      table.insert(args, selection)
+    end
+    local first = true
+    while true do
+      local ok, out = wezterm.run_child_process(args)
+      if not ok then
+        if first then
+          window:perform_action(act.Search("CurrentSelectionOrEmptyString"), pane)
+        end
+        return
+      end
+      first = false
+      local up, case, word, wrap, what = out:match("^find\t(%d)\t(%d)\t(%d)\t(%d)\t([^\r\n]*)")
+      if not up then
+        return
+      end
+      local found = window:find(pane, {
+        text = what,
+        match_case = case == "1",
+        whole_word = word == "1",
+        wrap = wrap == "1",
+        up = up == "1",
+      })
+      args = { shim, "--find", "--result", string.format("%d/%d", found.position, found.count) }
+    end
+  end
   -- what each pane's menu was opened with
   local opened = {}
   local chosen = wezterm.action_callback(function(window, pane, id)
@@ -706,7 +739,7 @@ __HELPERS__
         wezterm.open_with(url)
       end
     elseif id == "find" then
-      window:perform_action(act.Search("CurrentSelectionOrEmptyString"), pane)
+      find(window, pane, with.selection)
     elseif id == "select_all" then
       window:perform_action(act.SelectAll, pane)
     elseif id == "print" then

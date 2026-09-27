@@ -1096,6 +1096,26 @@
             GUID without (tests/shim.rs). The hover card asked the same
             way and had the same answer. Not tried: the menu itself in
             a session's tab on Windows.
+      - [x] Find as SecureCRT's dialog (2026-09-28, the person's
+            report: WezTerm's own search is keys only, which nobody new
+            to it knows). The menu's "Find…" brings up a small window of
+            NativeTerm's where the pointer is: Find what, Match whole
+            word only, Match case, Wrap around, Direction Up or Down,
+            Find Next, Cancel; under them what the find came to ("Match
+            3 of 11", "No more matches in this direction", "Cannot
+            find …"). Each Find Next selects the next match in the pane
+            and brings it into view (the fork's `window:find`,
+            `ee0039972`); the pane enters no mode. The options are kept.
+            Without NativeTerm the item is WezTerm's search, as before.
+            Tried on Lingmo (X11): "line 17" in 300 lines, up, three
+            times (11, 10, 9 of 11: lines 179, 178, 177 selected, read
+            back with Ctrl+Ins); whole words (1 of 1); down without
+            wrap from the last screen (no more); "LINE 17" with the case
+            (cannot find); "Line" without it (Line, line, Line).
+            Found on the way: a window of NativeTerm's asked for at the
+            pointer was put in the screen's middle by KWin (moved before
+            it was shown, which tells the window manager nothing); made
+            at its place now, the quotation window too.
       - [ ] macOS (the system's menu with ⌘C and ⌘V, and its print
             panel: for the person to try, no pointer can be sent there);
             Windows (WezTerm is opt-in there; builds, not tried).

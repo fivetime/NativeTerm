@@ -63,6 +63,12 @@ pub enum Mode {
     /// The terminal pastes as a quotation: with which characters
     /// (`--paste-quotation`; NativeTerm asks the person).
     PasteQuotation,
+    /// The terminal finds in a pane: what, and how (`--find [--initial
+    /// <text>] [--result <position>/<count>]`; NativeTerm's dialog says).
+    Find {
+        initial: Option<String>,
+        result: Option<(u32, u32)>,
+    },
     /// The print preview of the text in `file`, which is taken away
     /// (`--print-preview <file> [<title>]`).
     PrintPreview {
@@ -150,6 +156,22 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 return Ok(Mode::TabMenu { id, pane });
             }
             "--paste-quotation" => return Ok(Mode::PasteQuotation),
+            "--find" => {
+                let (mut initial, mut result) = (None, None);
+                while let Some(arg) = args.next() {
+                    match arg.as_str() {
+                        "--initial" => initial = Some(args.next().ok_or("--initial needs the text")?),
+                        "--result" => {
+                            let said = args.next().ok_or("--result needs <position>/<count>")?;
+                            let parsed =
+                                said.split_once('/').and_then(|(p, c)| Some((p.parse().ok()?, c.parse().ok()?)));
+                            result = Some(parsed.ok_or_else(|| format!("--result: not <position>/<count>: {said}"))?);
+                        }
+                        other => return Err(format!("--find: unknown option {other}")),
+                    }
+                }
+                return Ok(Mode::Find { initial, result });
+            }
             "--print-preview" => {
                 let file = args.next().ok_or("--print-preview needs a file")?;
                 return Ok(Mode::PrintPreview { file, title: args.next() });
@@ -222,6 +244,15 @@ mod tests {
     fn tab_menu_helper() {
         assert_eq!(p(&["--tab-menu"]).unwrap(), Mode::TabMenu { id: None, pane: None });
         assert_eq!(p(&["--paste-quotation"]).unwrap(), Mode::PasteQuotation);
+        assert_eq!(p(&["--find"]).unwrap(), Mode::Find { initial: None, result: None });
+        assert_eq!(
+            p(&["--find", "--initial", "--help"]).unwrap(),
+            Mode::Find { initial: Some("--help".into()), result: None },
+            "the text is whatever was selected"
+        );
+        assert_eq!(p(&["--find", "--result", "3/17"]).unwrap(), Mode::Find { initial: None, result: Some((3, 17)) });
+        assert!(p(&["--find", "--result", "3"]).is_err());
+        assert!(p(&["--find", "--result", "x/y"]).is_err());
         assert_eq!(
             p(&["--print-preview", "/run/user/1000/x.txt", "web01"]).unwrap(),
             Mode::PrintPreview { file: "/run/user/1000/x.txt".into(), title: Some("web01".into()) }
