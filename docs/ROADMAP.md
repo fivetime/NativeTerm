@@ -1061,8 +1061,17 @@
             with the selection in it, Select All then Copy (the whole
             screen), Print Selection (the page handed over, the text in
             it), Clear (204 lines, then 1).
-      - [ ] Wayland; macOS (the system's menu and print panel: for the
-            person to try, no pointer can be sent there); Windows.
+      - [x] Tried on Zorin (GNOME 46, Wayland) with a pointer and keys
+            from /dev/uinput: the menu with and without a selection,
+            Copy, Paste, Paste as Quotation (the window takes the
+            keyboard: Enter there pasted the two lines), both links,
+            Print Selection, Clear. The quotation window's buttons were
+            cut off there (winit draws the title bar within the window's
+            height on GNOME, and without the title): in a panel at the
+            bottom now (`e3454bf`).
+      - [ ] macOS (the system's menu with ⌘C and ⌘V, and its print
+            panel: for the person to try, no pointer can be sent there);
+            Windows (WezTerm is opt-in there; builds, not tried).
 - [x] The tab menu beyond the window (2026-09-27). Drawn over the
       WezTerm window, it cannot leave it: tried on Lingmo, a 520x300
       window cut the menu off after "Lock". Chrome: the system's menu on
