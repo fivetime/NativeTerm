@@ -1009,9 +1009,16 @@
             Mac reaching below the window; tried by the user there the
             same day (a session's tab: the menu at the pointer, an item
             chosen, dismissed, a small window) and found good.
-      - [ ] B, Linux (X11 override-redirect, Wayland xdg_popup) and
-            Windows (WezTerm is opt-in there): the menu in a window of
-            its own.
+      - [ ] B, Linux and Windows (WezTerm is opt-in there): the menu in
+            a window of its own, painted on the CPU with Chrome's numbers
+            (MenuConfig, kMenuRadius, the elevation 12 shadow).
+            - [x] X11 (fork `02ff564df`): an override-redirect window,
+                  the pointer grabbed. Tried on Lingmo and deepin with a
+                  520x300 window: the menu below the window, hover, a
+                  click, a press outside, Escape, Down Down Enter, and
+                  the menu above the point at the screen's bottom.
+            - [ ] Wayland: xdg_popup.
+            - [ ] Windows: a layered popup window.
       Not done: scrolling the drawn menu (B makes it unnecessary), and
       NativeTerm showing the menu itself (a Wayland client cannot place a
       window over another client's at a given point).
