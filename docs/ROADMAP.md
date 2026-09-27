@@ -1001,6 +1001,12 @@
       Tried end to end on Lingmo with the fork built there: a right
       click popped NativeTerm's menu up (the heading, icons, "Reconnect"
       dimmed while connected), and "Clone Session" opened the clone
+- [ ] WezTerm's runtime directory fills up (found 2026-09-27): on Zorin
+      /run/user/1000/wezterm held 202 862 files, 789 MB, the tmpfs full,
+      and a new WezTerm could not bind its socket ("No space left on
+      device"); deepin 177 728 files, Fedora 146 861, elementary 43 108.
+      Emptied by hand on the test boxes. To find: what writes them (a log
+      for every `wezterm cli` call NativeTerm makes?) and stop it.
 - [ ] The tab menu beyond the window (2026-09-27). Drawn over the
       WezTerm window, it cannot leave it: tried on Lingmo, a 520x300
       window cut the menu off after "Lock". Chrome: the system's menu on
@@ -1017,7 +1023,13 @@
                   520x300 window: the menu below the window, hover, a
                   click, a press outside, Escape, Down Down Enter, and
                   the menu above the point at the screen's bottom.
-            - [ ] Wayland: xdg_popup.
+            - [x] Wayland (fork `4415d6a6b`): an xdg_popup with the
+                  input's grab, which Mutter, KWin and gala all gave for
+                  the press that led to the menu. Tried with a pointer
+                  and keys from /dev/uinput on Zorin, Fedora, EndeavourOS
+                  and elementary: a click, Escape, Down Down Enter, a
+                  press in the window and one on the desktop; a 620x220
+                  window with the menu below it (Zorin).
             - [ ] Windows: a layered popup window.
       Not done: scrolling the drawn menu (B makes it unnecessary), and
       NativeTerm showing the menu itself (a Wayland client cannot place a
