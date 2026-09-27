@@ -4783,7 +4783,9 @@ the fork when it opens: the pane's selection, the clipboard's text
 `PasteFrom`, `Search` with the selection, the fork's `SelectAll`) or the
 configuration's doing (the selection copied and pasted; a selection as
 a URL, `http://` before what names no scheme; the lookup, the selection
-percent-encoded into `terminal.lookup_url`). Three need NativeTerm and
+percent-encoded into `terminal.lookup_url`, which the settings choose:
+a search known by name, `PaneMenu::LOOKUPS`, or an address of the
+person's own). Three need NativeTerm and
 ask the shim:
 - Paste as Quotation: `--paste-quotation` asks over the socket
   (`ShimMessage::PasteQuotation`) and prints `between<TAB>characters`, or

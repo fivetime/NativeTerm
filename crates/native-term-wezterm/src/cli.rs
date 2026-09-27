@@ -952,10 +952,27 @@ impl PaneMenu {
     /// SecureCRT's own ("Search Engine Command For Selection Lookup").
     pub const LOOKUP_DEFAULT: &'static str = "https://www.google.com/search?q=%s";
 
+    /// The searches the settings offer by name, the default first; any
+    /// other is the person's own.
+    pub const LOOKUPS: [(&'static str, &'static str); 4] = [
+        ("Google", Self::LOOKUP_DEFAULT),
+        ("Bing", "https://www.bing.com/search?q=%s"),
+        ("Baidu", "https://www.baidu.com/s?wd=%s"),
+        ("DuckDuckGo", "https://duckduckgo.com/?q=%s"),
+    ];
+
     /// The setting's value, or the default for none.
     #[must_use]
     pub fn lookup_url(setting: Option<&str>) -> String {
         setting.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(Self::LOOKUP_DEFAULT).to_string()
+    }
+
+    /// The name the settings have for the search the setting says, if it
+    /// is one of theirs.
+    #[must_use]
+    pub fn lookup_name(setting: Option<&str>) -> Option<&'static str> {
+        let url = Self::lookup_url(setting);
+        Self::LOOKUPS.iter().find(|(_, known)| *known == url).map(|(name, _)| *name)
     }
 }
 
@@ -1245,6 +1262,12 @@ mod tests {
         assert_eq!(lines[..lines.find("PopupMenu").unwrap()].matches("separator = true").count(), 3);
         assert!(with.trim_end().ends_with("return config"));
         assert_eq!(PaneMenu::lookup_url(Some("  ")), PaneMenu::LOOKUP_DEFAULT);
+        assert_eq!(PaneMenu::lookup_name(None), Some("Google"));
+        assert_eq!(PaneMenu::lookup_name(Some(" https://www.baidu.com/s?wd=%s ")), Some("Baidu"));
+        assert_eq!(PaneMenu::lookup_name(Some("https://search.example.org/?q=%s")), None, "the person's own");
+        for (name, url) in PaneMenu::LOOKUPS {
+            assert!(url.starts_with("https://") && url.matches("%s").count() == 1, "{name}: {url}");
+        }
         assert_eq!(PaneMenu::lookup_url(Some(" https://www.baidu.com/s?wd=%s ")), "https://www.baidu.com/s?wd=%s");
     }
 

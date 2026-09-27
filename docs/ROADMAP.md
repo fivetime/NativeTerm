@@ -1139,6 +1139,18 @@
             after the window is shown is the person's, and the place
             is the frame's as the window system has it. Wayland says
             nothing of where windows are: nothing is kept there.
+      - [x] What "Lookup Selection" searches with, in the settings
+            (2026-09-28): a row "Lookup Selection with": Google
+            (SecureCRT's own, the default), Bing, Baidu, DuckDuckGo, or
+            "Another…" with the search's address, `%s` where the text
+            goes. Shown where the terminal is WezTerm (the menu is
+            there only). It was the `terminal.lookup_url` setting
+            before, in the file alone. Tried on Lingmo: Bing chosen (the
+            setting and the terminal's configuration both say
+            `https://www.bing.com/search?q=%s` at once), an address of
+            one's own typed and Enter pressed, NativeTerm started again
+            (the row says "Another…" with the address), Google chosen
+            again.
       - [ ] macOS (the system's menu with ⌘C and ⌘V, and its print
             panel: for the person to try, no pointer can be sent there);
             Windows (WezTerm is opt-in there; builds, not tried).

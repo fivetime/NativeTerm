@@ -1951,6 +1951,59 @@ fn look_choice(ui: &mut egui::Ui, core: &Core) {
     .on_hover_text(t!("theme-look-hint"));
 }
 
+/// What "Lookup Selection" (the pane's menu) searches with: one of the
+/// searches known by name, or an address of the person's own, `%s` where
+/// what is looked up goes. Shown where the terminal has that menu.
+fn lookup_choice(ui: &mut egui::Ui, core: &Core) {
+    use native_term_wezterm::PaneMenu;
+    if core.terminal().as_any().downcast_ref::<native_term_wezterm::WezTerm>().is_none() {
+        return;
+    }
+    let setting = core.setting(PaneMenu::LOOKUP_SETTING);
+    let named = PaneMenu::lookup_name(setting.as_deref());
+    // the person's own, as they type it: the setting's while they don't
+    let typing = egui::Id::new("lookup-own");
+    let typed: Option<String> = ui.data(|d| d.get_temp(typing));
+    let own = typed.is_some() || named.is_none();
+    let set = |url: &str| {
+        core.set_setting(PaneMenu::LOOKUP_SETTING, url);
+        sync_terminal_look(core);
+    };
+    ui.horizontal(|ui| {
+        ui.label(t!("lookup-label"));
+        // (as the person knows them)
+        let label = |name: &str| if name == "Baidu" { t!("lookup-baidu") } else { name.to_string() };
+        let shown = if own { t!("lookup-own") } else { label(named.unwrap_or_default()) };
+        egui::ComboBox::from_id_salt("lookup").selected_text(shown).show_ui(ui, |ui| {
+            for (name, url) in PaneMenu::LOOKUPS {
+                if ui.selectable_label(!own && named == Some(name), label(name)).clicked() {
+                    ui.data_mut(|d| d.remove::<String>(typing));
+                    set(url);
+                }
+            }
+            if ui.selectable_label(own, t!("lookup-own")).clicked() && !own {
+                let start = PaneMenu::lookup_url(setting.as_deref());
+                ui.data_mut(|d| d.insert_temp(typing, start));
+            }
+        });
+    })
+    .response
+    .on_hover_text(t!("lookup-hint"));
+    if own {
+        let mut url = typed.unwrap_or_else(|| PaneMenu::lookup_url(setting.as_deref()));
+        let edit =
+            ui.add(egui::TextEdit::singleline(&mut url).hint_text("https://…?q=%s").desired_width(f32::INFINITY));
+        let edit = edit.on_hover_text(t!("lookup-own-hint"));
+        if edit.changed() {
+            ui.data_mut(|d| d.insert_temp(typing, url.clone()));
+        }
+        // taken when the person is done with the field
+        if edit.lost_focus() && !url.trim().is_empty() && setting.as_deref() != Some(url.trim()) {
+            set(url.trim());
+        }
+    }
+}
+
 /// Language: the system's, or one of NativeTerm's.
 fn language_choice(ui: &mut egui::Ui, core: &Core) {
     let setting = core.language_setting();
@@ -2238,6 +2291,7 @@ impl crate::window::Ui for App {
                         language_choice(ui, core);
                         theme_choice(ui, core);
                         look_choice(ui, core);
+                        lookup_choice(ui, core);
                     }
                     ui.separator();
                     self.agent.settings_ui(ui, &self.ssh_dir, self.core.as_ref());
