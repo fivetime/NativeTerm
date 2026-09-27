@@ -1,8 +1,10 @@
 //! Command line: `nativeterm-shim [--ssh-dir <dir>] [--session <id>] [--wait]
-//! [--no-forwards] [<host-alias>]` (`--ssh-dir`: where NativeTerm's session
-//! folders are, if not `~/.ssh`; `--wait`: don't connect until told to, for
-//! restored sessions; `--no-forwards`: a clone, which would clash with the
-//! original's port forwards), or
+//! [--no-forwards] [--wezterm] [<host-alias>]` (`--ssh-dir`: where
+//! NativeTerm's session folders are, if not `~/.ssh`; `--wait`: don't
+//! connect until told to, for restored sessions; `--no-forwards`: a clone,
+//! which would clash with the original's port forwards; `--wezterm`: the
+//! tab is a WezTerm pane, whatever terminal the environment came through),
+//! or
 //! `nativeterm-shim --authenticated <shim-pid>` (the `LocalCommand` login
 //! signal), `nativeterm-shim --proxy <url> <host> <port>` (the
 //! `ProxyCommand` helper), or `nativeterm-shim --zmodem download|upload`
@@ -83,6 +85,10 @@ pub enum Mode {
 pub struct Flags {
     pub wait: bool,
     pub no_forwards: bool,
+    /// The tab is a WezTerm pane: `WEZTERM_PANE` names it. A `WT_SESSION`
+    /// in the environment is another terminal's, inherited (NativeTerm
+    /// started from a Windows Terminal tab).
+    pub wezterm: bool,
 }
 
 pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
@@ -171,6 +177,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
             "--ssh-dir" => ssh_dir = Some(args.next().ok_or("--ssh-dir needs a folder")?),
             "--wait" => flags.wait = true,
             "--no-forwards" => flags.no_forwards = true,
+            "--wezterm" => flags.wezterm = true,
             flag if flag.starts_with('-') => return Err(format!("unknown option {flag:?}")),
             _ if alias.is_some() => return Err(format!("unexpected argument {arg:?}")),
             _ => alias = Some(arg),
@@ -185,6 +192,17 @@ mod tests {
 
     fn p(args: &[&str]) -> Result<Mode, String> {
         parse(args.iter().map(|s| s.to_string()))
+    }
+
+    #[test]
+    fn a_wezterm_pane() {
+        let Mode::Shim { flags, alias, .. } = p(&["--session", "id-1", "--wezterm", "web01"]).unwrap() else {
+            panic!("the shim itself");
+        };
+        assert!(flags.wezterm && !flags.wait);
+        assert_eq!(alias.as_deref(), Some("web01"));
+        let Mode::Shim { flags, .. } = p(&["web01"]).unwrap() else { panic!("the shim itself") };
+        assert!(!flags.wezterm);
     }
 
     #[test]
@@ -254,7 +272,7 @@ mod tests {
             Mode::Shim {
                 session: Some("s1".into()),
                 alias: Some("web01".into()),
-                flags: Flags { wait: true, no_forwards: true },
+                flags: Flags { wait: true, no_forwards: true, wezterm: false },
                 ssh_dir: None,
             }
         );

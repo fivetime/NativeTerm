@@ -4642,12 +4642,16 @@ Windows Terminal's business.
 ### The WezTerm backend
 
 `native-term-wezterm` drives WezTerm through `wezterm cli`, on any of
-the three systems. A session tab is `spawn -- <shim> --session … <alias>`
+the three systems. A session tab is `spawn -- <shim> --wezterm --session … <alias>`
 (`--new-window`, or `--window-id` for `Target::Recent`, which is the
 window last activated or made, and for `Target::Named`, remembered for
 the process's lifetime); when no WezTerm runs, `wezterm-gui start --
 <shim …>` makes the first window. Each tab is then `set-tab-title`d with
-its label, which the claimer's first rule finds. `list --format json` is
+its label, which the claimer's first rule finds. `--wezterm` tells the
+shim that its tab is a WezTerm pane, named by `WEZTERM_PANE`: a
+`WT_SESSION` in its environment is inherited (NativeTerm started from a
+Windows Terminal tab), and the menus ask for the tab by its pane.
+`list --format json` is
 the whole state — panes grouped into tabs and windows, a tab named by
 its set title or its active pane's, the active tab selected, no
 rectangles — and, WezTerm having no events, a subscription polls it

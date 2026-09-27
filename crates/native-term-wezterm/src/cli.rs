@@ -188,6 +188,10 @@ pub fn parse_spawned(stdout: &str) -> Option<u64> {
 pub fn shim_program(shim: &Path, shim_args: &[OsString], tab: &TabSpec) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![shim.into()];
     args.extend(shim_args.iter().cloned());
+    // the tab is a WezTerm pane, whatever the environment says (started
+    // from a Windows Terminal tab, NativeTerm and what it starts inherit
+    // that tab's `WT_SESSION`)
+    args.push("--wezterm".into());
     args.extend(["--session".into(), tab.session.clone().into()]);
     if tab.wait {
         args.push("--wait".into());
@@ -1280,7 +1284,17 @@ local results = {
         let program = shim_program(Path::new("/opt/nt/nativeterm-shim"), &["--ssh-dir".into(), "/x".into()], &tab);
         assert_eq!(
             strings(&program),
-            ["/opt/nt/nativeterm-shim", "--ssh-dir", "/x", "--session", "id-1", "--wait", "--no-forwards", "web01"]
+            [
+                "/opt/nt/nativeterm-shim",
+                "--ssh-dir",
+                "/x",
+                "--wezterm",
+                "--session",
+                "id-1",
+                "--wait",
+                "--no-forwards",
+                "web01"
+            ]
         );
         assert_eq!(
             strings(&spawn_args(Into::Window(4), &program))[..6],

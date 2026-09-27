@@ -118,6 +118,12 @@ fn main() {
             if let Some(dir) = ssh_dir {
                 plink::set_ssh_dir(dir.into());
             }
+            if flags.wezterm {
+                // another terminal's, inherited: gone for this process
+                // and for what it starts (ssh's login helper asks the
+                // same question), so that the pane's own id is the answer
+                std::env::remove_var("WT_SESSION");
+            }
             let code = run(session, alias, flags);
             std::process::exit(code);
         }
@@ -129,7 +135,10 @@ fn pipe_name() -> Option<String> {
 }
 
 /// The id the terminal gave this tab: `WT_SESSION` (Windows Terminal) or
-/// `WEZTERM_PANE`.
+/// `WEZTERM_PANE`. Each terminal sets its own for what runs in it and
+/// leaves the other's as it found it, so one may be inherited: in a
+/// Windows Terminal tab `WT_SESSION` is the tab's; in a WezTerm pane it is
+/// taken away at the start (`--wezterm`).
 fn wt_session() -> Option<String> {
     let var = |name: &str| std::env::var(name).ok().filter(|s| !s.is_empty());
     var("WT_SESSION").or_else(|| var("WEZTERM_PANE"))

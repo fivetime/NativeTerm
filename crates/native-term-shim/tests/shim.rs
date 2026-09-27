@@ -415,6 +415,30 @@ fn placeholder_without_host_is_closed_by_nativeterm() {
     assert_eq!(wait_exit(&mut shim), 0);
 }
 
+/// What the shim says its tab is, waiting to be told to connect.
+fn said_terminal_session(tag: &str, args: &[&str]) -> Option<String> {
+    let name = pipe_name(tag);
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(&name, args, &[("WEZTERM_PANE", "7")]);
+    let conn = listener.accept().unwrap();
+    let ShimMessage::Hello { wt_session, .. } = expect(&conn) else { panic!("Hello first") };
+    assert_eq!(expect(&conn), ShimMessage::Waiting);
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
+    wt_session
+}
+
+#[test]
+fn a_wezterm_pane_is_named_by_its_pane() {
+    // (the environment has a `WT_SESSION` too, as when NativeTerm was
+    // started from a Windows Terminal tab: NativeTerm looks the tab's
+    // session up by what the shim says, and WezTerm asks by the pane)
+    let pane = said_terminal_session("pane", &["--wezterm", "--session", "s-9", "--wait", "web01"]);
+    assert_eq!(pane.as_deref(), Some("7"));
+    let tab = said_terminal_session("tab", &["--session", "s-9", "--wait", "web01"]);
+    assert_eq!(tab.as_deref(), Some("6e7a0000-0000-4000-8000-00000000c0de"), "Windows Terminal's tab");
+}
+
 #[test]
 fn restored_session_waits_for_connect() {
     let name = pipe_name("wait");

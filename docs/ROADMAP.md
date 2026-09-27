@@ -1082,6 +1082,20 @@
             shadow too. Not tried: Windows (the press is posted on from
             the popup, as Chrome's RepostEventImpl); macOS, where the
             menu is the system's and does what the system does.
+      - [x] No tab menu in WezTerm on Windows (2026-09-28, the person's
+            report). Not the menu: NativeTerm had been started from a
+            Windows Terminal tab, whose `WT_SESSION` it and the WezTerm
+            it starts inherit; the shim named its tab by that before
+            `WEZTERM_PANE`, NativeTerm looked the pane up and found no
+            session, and an empty menu is none. `state.db` showed it:
+            every WezTerm session of the last days with the same GUID as
+            its terminal session. The shim is told that its tab is a
+            WezTerm pane (`--wezterm`) and takes the inherited variable
+            away for itself and what it starts. A real shim with both
+            variables set says `7`, the pane, with the flag and the
+            GUID without (tests/shim.rs). The hover card asked the same
+            way and had the same answer. Not tried: the menu itself in
+            a session's tab on Windows.
       - [ ] macOS (the system's menu with ⌘C and ⌘V, and its print
             panel: for the person to try, no pointer can be sent there);
             Windows (WezTerm is opt-in there; builds, not tried).
