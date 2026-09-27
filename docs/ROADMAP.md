@@ -1529,9 +1529,10 @@
       the question to WezTerm on Windows (`get_appearance`, which follows
       WM_SETTINGCHANGE itself). Seen on the VM: light, dark, light again
       within seconds of each switch.
-- [ ] macOS maximize/restore (zoom) and live resize in step with the
-      window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
-      Mac). Chrome holds the transaction that changes the frame until a
+- [x] macOS maximize/restore (zoom) and live resize in step with the
+      window's frame (2026-09-27, fork `68dd2bd42`; the zoom tried by the
+      user on the Mac after `2ccd4ce32`, below, and found good; a live
+      resize by the window's edge still to be tried by hand). Chrome holds the transaction that changes the frame until a
       frame of the new size is drawn (CATransactionCoordinator, up to
       500 ms); the fork painted when max_fps next allowed it and presented
       apart from the transaction, so the content ran ahead of or behind the
