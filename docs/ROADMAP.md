@@ -1116,6 +1116,12 @@
             pointer was put in the screen's middle by KWin (moved before
             it was shown, which tells the window manager nothing); made
             at its place now, the quotation window too.
+            On Zorin (Wayland), with a pointer and keys from
+            /dev/uinput: a line selected by three clicks, "Find…" from
+            the menu, the dialog's field starting with that line, Enter
+            twice: "Match 1 of 1", the line selected in the pane, the
+            dialog where the compositor puts it. Not tried: Windows,
+            macOS.
       - [ ] macOS (the system's menu with ⌘C and ⌘V, and its print
             panel: for the person to try, no pointer can be sent there);
             Windows (WezTerm is opt-in there; builds, not tried).
