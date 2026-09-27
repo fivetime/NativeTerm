@@ -14,7 +14,7 @@ const PLACEHOLDER: &str = "<text>";
 pub fn open(ticket: u64, core: Core) {
     let viewport = egui::ViewportBuilder::default()
         .with_title(t!("quote-title"))
-        .with_inner_size([460.0, 214.0])
+        .with_inner_size([460.0, 240.0])
         .with_resizable(false)
         .with_minimize_button(false)
         .with_maximize_button(false)
@@ -73,6 +73,20 @@ impl crate::window::Ui for QuotationWindow {
         }
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
         let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(ui.visuals().panel_fill);
+        // the buttons first, at the bottom: there whatever room the window
+        // system leaves the rest (its title bar is taken from the window's
+        // height on some)
+        egui::Panel::bottom("quote-buttons").frame(frame).show_separator_line(false).show_inside(ui, |ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(t!("button-cancel")).clicked() || escape {
+                    self.answer(false);
+                }
+                if ui.button(t!("button-ok")).clicked() || enter {
+                    self.answer(true);
+                }
+            });
+        });
+        let frame = frame.inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(14) });
         egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.horizontal(|ui| {
@@ -90,14 +104,6 @@ impl crate::window::Ui for QuotationWindow {
             });
             ui.label(t!("quote-note", placeholder = PLACEHOLDER));
             ui.checkbox(&mut self.no_prompt, t!("quote-no-prompt"));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::BOTTOM), |ui| {
-                if ui.button(t!("button-cancel")).clicked() || escape {
-                    self.answer(false);
-                }
-                if ui.button(t!("button-ok")).clicked() || enter {
-                    self.answer(true);
-                }
-            });
         });
     }
 
