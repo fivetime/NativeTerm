@@ -25,6 +25,17 @@ pub const WRAP_SETTING: &str = "find.wrap";
 /// `down`: towards the end; up otherwise, as SecureCRT starts.
 pub const DIRECTION_SETTING: &str = "find.direction";
 
+/// Where the person left the dialog: its top left corner, `x,y` in the
+/// screen's pixels (this machine's).
+pub const PLACE_SETTING: &str = "find.window";
+
+/// The place the setting names.
+#[must_use]
+pub fn place_from_setting(text: &str) -> Option<(i32, i32)> {
+    let (x, y) = text.split_once(',')?;
+    Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
 /// What to find, and how.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Find {
@@ -130,6 +141,15 @@ pub(crate) fn ask(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn where_the_dialog_was_left() {
+        assert_eq!(place_from_setting("1006,285"), Some((1006, 285)));
+        assert_eq!(place_from_setting(" -1200, 40 "), Some((-1200, 40)), "a screen to the left");
+        assert_eq!(place_from_setting(""), None);
+        assert_eq!(place_from_setting("12"), None);
+        assert_eq!(place_from_setting("a,b"), None);
+    }
 
     #[test]
     fn what_a_find_came_to() {

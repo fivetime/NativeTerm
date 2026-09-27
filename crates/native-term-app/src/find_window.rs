@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use native_term_app::find::{self, Find, Outcome, Question};
 use native_term_app::{t, Core};
 
+use crate::window::Place;
+
 /// After "Find Next" the terminal finds and asks again; one that has not
 /// by then is gone, and the dialog goes too.
 const ANSWER: Duration = Duration::from_secs(15);
@@ -41,8 +43,15 @@ pub fn asked(question: Question, core: Core) {
                 .with_minimize_button(false)
                 .with_maximize_button(false)
                 .with_always_on_top();
-            // where the pointer is: in the terminal's window, on the menu's item
-            crate::window::open_at_pointer("find", viewport, move |ctx| Box::new(FindWindow::new(ctx, core)));
+            // where the person left it (it stays up while they find, and
+            // where the pointer is it is over what is found, as often as
+            // not); the first time where the pointer is: in the terminal's
+            // window, on the menu's item
+            let left = core.setting(find::PLACE_SETTING).and_then(|s| find::place_from_setting(&s));
+            let place = left.map(|(x, y)| Place::At(x, y)).or_else(crate::window::pointer);
+            let settings = core.clone();
+            let moved = move |x: i32, y: i32| settings.set_setting(find::PLACE_SETTING, &format!("{x},{y}"));
+            crate::window::open_at("find", viewport, place, moved, move |ctx| Box::new(FindWindow::new(ctx, core)));
         }
     }
 }

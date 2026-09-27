@@ -43,6 +43,7 @@ pub const MACHINE_KEYS: &[&str] = &[
     "first_run_done",       // the start checks are about this computer
     "agent_hint_dismissed", // ssh-agent is a service of this machine
     "terminal.gpu",         // which GPU draws the terminal: this machine's
+    "find.window",          // where the Find dialog was left
 ];
 
 /// Keys that stay in `state.db`: one per host, written as the user walks

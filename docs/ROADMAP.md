@@ -1122,6 +1122,23 @@
             twice: "Match 1 of 1", the line selected in the pane, the
             dialog where the compositor puts it. Not tried: Windows,
             macOS.
+            The dialog comes back where the person left it
+            (2026-09-28): around the pointer it was over what is found
+            as often as not, the match being brought to the pane's
+            middle. Its frame's place is kept when it closes, if the
+            person moved it (`find.window`, this machine's), and it is
+            made there the next time. Tried on Lingmo: opened at the
+            pointer (156,315), dragged by its title bar by 320,280,
+            closed (kept: 476,565, the frame's corner, its title bar 30
+            above the window's own 595), opened again at 476,595,
+            closed unmoved (kept as it was). A first try, from where
+            the window says it is, kept a place it had not been moved
+            to, a title bar's height lower each time: a window says
+            several places while the window manager frames it. Now
+            the windows' own code keeps it: a move later than 1.5 s
+            after the window is shown is the person's, and the place
+            is the frame's as the window system has it. Wayland says
+            nothing of where windows are: nothing is kept there.
       - [ ] macOS (the system's menu with ⌘C and ⌘V, and its print
             panel: for the person to try, no pointer can be sent there);
             Windows (WezTerm is opt-in there; builds, not tried).

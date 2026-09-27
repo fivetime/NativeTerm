@@ -4812,7 +4812,10 @@ ask the shim:
   `cancel` when the dialog was closed meanwhile. A terminal that has
   not asked again 15 s after "Find Next" is gone, and the dialog goes
   too. Without NativeTerm (the shim fails) the item is WezTerm's own
-  search.
+  search. The dialog opens where the person left it (`find.window`, a
+  machine's own setting: `window::open_at` tells where a window was when
+  it closed, if it was moved after it had settled), around the pointer
+  the first time.
 - Print Selection: the fork's `window:print_text` where the system has a
   print panel for the window (macOS); elsewhere the selection goes into
   a file in a folder of the person's own (`XDG_RUNTIME_DIR`, `TMPDIR`,

@@ -59,8 +59,34 @@ struct Request {
     key: String,
     viewport: egui::ViewportBuilder,
     factory: Factory,
-    /// The screen's point the window's middle goes to.
-    middle: Option<(i32, i32)>,
+    place: Option<Place>,
+    left: Option<LeftAt>,
+}
+
+/// Told where a window was when it closed, its top left corner in the
+/// screen's pixels, when the person had moved it (see `open_at`).
+pub type LeftAt = Box<dyn Fn(i32, i32)>;
+
+/// A window whose place is kept: since when it is shown, and whether
+/// the person has moved it.
+struct Kept {
+    left: LeftAt,
+    shown: Instant,
+    moved: bool,
+}
+
+/// A window is put in its place when it is shown, by the window manager
+/// too (its frame around it, a place of its own choosing): it moves a few
+/// times then. A move after this long is the person's.
+const SETTLED: Duration = Duration::from_millis(1500);
+
+/// Where a window opens, in the screen's pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    /// Its middle at the point.
+    Around(i32, i32),
+    /// Its top left corner, title bar and all, at the point.
+    At(i32, i32),
 }
 
 thread_local! {
@@ -76,8 +102,30 @@ pub fn open(
     viewport: egui::ViewportBuilder,
     factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
 ) {
-    let request = Request { key: key.into(), viewport, factory: Box::new(factory), middle: None };
+    let request = Request { key: key.into(), viewport, factory: Box::new(factory), place: None, left: None };
     REQUESTS.with(|r| r.borrow_mut().push(request));
+}
+
+/// The same, the window at `place` (`None`: where the window system puts
+/// it), moved into the work area of the screen that is on where it would
+/// reach beyond it; `left` is told where the window was when it closed,
+/// when the person had moved it: `Place::At` that, the next time. Where
+/// the window system places windows itself and says nothing of where
+/// they are (Wayland), it does, and `left` hears nothing.
+pub fn open_at(
+    key: impl Into<String>,
+    viewport: egui::ViewportBuilder,
+    place: Option<Place>,
+    left: impl Fn(i32, i32) + 'static,
+    factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
+) {
+    let request = Request { key: key.into(), viewport, factory: Box::new(factory), place, left: Some(Box::new(left)) };
+    REQUESTS.with(|r| r.borrow_mut().push(request));
+}
+
+/// The pointer's place, for a window to open around.
+pub fn pointer() -> Option<Place> {
+    win::cursor().map(|(x, y)| Place::Around(x, y))
 }
 
 /// The same, the window's middle where the pointer is now (within the
@@ -89,8 +137,21 @@ pub fn open_at_pointer(
     viewport: egui::ViewportBuilder,
     factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
 ) {
-    let request = Request { key: key.into(), viewport, factory: Box::new(factory), middle: win::cursor() };
+    let request = Request { key: key.into(), viewport, factory: Box::new(factory), place: pointer(), left: None };
     REQUESTS.with(|r| r.borrow_mut().push(request));
+}
+
+/// Where a window of `size` goes for `place`, within the work area of
+/// the screen the place is on (from the area's left and top where the
+/// window is larger).
+fn placed(place: Place, size: (i32, i32)) -> (i32, i32) {
+    match place {
+        Place::Around(x, y) => around((x, y), size, win::work_area_at(x, y)),
+        Place::At(x, y) => {
+            let middle = (x + size.0 / 2, y + size.1 / 2);
+            around(middle, size, win::work_area_at(middle.0, middle.1))
+        }
+    }
 }
 
 /// Where a window of `size` goes for its middle to be at `middle`, within
@@ -446,6 +507,8 @@ struct Runner {
     /// Windows from `open`: number, key, window.
     extras: Vec<(u64, String, Pane)>,
     next_extra: u64,
+    /// Those of them whose place is kept, by number.
+    kept: Vec<(u64, Kept)>,
     /// The strip along the edge that stands for the docked window while
     /// it is hidden outright (see `set_hidden`): plain, painted by the
     /// server, brings the window back when the pointer touches it.
@@ -496,6 +559,7 @@ pub fn run(
         docking: Docking::default(),
         extras: Vec::new(),
         next_extra: 1,
+        kept: Vec::new(),
         #[cfg(not(windows))]
         strip: None,
         #[cfg(not(windows))]
@@ -627,7 +691,7 @@ impl Runner {
             let n = self.next_extra;
             self.next_extra += 1;
             let mut viewport = request.viewport.with_visible(false);
-            if let Some(middle) = request.middle {
+            if let Some(place) = request.place {
                 // the window is made where it is to be: a window moved
                 // before it is shown says nothing of it to the window
                 // manager, which then puts it where it puts new windows
@@ -635,7 +699,7 @@ impl Runner {
                 let scale = self.main.as_ref().map_or(1.0, |main| main.window.scale_factor());
                 let pixels = |points: f32| (f64::from(points) * scale) as i32;
                 let size = viewport.inner_size.map_or((0, 0), |size| (pixels(size.x), pixels(size.y)));
-                let (x, y) = around(middle, size, win::work_area_at(middle.0, middle.1));
+                let (x, y) = placed(place, size);
                 let points = |pixels: i32| (f64::from(pixels) / scale) as f32;
                 viewport = viewport.with_position([points(x), points(y)]);
             }
@@ -648,6 +712,9 @@ impl Runner {
                     }
                     pane.window.focus_window();
                     self.extras.push((n, request.key, pane));
+                    if let Some(left) = request.left {
+                        self.kept.push((n, Kept { left, shown: Instant::now(), moved: false }));
+                    }
                 }
                 Err(e) => eprintln!("window {}: {e}", request.key),
             }
@@ -655,6 +722,14 @@ impl Runner {
     }
 
     fn close_extra(&mut self, n: u64) {
+        // where the person left it, for the next time
+        if let Some(at) = self.kept.iter().position(|(m, _)| *m == n) {
+            let (_, kept) = self.kept.remove(at);
+            let frame = self.extra(n).and_then(|pane| win::window_bounds(pane.hwnd));
+            if let (true, Some(frame)) = (kept.moved, frame) {
+                (kept.left)(frame.left, frame.top);
+            }
+        }
         // dropping the pane drops its Ui (which ends its connections)
         self.extras.retain(|(m, _, _)| *m != n);
     }
@@ -1124,7 +1199,13 @@ impl ApplicationHandler<UserEvent> for Runner {
                             self.button_settle = Some(now + dock::DRAG_POLL);
                         }
                     }
-                    Which::Extra(_) => {}
+                    Which::Extra(n) => {
+                        if let WindowEvent::Moved(_) = event {
+                            if let Some((_, kept)) = self.kept.iter_mut().find(|(m, _)| *m == n) {
+                                kept.moved |= kept.shown.elapsed() > SETTLED;
+                            }
+                        }
+                    }
                 }
             }
         }
