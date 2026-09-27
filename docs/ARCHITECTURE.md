@@ -4701,10 +4701,14 @@ renderer, as the per-machine setting `terminal.gpu` says
 (`native_term_wezterm::Gpu`): WebGpu (Metal, Vulkan, DirectX 12) on a
 real GPU, found by the GUI itself (`wezterm.gui.enumerate_gpus()`), the
 integrated one first (`power_saving`, the default, as WezTerm's
-`LowPower`) or the discrete one first (`performance`), else OpenGL (a
-VM's virtual GPU driver or its software rendering); or no GPU at all
-(`software`: WezTerm's Software front end, Mesa's llvmpipe on Windows and
-Linux, Apple's software renderer on macOS). A trade the user makes: on a
+`LowPower`) or the discrete one first (`performance`), else OpenGL through
+a VM's virtual GPU, else, with no GPU at all, the CPU; or the CPU by choice
+(`software`). The CPU is WezTerm's Software front end: Mesa's llvmpipe on
+Windows (the bundled one) and Linux, Apple's software renderer on macOS.
+Windows' own OpenGL is 1.1 without a GPU, too old for WezTerm (a VM's
+windows failed outright unless it was reached over Remote Desktop), and
+Mesa beat WARP (Windows 10 VM, 2026-09-27: an output done in 36 s that
+WARP had not finished after 67). A trade the user makes: on a
 Mac with two GPUs the integrated one drives the screen and, while macOS
 animates a zoom, WindowServer holds it, so a frame waited 80-395 ms and a
 zoom took 460-690 ms, against 381 on the discrete one (native: 352;

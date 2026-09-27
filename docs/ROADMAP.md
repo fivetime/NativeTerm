@@ -1461,6 +1461,14 @@
       the Radeon's OpenGL driver too (opengl32.dll is a KnownDLL, so the
       bundled Mesa was never loaded) until fork `18ff7923b` loads
       mesa\opengl32.dll by its path: now llvmpipe (Mesa 20.1.8), painted.
+      Windows 10 VM with no GPU and no Windows Terminal (2026-09-27), two
+      more found and fixed: NativeTerm refused to start in WezTerm mode
+      without a Windows Terminal installed ("fatal-no-terminal"; the
+      settings pages now say there is none, as off Windows), and its
+      WezTerm windows did not open at all on the console (Windows' OpenGL
+      1.1): with no GPU at all the generated config now picks the CPU
+      (Software, Mesa; it beat WARP 36 s to >67 s on an output). All three
+      values then drew with llvmpipe there.
 - [ ] macOS maximize/restore (zoom) and live resize in step with the
       window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
       Mac). Chrome holds the transaction that changes the frame until a

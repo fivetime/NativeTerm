@@ -118,7 +118,6 @@ fn choose_install(dir: Option<&PathBuf>, chosen: Option<&Path>, notices: &mut Ve
         return Install::from_dir(dir).map_err(|e| format!("{}: {e}", dir.display()));
     }
     let found = Install::discover(&[]);
-    let first = found.first().ok_or_else(|| t!("fatal-no-terminal"))?;
     let same = |install: &&Install, want: &Path| {
         install.dir.as_os_str().eq_ignore_ascii_case(want.as_os_str()) || install.dir == want
     };
@@ -127,10 +126,14 @@ fn choose_install(dir: Option<&PathBuf>, chosen: Option<&Path>, notices: &mut Ve
             return Ok(install.clone());
         }
         // a folder that was picked by hand (a portable copy) is not among
-        // the installed packages, but it is still a Terminal
+        // the installed packages, but it is still a Terminal, installed
+        // ones or not
         if let Ok(install) = Install::from_dir(want) {
             return Ok(install);
         }
+    }
+    let first = found.first().ok_or_else(|| t!("fatal-no-terminal"))?;
+    if let Some(want) = chosen {
         notices.push(t!(
             "notice-terminal-choice-gone",
             chosen = want.display().to_string(),
@@ -161,8 +164,10 @@ pub struct Setup {
     options: Options,
     /// Held while NativeTerm runs: this data directory is ours.
     _lock: Option<data_lock::DataLock>,
+    /// The Windows Terminal the profile and settings pages are about;
+    /// none when the tabs go to WezTerm and no Terminal is installed
     #[cfg(windows)]
-    install: Install,
+    install: Option<Install>,
     shim: PathBuf,
     core: Option<Core>,
     data_dir: PathBuf,
@@ -305,7 +310,7 @@ fn setup() -> Result<Start, String> {
             options,
             _lock: lock,
             #[cfg(windows)]
-            install: install_for_wezterm(&settings, &mut notices)?,
+            install: install_for_wezterm(&settings, &mut notices),
             shim,
             core,
             data_dir,
@@ -353,7 +358,7 @@ fn setup() -> Result<Start, String> {
         options,
         _lock: lock,
         #[cfg(windows)]
-        install,
+        install: Some(install),
         shim,
         core,
         data_dir,
@@ -388,11 +393,13 @@ fn start_core(
 }
 
 /// The Windows Terminal install the settings and profile pages are about,
-/// found the usual way, when the tabs go to WezTerm instead.
+/// found the usual way, when the tabs go to WezTerm instead: none when no
+/// Terminal is installed (Windows 10 has none of its own), which WezTerm
+/// does not need.
 #[cfg(windows)]
-fn install_for_wezterm(settings: &settings::Settings, notices: &mut Vec<String>) -> Result<Install, String> {
+fn install_for_wezterm(settings: &settings::Settings, notices: &mut Vec<String>) -> Option<Install> {
     let chosen = settings.get(terminal_profile::INSTALL_SETTING).filter(|dir| !dir.is_empty()).map(PathBuf::from);
-    choose_install(None, chosen.as_deref(), notices)
+    choose_install(None, chosen.as_deref(), notices).ok()
 }
 
 fn main() {

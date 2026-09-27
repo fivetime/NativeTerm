@@ -20,7 +20,10 @@ pub const INSTALL_SETTING: &str = "terminal.install";
 pub const FAVORITES_SETTING: &str = "terminal.favorites";
 
 pub struct ProfileSetup {
-    install: Install,
+    /// None when the tabs go to WezTerm and no Terminal is installed: then
+    /// this says so, as `terminal_profile_stub.rs` does where there is no
+    /// Terminal at all.
+    install: Option<Install>,
     shim: PathBuf,
     root: Option<PathBuf>,
     pub status: Status,
@@ -37,9 +40,9 @@ pub struct ProfileSetup {
 }
 
 impl ProfileSetup {
-    pub fn new(install: Install, shim: PathBuf, backups: PathBuf) -> ProfileSetup {
+    pub fn new(install: Option<Install>, shim: PathBuf, backups: PathBuf) -> ProfileSetup {
         let root = profile::fragments_root();
-        let status = profile::status(&install, root.as_deref(), &shim);
+        let status = Status::Missing;
         let mut setup = ProfileSetup {
             install,
             shim,
@@ -55,8 +58,9 @@ impl ProfileSetup {
     }
 
     pub fn refresh(&mut self) {
-        self.status = profile::status(&self.install, self.root.as_deref(), &self.shim);
-        self.ssh_hidden = std::fs::read_to_string(self.install.settings_json())
+        let Some(install) = &self.install else { return };
+        self.status = profile::status(install, self.root.as_deref(), &self.shim);
+        self.ssh_hidden = std::fs::read_to_string(install.settings_json())
             .ok()
             .map(|text| sources::is_disabled(&text, sources::SSH_SOURCE));
     }
@@ -89,7 +93,8 @@ impl ProfileSetup {
     /// Hide or show Terminal's own SSH profiles (a backed-up edit of its
     /// `settings.json`).
     fn set_ssh_hidden(&mut self, hide: bool) -> Result<Option<PathBuf>, String> {
-        let result = sources::set_disabled(&self.install.settings_json(), sources::SSH_SOURCE, hide, &self.backups);
+        let install = self.install.as_ref().ok_or_else(|| t!("profile-no-terminal"))?;
+        let result = sources::set_disabled(&install.settings_json(), sources::SSH_SOURCE, hide, &self.backups);
         self.refresh();
         result.map_err(|e| e.to_string())
     }
@@ -98,7 +103,7 @@ impl ProfileSetup {
     /// `settings.json` changes, so touch all known ones. A test fragment
     /// folder (`NATIVETERM_FRAGMENTS_DIR`) only concerns the chosen one.
     fn settings_files(&self) -> Vec<PathBuf> {
-        let mut files = vec![self.install.settings_json()];
+        let mut files: Vec<PathBuf> = self.install.iter().map(Install::settings_json).collect();
         if std::env::var_os(profile::FRAGMENTS_ENV).is_some() {
             return files;
         }
@@ -140,25 +145,30 @@ impl ProfileSetup {
 
     /// The chosen Terminal, in words.
     pub fn terminal_text(&self) -> String {
-        let version = self.install.version.map(|v| format!(", {v}")).unwrap_or_default();
-        format!("{} ({}{version})", self.install.dir.display(), kind_name(&self.install.kind))
+        let Some(install) = &self.install else { return t!("profile-no-terminal") };
+        let version = install.version.map(|v| format!(", {v}")).unwrap_or_default();
+        format!("{} ({}{version})", install.dir.display(), kind_name(&install.kind))
     }
 
     /// What stands between NativeTerm and the chosen Terminal, if anything
     /// (the same checks as at start, for the wizard). An app execution
     /// alias that is off is not one: the package's own copy is used.
     pub fn terminal_problem(&self) -> Option<String> {
-        if let Some(version) = self.install.version.filter(|v| v.old()) {
+        let Some(install) = &self.install else { return Some(t!("profile-no-terminal")) };
+        if let Some(version) = install.version.filter(|v| v.old()) {
             let (major, minor) = install::OLDEST;
             return Some(t!("notice-terminal-old", version = version.to_string(), oldest = format!("{major}.{minor}")));
         }
-        if self.install.launcher_now().is_none() {
-            return Some(t!("notice-wt-missing", dir = self.install.dir.display().to_string()));
+        if install.launcher_now().is_none() {
+            return Some(t!("notice-wt-missing", dir = install.dir.display().to_string()));
         }
         None
     }
 
     fn install_fragment(&mut self) -> Result<(), String> {
+        if self.install.is_none() {
+            return Err(t!("profile-no-terminal"));
+        }
         let root = self.root.clone().ok_or_else(|| t!("profile-no-localappdata"))?;
         profile::install(&root, &self.shim, &self.favorites, &self.settings_files()).map_err(|e| e.to_string())?;
         self.refresh();
@@ -184,7 +194,7 @@ impl ProfileSetup {
 
     /// A warning line when tabs can't open; empty otherwise.
     pub fn banner(&mut self, ui: &mut egui::Ui, notices: &mut Vec<String>) {
-        if self.status.usable() {
+        if self.status.usable() || self.install.is_none() {
             return;
         }
         let red = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
@@ -216,7 +226,7 @@ impl ProfileSetup {
 
     /// The Terminal's own `settings.json` (its key bindings, among others).
     pub fn settings_json(&self) -> PathBuf {
-        self.install.settings_json()
+        self.install.as_ref().map(Install::settings_json).unwrap_or_default()
     }
 
     /// Which Terminal NativeTerm drives. Each install is its own
@@ -224,18 +234,19 @@ impl ProfileSetup {
     /// choice is read at the next start.
     fn install_choice(&self, ui: &mut egui::Ui, core: Option<&Core>, notices: &mut Vec<String>) {
         let Some(core) = core else { return };
+        let Some(install) = &self.install else { return };
         // the installed packages, and the one in use if it is neither of
         // them (a portable copy, or --terminal-dir)
         let mut others = Install::discover(&[]);
-        if !others.iter().any(|i| i.dir == self.install.dir) {
-            others.insert(0, self.install.clone());
+        if !others.iter().any(|i| i.dir == install.dir) {
+            others.insert(0, install.clone());
         }
         if others.len() < 2 {
             return;
         }
         // what is shown is the choice, not what is running: it can be
         // changed back before the next start
-        let chosen = core.setting(INSTALL_SETTING).map(PathBuf::from).unwrap_or_else(|| self.install.dir.clone());
+        let chosen = core.setting(INSTALL_SETTING).map(PathBuf::from).unwrap_or_else(|| install.dir.clone());
         let mut pick = chosen.clone();
         let text = others.iter().find(|i| i.dir == chosen).map(name_of).unwrap_or_else(|| chosen.display().to_string());
         ui.horizontal(|ui| {
@@ -248,7 +259,7 @@ impl ProfileSetup {
         });
         if pick != chosen {
             core.set_setting(INSTALL_SETTING, &pick.to_string_lossy());
-            if pick == self.install.dir {
+            if pick == install.dir {
                 notices.push(t!("settings-terminal-picked-current", dir = pick.display().to_string()));
             } else {
                 notices.push(t!("settings-terminal-picked", dir = pick.display().to_string()));
@@ -257,12 +268,20 @@ impl ProfileSetup {
     }
 
     pub fn settings_ui(&mut self, ui: &mut egui::Ui, core: Option<&Core>, notices: &mut Vec<String>) {
-        ui.label(t!(
-            "settings-terminal",
-            dir = self.install.dir.display().to_string(),
-            kind = kind_name(&self.install.kind)
-        ));
-        if let Some(version) = self.install.version {
+        let Some(install) = &self.install else {
+            // as where there is no Terminal (terminal_profile_stub.rs)
+            match core {
+                Some(core) if !core.has_profile() => {
+                    ui.weak(t!("profile-driven-by", terminal = core.terminal_name()));
+                }
+                _ => {
+                    ui.weak(t!("profile-no-terminal"));
+                }
+            }
+            return;
+        };
+        ui.label(t!("settings-terminal", dir = install.dir.display().to_string(), kind = kind_name(&install.kind)));
+        if let Some(version) = install.version {
             ui.label(t!("settings-terminal-version", version = version.to_string()));
         }
         self.install_choice(ui, core, notices);

@@ -609,16 +609,20 @@ config.front_end = \"Software\"
     format!(
         r#"-- drawn by the GPU through WebGpu (Metal, Vulkan, DirectX 12) where there
 -- is a real one ({which}; NativeTerm's `terminal.gpu` setting); OpenGL
--- where there is none (a virtual machine: its virtual GPU's driver or a
--- software one). Only the GUI can ask: `wezterm cli` reads this file too.
+-- through a virtual machine's virtual GPU; by the CPU where there is no
+-- GPU at all (WezTerm's Software front end: Windows' own OpenGL 1.1 is too
+-- old for WezTerm, and Mesa beat WARP, finishing an output in 36 s that
+-- WARP had not after 67, Windows 10 VM, 2026-09-27). Only the GUI can
+-- ask: `wezterm cli` reads this file too.
 -- Of one GPU's backends, DirectX 12 before Vulkan on Windows, as Chrome
 -- draws through Direct3D there: its swap chain follows a resize in 11 ms
 -- a step where Vulkan's took 37 (AMD, measured 2026-09-26).
 if wezterm.gui then
   local kinds = {{ IntegratedGpu = {integrated}, DiscreteGpu = {discrete} }}
   local backends = {{ Dx12 = 0, Metal = 0, Vulkan = 1, Gl = 2 }}
-  local gpu, best = nil, nil
+  local gpu, best, virtual = nil, nil, false
   for _, adapter in ipairs(wezterm.gui.enumerate_gpus()) do
+    virtual = virtual or adapter.device_type == "VirtualGpu"
     local kind = kinds[adapter.device_type]
     if kind then
       local rank = kind * 10 + (backends[adapter.backend] or 3)
@@ -630,6 +634,8 @@ if wezterm.gui then
   if gpu then
     config.front_end = "WebGpu"
     config.webgpu_preferred_adapter = gpu
+  elseif not virtual then
+    config.front_end = "Software"
   end
 end
 
@@ -932,6 +938,14 @@ mod tests {
         assert!(!unknown.contains("ShowTabNavigator"), "Ctrl+Tab stays WezTerm's until asked");
         assert!(unknown.trim_end().ends_with("return config"));
         assert!(unknown.contains("local kinds = { IntegratedGpu = 0, DiscreteGpu = 1 }"), "power saving by default");
+        assert!(
+            unknown.contains(
+                "  elseif not virtual then
+    config.front_end = \"Software\"
+"
+            ),
+            "no GPU: the CPU"
+        );
         let fast = default_config(&Look { gpu: Gpu::Performance, ..Look::default() }, shim);
         assert!(fast.contains("local kinds = { IntegratedGpu = 1, DiscreteGpu = 0 }"));
         let cpu = default_config(&Look { gpu: Gpu::Software, ..Look::default() }, shim);
