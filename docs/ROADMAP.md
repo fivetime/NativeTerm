@@ -1069,6 +1069,19 @@
             cut off there (winit draws the title bar within the window's
             height on GNOME, and without the title): in a panel at the
             bottom now (`e3454bf`).
+      - [x] One press for the next menu (2026-09-27, the person's
+            report: with the pane's menu up, a right click on a tab
+            took two). A press beside a menu closed it and went no
+            further; now it is the window's too, as Chrome's
+            (fork `d8ee0b0f7`). Tried on Lingmo (X11) and Zorin (Wayland):
+            the pane's menu up, one right press on a tab and the tab's
+            menu is up (Down Down Enter chose its third item); the
+            tab's up, one right press in the pane (Paste chosen from
+            it); the pane's up, one left press on the second tab shows
+            that tab; on X11 a right press on a tab under the menu's
+            shadow too. Not tried: Windows (the press is posted on from
+            the popup, as Chrome's RepostEventImpl); macOS, where the
+            menu is the system's and does what the system does.
       - [ ] macOS (the system's menu with ⌘C and ⌘V, and its print
             panel: for the person to try, no pointer can be sent there);
             Windows (WezTerm is opt-in there; builds, not tried).

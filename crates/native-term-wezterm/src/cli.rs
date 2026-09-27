@@ -675,6 +675,11 @@ __HELPERS__
   -- what each pane's menu was opened with
   local opened = {}
   local chosen = wezterm.action_callback(function(window, pane, id)
+    if not id then
+      -- dismissed: by a right press beside it, the menu may be up again
+      -- already, and what it was opened with is that one's
+      return
+    end
     local with = opened[pane:pane_id()] or { selection = "" }
     opened[pane:pane_id()] = nil
     if id == "copy" then
