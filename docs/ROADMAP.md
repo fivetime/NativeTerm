@@ -1001,12 +1001,28 @@
       Tried end to end on Lingmo with the fork built there: a right
       click popped NativeTerm's menu up (the heading, icons, "Reconnect"
       dimmed while connected), and "Clone Session" opened the clone
-- [ ] WezTerm's runtime directory fills up (found 2026-09-27): on Zorin
-      /run/user/1000/wezterm held 202 862 files, 789 MB, the tmpfs full,
-      and a new WezTerm could not bind its socket ("No space left on
+- [x] WezTerm's runtime directory fills up (found and closed
+      2026-09-27): on Zorin /run/user/1000/wezterm held 202 862 files and
+      a new WezTerm could not bind its socket ("No space left on
       device"); deepin 177 728 files, Fedora 146 861, elementary 43 108.
-      Emptied by hand on the test boxes. To find: what writes them (a log
-      for every `wezterm cli` call NativeTerm makes?) and stop it.
+      What ran out is inodes, not room: the session's tmpfs has 203 109
+      of them (794 MB / 4096), the files are a few hundred bytes each.
+      They were what the Mac had shown on 2026-09-25 (below): a log file
+      for every poll's `wezterm cli` while no window was open, two a
+      second. The fork's fix (`099a9b303`) reached the boxes on
+      2026-09-26 (their reflogs), after two to four days of polling
+      without it; WezTerm prunes its logs when a GUI starts, those older
+      than a week, so they stayed. Lingmo, restarted a few hours before
+      the fix, had 142. With the fix nothing is written in any state
+      tried on Fedora (no GUI; a GUI; a GUI ended or killed; a socket
+      file nobody listens on; a GUI that doesn't answer: 0 new files in
+      15-20 s each) but one: a GUI gone while a call waits for its answer
+      logs "Connection reset by peer", a file for each call waiting. The
+      poll's calls now run with `WEZTERM_LOG=off` (what the poll reads is
+      on stdout), so no state leaves the poll a file: that case 1 file
+      before, 0 after. Left as they are: `agent.<pid>`, a link a GUI
+      that is killed leaves behind (WezTerm's own, one for each GUI
+      killed, not one a second)
 - [ ] The tab menu beyond the window (2026-09-27). Drawn over the
       WezTerm window, it cannot leave it: tried on Lingmo, a 520x300
       window cut the menu off after "Lock". Chrome: the system's menu on

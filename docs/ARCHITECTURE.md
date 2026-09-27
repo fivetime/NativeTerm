@@ -4652,6 +4652,11 @@ the whole state — panes grouped into tabs and windows, a tab named by
 its set title or its active pane's, the active tab selected, no
 rectangles — and, WezTerm having no events, a subscription polls it
 every second and reports `Windows` or `Tabs` when the shape changed.
+The poll's calls run with `WEZTERM_LOG=off`: WezTerm's logger opens a
+file for the process in the runtime directory at the first line it
+logs, so a state in which every call logs one leaves two files a second
+(a Linux session's tmpfs has some 200 000 inodes, and with none left
+WezTerm can't make its socket).
 `select` is `activate-tab`, `close` kills the tab's panes, `activate` is
 `activate-pane` (the CLI can't raise a window; `foreground` is the
 window last activated), `screen_text` is `get-text`, and `type_text` is

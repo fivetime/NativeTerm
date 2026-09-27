@@ -585,8 +585,17 @@ impl TerminalBackend for WezTerm {
         std::thread::Builder::new()
             .name("wezterm-poll".into())
             .spawn(move || {
+                // The poll's calls log nothing: WezTerm's logger opens a
+                // file of the process's own in its runtime directory at
+                // the first line it logs, and whatever made every call log
+                // one (no window to talk to, before the fork stopped
+                // logging that; a GUI gone while a call waited) left two
+                // files a second — a Linux session's runtime directory has
+                // some 200,000 inodes, a day's worth, and with none left
+                // WezTerm doesn't start. What the poll needs is on stdout.
                 let output = |args: Vec<OsString>| {
                     quiet(&exe)
+                        .env("WEZTERM_LOG", "off")
                         .args(args)
                         .stdin(Stdio::null())
                         .output()
