@@ -1001,6 +1001,19 @@
       Tried end to end on Lingmo with the fork built there: a right
       click popped NativeTerm's menu up (the heading, icons, "Reconnect"
       dimmed while connected), and "Clone Session" opened the clone
+- [ ] The tab menu beyond the window (2026-09-27). Drawn over the
+      WezTerm window, it cannot leave it: tried on Lingmo, a 520x300
+      window cut the menu off after "Lock". Chrome: the system's menu on
+      macOS, its own in a window of its own elsewhere.
+      - [x] A, macOS: the system's menu (fork `e3d2a4c05`, NSMenu); seen on the
+            Mac reaching below the window; choosing an item to be tried
+            by hand.
+      - [ ] B, Linux (X11 override-redirect, Wayland xdg_popup) and
+            Windows (WezTerm is opt-in there): the menu in a window of
+            its own.
+      Not done: scrolling the drawn menu (B makes it unnecessary), and
+      NativeTerm showing the menu itself (a Wayland client cannot place a
+      window over another client's at a given point).
 - [x] The tab menu on the tab, and the window buttons in the tab strip
       (2026-09-24), as asked after trying it on Lingmo: in Windows Terminal
       the menu is the tab's, and Chrome has no title bar of the desktop's
