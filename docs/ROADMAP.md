@@ -1023,7 +1023,7 @@
       before, 0 after. Left as they are: `agent.<pid>`, a link a GUI
       that is killed leaves behind (WezTerm's own, one for each GUI
       killed, not one a second)
-- [ ] The tab menu beyond the window (2026-09-27). Drawn over the
+- [x] The tab menu beyond the window (2026-09-27). Drawn over the
       WezTerm window, it cannot leave it: tried on Lingmo, a 520x300
       window cut the menu off after "Lock". Chrome: the system's menu on
       macOS, its own in a window of its own elsewhere.
@@ -1031,7 +1031,7 @@
             Mac reaching below the window; tried by the user there the
             same day (a session's tab: the menu at the pointer, an item
             chosen, dismissed, a small window) and found good.
-      - [ ] B, Linux and Windows (WezTerm is opt-in there): the menu in
+      - [x] B, Linux and Windows (WezTerm is opt-in there): the menu in
             a window of its own, painted on the CPU with Chrome's numbers
             (MenuConfig, kMenuRadius, the elevation 12 shadow).
             - [x] X11 (fork `02ff564df`): an override-redirect window,
@@ -1046,7 +1046,20 @@
                   and elementary: a click, Escape, Down Down Enter, a
                   press in the window and one on the desktop; a 620x220
                   window with the menu below it (Zorin).
-            - [ ] Windows: a layered popup window.
+            - [x] Windows (fork `93f22e11d`): Chrome's menu window
+                  there, read from its source (a WS_POPUP tool window
+                  the window owns, above the others and never
+                  activated; the picture with its alpha through
+                  UpdateLayeredWindow; the mouse captured; within the
+                  monitor's work area). Tried on this machine (Windows
+                  11, 150%) with a 520x300 window and the pointer moved
+                  by a script: the menu below the window with its round
+                  corners and shadow, the window still the one in
+                  front, hover, a click on an item, a press on another
+                  application's window, Escape, Down Down Enter, a press
+                  in the window, and at the work area's bottom right
+                  the menu's bottom right corner at the pointer. Not
+                  tried: Windows 10, a second monitor.
       Not done: scrolling the drawn menu (B makes it unnecessary), and
       NativeTerm showing the menu itself (a Wayland client cannot place a
       window over another client's at a given point).

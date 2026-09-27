@@ -4748,9 +4748,11 @@ line per item (`id<TAB>text<TAB>flags<TAB>icon`: a heading with id 0,
 maps NativeTerm's icons — and `-` alone for a separator; `MenuItem`'s
 newer fields default, so older ends still talk). NativeTerm's WezTerm
 (the fork at github.com/fivetime/wezterm, branch `nativeterm`) has a
-`PopupMenu` action — a menu drawn over the window where the mouse is,
-with the heading, icons, separators and dimmed items, in the command
-palette's colours, which the written look sets per light and dark — and
+`PopupMenu` action — a menu where the mouse is, which may reach beyond
+the window as Chrome's does: the system's own menu on macOS, elsewhere
+a window of its own (X11, Wayland, Windows) with the heading, icons,
+separators and dimmed items, in the command palette's colours, which
+the written look sets per light and dark — and
 the callback uses it when `wezterm.has_action("PopupMenu")`; another
 WezTerm gets the choosable items in its `InputSelector`, in the pane.
 Either way the choice goes back with `--tab-menu <id>`, which
