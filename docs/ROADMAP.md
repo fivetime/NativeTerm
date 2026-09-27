@@ -1472,7 +1472,7 @@
       (checked by eye only when the user tried it): gdi32's pixel format
       and SwapBuffers reached the system's opengl32.dll, not Mesa's; fork
       `cb62625b0` calls Mesa's own wgl* for them, and the window shows.
-- [ ] macOS zoom as the screen shows it (measured 2026-09-27, MacBook
+- [x] macOS zoom as the screen shows it (measured 2026-09-27, MacBook
       Pro 2018, screen 3840x2400 scaled, 20 tabs, 6 zooms each; a sampler
       read one screen column ~50-65 times a second: how many different
       window heights a zoom showed, over how long, the longest the screen
@@ -1501,9 +1501,26 @@
       what the screen shows (1.8 -> 3.5) and presenting with the
       transaction (the vendored wgpu-hal) shortens the zoom (530 against
       710 ms on Intel) and had no frame whose content was of another size
-      than its window (without: 1-2 in 12 zooms): both stay. Open: make
-      `performance` move the screen to the discrete GPU; and what the
-      default can do on the Intel GPU (a native window shows 19).
+      than its window (without: 1-2 in 12 zooms): both stay.
+
+      The cause, found the same day (fork `2ccd4ce32`): the window's
+      background was the clear colour although the window is opaque, which
+      has the window server make the shadow from the window's contents at
+      every step. With the terminal's background colour instead, the Intel
+      GPU driving the screen:
+
+      | drawn by | heights | ms | longest still | content of another size |
+      |---|---|---|---|---|
+      | WebGpu Intel, with transaction (the default) | 15.5 | 345 | 51 | 0 |
+      | WebGpu Intel, without transaction | 15.2 | 379 | 89 | 0 |
+      | WebGpu Radeon (`performance`) | 11.8 | 353 | 134 | 4 frames |
+      | OpenGL, Intel | 11.3 | 344 | 107 | 3 frames |
+
+      Tried and not needed: drawing nothing while the zoom animates (2.5
+      heights with the clear background; 17.0 with the opaque one, against
+      15.5 drawing each step as Chrome does). On this Mac the default is
+      now the best choice; `performance` is for Macs whose discrete GPU
+      drives the screen.
 - [x] Windows: the terminal's windows follow a theme switch at once
       (2026-09-27, reported on the Windows 10 VM: the system went light,
       NativeTerm's window too, the WezTerm window stayed dark). NativeTerm

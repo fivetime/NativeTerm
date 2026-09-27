@@ -560,10 +560,9 @@ end
 
 /// Which GPU the terminal's windows draw with: NativeTerm's `terminal.gpu`
 /// setting, per machine, since it is a trade the user makes: the discrete
-/// one costs the battery. What it buys on a Mac with two GPUs is less than
-/// it seems: what makes a zoom smooth there is the GPU that drives the
-/// screen, not the one that draws (docs/ROADMAP.md, 2026-09-27), and the
-/// screen stays on the integrated one.
+/// one costs the battery. On a Mac with two GPUs whose integrated one
+/// drives the screen it buys nothing: a zoom drawn on the discrete one
+/// showed fewer steps than the default (docs/ROADMAP.md, 2026-09-27).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Gpu {
     /// The integrated GPU first (it spares the battery), as WezTerm's

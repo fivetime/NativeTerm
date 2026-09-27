@@ -4710,10 +4710,9 @@ windows failed outright unless it was reached over Remote Desktop), and
 Mesa beat WARP (Windows 10 VM, 2026-09-27: an output done in 36 s that
 WARP had not finished after 67). A trade the user makes (the
 discrete GPU costs the battery), and on a Mac with two GPUs one that buys
-less than it seems: as the screen shows it, a zoom is smooth when the
-discrete GPU drives the screen, whichever GPU and front end draw, and the
-setting leaves the screen on the integrated one (docs/ROADMAP.md,
-2026-09-27). The CPU renderer could not keep up with a zoom at all. A new choice applies to
+nothing where the integrated one drives the screen: drawing on the other
+GPU showed fewer steps of a zoom than the default (11.8 against 15.5;
+docs/ROADMAP.md, 2026-09-27). The CPU renderer could not keep up with a zoom at all. A new choice applies to
 windows opened after it; `set_look`
 rewrites it when any of that changes and running windows reload it on
 their own. All of it only unless the person has a WezTerm configuration
