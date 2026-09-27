@@ -1006,8 +1006,9 @@
       window cut the menu off after "Lock". Chrome: the system's menu on
       macOS, its own in a window of its own elsewhere.
       - [x] A, macOS: the system's menu (fork `e3d2a4c05`, NSMenu); seen on the
-            Mac reaching below the window; choosing an item to be tried
-            by hand.
+            Mac reaching below the window; tried by the user there the
+            same day (a session's tab: the menu at the pointer, an item
+            chosen, dismissed, a small window) and found good.
       - [ ] B, Linux (X11 override-redirect, Wayland xdg_popup) and
             Windows (WezTerm is opt-in there): the menu in a window of
             its own.
