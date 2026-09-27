@@ -1468,7 +1468,10 @@
       WezTerm windows did not open at all on the console (Windows' OpenGL
       1.1): with no GPU at all the generated config now picks the CPU
       (Software, Mesa; it beat WARP 36 s to >67 s on an output). All three
-      values then drew with llvmpipe there.
+      values then drew with llvmpipe there — but the window stayed white
+      (checked by eye only when the user tried it): gdi32's pixel format
+      and SwapBuffers reached the system's opengl32.dll, not Mesa's; fork
+      `cb62625b0` calls Mesa's own wgl* for them, and the window shows.
 - [ ] macOS maximize/restore (zoom) and live resize in step with the
       window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
       Mac). Chrome holds the transaction that changes the frame until a
