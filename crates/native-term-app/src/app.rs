@@ -1788,6 +1788,11 @@ pub fn terminal_look(
     let dark = match setting {
         Some("light") => Some(false),
         Some("dark") => Some(true),
+        // Windows: WezTerm follows the system theme itself, at once
+        // (WM_SETTINGCHANGE, then its configuration again with
+        // get_appearance), where NativeTerm read the registry only at
+        // start: a switch to light left the windows dark
+        _ if cfg!(windows) => None,
         _ => desktop.dark,
     };
     let fonts = native_term_os::fonts::terminal_families(desktop.monospace.as_deref());
@@ -2295,9 +2300,11 @@ mod tests {
     fn the_terminal_follows_the_theme_setting() {
         assert_eq!(terminal_look(Some("light"), false, Default::default()).dark, Some(false));
         assert_eq!(terminal_look(Some("dark"), false, Default::default()).dark, Some(true));
+        // (on Windows WezTerm asks the system itself)
         let desktop = native_term_os::appearance::cached();
-        assert_eq!(terminal_look(None, false, Default::default()).dark, desktop.dark);
-        assert_eq!(terminal_look(Some(""), false, Default::default()).dark, desktop.dark);
+        let dark = desktop.dark.filter(|_| !cfg!(windows));
+        assert_eq!(terminal_look(None, false, Default::default()).dark, dark);
+        assert_eq!(terminal_look(Some(""), false, Default::default()).dark, dark);
         assert_eq!(
             terminal_look(None, false, Default::default()).fonts,
             native_term_os::fonts::terminal_families(desktop.monospace.as_deref())

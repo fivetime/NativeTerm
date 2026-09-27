@@ -1472,6 +1472,14 @@
       (checked by eye only when the user tried it): gdi32's pixel format
       and SwapBuffers reached the system's opengl32.dll, not Mesa's; fork
       `cb62625b0` calls Mesa's own wgl* for them, and the window shows.
+- [x] Windows: the terminal's windows follow a theme switch at once
+      (2026-09-27, reported on the Windows 10 VM: the system went light,
+      NativeTerm's window too, the WezTerm window stayed dark). NativeTerm
+      read the registry at start only and wrote `local dark = true` into
+      the configuration; without a theme setting of its own it now leaves
+      the question to WezTerm on Windows (`get_appearance`, which follows
+      WM_SETTINGCHANGE itself). Seen on the VM: light, dark, light again
+      within seconds of each switch.
 - [ ] macOS maximize/restore (zoom) and live resize in step with the
       window's frame (2026-09-27, fork `68dd2bd42`; to be tried on the
       Mac). Chrome holds the transaction that changes the frame until a
