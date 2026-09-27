@@ -1086,6 +1086,14 @@ impl App {
             self.dropped(&alias, &session, paths, &text, false);
             return;
         }
+        if let MenuRequest::PasteQuotation(ticket) = request {
+            // a window of its own too, whatever dialog is open here
+            match &self.core {
+                Some(core) => crate::quotation_window::open(ticket, core.clone()),
+                None => native_term_app::quotation::answer(ticket, None),
+            }
+            return;
+        }
         if self.dialog.is_some() {
             self.notices.push(t!("notice-dialog-open"));
             return;
@@ -1107,7 +1115,7 @@ impl App {
                 None => self.notices.push(t!("notice-not-saved", alias = alias.as_str())),
             },
             // handled above
-            MenuRequest::Files { .. } | MenuRequest::Dropped { .. } => {}
+            MenuRequest::Files { .. } | MenuRequest::Dropped { .. } | MenuRequest::PasteQuotation(_) => {}
             MenuRequest::ConfirmClose(ids) => {
                 let labels = self
                     .core
@@ -1813,6 +1821,27 @@ pub fn terminal_look(
         titlebar_double_click: desktop.titlebar_double_click,
         button_layout: desktop.button_layout,
         gpu,
+        pane_menu: Some(pane_menu(None)),
+    }
+}
+
+/// The menu of a right click in a pane, in the person's language, a
+/// selection looked up with `lookup` (the `terminal.lookup_url` setting;
+/// `None`: the default).
+pub fn pane_menu(lookup: Option<&str>) -> native_term_wezterm::PaneMenu {
+    native_term_wezterm::PaneMenu {
+        copy: t!("panemenu-copy"),
+        paste: t!("panemenu-paste"),
+        copy_paste: t!("panemenu-copy-paste"),
+        paste_quotation: t!("panemenu-paste-quotation"),
+        open_selection: t!("panemenu-open-selection"),
+        open_url: t!("panemenu-open-url"),
+        lookup: t!("panemenu-lookup"),
+        find: t!("panemenu-find"),
+        select_all: t!("panemenu-select-all"),
+        print: t!("panemenu-print"),
+        clear: t!("tabmenu-clear"),
+        lookup_url: native_term_wezterm::PaneMenu::lookup_url(lookup),
     }
 }
 
@@ -1857,7 +1886,9 @@ fn desktop_titlebar(
 fn sync_terminal_look(core: &Core) {
     if let Some(wezterm) = core.terminal().as_any().downcast_ref::<native_term_wezterm::WezTerm>() {
         let gpu = native_term_wezterm::Gpu::from_setting(core.setting(native_term_wezterm::Gpu::SETTING).as_deref());
-        wezterm.set_look(&terminal_look(core.setting(THEME_SETTING).as_deref(), core.ctrl_tab(), gpu));
+        let mut look = terminal_look(core.setting(THEME_SETTING).as_deref(), core.ctrl_tab(), gpu);
+        look.pane_menu = Some(pane_menu(core.setting(native_term_wezterm::PaneMenu::LOOKUP_SETTING).as_deref()));
+        wezterm.set_look(&look);
     }
 }
 
@@ -1922,13 +1953,16 @@ fn language_choice(ui: &mut egui::Ui, core: &Core) {
     ui.horizontal(|ui| {
         ui.label(t!("language-label"));
         egui::ComboBox::from_id_salt("language").selected_text(shown).show_ui(ui, |ui| {
+            // (the terminal's menus are written in the language too)
             if ui.selectable_label(setting.is_none(), t!("language-system")).clicked() {
                 core.set_language_setting(None);
+                sync_terminal_look(core);
             }
             for (id, native) in &languages {
                 let id = id.to_string();
                 if ui.selectable_label(setting.as_deref() == Some(id.as_str()), *native).clicked() {
                     core.set_language_setting(Some(&id));
+                    sync_terminal_look(core);
                 }
             }
         });
@@ -2184,6 +2218,12 @@ impl crate::window::Ui for App {
                         let response = ui.checkbox(&mut ask, t!("drop-ask-setting")).on_hover_text(t!("drop-ask-hint"));
                         if response.changed() && ask {
                             core.set_setting("drop.action", "");
+                        }
+                        let mut ask = native_term_app::quotation::prompts(core);
+                        let response =
+                            ui.checkbox(&mut ask, t!("quote-ask-setting")).on_hover_text(t!("quote-ask-hint"));
+                        if response.changed() {
+                            native_term_app::quotation::set_prompts(core, ask);
                         }
                         language_choice(ui, core);
                         theme_choice(ui, core);

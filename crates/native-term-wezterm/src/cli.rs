@@ -404,6 +404,9 @@ config.use_fancy_tab_bar = true
     );
     lua.push_str(&gpu_lua(look.gpu));
     lua.push_str(&MENU_LUA.replace("__SHIM__", &lua_escape(&shim.display().to_string())));
+    if let Some(menu) = &look.pane_menu {
+        lua.push_str(&pane_menu_lua(menu));
+    }
     if look.switcher {
         lua.push_str(SWITCHER_LUA);
     }
@@ -544,6 +547,203 @@ if pcall(function() config.show_tab_hover_cards = true end) then
 end
 "#;
 
+/// What the pane's menu makes of text; on its own so that it can be run
+/// on its own (the tests do, in a real WezTerm).
+const PANE_MENU_HELPERS_LUA: &str = r#"  -- each line between the quotation characters, or after them
+  local function quote_lines(text, chars, between)
+    text = text:gsub("\r\n", "\n"):gsub("\r", "\n")
+    local tail = ""
+    if text:sub(-1) == "\n" then
+      text, tail = text:sub(1, -2), "\n"
+    end
+    local out = {}
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+      table.insert(out, chars .. line .. (between and chars or ""))
+    end
+    return table.concat(out, "\n") .. tail
+  end
+  -- on one line, its blanks single
+  local function one_line(text)
+    return (text:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
+  end
+  local function url_encode(text)
+    return (text:gsub("[^%w%-_%.~]", function(c)
+      return string.format("%%%02X", c:byte())
+    end))
+  end
+  -- what a browser is given for it: as it is when it says how it is
+  -- reached (https://…, mailto:…), by http otherwise
+  local function as_url(text)
+    text = one_line(text)
+    if text == "" then
+      return nil
+    end
+    if text:find("^%a[%w+.-]*://") or text:find("^mailto:") then
+      return text
+    end
+    return "http://" .. text
+  end
+  local function lookup(template, text)
+    local query = url_encode(one_line(text))
+    local url, count = template:gsub("%%s", function()
+      return query
+    end)
+    if count == 0 then
+      url = template .. query
+    end
+    return as_url(url)
+  end
+"#;
+
+/// The pane's menu: a right click in a pane pops it up (NativeTerm's
+/// WezTerm; not while a program in the pane has the mouse), SecureCRT's
+/// items in SecureCRT's order, those that need a selection, something to
+/// paste or a link under the pointer dimmed without. What needs NativeTerm
+/// asks the shim: the quotation characters (`--paste-quotation`, a small
+/// window there), the print preview where the system has no print panel
+/// for a window (`--print-preview`), clearing a session's tab (the tab
+/// menu's item).
+const PANE_MENU_LUA: &str = r#"-- the pane's menu: a right click in it
+if popup and wezterm.has_action("SelectAll") then
+  local act = wezterm.action
+  local text = {
+__TEXTS__  }
+  local lookup_url = "__LOOKUP__"
+  local mac = wezterm.target_triple:find("darwin") ~= nil
+  local keys = mac and { copy = "⌘C", paste = "⌘V" } or { copy = "Ctrl+Ins", paste = "Shift+Ins" }
+__HELPERS__
+  -- a folder of the person's own, for what is handed to the shim in a file
+  local function private_file(name)
+    for _, var in ipairs({ "XDG_RUNTIME_DIR", "TMPDIR", "TEMP", "TMP" }) do
+      local dir = os.getenv(var)
+      if dir and dir ~= "" then
+        local slash = dir:find("\\", 1, true) and "\\" or "/"
+        if dir:sub(-1) == "/" or dir:sub(-1) == "\\" then
+          slash = ""
+        end
+        return dir .. slash .. name
+      end
+    end
+  end
+  local function print_preview(window, pane, selection)
+    -- the system's print panel, where it has one for the window (macOS)
+    if window:print_text(selection) then
+      return
+    end
+    local name = string.format("nativeterm-print-%d-%d.txt", os.time(), math.random(1, 999999999))
+    local path = private_file(name)
+    local file = path and io.open(path, "wb")
+    if not file then
+      wezterm.log_error("NativeTerm: nowhere to put the selection for its print preview")
+      return
+    end
+    file:write(selection)
+    file:close()
+    -- the shim takes the file away, and shows it in the browser's print preview
+    wezterm.run_child_process({ shim, "--print-preview", path, pane:get_title() })
+  end
+  local function clear(window, pane)
+    -- a session's tab: as its tab menu does it (NativeTerm knows whether
+    -- the other side is there to draw its screen again); another pane: here
+    local id = tostring(pane:pane_id())
+    local ok, out = wezterm.run_child_process({ shim, "--tab-menu", "--pane", id })
+    if ok and out:find("[^%s]") then
+      wezterm.run_child_process({ shim, "--tab-menu", "10", "--pane", id })
+      return
+    end
+    window:perform_action(
+      act.Multiple({ act.ClearScrollback("ScrollbackAndViewport"), act.SendKey({ key = "L", mods = "CTRL" }) }),
+      pane
+    )
+  end
+  local function paste_quotation(window, pane)
+    -- NativeTerm asks (or knows); without it, SecureCRT's defaults
+    local chars, between = '"', true
+    local ok, out = wezterm.run_child_process({ shim, "--paste-quotation" })
+    if ok then
+      local b, c = out:match("^(%d)\t([^\r\n]*)")
+      if not b then
+        return
+      end
+      chars, between = c, b == "1"
+    end
+    local clip = window:get_clipboard_text()
+    if clip ~= "" then
+      pane:send_paste(quote_lines(clip, chars, between))
+    end
+  end
+  -- what each pane's menu was opened with
+  local opened = {}
+  local chosen = wezterm.action_callback(function(window, pane, id)
+    local with = opened[pane:pane_id()] or { selection = "" }
+    opened[pane:pane_id()] = nil
+    if id == "copy" then
+      window:perform_action(act.CopyTo("ClipboardAndPrimarySelection"), pane)
+    elseif id == "paste" then
+      window:perform_action(act.PasteFrom("Clipboard"), pane)
+    elseif id == "copy_paste" then
+      window:copy_to_clipboard(with.selection, "ClipboardAndPrimarySelection")
+      pane:send_paste(with.selection)
+    elseif id == "paste_quotation" then
+      paste_quotation(window, pane)
+    elseif id == "open" then
+      local url = with.selection ~= "" and as_url(with.selection) or with.link
+      if url then
+        wezterm.open_with(url)
+      end
+    elseif id == "lookup" then
+      local url = lookup(lookup_url, with.selection)
+      if url then
+        wezterm.open_with(url)
+      end
+    elseif id == "find" then
+      window:perform_action(act.Search("CurrentSelectionOrEmptyString"), pane)
+    elseif id == "select_all" then
+      window:perform_action(act.SelectAll, pane)
+    elseif id == "print" then
+      print_preview(window, pane, with.selection)
+    elseif id == "clear" then
+      clear(window, pane)
+    end
+  end)
+  local function pane_menu(window, pane)
+    local selection = window:get_selection_text_for_pane(pane)
+    local selected = selection:find("[^%s]") ~= nil
+    local clipboard = window:get_clipboard_text() ~= ""
+    local link = window:hovered_link()
+    opened[pane:pane_id()] = { selection = selected and selection or "", link = link }
+    local lines = {
+      { id = "copy", label = text.copy, icon = "md_content_copy", enabled = selected, shortcut = keys.copy },
+      { id = "paste", label = text.paste, icon = "md_content_paste", enabled = clipboard, shortcut = keys.paste },
+      { id = "copy_paste", label = text.copy_paste, enabled = selected },
+      { id = "paste_quotation", label = text.paste_quotation, enabled = clipboard },
+      { separator = true },
+      {
+        id = "open",
+        label = selected and text.open_selection or text.open_url,
+        enabled = selected or link ~= nil,
+      },
+      { id = "lookup", label = text.lookup, enabled = selected },
+      { separator = true },
+      { id = "find", label = text.find, icon = "md_binoculars" },
+      { id = "select_all", label = text.select_all },
+      { id = "print", label = text.print, enabled = selected },
+      { separator = true },
+      { id = "clear", label = text.clear },
+    }
+    window:perform_action(act.PopupMenu({ choices = lines, action = chosen }), pane)
+  end
+  config.mouse_bindings = {
+    { event = { Down = { streak = 1, button = "Right" } }, mods = "NONE", action = wezterm.action_callback(pane_menu) },
+  }
+  if not mac then
+    -- the keys the menu names: the clipboard's, as SecureCRT's
+    table.insert(config.keys, { key = "Insert", mods = "CTRL", action = act.CopyTo("ClipboardAndPrimarySelection") })
+    table.insert(config.keys, { key = "Insert", mods = "SHIFT", action = act.PasteFrom("Clipboard") })
+  end
+end
+"#;
+
 /// Ctrl+Tab shows WezTerm's tab navigator (its list of tabs), as
 /// NativeTerm's grid does on Windows; only when the person turned the
 /// switcher on, since it takes WezTerm's own next-tab key.
@@ -679,6 +879,64 @@ pub struct Look {
     pub tab_icon: Option<String>,
     /// Which GPU draws them (see `Gpu`).
     pub gpu: Gpu,
+    /// The menu of a right click in a pane; `None`: no such menu.
+    pub pane_menu: Option<PaneMenu>,
+}
+
+/// The menu of a right click in a pane, as SecureCRT's: its texts, in the
+/// person's language, and where a selection is looked up.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneMenu {
+    pub copy: String,
+    pub paste: String,
+    pub copy_paste: String,
+    pub paste_quotation: String,
+    /// With a selection, and without one (then for the link the pointer
+    /// is on).
+    pub open_selection: String,
+    pub open_url: String,
+    pub lookup: String,
+    pub find: String,
+    pub select_all: String,
+    pub print: String,
+    pub clear: String,
+    /// The search the selection is looked up with, `%s` where it goes
+    /// (NativeTerm's `terminal.lookup_url` setting).
+    pub lookup_url: String,
+}
+
+impl PaneMenu {
+    pub const LOOKUP_SETTING: &'static str = "terminal.lookup_url";
+    /// SecureCRT's own ("Search Engine Command For Selection Lookup").
+    pub const LOOKUP_DEFAULT: &'static str = "https://www.google.com/search?q=%s";
+
+    /// The setting's value, or the default for none.
+    #[must_use]
+    pub fn lookup_url(setting: Option<&str>) -> String {
+        setting.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(Self::LOOKUP_DEFAULT).to_string()
+    }
+}
+
+/// The pane menu's part of the configuration.
+fn pane_menu_lua(menu: &PaneMenu) -> String {
+    let texts = [
+        ("copy", &menu.copy),
+        ("paste", &menu.paste),
+        ("copy_paste", &menu.copy_paste),
+        ("paste_quotation", &menu.paste_quotation),
+        ("open_selection", &menu.open_selection),
+        ("open_url", &menu.open_url),
+        ("lookup", &menu.lookup),
+        ("find", &menu.find),
+        ("select_all", &menu.select_all),
+        ("print", &menu.print),
+        ("clear", &menu.clear),
+    ];
+    let texts: String = texts.iter().map(|(name, text)| format!("    {name} = \"{}\",\n", lua_escape(text))).collect();
+    PANE_MENU_LUA
+        .replace("__HELPERS__", PANE_MENU_HELPERS_LUA)
+        .replace("__TEXTS__", &texts)
+        .replace("__LOOKUP__", &lua_escape(&menu.lookup_url))
 }
 
 fn hex((r, g, b): native_term_os::titlebar::Rgb) -> String {
@@ -903,6 +1161,106 @@ mod tests {
         args.iter().map(|a| a.to_string_lossy().into_owned()).collect()
     }
 
+    fn pane_menu() -> PaneMenu {
+        PaneMenu {
+            copy: "Copy".into(),
+            paste: "Paste".into(),
+            copy_paste: "Copy and Paste".into(),
+            paste_quotation: "Paste as \"Quotation\"".into(),
+            open_selection: "Open Selection as URL".into(),
+            open_url: "Open URL".into(),
+            lookup: "Lookup Selection".into(),
+            find: "Find…".into(),
+            select_all: "全选".into(),
+            print: "Print Selection".into(),
+            clear: "Clear Screen and Scrollback".into(),
+            lookup_url: PaneMenu::lookup_url(None),
+        }
+    }
+
+    #[test]
+    fn the_pane_menu_is_written_when_asked_for() {
+        let shim = Path::new("/opt/nt/nativeterm-shim");
+        let without = default_config(&Look::default(), shim);
+        assert!(!without.contains("pane_menu"), "no menu, no right click taken from the pane");
+        let with = default_config(&Look { pane_menu: Some(pane_menu()), ..Look::default() }, shim);
+        // only NativeTerm's WezTerm has what it needs
+        assert!(with.contains("if popup and wezterm.has_action(\"SelectAll\") then"));
+        assert!(with.contains("    copy = \"Copy\",\n"));
+        assert!(with.contains("    paste_quotation = \"Paste as \\\"Quotation\\\"\",\n"), "escaped");
+        assert!(with.contains("    select_all = \"全选\",\n"));
+        assert!(with.contains("local lookup_url = \"https://www.google.com/search?q=%s\"\n"));
+        assert!(!with.contains("__"), "every placeholder filled");
+        // SecureCRT's order, its "Add Keyword" and its two other "Clear" items left out
+        let order = ["\"copy\"", "\"paste\"", "\"copy_paste\"", "\"paste_quotation\"", "\"open\"", "\"lookup\""];
+        let rest = ["\"find\"", "\"select_all\"", "\"print\"", "\"clear\""];
+        let lines = &with[with.find("local lines = {").expect("the menu's lines")..];
+        let mut at = 0;
+        for id in order.iter().chain(&rest) {
+            let found = lines[at..].find(&format!("id = {id}")).unwrap_or_else(|| panic!("{id} after the others"));
+            at += found;
+        }
+        assert_eq!(lines[..lines.find("PopupMenu").unwrap()].matches("separator = true").count(), 3);
+        assert!(with.trim_end().ends_with("return config"));
+        assert_eq!(PaneMenu::lookup_url(Some("  ")), PaneMenu::LOOKUP_DEFAULT);
+        assert_eq!(PaneMenu::lookup_url(Some(" https://www.baidu.com/s?wd=%s ")), "https://www.baidu.com/s?wd=%s");
+    }
+
+    /// What the menu makes of text, run by a real WezTerm: set
+    /// `NATIVETERM_TEST_WEZTERM` to its `wezterm` executable.
+    #[test]
+    #[ignore = "needs a WezTerm: NATIVETERM_TEST_WEZTERM=<path to wezterm>"]
+    fn the_pane_menu_helpers_in_a_real_wezterm() {
+        let wezterm = std::env::var_os("NATIVETERM_TEST_WEZTERM").expect("NATIVETERM_TEST_WEZTERM");
+        let dir = std::env::temp_dir().join(format!("nativeterm-helpers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (config, out) = (dir.join("helpers.lua"), dir.join("out.txt"));
+        let cases = r#"
+local results = {
+  quote_lines("a\r\nb c\n", '"', true),
+  quote_lines("one", "> ", false),
+  quote_lines("x\n\ny", "'", true),
+  one_line("  two\n words\t "),
+  url_encode("a b&c=中"),
+  as_url(" example.com/x "),
+  as_url("https://example.com"),
+  as_url("localhost:8080"),
+  tostring(as_url("  ")),
+  lookup("https://www.google.com/search?q=%s", "rust  mlua\n"),
+  lookup("www.google.com/search?q=%s", "100%"),
+  lookup("https://example.com/?q=", "x"),
+}
+"#;
+        let lua = format!(
+            "local wezterm = require(\"wezterm\")\n{PANE_MENU_HELPERS_LUA}{cases}local f = assert(io.open(\"{}\", \"wb\"))\nf:write(table.concat(results, \"\\30\"))\nf:close()\nreturn {{}}\n",
+            lua_escape(&out.display().to_string()),
+        );
+        std::fs::write(&config, lua).unwrap();
+        let ran = std::process::Command::new(wezterm).arg("--config-file").arg(&config).arg("show-keys").output();
+        let ran = ran.expect("WezTerm runs");
+        let results = std::fs::read_to_string(&out)
+            .unwrap_or_else(|e| panic!("no results ({e}): {}", String::from_utf8_lossy(&ran.stderr)));
+        let _ = std::fs::remove_dir_all(&dir);
+        let results: Vec<&str> = results.split('\u{1e}').collect();
+        assert_eq!(
+            results,
+            [
+                "\"a\"\n\"b c\"\n",
+                "> one",
+                "'x'\n''\n'y'",
+                "two words",
+                "a%20b%26c%3D%E4%B8%AD",
+                "http://example.com/x",
+                "https://example.com",
+                "http://localhost:8080",
+                "nil",
+                "https://www.google.com/search?q=rust%20mlua",
+                "http://www.google.com/search?q=100%25",
+                "https://example.com/?q=x",
+            ]
+        );
+    }
+
     #[test]
     fn the_shim_gets_the_same_arguments_as_on_windows() {
         let tab = TabSpec {
@@ -986,6 +1344,7 @@ mod tests {
                 accent: None,
                 tab_icon: Some("/usr/share/icons/Adwaita/16x16/apps/utilities-terminal.png".into()),
                 gpu: Gpu::Performance,
+                pane_menu: None,
             },
             shim,
         );

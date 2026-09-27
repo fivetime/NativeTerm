@@ -1023,6 +1023,46 @@
       before, 0 after. Left as they are: `agent.<pid>`, a link a GUI
       that is killed leaves behind (WezTerm's own, one for each GUI
       killed, not one a second)
+- [ ] The pane's menu, as SecureCRT's (2026-09-27): a right click in a
+      pane of NativeTerm's WezTerm pops up Copy, Paste, Copy and Paste,
+      Paste as Quotation | Open Selection as URL (Open URL without a
+      selection, for the link under the pointer), Lookup Selection | Find…,
+      Select All, Print Selection | Clear Screen and Scrollback; what
+      needs a selection, something in the clipboard or a link is dimmed
+      without. Asked for with SecureCRT's menus as the pattern, without
+      its "Add Keyword…" (nothing of the kind here) and with its three
+      "Clear" items as one. The keys beside Copy and Paste are SecureCRT's
+      (Ctrl+Ins, Shift+Ins, bound to the clipboard; ⌘C, ⌘V on macOS).
+      SecureCRT's defaults read from its `Global.ini` here: the quotation
+      character `"`, the text between, the lookup
+      `www.google.com/search?q=%s` (the `terminal.lookup_url` setting;
+      no system has a URL scheme for "search with the default engine":
+      asked on macOS 13.5, `x-web-search:` has no application; Windows'
+      `search:` and `ms-search:` are Explorer's and the system's search).
+      - [x] The fork (`75ad1bc1b`): an item's keys in the menu (Chrome's
+            minor text), `SelectAll`, the clipboard's text, the link
+            under the pointer and the print panel for a configuration.
+      - [x] The menu, written into the configuration in the person's
+            language; Paste as Quotation asks in a small window of
+            NativeTerm's where the pointer is (SecureCRT's dialog: the
+            characters, between or after, the sample, "do not show this
+            again", which the settings bring back); Print Selection is
+            the system's print panel on macOS and the browser's print
+            preview of a page elsewhere (the person's choice: no system
+            but macOS has a print preview for any window), the page in
+            the session's runtime folder for a minute.
+      - [x] Tried on Lingmo (X11) with a pointer and keys from xdotool,
+            the browser a script that wrote down what it was given: the
+            menu with and without a selection, Copy, Paste, Copy and
+            Paste, Paste as Quotation (the window in front, Enter:
+            `"line one"` and `"line two"` at the prompt), both links
+            (`http://example.com/path`,
+            `https://www.google.com/search?q=example.com%2Fpath`), Find
+            with the selection in it, Select All then Copy (the whole
+            screen), Print Selection (the page handed over, the text in
+            it), Clear (204 lines, then 1).
+      - [ ] Wayland; macOS (the system's menu and print panel: for the
+            person to try, no pointer can be sent there); Windows.
 - [x] The tab menu beyond the window (2026-09-27). Drawn over the
       WezTerm window, it cannot leave it: tried on Lingmo, a 520x300
       window cut the menu off after "Lock". Chrome: the system's menu on

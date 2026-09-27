@@ -954,3 +954,24 @@ tree-drag-hint = 把主机拖到文件夹上即可移动过去（选中多台时
 # 把文件拖到 NativeTerm 自己的窗口上
 drop-on-session = 放开即交给 { $label }
 drop-on-tab = 放开即交给这个标签
+
+## 窗格菜单（在 NativeTerm 的 WezTerm 窗格中点右键）
+
+panemenu-copy = 复制
+panemenu-paste = 粘贴
+panemenu-copy-paste = 复制并粘贴
+panemenu-paste-quotation = 粘贴为引用
+panemenu-open-selection = 将所选内容作为网址打开
+panemenu-open-url = 打开网址
+panemenu-lookup = 查询所选内容
+panemenu-find = 查找…
+panemenu-select-all = 全选
+panemenu-print = 打印所选内容
+quote-title = 粘贴为引用
+quote-chars = 引号字符：
+quote-between = 把粘贴的文本放在引号字符之间
+quote-sample = 示例：
+quote-note = 注意 { $placeholder } 是占位符。剪贴板中的每一行文本都会按上面的样子处理后再粘贴。
+quote-no-prompt = 不再显示此提示（始终使用上面选定的设置）。
+quote-ask-setting = “粘贴为引用”时询问引号字符
+quote-ask-hint = 关闭后直接粘贴，使用上次选定的引号字符

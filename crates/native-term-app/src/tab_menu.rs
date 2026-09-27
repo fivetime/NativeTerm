@@ -40,6 +40,9 @@ pub enum MenuRequest {
     /// text Terminal pasted, so either they are uploaded or the text is
     /// sent after all.
     Dropped { alias: String, session: String, paths: Vec<PathBuf>, text: String },
+    /// A paste as a quotation: with which characters? The answer goes to
+    /// `quotation::answer` with this ticket.
+    PasteQuotation(u64),
 }
 
 /// `off` keeps the cards away (`state.db`).

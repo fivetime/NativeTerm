@@ -14,7 +14,7 @@
 //! all three.
 
 pub mod cli;
-pub use cli::{Gpu, Look};
+pub use cli::{Gpu, Look, PaneMenu};
 
 use std::any::Any;
 use std::collections::{HashMap, HashSet};

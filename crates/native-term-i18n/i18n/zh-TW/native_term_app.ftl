@@ -954,3 +954,24 @@ tree-drag-hint = 把主機拖到資料夾上即可移過去（選取多台時會
 # 把檔案拖到 NativeTerm 自己的視窗上
 drop-on-session = 放開即交給 { $label }
 drop-on-tab = 放開即交給這個分頁
+
+## 窗格選單（在 NativeTerm 的 WezTerm 窗格中按右鍵）
+
+panemenu-copy = 複製
+panemenu-paste = 貼上
+panemenu-copy-paste = 複製並貼上
+panemenu-paste-quotation = 貼上為引用
+panemenu-open-selection = 將所選內容作為網址開啟
+panemenu-open-url = 開啟網址
+panemenu-lookup = 查詢所選內容
+panemenu-find = 尋找…
+panemenu-select-all = 全選
+panemenu-print = 列印所選內容
+quote-title = 貼上為引用
+quote-chars = 引號字元：
+quote-between = 把貼上的文字放在引號字元之間
+quote-sample = 範例：
+quote-note = 注意 { $placeholder } 是預留位置。剪貼簿中的每一行文字都會按上面的樣子處理後再貼上。
+quote-no-prompt = 不再顯示此提示（一律使用上面選定的設定）。
+quote-ask-setting = 「貼上為引用」時詢問引號字元
+quote-ask-hint = 關閉後直接貼上，使用上次選定的引號字元

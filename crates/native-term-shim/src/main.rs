@@ -34,6 +34,7 @@ mod plink;
 #[cfg(unix)]
 mod posix;
 mod preconnect;
+mod print;
 mod proxy;
 mod saved;
 mod ssh;
@@ -105,6 +106,8 @@ fn main() {
         Mode::Zmodem { mode, escape, files } => std::process::exit(zmodem::run(&mode, escape, files)),
         Mode::Drop { paths } => std::process::exit(drop::run(&paths)),
         Mode::TabMenu { id, pane } => std::process::exit(menu::run(id, pane)),
+        Mode::PasteQuotation => std::process::exit(menu::quotation()),
+        Mode::PrintPreview { file, title } => std::process::exit(print::preview(&file, title.as_deref())),
         Mode::TabCard { pane } => std::process::exit(menu::card(pane)),
         Mode::CreateKey { path } => {
             let code = keys::create(&path);

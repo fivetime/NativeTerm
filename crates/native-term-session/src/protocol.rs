@@ -90,6 +90,11 @@ pub enum ShimMessage {
     /// session's name and state), answered by `AppMessage::TabCard`. For
     /// terminals that draw the card themselves (WezTerm).
     TabCard,
+    /// From a `Request` helper: the terminal is about to paste what the
+    /// clipboard holds as a quotation and asks with which characters,
+    /// answered by `AppMessage::Quotation` (once the person has said, where
+    /// they are asked).
+    PasteQuotation,
 }
 
 /// One line of the tab menu, as `AppMessage::TabMenu` lists it: an
@@ -171,6 +176,14 @@ pub enum AppMessage {
         note: String,
         show: bool,
     },
+    /// The answer to `ShimMessage::PasteQuotation`: every line goes
+    /// between `chars` (`between`) or after them; `paste` false: the
+    /// person said no, nothing is pasted.
+    Quotation {
+        chars: String,
+        between: bool,
+        paste: bool,
+    },
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {
@@ -214,6 +227,7 @@ mod tests {
             ShimMessage::PasswordRefused,
             ShimMessage::TabMenu,
             ShimMessage::TabAction { id: 4 },
+            ShimMessage::PasteQuotation,
             ShimMessage::TabCard,
         ];
         for m in messages {

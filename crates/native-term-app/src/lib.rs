@@ -15,6 +15,7 @@ pub mod import;
 pub mod notes;
 mod previews;
 pub mod quick;
+pub mod quotation;
 pub mod registry;
 pub mod settings;
 pub mod shortcuts;
@@ -1705,6 +1706,16 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             let _ = conn.send(&AppMessage::TabCard { title, note, show });
             return;
         }
+        if let Ok(Some(ShimMessage::PasteQuotation)) = &asked {
+            // asked in a window of the main program's; this connection
+            // has a thread of its own to wait on
+            let core = Core { shared: Arc::clone(shared) };
+            let answer = quotation::ask(&core, ask.as_deref());
+            let paste = answer.is_some();
+            let quotation::Quotation { chars, between } = answer.unwrap_or_default();
+            let _ = conn.send(&AppMessage::Quotation { chars, between, paste });
+            return;
+        }
         if let Ok(Some(ShimMessage::TabMenu)) = &asked {
             // the terminal's own picker shows the menu: say what is on it
             let items = found.as_ref().map_or_else(Vec::new, |(_, id)| tab_menu::items_for(shared, id));
@@ -2082,6 +2093,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::OpenFiles
             | ShimMessage::TabMenu
             | ShimMessage::TabCard
+            | ShimMessage::PasteQuotation
             | ShimMessage::TabAction { .. }
     ) {
         s.quiet_since = None;
@@ -2092,6 +2104,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         | ShimMessage::Dropped { .. }
         | ShimMessage::TabMenu
         | ShimMessage::TabCard
+        | ShimMessage::PasteQuotation
         | ShimMessage::TabAction { .. } => {}
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {

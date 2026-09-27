@@ -58,6 +58,15 @@ pub enum Mode {
     TabCard {
         pane: Option<String>,
     },
+    /// The terminal pastes as a quotation: with which characters
+    /// (`--paste-quotation`; NativeTerm asks the person).
+    PasteQuotation,
+    /// The print preview of the text in `file`, which is taken away
+    /// (`--print-preview <file> [<title>]`).
+    PrintPreview {
+        file: String,
+        title: Option<String>,
+    },
     /// A ZMODEM transfer on stdin / stdout: the server ran `sz`
     /// (`download`) or `rz` (`upload`); `escape`: ask the sender to escape
     /// every control character (`--escape-control`, for Telnet); `files`:
@@ -134,6 +143,11 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
                 }
                 return Ok(Mode::TabMenu { id, pane });
             }
+            "--paste-quotation" => return Ok(Mode::PasteQuotation),
+            "--print-preview" => {
+                let file = args.next().ok_or("--print-preview needs a file")?;
+                return Ok(Mode::PrintPreview { file, title: args.next() });
+            }
             "--tab-card" => {
                 let pane = match (args.next().as_deref(), args.next()) {
                     (None, _) => None,
@@ -189,6 +203,13 @@ mod tests {
     #[test]
     fn tab_menu_helper() {
         assert_eq!(p(&["--tab-menu"]).unwrap(), Mode::TabMenu { id: None, pane: None });
+        assert_eq!(p(&["--paste-quotation"]).unwrap(), Mode::PasteQuotation);
+        assert_eq!(
+            p(&["--print-preview", "/run/user/1000/x.txt", "web01"]).unwrap(),
+            Mode::PrintPreview { file: "/run/user/1000/x.txt".into(), title: Some("web01".into()) }
+        );
+        assert_eq!(p(&["--print-preview", "x.txt"]).unwrap(), Mode::PrintPreview { file: "x.txt".into(), title: None });
+        assert!(p(&["--print-preview"]).is_err());
         assert_eq!(
             p(&["--tab-menu", "4", "--pane", "7"]).unwrap(),
             Mode::TabMenu { id: Some(4), pane: Some("7".into()) }

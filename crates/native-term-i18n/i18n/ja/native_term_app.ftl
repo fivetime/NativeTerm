@@ -970,3 +970,24 @@ tree-drag-hint = ホストをフォルダーにドラッグすると移動しま
 # NativeTerm 自身のウィンドウにファイルをドロップする
 drop-on-session = ここで放すと { $label } へ
 drop-on-tab = ここで放すとこのタブへ
+
+## ペインのメニュー（NativeTerm の WezTerm のペインで右クリック）
+
+panemenu-copy = コピー
+panemenu-paste = 貼り付け
+panemenu-copy-paste = コピーして貼り付け
+panemenu-paste-quotation = 引用として貼り付け
+panemenu-open-selection = 選択範囲を URL として開く
+panemenu-open-url = URL を開く
+panemenu-lookup = 選択範囲をウェブで検索
+panemenu-find = 検索…
+panemenu-select-all = すべて選択
+panemenu-print = 選択範囲を印刷
+quote-title = 引用として貼り付け
+quote-chars = 引用文字:
+quote-between = 貼り付けるテキストを引用文字で囲む
+quote-sample = 例:
+quote-note = { $placeholder } はプレースホルダーです。クリップボードの各行は、上の形にしてから貼り付けられます。
+quote-no-prompt = 今後このメッセージを表示しない（上で選んだ設定を常に使う）。
+quote-ask-setting = 「引用として貼り付け」のときに引用文字をたずねる
+quote-ask-hint = オフ: 前回選んだ引用文字ですぐに貼り付けます

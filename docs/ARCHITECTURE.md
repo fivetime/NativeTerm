@@ -4768,6 +4768,44 @@ tabs with the last lines of their screens, Ctrl released switching; a
 WezTerm without that action (`wezterm.has_action`) gets its tab
 navigator instead.
 
+The pane's menu (a right click in a pane, while no program there takes
+the mouse) is SecureCRT's, and the configuration's own: its items'
+texts are written into it in the person's language (`Look::pane_menu`,
+written again when the language changes), so a right click costs no
+question to NativeTerm. What it shows depends on what is there, asked of
+the fork when it opens: the pane's selection, the clipboard's text
+(`window:get_clipboard_text()`), the link under the pointer
+(`window:hovered_link()`). Most items are WezTerm's actions (`CopyTo`,
+`PasteFrom`, `Search` with the selection, the fork's `SelectAll`) or the
+configuration's doing (the selection copied and pasted; a selection as
+a URL, `http://` before what names no scheme; the lookup, the selection
+percent-encoded into `terminal.lookup_url`). Three need NativeTerm and
+ask the shim:
+- Paste as Quotation: `--paste-quotation` asks over the socket
+  (`ShimMessage::PasteQuotation`) and prints `between<TAB>characters`, or
+  `cancel`; NativeTerm answers from its settings (`paste.quotation`,
+  `paste.quotation_between`) or, while `paste.quotation_prompt` is not
+  `off`, from a small window of its own where the pointer is
+  (`quotation_window`, above the others: the terminal is another
+  program's window, which it cannot be a dialog of). The connection's
+  thread waits for the window's answer (`quotation::ask`, ten minutes at
+  most, one question at a time). The configuration then pastes the
+  clipboard's lines between or after the characters; without NativeTerm,
+  with SecureCRT's defaults.
+- Print Selection: the fork's `window:print_text` where the system has a
+  print panel for the window (macOS); elsewhere the selection goes into
+  a file in a folder of the person's own (`XDG_RUNTIME_DIR`, `TMPDIR`,
+  `TEMP`), which `--print-preview <file> <title>` takes away at once and
+  turns into a page beside it (the text in a `<pre>`, escaped, `print()`
+  when loaded; created for the person alone) for the desktop's opener to
+  hand to the browser; the shim stays a minute, then takes the page away
+  too, and sweeps pages older than an hour that an ended shim left. The
+  shim reads and removes only files named as the configuration names
+  them.
+- Clear Screen and Scrollback: the tab menu's item for a session's tab
+  (NativeTerm knows whether the other side is there to draw its screen
+  again), WezTerm's `ClearScrollback` and Ctrl+L for another pane.
+
 The hover card is the fork's (`show_tab_hover_cards`): the pointer
 resting on a tab brings up a card with a title, a note and the last
 lines of the tab's screen. When the pointer arrives the fork emits the

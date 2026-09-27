@@ -989,3 +989,24 @@ tree-drag-hint = Drag a host onto a folder to move it there (several, if several
 # dropping files on NativeTerm's own window
 drop-on-session = Drop for { $label }
 drop-on-tab = Drop for this tab
+
+## The pane's menu (a right click in a pane of NativeTerm's WezTerm)
+
+panemenu-copy = Copy
+panemenu-paste = Paste
+panemenu-copy-paste = Copy and Paste
+panemenu-paste-quotation = Paste as Quotation
+panemenu-open-selection = Open Selection as URL
+panemenu-open-url = Open URL
+panemenu-lookup = Lookup Selection
+panemenu-find = Find…
+panemenu-select-all = Select All
+panemenu-print = Print Selection
+quote-title = Paste as Quotation
+quote-chars = Quotation character(s):
+quote-between = Insert pasted text between
+quote-sample = Sample:
+quote-note = Note that { $placeholder } is a placeholder. Each line of text found in the clipboard will be modified as shown above before being pasted.
+quote-no-prompt = Do not show this prompt again (always use the settings selected above).
+quote-ask-setting = Ask for the quotation characters on “Paste as Quotation”
+quote-ask-hint = Off: the text is pasted at once, with the characters chosen last

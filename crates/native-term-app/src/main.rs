@@ -29,6 +29,7 @@ mod key_dialog;
 mod looks;
 mod options_dialog;
 mod plink_dialog;
+mod quotation_window;
 mod send_dialog;
 mod send_line;
 mod server_sessions;

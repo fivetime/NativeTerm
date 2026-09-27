@@ -59,6 +59,8 @@ struct Request {
     key: String,
     viewport: egui::ViewportBuilder,
     factory: Factory,
+    /// The screen's point the window's middle goes to.
+    middle: Option<(i32, i32)>,
 }
 
 thread_local! {
@@ -74,8 +76,31 @@ pub fn open(
     viewport: egui::ViewportBuilder,
     factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
 ) {
-    let request = Request { key: key.into(), viewport, factory: Box::new(factory) };
+    let request = Request { key: key.into(), viewport, factory: Box::new(factory), middle: None };
     REQUESTS.with(|r| r.borrow_mut().push(request));
+}
+
+/// The same, the window's middle where the pointer is now (within the
+/// screen's work area): for what another program's window asked for, the
+/// pointer being there. Where the window system places windows itself
+/// (Wayland), it does.
+pub fn open_at_pointer(
+    key: impl Into<String>,
+    viewport: egui::ViewportBuilder,
+    factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
+) {
+    let request = Request { key: key.into(), viewport, factory: Box::new(factory), middle: win::cursor() };
+    REQUESTS.with(|r| r.borrow_mut().push(request));
+}
+
+/// Where a window of `size` goes for its middle to be at `middle`, within
+/// `area` (from its left and top where it is larger).
+fn around(middle: (i32, i32), size: (i32, i32), area: Option<win::Bounds>) -> (i32, i32) {
+    let (x, y) = (middle.0 - size.0 / 2, middle.1 - size.1 / 2);
+    match area {
+        Some(area) => (x.min(area.right - size.0).max(area.left), y.min(area.bottom - size.1).max(area.top)),
+        None => (x, y),
+    }
 }
 
 type Factory = Box<dyn FnOnce(&egui::Context) -> Box<dyn Ui>>;
@@ -602,7 +627,16 @@ impl Runner {
             let n = self.next_extra;
             self.next_extra += 1;
             let viewport = request.viewport.with_visible(false);
-            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, false, |_| {}) {
+            let middle = request.middle;
+            let place = move |window: &Window| {
+                if let Some(middle) = middle {
+                    let size = window.outer_size();
+                    let size = (size.width as i32, size.height as i32);
+                    let (x, y) = around(middle, size, win::work_area_at(middle.0, middle.1));
+                    window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+                }
+            };
+            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, false, place) {
                 Ok(mut pane) => {
                     // painted at once: a hidden window gets no redraw
                     if let Err(e) = pane.paint(self.frame_log.as_ref(), true) {
@@ -1200,6 +1234,20 @@ fn frame_interval(window: &Window) -> Duration {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_window_around_a_point() {
+        let area = Some(super::win::Bounds { left: 0, top: 30, right: 1920, bottom: 1160 });
+        assert_eq!(super::around((960, 600), (460, 220), area), (730, 490));
+        // near the screen's edges: within the work area
+        assert_eq!(super::around((10, 40), (460, 220), area), (0, 30));
+        assert_eq!(super::around((1910, 1150), (460, 220), area), (1460, 940));
+        // no work area known: where asked
+        assert_eq!(super::around((10, 40), (460, 220), None), (-220, -70));
+        // larger than the area: from its left and top
+        assert_eq!(super::around((100, 100), (3000, 2000), area), (0, 30));
+    }
+
     use super::*;
 
     #[test]
