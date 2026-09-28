@@ -21,6 +21,7 @@ pub mod registry;
 pub mod settings;
 pub mod shortcuts;
 pub mod tab_menu;
+pub mod tab_title;
 pub mod tmux_send;
 pub mod toast;
 
@@ -1741,10 +1742,30 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             let _ = conn.send(&AppMessage::Quotation { chars, between, paste });
             return;
         }
-        if let Ok(Some(ShimMessage::TabMenu)) = &asked {
-            // the terminal's own picker shows the menu: say what is on it
-            let items = found.as_ref().map_or_else(Vec::new, |(_, id)| tab_menu::items_for(shared, id));
+        if let Ok(Some(ShimMessage::TabMenu { place })) = &asked {
+            // the terminal's own picker shows the menu: say what is on
+            // it; a tab without a session has what any tab has, where
+            // the terminal says which of its tabs it is
+            let items = match (&found, place) {
+                (Some((_, id)), _) => tab_menu::items_for(shared, id),
+                (None, Some(place)) => tab_menu::plain_items(shared, *place),
+                (None, None) => Vec::new(),
+            };
             let _ = conn.send(&AppMessage::TabMenu { items });
+            return;
+        }
+        if let Ok(Some(ShimMessage::TabTitle { current })) = &asked {
+            // asked in a window of the main program's; this connection
+            // has a thread of its own to wait on
+            let answer = tab_title::ask(ask.as_deref(), current.clone());
+            let rename = answer.is_some();
+            let _ = conn.send(&AppMessage::TabTitle { title: answer.unwrap_or_default(), rename });
+            return;
+        }
+        if let (Ok(Some(ShimMessage::TabAction { id })), None, Some(ask)) = (&asked, &found, &ask) {
+            // from the menu of a tab without a session
+            let actions = tab_menu::Actions { core: Arc::downgrade(shared), ask: Arc::clone(ask) };
+            tab_menu::choose_plain(&actions, shared, *id);
             return;
         }
         if let (Ok(Some(message)), Some((alias, session)), Some(ask)) = (asked, found, ask) {
@@ -2116,7 +2137,8 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::Unreachable
             | ShimMessage::PasswordRefused
             | ShimMessage::OpenFiles
-            | ShimMessage::TabMenu
+            | ShimMessage::TabMenu { .. }
+            | ShimMessage::TabTitle { .. }
             | ShimMessage::TabCard
             | ShimMessage::PasteQuotation
             | ShimMessage::Find { .. }
@@ -2128,7 +2150,8 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         // only from a `Request` helper, never on a session link
         ShimMessage::OpenFiles
         | ShimMessage::Dropped { .. }
-        | ShimMessage::TabMenu
+        | ShimMessage::TabMenu { .. }
+        | ShimMessage::TabTitle { .. }
         | ShimMessage::TabCard
         | ShimMessage::PasteQuotation
         | ShimMessage::Find { .. }

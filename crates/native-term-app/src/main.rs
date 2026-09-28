@@ -40,6 +40,7 @@ mod shell;
 mod shortcut_ui;
 mod storage;
 mod tab_list;
+mod tab_title_window;
 #[cfg(windows)]
 mod terminal_profile;
 #[cfg(not(windows))]

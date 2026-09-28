@@ -17,7 +17,8 @@ static REQUESTS: Mutex<Vec<MenuRequest>> = Mutex::new(Vec::new());
 pub fn ask(request: MenuRequest) {
     // (what is asked in a window of its own leaves the main window where
     // it is)
-    let own_window = matches!(request, MenuRequest::PasteQuotation(_) | MenuRequest::Find(_));
+    let own_window =
+        matches!(request, MenuRequest::PasteQuotation(_) | MenuRequest::Find(_) | MenuRequest::TabTitle { .. });
     REQUESTS.lock().unwrap_or_else(|e| e.into_inner()).push(request);
     if !own_window {
         show_main();

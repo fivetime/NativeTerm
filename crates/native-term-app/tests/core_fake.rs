@@ -281,7 +281,7 @@ fn a_terminal_that_shows_the_menu_itself_gets_it_over_the_pipe() {
         conn.send(&request).unwrap();
         conn
     };
-    let conn = helper(ShimMessage::TabMenu);
+    let conn = helper(ShimMessage::TabMenu { place: None });
     assert!(matches!(conn.recv::<AppMessage>(Duration::from_secs(2)), Ok(Some(AppMessage::Welcome { .. }))));
     let Ok(Some(AppMessage::TabMenu { items })) = conn.recv::<AppMessage>(Duration::from_secs(2)) else {
         panic!("no menu came back");
@@ -294,23 +294,53 @@ fn a_terminal_that_shows_the_menu_itself_gets_it_over_the_pipe() {
     assert!(!items.last().unwrap().separator && !items[1].separator, "{items:?}");
     assert!(items.windows(2).all(|w| !(w[0].separator && w[1].separator)), "{items:?}");
 
-    // a tab nobody claims gets no menu
-    let conn = pipe::connect(&name, Duration::from_secs(2)).unwrap();
-    conn.send(&ShimMessage::Hello {
-        protocol: native_term_session::PROTOCOL_VERSION,
-        role: Role::Request,
-        pid: std::process::id(),
-        wt_session: Some("no-such-pane".into()),
-        session: None,
-        alias: None,
-        terminal_window: None,
-    })
-    .unwrap();
-    conn.send(&ShimMessage::TabMenu).unwrap();
-    let _ = conn.recv::<AppMessage>(Duration::from_secs(2));
+    // a tab nobody claims gets no menu where the terminal does not say
+    // which of its tabs it is, and the menu of any tab where it does
+    let stranger = |request: ShimMessage| {
+        let conn = pipe::connect(&name, Duration::from_secs(2)).unwrap();
+        conn.send(&ShimMessage::Hello {
+            protocol: native_term_session::PROTOCOL_VERSION,
+            role: Role::Request,
+            pid: std::process::id(),
+            wt_session: Some("no-such-pane".into()),
+            session: None,
+            alias: None,
+            terminal_window: None,
+        })
+        .unwrap();
+        conn.send(&request).unwrap();
+        let _ = conn.recv::<AppMessage>(Duration::from_secs(2));
+        conn
+    };
+    let conn = stranger(ShimMessage::TabMenu { place: None });
     assert!(
         matches!(conn.recv::<AppMessage>(Duration::from_secs(2)), Ok(Some(AppMessage::TabMenu { items })) if items.is_empty())
     );
+    // the second of three tabs
+    let place = native_term_session::protocol::TabPlace { index: 1, count: 3 };
+    let conn = stranger(ShimMessage::TabMenu { place: Some(place) });
+    let Ok(Some(AppMessage::TabMenu { items })) = conn.recv::<AppMessage>(Duration::from_secs(2)) else {
+        panic!("no menu came back");
+    };
+    let item = |id: u32| items.iter().find(|i| i.id == id && !i.separator).unwrap_or_else(|| panic!("{id}: {items:?}"));
+    assert!(items.iter().all(|i| i.id != 0 || i.separator), "no heading: the terminal has the tab's title");
+    for id in [tab_menu::CLOSE, tab_menu::CLOSE_LEFT, tab_menu::CLOSE_RIGHT, tab_menu::CLOSE_OTHERS] {
+        assert!(item(id).here && item(id).enabled, "the terminal closes its own tabs: {id}");
+    }
+    assert!(item(tab_menu::CLEAR).here && item(tab_menu::RENAME_TAB).here);
+    assert!(!item(tab_menu::SEND).here && item(tab_menu::SEND).enabled, "NativeTerm's dialog");
+    assert!(!item(tab_menu::CLOSE_ENDED).enabled, "nothing has ended: {items:?}");
+    assert!(items.iter().all(|i| i.id != tab_menu::CONNECT && i.id != tab_menu::FILES), "nothing of a session's");
+    // the only tab: nothing beside it to close
+    let place = native_term_session::protocol::TabPlace { index: 0, count: 1 };
+    let conn = stranger(ShimMessage::TabMenu { place: Some(place) });
+    let Ok(Some(AppMessage::TabMenu { items })) = conn.recv::<AppMessage>(Duration::from_secs(2)) else {
+        panic!("no menu came back");
+    };
+    for id in [tab_menu::CLOSE_LEFT, tab_menu::CLOSE_RIGHT, tab_menu::CLOSE_OTHERS] {
+        assert!(!items.iter().find(|i| i.id == id).unwrap().enabled, "{id}");
+    }
+    assert!(items.iter().find(|i| i.id == tab_menu::CLOSE).unwrap().enabled);
 
     // the choice closes the session, and its tab with it
     let _conn = helper(ShimMessage::TabAction { id: tab_menu::CLOSE });

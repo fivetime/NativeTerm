@@ -473,18 +473,86 @@ config.command_palette_fg_color = dark and "#FFFFFF" or "#1A1A1A"
 /// click on the tab itself (its `tab-right-click` event), as in Windows
 /// Terminal, and leaves the pane's right click alone; another WezTerm has
 /// no such event, so there a right click in the pane lists the items that
-/// can be chosen in its picker. A tab that is not NativeTerm's gets no
-/// menu (the shim prints nothing).
+/// can be chosen in its picker. A tab that is not NativeTerm's has the
+/// menu of any tab (the shim is told where the tab is among its
+/// window's: `--tabs`): what is flagged `l` the terminal does itself,
+/// the tabs being its own — closing them (a session's tab among them by
+/// NativeTerm), clearing the screen, a title NativeTerm asks for.
 const MENU_LUA: &str = r#"-- NativeTerm's tab menu: right-click a tab, or Ctrl+Shift+M
 local shim = "__SHIM__"
 local popup = wezterm.has_action ~= nil and wezterm.has_action("PopupMenu")
+local cli = wezterm.executable_dir .. (wezterm.target_triple:find("windows") and "\\wezterm.exe" or "/wezterm")
+-- where the pane's tab is among its window's tabs (the first: 0), and those
+local function place_of(pane)
+  local tab = pane:tab()
+  local window = tab and tab:window()
+  local tabs = window and window:tabs_with_info() or {}
+  for _, info in ipairs(tabs) do
+    if info.tab:tab_id() == tab:tab_id() then
+      return info.index, tabs
+    end
+  end
+  return 0, tabs
+end
+-- a tab closed: a session's by NativeTerm, its way (a locked one stays);
+-- another's panes by the terminal
+local function close_tab(tab)
+  for _, pane in ipairs(tab:panes()) do
+    local id = tostring(pane:pane_id())
+    local ok, out = wezterm.run_child_process({ shim, "--tab-menu", "--pane", id })
+    if ok and out:find("[^%s]") then
+      wezterm.run_child_process({ shim, "--tab-menu", "4", "--pane", id })
+    else
+      wezterm.run_child_process({ cli, "cli", "--no-auto-start", "kill-pane", "--pane-id", id })
+    end
+  end
+end
+-- what the terminal does itself, for a tab without a session: 10 clears,
+-- 15 gives the tab a title (NativeTerm asks which), 4 closes the tab, 14
+-- those at its left, 7 those at its right, 5 all the others
+local function here(window, pane, id)
+  if id == "10" then
+    local act = wezterm.action
+    window:perform_action(
+      act.Multiple({ act.ClearScrollback("ScrollbackAndViewport"), act.SendKey({ key = "L", mods = "CTRL" }) }),
+      pane
+    )
+    return
+  end
+  if id == "15" then
+    local tab = pane:tab()
+    local title = tab:get_title()
+    if title == "" then
+      title = pane:get_title()
+    end
+    local ok, out = wezterm.run_child_process({ shim, "--tab-title", title })
+    local said, name = (ok and out or ""):match("^(%d)\t([^\r\n]*)")
+    if said == "1" then
+      tab:set_title(name)
+    end
+    return
+  end
+  local at, tabs = place_of(pane)
+  local closing = {}
+  for _, info in ipairs(tabs) do
+    local i = info.index
+    if (id == "4" and i == at) or (id == "14" and i < at) or (id == "7" and i > at) or (id == "5" and i ~= at) then
+      table.insert(closing, info.tab)
+    end
+  end
+  for _, tab in ipairs(closing) do
+    close_tab(tab)
+  end
+end
 local function tab_menu(window, pane)
-  local ok, out = wezterm.run_child_process({ shim, "--tab-menu", "--pane", tostring(pane:pane_id()) })
+  local at, tabs = place_of(pane)
+  local id = tostring(pane:pane_id())
+  local ok, out = wezterm.run_child_process({ shim, "--tab-menu", "--pane", id, "--tabs", at .. "/" .. #tabs })
   if not ok then
     return
   end
-  -- id, text, flags ("d": disabled), icon; "-" for a separator
-  local title, lines = "NativeTerm", {}
+  -- id, text, flags ("d": disabled, "l": done here), icon; "-" for a separator
+  local title, lines, done_here = nil, {}, {}
   for line in out:gmatch("[^\r\n]+") do
     if line == "-" then
       table.insert(lines, { separator = true })
@@ -493,17 +561,32 @@ local function tab_menu(window, pane)
       if id == "0" then
         title = text
       elseif id then
-        table.insert(lines, { id = id, label = text, enabled = flags ~= "d", icon = icon ~= "" and icon or nil })
+        local enabled = not flags:find("d")
+        done_here[id] = flags:find("l") ~= nil
+        table.insert(lines, { id = id, label = text, enabled = enabled, icon = icon ~= "" and icon or nil })
       end
     end
   end
   if #lines == 0 then
     return
   end
-  local chosen = wezterm.action_callback(function(_, chosen_pane, id)
-    if id then
-      wezterm.run_child_process({ shim, "--tab-menu", id, "--pane", tostring(chosen_pane:pane_id()) })
+  if not title then
+    -- a tab without a session: what it is called
+    local tab = pane:tab()
+    title = tab and tab:get_title() or ""
+    if title == "" then
+      title = pane:get_title()
     end
+  end
+  local chosen = wezterm.action_callback(function(chosen_window, chosen_pane, id)
+    if not id then
+      return
+    end
+    if done_here[id] then
+      here(chosen_window, chosen_pane, id)
+      return
+    end
+    wezterm.run_child_process({ shim, "--tab-menu", id, "--pane", tostring(chosen_pane:pane_id()) })
   end)
   if popup then
     table.insert(lines, 1, { label = title, header = true })

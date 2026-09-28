@@ -1,5 +1,9 @@
-//! What NativeTerm's tab menu offers and does. Only NativeTerm's own tabs
-//! are ever touched; the user's other tabs never are.
+//! What NativeTerm's tab menu offers and does. A session's menu touches
+//! only NativeTerm's own tabs, never the user's other ones. A tab
+//! without a session (the terminal's own "new tab") has a menu where the
+//! terminal shows NativeTerm's (WezTerm): what is done with any tab —
+//! closed, those beside it closed, its title, its screen — which the
+//! terminal does itself, and what NativeTerm does whatever the tab.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
@@ -24,12 +28,22 @@ pub const CLEAR: u32 = 10;
 pub const RENAME: u32 = 11;
 pub const BREAK: u32 = 12;
 pub const FILES: u32 = 13;
+/// A tab without a session only: the tabs at its left, and its title for
+/// as long as the tab lives.
+pub const CLOSE_LEFT: u32 = 14;
+pub const RENAME_TAB: u32 = 15;
 
 /// What the menu asks the main window to do (its dialogs live there).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MenuRequest {
     /// Send commands to this session.
     Send(String),
+    /// Send commands: to whom is chosen in the dialog.
+    SendAny,
+    /// A tab's title for as long as it lives: which? `current` is the
+    /// one it has. The answer goes to `tab_title::answer` with this
+    /// ticket.
+    TabTitle { ticket: u64, current: String },
     /// Rename this host.
     Rename(String),
     /// Closing these sessions would close tabs that hold other panes too.
@@ -125,6 +139,48 @@ pub(crate) fn items_for(shared: &Arc<Shared>, session: &str) -> Vec<MenuItem> {
         items.insert(0, MenuItem::new(0, view.label.clone()));
     }
     items
+}
+
+/// The menu of a tab without a session, at `place` among its window's
+/// tabs: no heading (the terminal has the tab's title). What is `here`
+/// the terminal does itself, the tabs being its own; the ids are the
+/// session menu's where the items are.
+pub(crate) fn plain_items(shared: &Arc<Shared>, place: native_term_session::protocol::TabPlace) -> Vec<MenuItem> {
+    let core = Core { shared: Arc::clone(shared) };
+    let open: Vec<SessionView> = core.sessions().into_iter().filter(|s| s.state.is_open()).collect();
+    let ended = !close_set(&open, &CloseSet::Ended).is_empty();
+    let (left, right) = (place.index > 0, place.index + 1 < place.count);
+    let item = |id: u32, icon: &str, text: String, enabled: bool, here: bool| MenuItem {
+        enabled,
+        here,
+        icon: Some(icon.to_string()),
+        ..MenuItem::new(id, text)
+    };
+    vec![
+        item(SEND, "cod_send", t!("tabmenu-send"), true, false),
+        item(CLEAR, "cod_clear_all", t!("tabmenu-clear"), true, true),
+        item(RENAME_TAB, "cod_edit", t!("tabmenu-rename-tab"), true, true),
+        MenuItem::separator(),
+        item(CLOSE, "cod_close", t!("tabmenu-close"), true, true),
+        item(CLOSE_LEFT, "cod_arrow_left", t!("tabmenu-close-left"), left, true),
+        item(CLOSE_RIGHT, "cod_arrow_right", t!("tabmenu-close-right"), right, true),
+        item(CLOSE_OTHERS, "cod_close_all", t!("tabmenu-close-all-others"), left || right, true),
+        item(CLOSE_ENDED, "cod_circle_slash", t!("tabmenu-close-disconnected"), ended, false),
+    ]
+}
+
+/// An item chosen from that menu which the terminal does not do itself.
+pub(crate) fn choose_plain(actions: &Actions, shared: &Arc<Shared>, id: u32) {
+    let core = Core { shared: Arc::clone(shared) };
+    match id {
+        SEND => (actions.ask)(MenuRequest::SendAny),
+        CLOSE_ENDED => {
+            if let Closing::Confirm(ids) = core.close_sessions(&CloseSet::Ended) {
+                (actions.ask)(MenuRequest::ConfirmClose(ids));
+            }
+        }
+        _ => {}
+    }
 }
 
 /// The nerdfont (codicon) a terminal that draws the menu itself shows

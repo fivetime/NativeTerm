@@ -1193,6 +1193,10 @@ impl App {
             }
             return;
         }
+        if let MenuRequest::TabTitle { ticket, current } = request {
+            crate::tab_title_window::open(ticket, current);
+            return;
+        }
         if self.dialog.is_some() {
             self.notices.push(t!("notice-dialog-open"));
             return;
@@ -1201,6 +1205,11 @@ impl App {
             MenuRequest::Send(id) => {
                 if let Some(core) = &self.core {
                     self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(core, &[id]))));
+                }
+            }
+            MenuRequest::SendAny => {
+                if let Some(core) = &self.core {
+                    self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(core, &[]))));
                 }
             }
             MenuRequest::Rename(alias) => match self.tree.find(&alias) {
@@ -1217,6 +1226,7 @@ impl App {
             MenuRequest::Files { .. }
             | MenuRequest::Dropped { .. }
             | MenuRequest::PasteQuotation(_)
+            | MenuRequest::TabTitle { .. }
             | MenuRequest::Find(_) => {}
             MenuRequest::ConfirmClose(ids) => {
                 let labels = self

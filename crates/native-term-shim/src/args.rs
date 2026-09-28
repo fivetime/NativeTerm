@@ -50,10 +50,18 @@ pub enum Mode {
     },
     /// NativeTerm's tab menu for a terminal that shows it itself: list
     /// the items (`--tab-menu`) or choose one (`--tab-menu <id>`), for
-    /// the tab `--pane` names (else this process's own).
+    /// the tab `--pane` names (else this process's own); `--tabs
+    /// <index>/<count>` says where the tab is among its window's, and a
+    /// tab without a session is then listed what any tab has.
     TabMenu {
         id: Option<u32>,
         pane: Option<String>,
+        place: Option<(u32, u32)>,
+    },
+    /// The terminal gives a tab another title: which (`--tab-title
+    /// <current>`; NativeTerm asks the person).
+    TabTitle {
+        current: String,
     },
     /// What the hover card of the tab `--pane` names (else this process's
     /// own) says, for a terminal that draws it itself.
@@ -147,14 +155,23 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Mode, String> {
             "--tab-menu" => {
                 let mut id = None;
                 let mut pane = None;
+                let mut place = None;
                 while let Some(arg) = args.next() {
                     match arg.as_str() {
                         "--pane" => pane = Some(args.next().ok_or("--pane needs a value")?),
+                        "--tabs" => {
+                            let said = args.next().ok_or("--tabs needs <index>/<count>")?;
+                            let parsed =
+                                said.split_once('/').and_then(|(i, c)| Some((i.parse().ok()?, c.parse().ok()?)));
+                            place = Some(parsed.ok_or_else(|| format!("--tabs: not <index>/<count>: {said}"))?);
+                        }
                         other => id = Some(other.parse().map_err(|_| format!("--tab-menu: not an item: {other}"))?),
                     }
                 }
-                return Ok(Mode::TabMenu { id, pane });
+                return Ok(Mode::TabMenu { id, pane, place });
             }
+            // (whatever the title is: it is the argument, not an option)
+            "--tab-title" => return Ok(Mode::TabTitle { current: args.next().unwrap_or_default() }),
             "--paste-quotation" => return Ok(Mode::PasteQuotation),
             "--find" => {
                 let (mut initial, mut result) = (None, None);
@@ -242,7 +259,14 @@ mod tests {
 
     #[test]
     fn tab_menu_helper() {
-        assert_eq!(p(&["--tab-menu"]).unwrap(), Mode::TabMenu { id: None, pane: None });
+        assert_eq!(p(&["--tab-menu"]).unwrap(), Mode::TabMenu { id: None, pane: None, place: None });
+        assert_eq!(
+            p(&["--tab-menu", "--pane", "7", "--tabs", "1/3"]).unwrap(),
+            Mode::TabMenu { id: None, pane: Some("7".into()), place: Some((1, 3)) }
+        );
+        assert!(p(&["--tab-menu", "--tabs", "second"]).is_err());
+        assert_eq!(p(&["--tab-title", "--help"]).unwrap(), Mode::TabTitle { current: "--help".into() });
+        assert_eq!(p(&["--tab-title"]).unwrap(), Mode::TabTitle { current: String::new() });
         assert_eq!(p(&["--paste-quotation"]).unwrap(), Mode::PasteQuotation);
         assert_eq!(p(&["--find"]).unwrap(), Mode::Find { initial: None, result: None });
         assert_eq!(
@@ -261,9 +285,12 @@ mod tests {
         assert!(p(&["--print-preview"]).is_err());
         assert_eq!(
             p(&["--tab-menu", "4", "--pane", "7"]).unwrap(),
-            Mode::TabMenu { id: Some(4), pane: Some("7".into()) }
+            Mode::TabMenu { id: Some(4), pane: Some("7".into()), place: None }
         );
-        assert_eq!(p(&["--tab-menu", "--pane", "7"]).unwrap(), Mode::TabMenu { id: None, pane: Some("7".into()) });
+        assert_eq!(
+            p(&["--tab-menu", "--pane", "7"]).unwrap(),
+            Mode::TabMenu { id: None, pane: Some("7".into()), place: None }
+        );
         assert!(p(&["--tab-menu", "close"]).is_err());
         assert_eq!(p(&["--tab-card", "--pane", "7"]).unwrap(), Mode::TabCard { pane: Some("7".into()) });
         assert_eq!(p(&["--tab-card"]).unwrap(), Mode::TabCard { pane: None });

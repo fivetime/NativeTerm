@@ -105,7 +105,8 @@ fn main() {
         // rz / sz: stdin and stdout are the session's data
         Mode::Zmodem { mode, escape, files } => std::process::exit(zmodem::run(&mode, escape, files)),
         Mode::Drop { paths } => std::process::exit(drop::run(&paths)),
-        Mode::TabMenu { id, pane } => std::process::exit(menu::run(id, pane)),
+        Mode::TabMenu { id, pane, place } => std::process::exit(menu::run(id, pane, place)),
+        Mode::TabTitle { current } => std::process::exit(menu::title(current)),
         Mode::PasteQuotation => std::process::exit(menu::quotation()),
         Mode::Find { initial, result } => std::process::exit(menu::find(initial, result)),
         Mode::PrintPreview { file, title } => std::process::exit(print::preview(&file, title.as_deref())),

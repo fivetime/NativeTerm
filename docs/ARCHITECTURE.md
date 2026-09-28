@@ -4876,10 +4876,33 @@ WezTerm gets the choosable items in its `InputSelector`, in the pane.
 Either way the choice goes back with `--tab-menu <id>`, which
 `ShimMessage::TabAction` carries to the same `Actions::chosen` the
 Windows menu uses. The items are `Actions::entries` for the session's
-tab, the ones that apply, so the two menus never drift; a tab that is
-not NativeTerm's gets no menu (the shim prints nothing), and a right
+tab, the ones that apply, so the two menus never drift, and a right
 click while a program on the other side takes the mouse goes to that
-program, as WezTerm always does. Ctrl+Tab is left to WezTerm unless the
+program, as WezTerm always does.
+
+A tab that is not NativeTerm's (the terminal's own "new tab": a shell,
+no session) has the menu of any tab: Send Command…, Clear Screen and
+Scrollback, Rename Tab…, and Close, Close Tabs to the Left, to the
+Right, Close Other Tabs, Close Disconnected Tabs (dimmed where there
+is nothing to close). The callback tells the shim where the tab is
+among its window's (`--tabs <index>/<count>`, `ShimMessage::TabMenu`'s
+`place`), and NativeTerm lists the items (`tab_menu::plain_items`);
+without the place a tab without a session is listed nothing, which is
+how the callback tells a session's tab from another. What is flagged
+`l` (`MenuItem::here`) the terminal does itself, the tabs being its
+own: it clears the pane; it closes tabs, a session's tab among them by
+NativeTerm (`--tab-menu 4` for its pane: closed its way, a locked one
+stays), another's by `wezterm cli kill-pane` for each of its panes,
+without asking (as Windows Terminal's "Close tabs to the right"); and
+it sets the tab's title to what NativeTerm's small window asked for
+(`--tab-title <current>`, `ShimMessage::TabTitle`, `tab_title.rs`): for
+as long as the tab lives, nothing kept, an empty one the terminal's own
+title again. The rest goes to NativeTerm as a `TabAction` from a pane
+without a session (`tab_menu::choose_plain`): the send dialog with
+nobody chosen yet, and the ended sessions closed. Windows Terminal's
+own tabs keep Terminal's own menu: NativeTerm draws none over them.
+
+Ctrl+Tab is left to WezTerm unless the
 switcher setting is on, when it shows the fork's `ShowTabSwitcher`
 grid (per window, unlike the grid on Windows): tiles of the window's
 tabs with the last lines of their screens, Ctrl released switching; a

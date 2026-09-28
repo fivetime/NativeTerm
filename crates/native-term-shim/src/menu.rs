@@ -5,9 +5,10 @@
 //! right click (and Ctrl+Shift+M) to a menu of its own; the menu's
 //! items come from here: `--tab-menu` asks NativeTerm what applies to
 //! the tab's session and prints one line per item
-//! (`id<TAB>text<TAB>flags<TAB>icon`: a heading with id 0, `d` in the
-//! flags for a disabled item, a nerdfont name for the icon; `-` alone for
-//! a separator), and `--tab-menu <id>` reports the choice. The tab is
+//! (`id<TAB>text<TAB>flags<TAB>icon`: a heading with id 0, in the
+//! flags `d` for a disabled item and `l` for one the terminal does
+//! itself, a nerdfont name for the icon; `-` alone for a separator), and
+//! `--tab-menu <id>` reports the choice. The tab is
 //! named by `--pane` (WezTerm's pane id, which the session's shim
 //! reported as its terminal session), since the menu runs in the GUI
 //! process, not in the tab.
@@ -26,7 +27,7 @@ pub fn lines(items: &[native_term_session::protocol::MenuItem]) -> String {
             if i.separator {
                 return "-\n".to_string();
             }
-            let flags = if i.enabled { "" } else { "d" };
+            let flags = format!("{}{}", if i.enabled { "" } else { "d" }, if i.here { "l" } else { "" });
             format!("{}\t{}\t{flags}\t{}\n", i.id, clean(&i.text), clean(i.icon.as_deref().unwrap_or("")))
         })
         .collect()
@@ -34,7 +35,7 @@ pub fn lines(items: &[native_term_session::protocol::MenuItem]) -> String {
 
 /// Exit code 0 when NativeTerm answered (the items are on stdout for a
 /// listing), 1 when it could not be reached or knows no such tab.
-pub fn run(id: Option<u32>, pane: Option<String>) -> i32 {
+pub fn run(id: Option<u32>, pane: Option<String>, place: Option<(u32, u32)>) -> i32 {
     let Some(name) = crate::pipe_name() else { return 1 };
     let Ok(conn) = pipe::connect(&name, Duration::from_millis(500)) else { return 1 };
     let hello = ShimMessage::Hello {
@@ -48,7 +49,9 @@ pub fn run(id: Option<u32>, pane: Option<String>) -> i32 {
     };
     let request = match id {
         Some(id) => ShimMessage::TabAction { id },
-        None => ShimMessage::TabMenu,
+        None => ShimMessage::TabMenu {
+            place: place.map(|(index, count)| native_term_session::protocol::TabPlace { index, count }),
+        },
     };
     if conn.send(&hello).is_err() || conn.send(&request).is_err() {
         return 1;
@@ -141,6 +144,46 @@ pub fn quotation() -> i32 {
     1
 }
 
+/// The tab's new title, as `1<TAB>title` on stdout (an empty one: the
+/// terminal's own again), or `cancel` when the person said no. Waits for
+/// them. Exit code 0 when NativeTerm answered, 1 when it could not be
+/// reached.
+pub fn title(current: String) -> i32 {
+    let Some(name) = crate::pipe_name() else { return 1 };
+    let Ok(conn) = pipe::connect(&name, Duration::from_millis(500)) else { return 1 };
+    let hello = ShimMessage::Hello {
+        protocol: native_term_session::PROTOCOL_VERSION,
+        role: Role::Request,
+        pid: std::process::id(),
+        wt_session: crate::wt_session(),
+        session: None,
+        alias: None,
+        terminal_window: None,
+    };
+    if conn.send(&hello).is_err() || conn.send(&ShimMessage::TabTitle { current }).is_err() {
+        return 1;
+    }
+    loop {
+        match conn.recv::<AppMessage>(ANSWER) {
+            Ok(Some(AppMessage::TabTitle { title, rename })) => {
+                print!("{}", title_line(&title, rename));
+                return 0;
+            }
+            // `Welcome`; or nothing yet: the window is up, the person types
+            Ok(_) => continue,
+            Err(_) => return 1,
+        }
+    }
+}
+
+fn title_line(title: &str, rename: bool) -> String {
+    if rename {
+        format!("1\t{}\n", title.replace(['\t', '\n', '\r'], " ").trim())
+    } else {
+        "cancel\n".into()
+    }
+}
+
 /// What to find in the pane, as `find<TAB>up<TAB>case<TAB>word<TAB>wrap
 /// <TAB>text` (each `1` or `0`) on stdout, or `cancel` when the person
 /// closed the dialog. Waits for them, however long they take. Exit code 0
@@ -225,6 +268,27 @@ mod tests {
         );
         assert_eq!(super::find_line(false, "eth0", [true; 4]), "cancel\n");
         assert_eq!(super::find_line(true, "", [true; 4]), "cancel\n");
+    }
+
+    #[test]
+    fn a_title_line() {
+        assert_eq!(super::title_line(" build\tlogs\n", true), "1\tbuild logs\n");
+        assert_eq!(super::title_line("", true), "1\t\n", "the terminal's own title again");
+        assert_eq!(super::title_line("build", false), "cancel\n");
+    }
+
+    #[test]
+    fn what_the_terminal_does_itself_is_flagged() {
+        use native_term_session::protocol::MenuItem;
+        let items = [
+            MenuItem { here: true, icon: Some("cod_close".into()), ..MenuItem::new(4, "Close") },
+            MenuItem { here: true, enabled: false, ..MenuItem::new(7, "Close Tabs to the Right") },
+            MenuItem::new(8, "Send Command…"),
+        ];
+        assert_eq!(
+            super::lines(&items),
+            "4\tClose\tl\tcod_close\n7\tClose Tabs to the Right\tdl\t\n8\tSend Command…\t\t\n"
+        );
     }
 
     #[test]

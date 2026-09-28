@@ -82,10 +82,18 @@ pub enum ShimMessage {
     /// tab's session (found by `wt_session`), answered by
     /// `AppMessage::TabMenu`. For terminals whose tab strip NativeTerm
     /// can't draw over (WezTerm): the terminal's own picker shows the
-    /// items.
-    TabMenu,
+    /// items. With the tab's `place` among its window's tabs (newer), a
+    /// tab without a session has a menu too: what is done with any tab.
+    TabMenu {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        place: Option<TabPlace>,
+    },
     /// From a `Request` helper: the item chosen from that menu.
     TabAction { id: u32 },
+    /// From a `Request` helper: the terminal gives a tab another title
+    /// and asks which (`current`: the one it has), answered by
+    /// `AppMessage::TabTitle` once the person has said.
+    TabTitle { current: String },
     /// From a `Request` helper: what the tab's hover card says (the
     /// session's name and state), answered by `AppMessage::TabCard`. For
     /// terminals that draw the card themselves (WezTerm).
@@ -116,6 +124,13 @@ pub struct FindResult {
     pub count: u32,
 }
 
+/// Where a tab is among its window's tabs: the first is 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TabPlace {
+    pub index: u32,
+    pub count: u32,
+}
+
 /// One line of the tab menu, as `AppMessage::TabMenu` lists it: an
 /// item to choose (`id` as `ShimMessage::TabAction` sends it back), a
 /// heading (`id` 0) naming what the menu is about, or a separator. The
@@ -132,16 +147,24 @@ pub struct MenuItem {
     /// Its icon, as a nerdfont name (what WezTerm draws icons with).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// The terminal does it itself (a tab of its own closed, its screen
+    /// cleared): chosen, it is not sent back as a `TabAction`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub here: bool,
 }
 
 fn enabled() -> bool {
     true
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl MenuItem {
     /// An enabled item (or, with `id` 0, the heading) without an icon.
     pub fn new(id: u32, text: impl Into<String>) -> MenuItem {
-        MenuItem { id, text: text.into(), enabled: true, separator: false, icon: None }
+        MenuItem { id, text: text.into(), enabled: true, separator: false, icon: None, here: false }
     }
 
     pub fn separator() -> MenuItem {
@@ -194,6 +217,12 @@ pub enum AppMessage {
         title: String,
         note: String,
         show: bool,
+    },
+    /// The answer to `ShimMessage::TabTitle`: the tab's new title (empty:
+    /// the terminal's own again); `rename` false: the person said no.
+    TabTitle {
+        title: String,
+        rename: bool,
     },
     /// The answer to `ShimMessage::PasteQuotation`: every line goes
     /// between `chars` (`between`) or after them; `paste` false: the
@@ -254,7 +283,9 @@ mod tests {
             ShimMessage::Specials { names: vec!["brk".into(), "ayt".into()] },
             ShimMessage::Unreachable,
             ShimMessage::PasswordRefused,
-            ShimMessage::TabMenu,
+            ShimMessage::TabMenu { place: None },
+            ShimMessage::TabMenu { place: Some(TabPlace { index: 1, count: 3 }) },
+            ShimMessage::TabTitle { current: "bash".into() },
             ShimMessage::TabAction { id: 4 },
             ShimMessage::PasteQuotation,
             ShimMessage::Find { initial: Some("eth0".into()), result: None },
@@ -283,6 +314,16 @@ mod tests {
         assert_eq!(decode::<AppMessage>(&encode(&menu)).unwrap(), menu);
         let card = AppMessage::TabCard { title: "web01".into(), note: "Connected · 5 min".into(), show: true };
         assert_eq!(decode::<AppMessage>(&encode(&card)).unwrap(), card);
+        let title = AppMessage::TabTitle { title: "构建".into(), rename: true };
+        assert_eq!(decode::<AppMessage>(&encode(&title)).unwrap(), title);
+        // an older shim asks without the tab's place
+        let old = r#"{"type":"tab_menu"}"#;
+        assert_eq!(decode::<ShimMessage>(old).unwrap(), ShimMessage::TabMenu { place: None });
+        assert_eq!(encode(&ShimMessage::TabMenu { place: None }), "{\"type\":\"tab_menu\"}\n");
+        // what the terminal does itself is said only where it is so
+        let here = MenuItem { here: true, ..MenuItem::new(4, "Close") };
+        assert!(encode(&here).contains("\"here\":true"));
+        assert!(!encode(&MenuItem::new(4, "Close")).contains("here"));
         // an older NativeTerm sends id and text only
         let old = r#"{"type":"tab_menu","items":[{"id":1,"text":"Reconnect"}]}"#;
         assert_eq!(

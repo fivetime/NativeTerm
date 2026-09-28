@@ -701,6 +701,18 @@
             Terminal's `wt -w new` with the portable copy. Not on
             Wayland (no window can be brought forward from outside
             there without the compositor's token); macOS not seen.
+      - [x] A menu for a tab without a session (WezTerm's "new tab": a
+            right click on it showed nothing): Send Command…, Clear
+            Screen and Scrollback, Rename Tab… (for as long as the tab
+            lives; NativeTerm's small window asks), Close, Close Tabs
+            to the Left, to the Right, Close Other Tabs, Close
+            Disconnected Tabs. Tried on Lingmo (X11) with NativeTerm
+            running: four tabs of a shell, every item chosen; and
+            beside a session's tab: "Send Command…" brings NativeTerm's
+            dialog, "Close Tabs to the Left" closes the session's tab
+            through NativeTerm. Not seen: Windows, macOS, Wayland (the
+            same configuration and shim; the menu itself was tried
+            there before).
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open
