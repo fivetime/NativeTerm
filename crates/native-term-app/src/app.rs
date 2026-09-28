@@ -1662,7 +1662,8 @@ impl App {
                 }
                 for page in Page::ALL {
                     let count = if page == Page::Sessions { open } else { 0 };
-                    let title = page.title();
+                    // (what the page is, and a line about it)
+                    let title = format!("{}\n{}", page.title(), page.about(self.tree.hosts().count()));
                     let button = layout::Rail { count, ..rail(tones, page.icon(), &title, self.page == page) };
                     if layout::rail_button(ui, tones, button).clicked() {
                         self.page = page;
@@ -1731,15 +1732,35 @@ impl App {
     fn header(&mut self, ui: &mut egui::Ui, tones: &Tones) -> Vec<TreeAction> {
         let mut actions = Vec::new();
         // (the design's widths are the whole window's)
-        let width = ui.available_width() + layout::RAIL;
-        let short = width < layout::SHORT_HEADER;
-        let frame = layout::bar(tones, layout::header_pad(width));
-        egui::Panel::top("header").frame(frame).show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
+        let short = ui.available_width() + layout::RAIL < layout::SHORT_HEADER;
+        let (maximized, focused) = ui.input(|i| {
+            let window = i.viewport();
+            (window.maximized.unwrap_or(false), window.focused.unwrap_or(true))
+        });
+        let frame = layout::bar(tones, egui::Margin::symmetric(layout::TITLE_PAD, 0));
+        egui::Panel::top("header").exact_size(layout::TITLE_BAR).resizable(false).frame(frame).show_inside(ui, |ui| {
+            // the window is taken by the header: what is put into it
+            // afterwards is over this, and is what it is
+            let bar = ui.max_rect().expand2(egui::vec2(f32::from(layout::TITLE_PAD), 0.0));
+            let taken = ui.interact(bar, ui.id().with("title-bar"), egui::Sense::click_and_drag());
+            if taken.double_clicked() {
+                self.title_double_click(ui, maximized);
+            } else if taken.drag_started_by(egui::PointerButton::Primary) {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+            let mut caption = None;
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                if cfg!(target_os = "macos") {
+                    caption = layout::caption_dots(ui, tones, focused);
+                    ui.add_space(6.0);
+                }
                 layout::header_tile(ui, tones, self.page.icon());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
+                    if !cfg!(target_os = "macos") {
+                        caption = layout::caption_buttons(ui, tones, maximized);
+                    }
                     let (icon, hint) = other_theme(ui);
                     if layout::theme_button(ui, tones, icon, &hint).clicked() {
                         self.change_theme(ui);
@@ -1749,13 +1770,77 @@ impl App {
                     }
                     ui.add_space(4.0);
                     // the title has what the buttons leave
-                    let about = self.page.about(self.tree.hosts().count());
-                    let size = layout::title_size(width);
-                    layout::header_title(ui, tones, &self.page.title(), &about, ui.available_width(), size);
+                    layout::header_title(ui, tones, &self.page.title(), ui.available_width());
                 });
             });
+            match caption {
+                Some(layout::Caption::Minimize) => {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
+                Some(layout::Caption::Maximize | layout::Caption::Restore) => {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+                }
+                Some(layout::Caption::Close) => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
+                None => {}
+            }
         });
         actions
+    }
+
+    /// Two clicks on the header: what the system does for them where it
+    /// says (macOS: to fill the screen, to go to the Dock, or nothing),
+    /// else the window is maximized, or is again what it was.
+    fn title_double_click(&self, ui: &egui::Ui, maximized: bool) {
+        let system = crate::window::main_handle().is_some_and(native_term_os::dock::title_double_click);
+        if !system {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
+    }
+
+    /// The window's edges, where the system gives it none (Windows and
+    /// the Linux desktops: the title bar went, and the frame with it):
+    /// a line around it, and along it the bands it is taken by to be
+    /// made larger or smaller. Over everything else, so that what is
+    /// under a band is not pressed with it. Not while the window fills
+    /// the screen.
+    fn window_frame(&self, ui: &egui::Ui, tones: &Tones) {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        let filling = ui.input(|i| {
+            let window = i.viewport();
+            window.maximized.unwrap_or(false) || window.fullscreen.unwrap_or(false)
+        });
+        if filling {
+            return;
+        }
+        let ctx = ui.ctx();
+        let whole = ctx.content_rect();
+        let over = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("window-frame"));
+        let line = egui::Stroke::new(1.0_f32, tones.line);
+        ctx.layer_painter(over).rect_stroke(whole, 0.0, line, egui::StrokeKind::Inside);
+        let band = layout::FRAME_BAND;
+        let bands = [
+            ("n", egui::Rect::from_min_max(whole.min, egui::pos2(whole.right(), whole.top() + band))),
+            ("s", egui::Rect::from_min_max(egui::pos2(whole.left(), whole.bottom() - band), whole.max)),
+            ("w", egui::Rect::from_min_max(whole.min, egui::pos2(whole.left() + band, whole.bottom()))),
+            ("e", egui::Rect::from_min_max(egui::pos2(whole.right() - band, whole.top()), whole.max)),
+        ];
+        for (name, rect) in bands {
+            egui::Area::new(egui::Id::new(("window-frame", name)))
+                .order(egui::Order::Foreground)
+                .fixed_pos(rect.min)
+                .constrain(false)
+                .show(ctx, |ui| {
+                    let (_, edge) = ui.allocate_exact_size(rect.size(), egui::Sense::drag());
+                    let to = edge.hover_pos().and_then(|at| layout::frame_hit(at - whole.min, whole.size()));
+                    let Some(to) = to else { return };
+                    ui.ctx().set_cursor_icon(layout::frame_cursor(to));
+                    if edge.drag_started_by(egui::PointerButton::Primary) {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::BeginResize(to));
+                    }
+                });
+        }
     }
 
     /// The tree's buttons, from the right: a narrow window has their
@@ -2871,6 +2956,7 @@ impl crate::window::Ui for App {
             }
         }
         self.settings_window(ctx);
+        self.window_frame(ui, &tones);
         self.show_dialog(ctx);
         self.show_wizard(ctx);
         // over everything else, in the corner

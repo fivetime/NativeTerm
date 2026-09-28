@@ -254,6 +254,15 @@ impl From<accesskit_winit::Event> for UserEvent {
     }
 }
 
+/// The main window's handle (`window_handle`), for what the app asks the
+/// system about it; 0 before there is one.
+static MAIN_HANDLE: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// The main window's handle, once it is made.
+pub fn main_handle() -> Option<isize> {
+    Some(MAIN_HANDLE.load(std::sync::atomic::Ordering::Relaxed)).filter(|handle| *handle != 0)
+}
+
 /// One window and everything that paints it.
 struct Pane {
     ctx: egui::Context,
@@ -272,6 +281,9 @@ struct Pane {
     hwnd: isize,
     /// The look it has (every window follows the one chosen).
     look: Option<crate::looks::Preset>,
+    /// Its own button that closes it was clicked (the main window's
+    /// header has one): as if the system's had been.
+    close_asked: bool,
 }
 
 impl Pane {
@@ -327,6 +339,7 @@ impl Pane {
             repaint_at: None,
             hwnd,
             look: None,
+            close_asked: false,
         })
     }
 
@@ -358,6 +371,23 @@ impl Pane {
         self.state.handle_platform_output(&self.window, std::mem::take(&mut output.platform_output));
         if let Some(viewport) = output.viewport_output.remove(&ViewportId::ROOT) {
             let mut actions = Vec::new();
+            // the window is taken by its header or an edge of its own: the
+            // system moves it from here on, and the button's release is the
+            // system's too (X11's window manager grabs the pointer, AppKit
+            // runs the drag itself); winit sends one after the drag on
+            // Windows only. Without it the next press would be no press.
+            let taken = viewport.commands.iter().any(|command| {
+                matches!(command, egui::ViewportCommand::StartDrag | egui::ViewportCommand::BeginResize(_))
+            });
+            if taken && !cfg!(windows) {
+                if let Some(pos) = self.ctx.pointer_latest_pos() {
+                    let modifiers = self.ctx.input(|i| i.modifiers);
+                    let button = egui::PointerButton::Primary;
+                    let released = egui::Event::PointerButton { pos, button, pressed: false, modifiers };
+                    self.state.egui_input_mut().events.push(released);
+                    self.ctx.request_repaint();
+                }
+            }
             egui_winit::process_viewport_commands(
                 &self.ctx,
                 &mut self.info,
@@ -376,6 +406,7 @@ impl Pane {
                 };
                 self.state.egui_input_mut().events.extend(event);
             }
+            self.close_asked |= self.info.events.contains(&egui::ViewportEvent::Close);
         }
 
         let ran = started.elapsed();
@@ -587,6 +618,13 @@ impl Runner {
         let factory = self.factory.take().ok_or("the window was already started")?;
         let placement = self.placement;
         let main = Pane::create(event_loop, &self.proxy, Which::Main, &self.viewport, factory, false, |window| {
+            // without the system's title bar (`main.rs`) the window
+            // would be without its shadow too
+            #[cfg(windows)]
+            {
+                use winit::platform::windows::WindowExtWindows;
+                window.set_undecorated_shadow(true);
+            }
             if let Some(p) = placement {
                 // only if it is still on a monitor
                 if win::on_a_monitor(p.x + p.width as i32 / 2, p.y + 16) {
@@ -595,6 +633,7 @@ impl Runner {
                 }
             }
         })?;
+        MAIN_HANDLE.store(main.hwnd, std::sync::atomic::Ordering::Relaxed);
         self.main = Some(main);
         // Wayland lets no client place or find windows: nothing docks, so
         // the strip and the floating button are never needed there, and a
@@ -1142,6 +1181,16 @@ impl Runner {
         Ok(())
     }
 
+    /// The main window closes, and the program ends.
+    fn close_main(&mut self, event_loop: &ActiveEventLoop) {
+        self.save_placement();
+        if let Some(main) = self.main.as_mut() {
+            main.ui.on_exit();
+        }
+        self.extras.clear();
+        event_loop.exit();
+    }
+
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: String) {
         self.error = Some(error);
         event_loop.exit();
@@ -1179,14 +1228,7 @@ impl ApplicationHandler<UserEvent> for Runner {
                     self.fail(event_loop, e);
                 }
             }
-            WindowEvent::CloseRequested if which == Which::Main => {
-                self.save_placement();
-                if let Some(main) = self.main.as_mut() {
-                    main.ui.on_exit();
-                }
-                self.extras.clear();
-                event_loop.exit();
-            }
+            WindowEvent::CloseRequested if which == Which::Main => self.close_main(event_loop),
             WindowEvent::CloseRequested => {
                 if let Which::Extra(n) = which {
                     if pane.ui.close_requested() {
@@ -1254,6 +1296,10 @@ impl ApplicationHandler<UserEvent> for Runner {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.main.as_ref().is_some_and(|main| main.close_asked) {
+            self.close_main(event_loop);
+            return;
+        }
         self.open_requested(event_loop);
         let now = Instant::now();
         if shell::take_show_main() {

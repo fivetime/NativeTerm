@@ -1057,3 +1057,7 @@ import-securecrt-none = 未在本機找到它的設定，可以手動選擇資�
 import-button = 匯入…
 import-putty-about = 本機 PuTTY 裡儲存的工作階段
 import-openssh = { $dir }/config 裡的主機不需要匯入，它們已經在工作階段樹裡。
+window-minimize = 最小化
+window-maximize = 最大化
+window-restore = 還原
+window-close = 關閉

@@ -44,6 +44,15 @@ pub fn over_fullscreen(_handle: isize, _on: bool) {}
 #[cfg(not(target_os = "macos"))]
 pub fn regular_application() {}
 
+/// Two clicks on a title bar of the window's own: where the system says
+/// what they do (macOS, System Settings: `AppleActionOnDoubleClick`) it
+/// is done and this is true; elsewhere false, and the caller does what
+/// it does.
+#[cfg(not(target_os = "macos"))]
+pub fn title_double_click(_handle: isize) -> bool {
+    false
+}
+
 #[cfg(unix)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Bounds {
@@ -343,12 +352,13 @@ mod mac {
 
     use super::Bounds;
     use objc2::rc::Retained;
-    use objc2::MainThreadMarker;
+    use objc2::runtime::{AnyObject, NSObjectProtocol};
+    use objc2::{msg_send, sel, MainThreadMarker};
     use objc2_app_kit::{
         NSApplication, NSApplicationActivationPolicy, NSColor, NSEvent, NSScreen, NSView, NSWindow,
         NSWindowCollectionBehavior,
     };
-    use objc2_foundation::{NSPoint, NSRect};
+    use objc2_foundation::{ns_string, NSPoint, NSRect, NSUserDefaults};
 
     /// The primary screen's height in points and its scale: what turns
     /// AppKit's coordinates into ours. `None` off the main thread.
@@ -473,6 +483,28 @@ mod mac {
         }
     }
 
+    /// See the crate-level `title_double_click`: as Chrome does it for
+    /// its own strip (`NativeWidgetMacNSWindow sendEvent:`): "Fill" where
+    /// the window has `-_zoomFill:`, not set or "Maximize" the zoom,
+    /// "Minimize" the Dock, anything else ("None") nothing.
+    pub fn title_double_click(handle: isize) -> bool {
+        let Some(w) = window(handle) else { return false };
+        let action = NSUserDefaults::standardUserDefaults().stringForKey(ns_string!("AppleActionOnDoubleClick"));
+        match action.map(|action| action.to_string()).as_deref() {
+            Some("Fill") => {
+                if w.respondsToSelector(sel!(_zoomFill:)) {
+                    // SAFETY: the window answers to it, and it takes who
+                    // sent it (nobody) as the other actions do.
+                    let () = unsafe { msg_send![&*w, _zoomFill: Option::<&AnyObject>::None] };
+                }
+            }
+            None | Some("Maximize") => w.zoom(None),
+            Some("Minimize") => w.miniaturize(None),
+            Some(_) => {}
+        }
+        true
+    }
+
     /// Move the window's frame (title bar included) to `left`, `top`.
     pub fn move_window(handle: isize, left: i32, top: i32) {
         let (Some(w), Some((height, scale))) = (window(handle), space()) else { return };
@@ -513,5 +545,5 @@ mod mac {
 #[cfg(target_os = "macos")]
 pub use mac::{
     cursor, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, over_fullscreen,
-    regular_application, round_corners, set_topmost, window_bounds, work_area, work_area_at,
+    regular_application, round_corners, set_topmost, title_double_click, window_bounds, work_area, work_area_at,
 };

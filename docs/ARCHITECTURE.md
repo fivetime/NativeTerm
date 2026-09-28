@@ -3928,7 +3928,7 @@ All UI surfaces invoke one shared app-level command layer
     every window has an egui context of its own and takes the look
     chosen when it paints (`window::Pane`).
   - **The main window** is laid out after the design the person
-    brought (`interactive_modern_tree_view_ui-v2.html`, a web page
+    brought (`interactive_modern_tree_view_ui-v3.html`, a web page
     written with Tailwind's classes; nothing of it is a picture, and
     nothing here is: rectangles, lines, the text font, the icon font).
     `layout.rs` draws the parts with the classes' numbers, `app.rs` puts
@@ -3940,12 +3940,43 @@ All UI surfaces invoke one shared app-level command layer
       its lower end: the settings, light or dark, and the pin while the
       window is docked. In a low window the icons are nearer to each
       other (`layout::rail_gap`).
-    - **A header** (`p-4 sm:p-5`): the page's icon in a tile, its name,
-      a line about it; for the tree "Expand All", "Collapse All", and
-      the blue "New" (a host, another kind of session, a folder: in the
-      folder that is chosen, else in the main config), and what reads
-      `~/.ssh` again; at its end light or dark. A window narrower than
-      720 has the buttons' signs only.
+    - **A header that is the window's title bar** (`h-14 px-4`; the
+      system's title bar is gone, the design's third version): the
+      page's icon in a tile and its name; for the tree "Expand All",
+      "Collapse All", and the blue "New" (a host, another kind of
+      session, a folder: in the folder that is chosen, else in the main
+      config), and what reads `~/.ssh` again; light or dark; and the
+      window's own buttons, where the platform has them: at the
+      header's end on Windows and the Linux desktops (minimize,
+      maximize or restore, close: drawn, not from a font), at its start
+      on macOS (three dots, their signs in them under the pointer,
+      without colour while the window is not in front). A window
+      narrower than 720 has the tree's buttons' signs only. The window
+      is taken by the header to be moved (`ViewportCommand::StartDrag`:
+      the system moves it, so Windows' snapping, KWin's tiling and
+      NativeTerm's own docking go on as with a title bar); two clicks
+      on it maximize the window or give it its size back, on macOS
+      what System Settings says (`AppleActionOnDoubleClick`, as Chrome
+      reads it: `native_term_os::dock::title_double_click`).
+    - **The window's frame**: on macOS the system's (round corners,
+      shadow, edges to take it by), its title bar see-through over the
+      window's own content and its buttons hidden
+      (`with_fullsize_content_view`, `main.rs`). Elsewhere a frame
+      comes with a title bar or not at all (`with_decorations(false)`),
+      so the edges are the app's: a line around the window, and along
+      it bands of 4 with corners of 16 (Chrome's
+      `kFrameBorderThickness` and `kResizeAreaCornerSize` for a frame
+      of its own, the hit test `FrameView::GetHTComponentForFrame`'s:
+      `layout::frame_hit`) that begin the system's resize
+      (`BeginResize`). The bands are areas over everything else, so
+      what is under one is not pressed with it. Windows keeps the
+      window's shadow (`set_undecorated_shadow`). None of it while the
+      window is maximized. Once the system has the pointer for a move
+      or a resize, the button's release is the system's too (X11's
+      window manager, the Wayland compositor, AppKit); `window.rs`
+      gives egui one, without which every other press was none.
+      The window's own "close" is a viewport command, which
+      `window.rs` takes as the system's close.
     - **What is wrong** (no terminal profile, no agent, files in
       conflict, sessions lost) and what was just said, in a bar under
       the header, which is there only while there is something to say

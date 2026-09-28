@@ -669,6 +669,27 @@
             Not seen by me: Windows and macOS (the person's to look
             at), a session open (the marks, the bubble), a window of
             many hundred hosts.
+      - [x] The header as the window's title bar (the design's third
+            version, "cross-platform": the system's title bar gone, the
+            window's buttons at the header's end on Windows and Linux,
+            three dots at its start on macOS). Tried on Lingmo (X11,
+            KWin) with xdotool and on Zorin (Wayland, GNOME 46) with a
+            pointer from /dev/uinput: moved by the header, made larger
+            and smaller by each edge and by corners, two clicks
+            maximize and restore, the three buttons; docking at the
+            screen's edge, hiding, the strip, undocking (X11). Found on
+            the way: after a move or a resize the system had begun,
+            every other press was lost (the release never came).
+            Windows: looked at, not touched (the desktop is the
+            person's): the window's styles keep Windows' shadow and
+            snapping, the header and its buttons are drawn as on
+            Linux. Not seen: macOS (the machine was not reachable),
+            where the frame stays the system's and only the title bar
+            goes; KDE on Wayland.
+            Not done: a shadow and round corners for the window on
+            Linux where the desktop gives an undecorated window none
+            (GNOME); Windows 11's snap layouts under the pointer on
+            "maximize"; the window's menu on a right click.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

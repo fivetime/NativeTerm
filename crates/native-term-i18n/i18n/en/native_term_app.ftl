@@ -1098,3 +1098,7 @@ import-securecrt-none = Its configuration was not found on this computer; its fo
 import-button = Import…
 import-putty-about = The sessions saved in PuTTY on this computer
 import-openssh = The hosts in { $dir }/config need no import: they are in the tree already.
+window-minimize = Minimize
+window-maximize = Maximize
+window-restore = Restore
+window-close = Close

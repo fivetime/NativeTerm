@@ -448,7 +448,9 @@ fn main() {
     let viewport = egui::ViewportBuilder::default()
         .with_title("NativeTerm")
         .with_app_id("NativeTerm")
-        .with_inner_size([960.0, 640.0]);
+        .with_inner_size([960.0, 640.0])
+        .with_min_inner_size([560.0, 400.0]);
+    let viewport = without_title_bar(viewport);
     // where the window was, and a way to remember it
     let settings = setup.as_ref().ok().and_then(|s| s.core.clone());
     let settings_core = settings.clone();
@@ -472,6 +474,24 @@ fn main() {
         std::process::exit(1);
     }
     diag::close("NativeTerm stopped");
+}
+
+/// The main window without the system's title bar: its header is one
+/// (`app.rs`, the design's). On macOS the window keeps the system's
+/// frame (its round corners, its shadow, its edges to take it by), the
+/// title bar see-through over the window's own content and its buttons
+/// hidden for the header's; elsewhere a frame comes with a title bar or
+/// not at all, and the window has none (its edges are `app.rs`'s).
+fn without_title_bar(viewport: egui::ViewportBuilder) -> egui::ViewportBuilder {
+    if cfg!(target_os = "macos") {
+        viewport
+            .with_fullsize_content_view(true)
+            .with_title_shown(false)
+            .with_titlebar_shown(false)
+            .with_titlebar_buttons_shown(false)
+    } else {
+        viewport.with_decorations(false)
+    }
 }
 
 /// `state.db` setting: where the floating button was (`x,y`).

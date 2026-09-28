@@ -1,10 +1,11 @@
 //! The main window's layout, after the design the person brought
-//! (`interactive_modern_tree_view_ui-v2.html`, a web page written with
+//! (`interactive_modern_tree_view_ui-v3.html`, a web page written with
 //! Tailwind's classes; the numbers here are those classes', the colours
-//! its variables, `looks::Tones`): a rail of
-//! icons at the left, a header, the tree under its search field and its
-//! filters, a bar below it, and what is chosen at the right. Nothing of
-//! it is a picture: rectangles, lines, the text font and the icon font.
+//! its variables, `looks::Tones`): a rail of icons at the left, a header
+//! that is the window's title bar (the system's is gone), the tree under
+//! its search field and its filters, a bar below it, and what is chosen
+//! at the right. Nothing of it is a picture: rectangles, lines, the text
+//! font and the icon font.
 //!
 //! This file draws the parts; `app.rs` puts them together, the tree's
 //! rows are `tree_view.rs`'s and what is chosen is `properties.rs`'s.
@@ -21,22 +22,26 @@ pub const RAIL: f32 = 56.0;
 const RAIL_ICON: f32 = 20.0;
 pub const RAIL_BUTTON: f32 = 40.0;
 pub const RAIL_GAP: f32 = 16.0;
-/// The header's tile: an icon of 24 with `p-2.5` around it.
-const HEADER_TILE: f32 = 44.0;
-/// From this width on the design has more room around the header's
-/// content and a larger title (its `sm:`).
-const WIDE: f32 = 640.0;
-
-/// The room around the header's content (`p-4 sm:p-5`) in a window
-/// `width` wide.
-#[must_use]
-pub fn header_pad(width: f32) -> i8 {
-    if width < WIDE {
-        16
-    } else {
-        20
-    }
-}
+/// The header, which is the window's title bar (`h-14 px-4`), and its
+/// tile: an icon of 16 with `p-1.5` around it.
+pub const TITLE_BAR: f32 = 56.0;
+pub const TITLE_PAD: i8 = 16;
+const HEADER_TILE: f32 = 28.0;
+/// One of the window's buttons (`p-1.5` around an icon of 14), and what
+/// is between two of them (`space-x-1`).
+const CAPTION: f32 = 26.0;
+const CAPTION_GAP: f32 = 4.0;
+/// The window's buttons as macOS has them (`w-3 h-3 rounded-full`,
+/// `gap-2`).
+const DOT: f32 = 12.0;
+const DOT_GAP: f32 = 8.0;
+/// Where the window is taken by its edge to be made larger or smaller:
+/// the band along each edge and the corners' reach along it, as Chrome
+/// has them for a frame of its own without a shadow
+/// (`kFrameBorderThickness`, `kResizeAreaCornerSize` in
+/// `ui/views/window/default_frame_view.cc`).
+pub const FRAME_BAND: f32 = 4.0;
+pub const FRAME_CORNER: f32 = 16.0;
 /// The bar below the tree (`h-9`, `px-4`).
 pub const FOOTER: f32 = 36.0;
 /// What is chosen, at the right (`w-80`; the design has `w-96` from a
@@ -48,20 +53,10 @@ pub const NARROW: f32 = 680.0;
 pub const SHORT_HEADER: f32 = 720.0;
 
 /// The small text (`text-xs`), a badge's (`text-[11px]`), what is said
-/// in the middle of an empty place (`text-sm`), a title's (`text-base
-/// sm:text-lg`).
+/// in the middle of an empty place and the header's title (`text-sm`).
 pub const SMALL: f32 = 12.0;
 pub const TINY: f32 = 11.0;
 pub const MIDDLE: f32 = 14.0;
-
-#[must_use]
-pub fn title_size(width: f32) -> f32 {
-    if width < WIDE {
-        16.0
-    } else {
-        18.0
-    }
-}
 
 fn font(size: f32) -> egui::FontId {
     egui::FontId::proportional(size)
@@ -160,24 +155,196 @@ pub fn tile(ui: &mut egui::Ui, side: f32, icon: char, fill: egui::Color32, line:
     }
 }
 
-/// The header's tile.
+/// The header's tile (`p-1.5 rounded-lg`, the accent's colours).
 pub fn header_tile(ui: &mut egui::Ui, tones: &Tones, icon: char) {
-    tile(ui, HEADER_TILE, icon, tones.tile.fill, tones.tile.line, tones.tile.text);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(HEADER_TILE, HEADER_TILE), egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        painter.rect_filled(rect, 8.0, tones.tile.fill);
+        painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.0_f32, tones.tile.line), egui::StrokeKind::Inside);
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, icon, font(16.0), tones.tile.text);
+    }
 }
 
-/// The header's two lines, `width` wide: what is shown, in letters
-/// `size` high, and a word about it.
-pub fn header_title(ui: &mut egui::Ui, tones: &Tones, title: &str, about: &str, width: f32, size: f32) {
+/// The header's title, `width` wide (`text-sm`): what is shown. Nothing
+/// happens to it: the pointer takes the window by it as by the rest of
+/// the header.
+pub fn header_title(ui: &mut egui::Ui, tones: &Tones, title: &str, width: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width.max(0.0), HEADER_TILE), egui::Sense::hover());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter().with_clip_rect(rect);
-        let title = elided(&painter, title, font(size), tones.text, rect.width());
-        let about = elided(&painter, about, font(SMALL), tones.weak, rect.width());
-        let height = title.size().y + about.size().y;
-        let top = rect.center().y - height / 2.0;
-        let under = top + title.size().y;
-        painter.galley(egui::pos2(rect.left(), top), title, tones.text);
-        painter.galley(egui::pos2(rect.left(), under), about, tones.weak);
+        let title = elided(&painter, title, font(MIDDLE), tones.text, rect.width());
+        painter.galley(egui::pos2(rect.left(), rect.center().y - title.size().y / 2.0), title, tones.text);
+    }
+}
+
+/// One of the window's buttons.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Caption {
+    Minimize,
+    Maximize,
+    /// What "maximize" is while the window is maximized.
+    Restore,
+    Close,
+}
+
+impl Caption {
+    fn hint(self) -> String {
+        match self {
+            Caption::Minimize => native_term_app::t!("window-minimize"),
+            Caption::Maximize => native_term_app::t!("window-maximize"),
+            Caption::Restore => native_term_app::t!("window-restore"),
+            Caption::Close => native_term_app::t!("window-close"),
+        }
+    }
+
+    /// Its sign, drawn in a square `side` wide around `middle`: the
+    /// design's icons (a line, a square, two squares, a cross), which
+    /// are lines a twelfth of their size thick.
+    fn paint(self, painter: &egui::Painter, middle: egui::Pos2, side: f32, color: egui::Color32) {
+        let line = egui::Stroke::new((side / 12.0).max(1.0), color);
+        // (the icons are drawn on a square of 24)
+        let at = |x: f32, y: f32| middle + egui::vec2(x - 12.0, y - 12.0) * (side / 24.0);
+        match self {
+            Caption::Minimize => {
+                painter.line_segment([at(5.0, 12.0), at(19.0, 12.0)], line);
+            }
+            Caption::Maximize => {
+                let square = egui::Rect::from_min_max(at(3.0, 3.0), at(21.0, 21.0));
+                painter.rect_stroke(square, side / 12.0, line, egui::StrokeKind::Middle);
+            }
+            Caption::Restore => {
+                let front = egui::Rect::from_min_max(at(8.0, 8.0), at(22.0, 22.0));
+                painter.rect_stroke(front, side / 12.0, line, egui::StrokeKind::Middle);
+                let behind = [at(4.0, 16.0), at(2.0, 14.0), at(2.0, 4.0), at(4.0, 2.0), at(14.0, 2.0), at(16.0, 4.0)];
+                painter.add(egui::Shape::line(behind.to_vec(), line));
+            }
+            Caption::Close => {
+                painter.line_segment([at(6.0, 6.0), at(18.0, 18.0)], line);
+                painter.line_segment([at(18.0, 6.0), at(6.0, 18.0)], line);
+            }
+        }
+    }
+}
+
+/// One of the window's buttons as Windows and the Linux desktops have
+/// them (`p-1.5 rounded-lg hover:bg-gray-500/10`; the one that closes
+/// `hover:bg-red-500 hover:text-white`).
+fn caption_button(ui: &mut egui::Ui, tones: &Tones, caption: Caption) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(CAPTION, CAPTION), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, caption.hint()));
+    if ui.is_rect_visible(rect) {
+        let near = response.hovered();
+        let (fill, color) = match (near, caption) {
+            (false, _) => (egui::Color32::TRANSPARENT, tones.weak),
+            (true, Caption::Close) => (tones.danger, egui::Color32::WHITE),
+            (true, _) => (thin(egui::Color32::from_rgb(0x6b, 0x72, 0x80), 0x1a), tones.weak),
+        };
+        ui.painter().rect_filled(rect, 8.0, fill);
+        // (the square is `w-3` where the others are `w-3.5`)
+        let side = if matches!(caption, Caption::Maximize | Caption::Restore) { 12.0 } else { 14.0 };
+        caption.paint(ui.painter(), rect.center(), side, color);
+    }
+    response.on_hover_text(caption.hint())
+}
+
+/// The window's buttons at the header's end, from the right (the layout
+/// they are put into goes that way): a line before them (`pl-2
+/// border-l`). The one that was clicked.
+pub fn caption_buttons(ui: &mut egui::Ui, tones: &Tones, maximized: bool) -> Option<Caption> {
+    let mut clicked = None;
+    let middle = if maximized { Caption::Restore } else { Caption::Maximize };
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = CAPTION_GAP;
+        for caption in [Caption::Close, middle, Caption::Minimize] {
+            if caption_button(ui, tones, caption).clicked() {
+                clicked = Some(caption);
+            }
+        }
+        ui.add_space(8.0 - CAPTION_GAP);
+        let (line, _) = ui.allocate_exact_size(egui::vec2(1.0, CAPTION), egui::Sense::hover());
+        ui.painter().rect_filled(line, 0.0, tones.line);
+    });
+    clicked
+}
+
+/// The window's buttons as macOS has them, at the header's start: three
+/// dots (`bg-red-500`, `bg-amber-500`, `bg-emerald-500`; a shade darker
+/// under the pointer), their signs in them while the pointer is on any
+/// of them; without their colours while the window is not the one in
+/// front, as the system's are. The one that was clicked.
+pub fn caption_dots(ui: &mut egui::Ui, tones: &Tones, focused: bool) -> Option<Caption> {
+    const DOTS: [(Caption, u32, u32, u32); 3] = [
+        (Caption::Close, 0xef4444, 0xdc2626, 0x450a0a),
+        (Caption::Minimize, 0xf59e0b, 0xd97706, 0x451a03),
+        (Caption::Maximize, 0x10b981, 0x059669, 0x022c22),
+    ];
+    let rgb = |hex: u32| egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
+    let width = 3.0 * DOT + 2.0 * DOT_GAP;
+    let (all, _) = ui.allocate_exact_size(egui::vec2(width, DOT), egui::Sense::hover());
+    let over_any = ui.rect_contains_pointer(all.expand(2.0));
+    let mut clicked = None;
+    for (i, (caption, color, near, sign)) in DOTS.into_iter().enumerate() {
+        let left = all.left() + i as f32 * (DOT + DOT_GAP);
+        let rect = egui::Rect::from_min_size(egui::pos2(left, all.top()), egui::vec2(DOT, DOT));
+        let response = ui.interact(rect.expand(2.0), ui.id().with(("dot", i)), egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, caption.hint()));
+        let fill = match (focused || over_any, response.hovered()) {
+            (false, _) => tones.line,
+            (true, false) => rgb(color),
+            (true, true) => rgb(near),
+        };
+        ui.painter().circle_filled(rect.center(), DOT / 2.0, fill);
+        if over_any {
+            // (`w-2` with lines of three: thicker than the others')
+            caption.paint(ui.painter(), rect.center(), 7.0, rgb(sign));
+        }
+        if response.on_hover_text(caption.hint()).clicked() {
+            clicked = Some(caption);
+        }
+    }
+    clicked
+}
+
+/// Which way the window is made larger or smaller when it is taken at
+/// `point` (from its top left corner; it is `size` large), if it is
+/// taken by its edge there: Chrome's `FrameView::GetHTComponentForFrame`
+/// with `FRAME_BAND` along every edge and `FRAME_CORNER` for the corners.
+#[must_use]
+pub fn frame_hit(point: egui::Vec2, size: egui::Vec2) -> Option<egui::viewport::ResizeDirection> {
+    use egui::viewport::ResizeDirection as To;
+    let mut top = point.y < FRAME_BAND;
+    let bottom = point.y >= size.y - FRAME_BAND;
+    let mut left = point.x < FRAME_BAND;
+    let mut right = point.x >= size.x - FRAME_BAND;
+    if !(top || bottom || left || right) {
+        return None;
+    }
+    // (in a band: the corners reach further along it)
+    top |= point.y < FRAME_CORNER;
+    left |= point.x < FRAME_CORNER;
+    right |= point.x >= size.x - FRAME_CORNER;
+    Some(match (top, bottom, left, right) {
+        (true, _, true, _) => To::NorthWest,
+        (true, _, _, true) => To::NorthEast,
+        (true, _, _, _) => To::North,
+        (_, true, true, _) => To::SouthWest,
+        (_, true, _, true) => To::SouthEast,
+        (_, true, _, _) => To::South,
+        (_, _, true, _) => To::West,
+        _ => To::East,
+    })
+}
+
+/// The pointer's shape over an edge the window is taken by.
+#[must_use]
+pub fn frame_cursor(to: egui::viewport::ResizeDirection) -> egui::CursorIcon {
+    use egui::viewport::ResizeDirection as To;
+    match to {
+        To::North | To::South => egui::CursorIcon::ResizeVertical,
+        To::East | To::West => egui::CursorIcon::ResizeHorizontal,
+        To::NorthWest | To::SouthEast => egui::CursorIcon::ResizeNwSe,
+        To::NorthEast | To::SouthWest => egui::CursorIcon::ResizeNeSw,
     }
 }
 
@@ -212,7 +379,7 @@ pub enum Kind {
 /// Where a button is, which is how much room it has.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Room {
-    /// The header's (`px-3.5 py-1.5`).
+    /// The header's (`px-3 py-1.5`).
     Header,
     /// Among what is chosen's (`py-2`), as wide as it needs.
     Panel,
@@ -230,7 +397,7 @@ pub fn button(
     text: &str,
 ) -> egui::Response {
     let (pad, height) = match room {
-        Room::Header => (14.0, 28.0),
+        Room::Header => (12.0, 28.0),
         Room::Panel | Room::Wide(_) => (12.0, 32.0),
     };
     let color = match kind {
@@ -473,6 +640,29 @@ mod tests {
         assert_eq!(rail_gap(280.0, 6), 8.0);
         assert_eq!(rail_gap(200.0, 6), 0.0, "never over each other's place");
         assert_eq!(rail_gap(100.0, 1), RAIL_GAP);
+    }
+
+    #[test]
+    fn the_window_is_taken_by_its_edges() {
+        use egui::viewport::ResizeDirection as To;
+        let size = egui::vec2(800.0, 600.0);
+        let at = |x: f32, y: f32| frame_hit(egui::vec2(x, y), size);
+        assert_eq!(at(400.0, 300.0), None, "in the window");
+        assert_eq!(at(400.0, 4.0), None, "the header, under the band");
+        assert_eq!(at(400.0, 3.0), Some(To::North));
+        assert_eq!(at(400.0, 596.0), Some(To::South));
+        assert_eq!(at(3.0, 300.0), Some(To::West));
+        assert_eq!(at(796.0, 300.0), Some(To::East));
+        // the corners reach 16 along a band
+        assert_eq!(at(15.0, 3.0), Some(To::NorthWest));
+        assert_eq!(at(3.0, 15.0), Some(To::NorthWest));
+        assert_eq!(at(16.0, 3.0), Some(To::North));
+        assert_eq!(at(790.0, 2.0), Some(To::NorthEast));
+        assert_eq!(at(10.0, 598.0), Some(To::SouthWest));
+        assert_eq!(at(799.0, 599.0), Some(To::SouthEast));
+        // (as in Chrome: from the side a lower corner begins at the band below)
+        assert_eq!(at(2.0, 590.0), Some(To::West));
+        assert_eq!(frame_cursor(To::NorthWest), egui::CursorIcon::ResizeNwSe);
     }
 
     #[test]

@@ -1073,3 +1073,7 @@ import-securecrt-none = このコンピューターでは設定が見つかり�
 import-button = インポート…
 import-putty-about = このコンピューターの PuTTY に保存されているセッション
 import-openssh = { $dir }/config のホストはインポート不要です。すでにツリーにあります。
+window-minimize = 最小化
+window-maximize = 最大化
+window-restore = 元に戻す
+window-close = 閉じる

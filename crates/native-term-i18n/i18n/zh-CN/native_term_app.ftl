@@ -1057,3 +1057,7 @@ import-securecrt-none = 未在本机找到它的配置，可以手动选择文�
 import-button = 导入…
 import-putty-about = 本机 PuTTY 里保存的会话
 import-openssh = { $dir }/config 里的主机不需要导入，它们已经在会话树里。
+window-minimize = 最小化
+window-maximize = 最大化
+window-restore = 还原
+window-close = 关闭
