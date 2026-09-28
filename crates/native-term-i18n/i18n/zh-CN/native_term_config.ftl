@@ -41,3 +41,4 @@ config-missing-session = 会话 { $name }
 config-write-conflict = 这个文件在读取之后被别处改动过
 config-write-rejected = ssh 不接受这次修改，已还原成上一个版本：{ $reason }
 config-include-wildcard = { $pattern }：目录名里的通配符不会展开
+config-system-host = 系统 { $value }：应为一个简短的词（字母、数字、- _ .）

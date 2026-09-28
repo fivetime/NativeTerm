@@ -41,3 +41,4 @@ config-missing-session = 工作階段 { $name }
 config-write-conflict = 這個檔案在讀取之後被別處改動過
 config-write-rejected = ssh 不接受這次修改，已還原成上一個版本：{ $reason }
 config-include-wildcard = { $pattern }：目錄名裡的萬用字元不會展開
+config-system-host = 系統 { $value }：應為一個簡短的詞（字母、數字、- _ .）

@@ -42,3 +42,4 @@ config-missing-session = session { $name }
 config-write-conflict = the file was changed by someone else since it was read
 config-write-rejected = ssh rejected the change, previous version restored: { $reason }
 config-include-wildcard = { $pattern }: a wildcard in a directory name is not followed
+config-system-host = system { $value }: one short word (letters, digits, - _ .)

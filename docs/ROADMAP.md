@@ -773,6 +773,19 @@
             login from NativeTerm on Windows and macOS.
             Open: the fork's ssh is next to NativeTerm on Windows and
             where it was built by hand; shipping it is packaging.
+      - [x] The system can be chosen by hand (the person, 2026-09-28:
+            what a server says is what its system is made from, not
+            always the system): "System" in the host's dialog, new
+            and edited, "Automatic" unless something is chosen;
+            written with the host (`NativeTermSystem`), taken before
+            what the server said. Twenty-three systems with their
+            pictures. The dialog's fields scroll where the window is
+            lower than they are (it had grown past a window 720
+            high, its buttons out of sight). Seen on Lingmo (X11),
+            dark and light: the choice with its pictures, Fedora
+            chosen for a host whose server says nothing (its row,
+            its card, the line in its file), "Automatic (Ubuntu)"
+            for one that said so, the dialog of a new host.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

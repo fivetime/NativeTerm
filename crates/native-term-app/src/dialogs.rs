@@ -193,6 +193,13 @@ pub struct HostDialog {
     /// The folder's set, and the sets there are, for the choice.
     folder_credential: Option<String>,
     sets: Vec<String>,
+    /// The system it runs, as the person says (`NativeTermSystem`);
+    /// `None`: what its server says.
+    system: Option<String>,
+    /// What its server said, for "automatic (…)".
+    said: Option<native_term_app::server::Os>,
+    /// The systems' pictures, as made for the choice so far.
+    logos: crate::logos::Logos,
     pub error: Option<String>,
 }
 
@@ -341,8 +348,17 @@ impl HostDialog {
             new_set: None,
             folder_credential: None,
             sets: Vec::new(),
+            system: d.system.clone(),
+            said: None,
+            logos: Default::default(),
             error: None,
         }
+    }
+
+    /// The system its server said it is of, for "automatic (…)".
+    pub fn with_system_said(mut self, said: Option<native_term_app::server::Os>) -> HostDialog {
+        self.said = said;
+        self
     }
 
     /// The folder's credential set and the sets there are, for the choice.
@@ -477,6 +493,7 @@ impl HostDialog {
                 Some(_) => return Err(t!("cred-sets-bad-name")),
                 None => self.credential.clone(),
             },
+            system: self.system.clone(),
         })
     }
 
@@ -501,87 +518,100 @@ impl HostDialog {
             .open(&mut open)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                egui::Grid::new("host-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                    let field = |ui: &mut egui::Ui, name: String, value: &mut String, hint: String| {
-                        ui.label(name);
-                        ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(280.0));
+                // (in a window that is lower than all of it, what is asked
+                // is scrolled through: the buttons under it stay in sight)
+                let room = (ui.ctx().content_rect().height() - 130.0).max(200.0);
+                egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
+                    egui::Grid::new("host-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                        let field = |ui: &mut egui::Ui, name: String, value: &mut String, hint: String| {
+                            ui.label(name);
+                            ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(280.0));
+                            ui.end_row();
+                        };
+                        field(ui, t!("field-name"), &mut self.label, t!("field-name-hint"));
+                        field(ui, t!("field-host"), &mut self.hostname, t!("field-host-hint"));
+                        field(ui, t!("field-user"), &mut self.user, t!("field-user-hint"));
+                        field(ui, t!("field-port"), &mut self.port, "22".into());
+                        field(ui, t!("field-jump"), &mut self.proxy_jump, t!("field-jump-hint"));
+                        ui.label(t!("field-keys"));
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.identity_files)
+                                .hint_text(t!("field-keys-hint"))
+                                .desired_rows(2)
+                                .desired_width(280.0),
+                        );
                         ui.end_row();
-                    };
-                    field(ui, t!("field-name"), &mut self.label, t!("field-name-hint"));
-                    field(ui, t!("field-host"), &mut self.hostname, t!("field-host-hint"));
-                    field(ui, t!("field-user"), &mut self.user, t!("field-user-hint"));
-                    field(ui, t!("field-port"), &mut self.port, "22".into());
-                    field(ui, t!("field-jump"), &mut self.proxy_jump, t!("field-jump-hint"));
-                    ui.label(t!("field-keys"));
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.identity_files)
-                            .hint_text(t!("field-keys-hint"))
-                            .desired_rows(2)
-                            .desired_width(280.0),
-                    );
-                    ui.end_row();
-                    field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
-                    ui.label(t!("field-tags")).on_hover_text(t!("field-tags-hint"));
-                    tags_field(ui, &mut self.tags);
-                    ui.end_row();
-                    ui.label(t!("field-long-note")).on_hover_text(t!("field-long-note-hint"));
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.long_note)
-                            .hint_text(t!("field-long-note-hint-short"))
-                            .desired_rows(3)
-                            .desired_width(280.0),
-                    );
-                    ui.end_row();
-                    field(ui, t!("field-on-login"), &mut self.on_login, t!("field-on-login-hint"));
-                    field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
-                    ui.label(t!("field-charset")).on_hover_text(t!("field-charset-hint"));
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.charset).hint_text("UTF-8").desired_width(120.0));
-                        egui::ComboBox::from_id_salt("host-charsets").selected_text(t!("plink-common")).show_ui(
+                        field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
+                        ui.label(t!("field-tags")).on_hover_text(t!("field-tags-hint"));
+                        tags_field(ui, &mut self.tags);
+                        ui.end_row();
+                        ui.label(t!("field-long-note")).on_hover_text(t!("field-long-note-hint"));
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.long_note)
+                                .hint_text(t!("field-long-note-hint-short"))
+                                .desired_rows(3)
+                                .desired_width(280.0),
+                        );
+                        ui.end_row();
+                        field(ui, t!("field-on-login"), &mut self.on_login, t!("field-on-login-hint"));
+                        field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
+                        ui.label(t!("field-charset")).on_hover_text(t!("field-charset-hint"));
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.charset).hint_text("UTF-8").desired_width(120.0),
+                            );
+                            egui::ComboBox::from_id_salt("host-charsets").selected_text(t!("plink-common")).show_ui(
+                                ui,
+                                |ui| {
+                                    for c in crate::plink_dialog::CHARSETS {
+                                        ui.selectable_value(&mut self.charset, c.to_string(), c);
+                                    }
+                                },
+                            );
+                        });
+                        ui.end_row();
+                        ui.label(t!("field-system")).on_hover_text(t!("field-system-hint"));
+                        system_choice(ui, &mut self.logos, &mut self.system, self.said);
+                        ui.end_row();
+                        ui.label(t!("field-tab-color")).on_hover_text(t!("field-tab-color-hint"));
+                        tab_color_choice(ui, &mut self.tab_color, self.folder_look.0.as_deref());
+                        ui.end_row();
+                        ui.label(t!("field-color-scheme"));
+                        color_scheme_choice(ui, &mut self.color_scheme, self.folder_look.1.as_deref());
+                        ui.end_row();
+                        ui.label(t!("field-persistent")).on_hover_text(t!("field-persistent-hint"));
+                        let choices = self.persistent_choices();
+                        let current = choices
+                            .iter()
+                            .find(|(v, _)| *v == self.persistent)
+                            .map(|(_, t)| t.clone())
+                            .unwrap_or_default();
+                        egui::ComboBox::from_id_salt("host-persistent").selected_text(current).width(280.0).show_ui(
                             ui,
                             |ui| {
-                                for c in crate::plink_dialog::CHARSETS {
-                                    ui.selectable_value(&mut self.charset, c.to_string(), c);
+                                for (value, text) in choices {
+                                    ui.selectable_value(&mut self.persistent, value, text);
                                 }
                             },
                         );
+                        ui.end_row();
+                        ui.label(t!("field-credential")).on_hover_text(t!("field-credential-hint"));
+                        self.credential_choice(ui);
+                        ui.end_row();
                     });
-                    ui.end_row();
-                    ui.label(t!("field-tab-color")).on_hover_text(t!("field-tab-color-hint"));
-                    tab_color_choice(ui, &mut self.tab_color, self.folder_look.0.as_deref());
-                    ui.end_row();
-                    ui.label(t!("field-color-scheme"));
-                    color_scheme_choice(ui, &mut self.color_scheme, self.folder_look.1.as_deref());
-                    ui.end_row();
-                    ui.label(t!("field-persistent")).on_hover_text(t!("field-persistent-hint"));
-                    let choices = self.persistent_choices();
-                    let current =
-                        choices.iter().find(|(v, _)| *v == self.persistent).map(|(_, t)| t.clone()).unwrap_or_default();
-                    egui::ComboBox::from_id_salt("host-persistent").selected_text(current).width(280.0).show_ui(
-                        ui,
-                        |ui| {
-                            for (value, text) in choices {
-                                ui.selectable_value(&mut self.persistent, value, text);
-                            }
-                        },
-                    );
-                    ui.end_row();
-                    ui.label(t!("field-credential")).on_hover_text(t!("field-credential-hint"));
-                    self.credential_choice(ui);
-                    ui.end_row();
-                });
-                if let Some(alias) = &self.alias {
-                    ui.weak(t!("host-alias-kept", alias = alias.as_str()));
-                }
-                self.follow_set();
-                match &mut self.password {
-                    Some(field) => field.show(ui),
-                    None if self.alias.is_none() => {
-                        ui.separator();
-                        ui.weak(t!("password-after-save"));
+                    if let Some(alias) = &self.alias {
+                        ui.weak(t!("host-alias-kept", alias = alias.as_str()));
                     }
-                    None => {}
-                }
+                    self.follow_set();
+                    match &mut self.password {
+                        Some(field) => field.show(ui),
+                        None if self.alias.is_none() => {
+                            ui.separator();
+                            ui.weak(t!("password-after-save"));
+                        }
+                        None => {}
+                    }
+                });
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
                 }
@@ -618,6 +648,62 @@ pub fn color_text(value: &str) -> egui::RichText {
     });
     let swatch = tab_color(value).and_then(|hex| egui::Color32::from_hex(&hex).ok()).unwrap_or(egui::Color32::GRAY);
     egui::RichText::new(format!("■ {}", name.unwrap_or_else(|| value.to_string()))).color(swatch)
+}
+
+/// The system a host runs: what its server says ("automatic", with
+/// what it said where it did), or one of the systems there are pictures
+/// of. One the configuration has and NativeTerm has no picture of stays
+/// as it is written while nothing else is chosen.
+fn system_choice(
+    ui: &mut egui::Ui,
+    logos: &mut crate::logos::Logos,
+    value: &mut Option<String>,
+    said: Option<native_term_app::server::Os>,
+) {
+    use native_term_app::server::Os;
+    const PICTURE: f32 = 16.0;
+    let tones = crate::looks::tones(ui.visuals());
+    let dark = ui.visuals().dark_mode;
+    let automatic = match said {
+        Some(os) => t!("system-auto-said", name = os.name()),
+        None => t!("system-auto"),
+    };
+    let chosen = value.as_deref().and_then(Os::named);
+    let current = match (chosen, value.as_deref()) {
+        (Some(os), _) => os.name().to_string(),
+        (None, Some(other)) => other.to_string(),
+        (None, None) => automatic.clone(),
+    };
+    let mut picture = |ui: &mut egui::Ui, os: Option<Os>| {
+        let (place, _) = ui.allocate_exact_size(egui::Vec2::splat(PICTURE), egui::Sense::hover());
+        let Some(os) = os else { return };
+        if let Some(picture) = logos.picture(ui.ctx(), os, PICTURE) {
+            let place = crate::logos::place(ui.ctx(), place.center(), PICTURE);
+            crate::logos::paint(ui.painter(), picture, place, crate::logos::tint(os, &tones, dark));
+        }
+    };
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        egui::ComboBox::from_id_salt("host-system").selected_text(current).width(200.0).height(320.0).show_ui(
+            ui,
+            |ui| {
+                ui.horizontal(|ui| {
+                    picture(ui, said);
+                    ui.selectable_value(value, None, automatic.as_str());
+                });
+                for os in Os::ALL {
+                    ui.horizontal(|ui| {
+                        picture(ui, Some(os));
+                        if ui.selectable_label(chosen == Some(os), os.name()).clicked() {
+                            *value = Some(os.id().to_string());
+                        }
+                    });
+                }
+            },
+        );
+        // (what is shown for the host as it is now)
+        picture(ui, chosen.or(said).filter(|_| chosen.is_some() || value.is_none()));
+    });
 }
 
 /// Tab color: as the folder, none, a preset, or a hex value typed in.

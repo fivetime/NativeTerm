@@ -40,6 +40,7 @@ pub mod proxy;
 pub mod putty;
 pub mod repair;
 pub mod securecrt;
+pub mod system;
 pub mod traces;
 pub mod tree;
 pub mod write;

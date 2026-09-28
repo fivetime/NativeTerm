@@ -765,7 +765,10 @@ impl App {
                                 .and_then(|e| native_term_config::password::target(&e, None));
                             let (color, scheme) = self.folder_look(&host.file);
                             let set = self.folder_credential(&host.file);
+                            let said =
+                                self.core.as_ref().and_then(|c| c.servers().get(&alias).and_then(|known| known.os));
                             let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host))
+                                .with_system_said(said)
                                 .with_folder_default(folder)
                                 .with_folder_look(color, scheme)
                                 .with_credentials(set, crate::credential_sets::names())
@@ -1234,7 +1237,9 @@ impl App {
             MenuRequest::Rename(alias) => match self.tree.find(&alias) {
                 Some((_, host)) => {
                     let folder = self.folder_persistent(&host.file);
+                    let said = self.core.as_ref().and_then(|c| c.servers().get(&alias).and_then(|known| known.os));
                     let dialog = HostDialog::edit(&alias, &HostDraft::from_host(host))
+                        .with_system_said(said)
                         .with_folder_default(folder)
                         .with_note(self.note_of(host));
                     self.dialog = Some(Dialog::Host(Box::new(dialog)));

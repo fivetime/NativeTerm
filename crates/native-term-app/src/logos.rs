@@ -21,26 +21,55 @@ const KEPT: usize = 96;
 /// (the picture, whether it is a shape only).
 fn kept(os: Os) -> (&'static [u8], bool) {
     match os {
-        Os::Ubuntu => (include_bytes!("../assets/os/ubuntu.png"), false),
+        Os::Arch => (include_bytes!("../assets/os/arch.png"), false),
+        Os::CentOs => (include_bytes!("../assets/os/centos.png"), false),
         Os::Debian => (include_bytes!("../assets/os/debian.png"), false),
+        Os::Fedora => (include_bytes!("../assets/os/fedora.png"), false),
         Os::FreeBsd => (include_bytes!("../assets/os/freebsd.png"), false),
+        Os::Linux => (include_bytes!("../assets/os/linux.png"), false),
+        Os::Manjaro => (include_bytes!("../assets/os/manjaro.png"), false),
+        Os::Mint => (include_bytes!("../assets/os/linuxmint.png"), false),
         Os::Raspbian => (include_bytes!("../assets/os/raspbian.png"), false),
+        Os::Rhel => (include_bytes!("../assets/os/rhel.png"), false),
+        Os::Rocky => (include_bytes!("../assets/os/rocky.png"), false),
+        Os::Ubuntu => (include_bytes!("../assets/os/ubuntu.png"), false),
         Os::Windows => (include_bytes!("../assets/os/windows.png"), false),
+        Os::Zorin => (include_bytes!("../assets/os/zorin.png"), false),
+        Os::AlmaLinux => (include_bytes!("../assets/os/almalinux.png"), true),
+        Os::Alpine => (include_bytes!("../assets/os/alpine.png"), true),
         Os::Deepin => (include_bytes!("../assets/os/deepin.png"), true),
+        Os::Elementary => (include_bytes!("../assets/os/elementary.png"), true),
+        Os::EndeavourOs => (include_bytes!("../assets/os/endeavouros.png"), true),
         Os::Kali => (include_bytes!("../assets/os/kali.png"), true),
+        Os::MacOs => (include_bytes!("../assets/os/macos.png"), true),
+        Os::OpenBsd => (include_bytes!("../assets/os/openbsd.png"), true),
+        Os::Suse => (include_bytes!("../assets/os/suse.png"), true),
     }
 }
 
 /// What a picture is drawn with: nothing of its own colours changed, or
-/// the colour a shape is given. Deepin's are its own logo's two
-/// (`/usr/share/deepin/distribution/distribution_logo.svg`, Deepin 25):
-/// the lighter on a dark row, the darker on a light one.
+/// the colour a shape is given. A shape has its system's colour where
+/// that was read from the system's own logo, and the colour of any
+/// host's picture otherwise:
+///
+/// - Deepin: its logo's two blues
+///   (`/usr/share/deepin/distribution/distribution_logo.svg`, Deepin
+///   25), the lighter on a dark row, the darker on a light one;
+/// - SUSE: its logo's green and its dark (gilbarbara's `suse.svg`), the
+///   green on a dark row;
+/// - EndeavourOS: its logo's violet
+///   (`/usr/share/pixmaps/endeavouros-logo.svg` there);
+/// - macOS and elementary OS: their logos are of one colour, which is
+///   the text's here (Apple's is black or white, elementary's dark).
 #[must_use]
 pub fn tint(os: Os, tones: &Tones, dark: bool) -> egui::Color32 {
+    let rgb = |hex: u32| egui::Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8);
     match (kept(os).1, os) {
         (false, _) => egui::Color32::WHITE,
-        (true, Os::Deepin) if dark => egui::Color32::from_rgb(0x3e, 0xa9, 0xfd),
-        (true, Os::Deepin) => egui::Color32::from_rgb(0x26, 0x59, 0xb8),
+        (true, Os::Deepin) => rgb(if dark { 0x3e_a9fd } else { 0x26_59b8 }),
+        (true, Os::Suse) => rgb(if dark { 0x02_d35f } else { 0x0d_2c40 }),
+        (true, Os::EndeavourOs) => rgb(0x7d_7dff),
+        (true, Os::MacOs | Os::Elementary) => tones.text,
         (true, _) => tones.host,
     }
 }

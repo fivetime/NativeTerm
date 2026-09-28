@@ -1253,8 +1253,12 @@ impl TreeView {
                             Some(Protocol::Serial) => icons::SERIAL,
                             Some(_) => icons::NETWORK,
                         };
-                        // (an SSH host whose server said what system it is of)
-                        let os = shown.servers.get(alias).filter(|_| plink.is_none()).and_then(|known| known.os);
+                        // (an SSH host whose system is known: the person
+                        // said it, or its server did)
+                        let named = native_term_config::system::for_host(folders[*folder], host);
+                        let os = native_term_app::server::system(named, shown.servers.get(alias))
+                            .filter(|_| plink.is_none())
+                            .map(|(os, _)| os);
                         let logo = os.and_then(|os| {
                             let picture = logos.picture(ui.ctx(), os, PICTURE)?;
                             Some((picture, crate::logos::tint(os, &tones, ui.visuals().dark_mode)))

@@ -169,9 +169,11 @@ fn one_host(
         Some(session) => session.target(),
         None => tree_view::address(host),
     };
-    // (an SSH host whose server said what system it is of has its picture)
-    let os = about.servers.get(&alias).filter(|_| plink.is_none()).and_then(|known| known.os);
-    let logo = os.and_then(|os| {
+    // (an SSH host whose system is known has its picture: the person
+    // said it, or its server did)
+    let chosen = native_term_config::system::for_host(folder, host);
+    let system = native_term_app::server::system(chosen, about.servers.get(&alias)).filter(|_| plink.is_none());
+    let logo = system.and_then(|(os, _)| {
         let picture = about.logos.borrow_mut().picture(ui.ctx(), os, layout::TILE_PICTURE)?;
         Some((picture, crate::logos::tint(os, tones, ui.visuals().dark_mode)))
     });
@@ -214,11 +216,16 @@ fn one_host(
                         layout::value(ui, tones, program.name(), false);
                     });
                 }
-                // what its server said it is, the last time it was logged in to
+                // the system it runs, and what its server said it is
+                // the last time it was logged in to
+                if let Some((os, by)) = system {
+                    let text = match by {
+                        native_term_app::server::By::Chosen => t!("props-os-chosen", name = os.name()),
+                        native_term_app::server::By::Said => os.name().to_string(),
+                    };
+                    layout::property(ui, tones, &t!("props-os"), |ui| layout::value(ui, tones, &text, false));
+                }
                 if let Some(known) = about.servers.get(&alias) {
-                    if let Some(os) = known.os {
-                        layout::property(ui, tones, &t!("props-os"), |ui| layout::value(ui, tones, os.name(), false));
-                    }
                     layout::property(ui, tones, &t!("props-server"), |ui| {
                         layout::value(ui, tones, &known.software(), true);
                     });

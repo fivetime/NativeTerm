@@ -42,3 +42,4 @@ config-missing-session = セッション { $name }
 config-write-conflict = このファイルは読み込んだあとに別の場所から変更されています
 config-write-rejected = ssh がこの変更を受け付けなかったため、前の版に戻しました: { $reason }
 config-include-wildcard = { $pattern }: ディレクトリ名のワイルドカードは展開しません
+config-system-host = システム { $value }: 短い 1 語です（英数字、- _ .）

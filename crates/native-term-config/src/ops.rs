@@ -58,6 +58,9 @@ pub struct HostDraft {
     /// The host's own `NativeTermCredential` (a credential set's name, or
     /// `none`); `None` follows the folder.
     pub credential: Option<String>,
+    /// The system it runs, as the person says (`NativeTermSystem`);
+    /// `None`: what its server says.
+    pub system: Option<String>,
 }
 
 impl HostDraft {
@@ -77,6 +80,7 @@ impl HostDraft {
             tab_color: host.nt.get(appearance::TAB_COLOR).map(str::to_string),
             color_scheme: host.nt.get(appearance::COLOR_SCHEME).map(str::to_string),
             credential: host.nt.get(password::KEY).map(str::to_string),
+            system: host.nt.get(crate::system::KEY).map(str::to_string),
         }
     }
 
@@ -122,6 +126,9 @@ impl HostDraft {
             if !s.eq_ignore_ascii_case("none") && appearance::color_scheme(s).is_none() {
                 return Err(EditError::Invalid(t!("config-color-scheme-host", value = quoted(s))));
             }
+        }
+        if let Some(system) = self.system.as_deref().filter(|name| !crate::system::valid(name)) {
+            return Err(EditError::Invalid(t!("config-system-host", value = quoted(system))));
         }
         if self.port == Some(0) {
             return Err(EditError::Invalid(t!("config-port-zero")));
@@ -663,6 +670,7 @@ impl Editor {
                 set_or_remove(doc, block, "NativeTermTabColor", draft.tab_color.as_deref());
                 set_or_remove(doc, block, "NativeTermColorScheme", draft.color_scheme.as_deref());
                 set_or_remove(doc, block, "NativeTermCredential", draft.credential.as_deref());
+                set_or_remove(doc, block, "NativeTermSystem", draft.system.as_deref());
             },
             || self.validate(&alias, Some(draft.hostname.trim())),
         )?;
@@ -1224,6 +1232,9 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
     if let Some(set) = &draft.credential {
         entries.push(("NativeTermCredential", set.clone()));
     }
+    if let Some(system) = &draft.system {
+        entries.push(("NativeTermSystem", system.clone()));
+    }
     if let Some(id) = id {
         entries.push(("NativeTermId", id.to_string()));
     }
@@ -1359,6 +1370,40 @@ mod tests {
 
     fn draft(label: &str, hostname: &str) -> HostDraft {
         HostDraft { label: label.into(), hostname: hostname.into(), ..HostDraft::default() }
+    }
+
+    /// The system a host runs, as the person says: written with the
+    /// host, read with it, its folder's where it has none of its own,
+    /// and gone again when it is "automatic".
+    #[test]
+    fn the_system_a_host_runs_is_written_with_it() {
+        let Some((_home, editor)) = setup() else { return };
+        let prod = editor.create_folder("prod").unwrap();
+        let said = |alias: &str| {
+            let t = tree(&editor);
+            let (folder, host) = t.find(alias).unwrap();
+            crate::system::for_host(folder, host).map(str::to_string)
+        };
+        editor
+            .create_host(&tree(&editor), &prod, &HostDraft { system: Some("fedora".into()), ..draft("db", "10.0.0.2") })
+            .unwrap();
+        editor.create_host(&tree(&editor), &prod, &draft("web", "10.0.0.1")).unwrap();
+        assert_eq!(said("db").as_deref(), Some("fedora"));
+        assert_eq!(said("web"), None);
+        let text = std::fs::read_to_string(&prod).unwrap();
+        assert_eq!(text.matches("NativeTermSystem fedora").count(), 1, "{text}");
+        let db = HostDraft::from_host(tree(&editor).find("db").unwrap().1);
+        assert_eq!(db.system.as_deref(), Some("fedora"));
+        // another, and none
+        let host = |alias: &str| tree(&editor).find(alias).unwrap().1.clone();
+        editor.update_host(&host("db"), &HostDraft { system: Some("rocky".into()), ..db.clone() }).unwrap();
+        assert_eq!(said("db").as_deref(), Some("rocky"));
+        editor.update_host(&host("db"), &HostDraft { system: None, ..db.clone() }).unwrap();
+        assert_eq!(said("db"), None);
+        assert!(!std::fs::read_to_string(&prod).unwrap().contains("NativeTermSystem"));
+        // what is no name is not written
+        let bad = HostDraft { system: Some("red hat".into()), ..db };
+        assert!(editor.update_host(&host("db"), &bad).is_err());
     }
 
     /// A second computer: its sessions are in the synced folder already,
@@ -1847,6 +1892,7 @@ mod tests {
             HostDraft { user: Some("a b".into()), ..draft("x", "h") },
             HostDraft { note: Some("a\nb".into()), ..draft("x", "h") },
             HostDraft { port: Some(0), ..draft("x", "h") },
+            HostDraft { system: Some("red hat".into()), ..draft("x", "h") },
         ] {
             assert!(bad.check().is_err(), "{bad:?}");
         }

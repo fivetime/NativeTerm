@@ -1593,6 +1593,23 @@ its logs where those are kept, and looks like something done to it).
   what each pixel covers (`logos::sized`), and drawn on whole pixels:
   sharp at 100 %, 125 %, 150 %, 200 %. Debian's red is dark on a dark
   row (2.3 : 1 against it); it is the logo as it is.
+- **The person may say what a host runs** (2026-09-28: what a server
+  says is the family, and some say nothing). The host's dialog, new
+  and edited, has "System": "Automatic" (with what the server said,
+  where it did) or one of the systems there are pictures of, each with
+  its picture. It is written with the host (`NativeTermSystem fedora`,
+  the name a system gives itself in its `os-release`;
+  `native_term_config::system`), so it is where the configuration is,
+  on every computer; a folder's block may have it for all its hosts
+  (no dialog writes it there). What the person says is taken before
+  what the server said (`server::system`), and the card says that it
+  was chosen. A name NativeTerm has no picture of is kept as written
+  and shows nothing. Twenty-three systems have a picture; the shapes'
+  colours are their systems' own where those were read from the
+  systems' own logos (`logos::tint`), the colour of any host's picture
+  otherwise.
+- The host's dialog is higher than a low window now: what it asks is
+  scrolled through, and its buttons stay under it.
 
 ### Host aliases and display names
 

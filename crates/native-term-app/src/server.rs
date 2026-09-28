@@ -28,16 +28,34 @@
 
 use std::collections::HashMap;
 
-/// The systems a server is known to be of, and has a picture for.
+/// The systems there are pictures of: those a server says it is of, and
+/// those the person says a host runs (`NativeTermSystem`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Os {
-    Ubuntu,
+    AlmaLinux,
+    Alpine,
+    Arch,
+    CentOs,
     Debian,
     Deepin,
-    Raspbian,
-    Kali,
+    Elementary,
+    EndeavourOs,
+    Fedora,
     FreeBsd,
+    Kali,
+    Mint,
+    MacOs,
+    Manjaro,
+    OpenBsd,
+    Raspbian,
+    Rhel,
+    Rocky,
+    Suse,
+    Ubuntu,
     Windows,
+    Zorin,
+    /// A Linux that is none of them.
+    Linux,
 }
 
 /// As long as an identification string may be (RFC 4253: 255 with its
@@ -61,7 +79,33 @@ pub fn software(said: &str) -> Option<(&str, &str)> {
 }
 
 impl Os {
-    pub const ALL: [Os; 7] = [Os::Ubuntu, Os::Debian, Os::Deepin, Os::Raspbian, Os::Kali, Os::FreeBsd, Os::Windows];
+    /// All of them, as they are chosen among: by their names, a Linux
+    /// that is none of the others last.
+    pub const ALL: [Os; 23] = [
+        Os::AlmaLinux,
+        Os::Alpine,
+        Os::Arch,
+        Os::CentOs,
+        Os::Debian,
+        Os::Deepin,
+        Os::Elementary,
+        Os::EndeavourOs,
+        Os::Fedora,
+        Os::FreeBsd,
+        Os::Kali,
+        Os::Mint,
+        Os::MacOs,
+        Os::Manjaro,
+        Os::OpenBsd,
+        Os::Raspbian,
+        Os::Rhel,
+        Os::Rocky,
+        Os::Suse,
+        Os::Ubuntu,
+        Os::Windows,
+        Os::Zorin,
+        Os::Linux,
+    ];
 
     /// The system a server that says `said` is of, where it says.
     #[must_use]
@@ -72,14 +116,58 @@ impl Os {
         }
         // (the vendor: the letters what is said begins with)
         let vendor: String = comments.chars().take_while(char::is_ascii_alphabetic).collect();
-        Os::ALL.into_iter().find(|os| os.vendor().eq_ignore_ascii_case(&vendor))
+        Os::ALL.into_iter().find(|os| os.vendor().is_some_and(|name| name.eq_ignore_ascii_case(&vendor)))
     }
 
-    fn vendor(self) -> &'static str {
+    /// What a server of it says after its software, where its servers
+    /// say something (see above for where each is known from).
+    fn vendor(self) -> Option<&'static str> {
         match self {
-            Os::Windows => "Windows",
-            Os::FreeBsd => "FreeBSD",
-            _ => self.name(),
+            Os::Ubuntu => Some("Ubuntu"),
+            Os::Debian => Some("Debian"),
+            Os::Deepin => Some("Deepin"),
+            Os::Raspbian => Some("Raspbian"),
+            Os::Kali => Some("Kali"),
+            Os::FreeBsd => Some("FreeBSD"),
+            _ => None,
+        }
+    }
+
+    /// The system the person says a host runs (`NativeTermSystem`),
+    /// where it is one of these.
+    #[must_use]
+    pub fn named(id: &str) -> Option<Os> {
+        Os::ALL.into_iter().find(|os| os.id().eq_ignore_ascii_case(id.trim()))
+    }
+
+    /// What it is written as (`NativeTermSystem`): as it calls itself in
+    /// its `/etc/os-release` (`ID=`), where it has one.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Os::AlmaLinux => "almalinux",
+            Os::Alpine => "alpine",
+            Os::Arch => "arch",
+            Os::CentOs => "centos",
+            Os::Debian => "debian",
+            Os::Deepin => "deepin",
+            Os::Elementary => "elementary",
+            Os::EndeavourOs => "endeavouros",
+            Os::Fedora => "fedora",
+            Os::FreeBsd => "freebsd",
+            Os::Kali => "kali",
+            Os::Mint => "linuxmint",
+            Os::MacOs => "macos",
+            Os::Manjaro => "manjaro",
+            Os::OpenBsd => "openbsd",
+            Os::Raspbian => "raspbian",
+            Os::Rhel => "rhel",
+            Os::Rocky => "rocky",
+            Os::Suse => "suse",
+            Os::Ubuntu => "ubuntu",
+            Os::Windows => "windows",
+            Os::Zorin => "zorin",
+            Os::Linux => "linux",
         }
     }
 
@@ -87,15 +175,48 @@ impl Os {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
-            Os::Ubuntu => "Ubuntu",
+            Os::AlmaLinux => "AlmaLinux",
+            Os::Alpine => "Alpine Linux",
+            Os::Arch => "Arch Linux",
+            Os::CentOs => "CentOS",
             Os::Debian => "Debian",
             Os::Deepin => "Deepin",
-            Os::Raspbian => "Raspbian",
-            Os::Kali => "Kali",
+            Os::Elementary => "elementary OS",
+            Os::EndeavourOs => "EndeavourOS",
+            Os::Fedora => "Fedora",
             Os::FreeBsd => "FreeBSD",
+            Os::Kali => "Kali Linux",
+            Os::Mint => "Linux Mint",
+            Os::MacOs => "macOS",
+            Os::Manjaro => "Manjaro",
+            Os::OpenBsd => "OpenBSD",
+            Os::Raspbian => "Raspberry Pi OS",
+            Os::Rhel => "Red Hat Enterprise Linux",
+            Os::Rocky => "Rocky Linux",
+            Os::Suse => "SUSE / openSUSE",
+            Os::Ubuntu => "Ubuntu",
             Os::Windows => "Windows",
+            Os::Zorin => "Zorin OS",
+            Os::Linux => "Linux",
         }
     }
+}
+
+/// How a host's system is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum By {
+    /// The person said it.
+    Chosen,
+    /// Its server said it.
+    Said,
+}
+
+/// The system a host runs: what the person says (`chosen`), before what
+/// its server said.
+#[must_use]
+pub fn system(chosen: Option<&str>, known: Option<&Known>) -> Option<(Os, By)> {
+    let chosen = chosen.and_then(Os::named).map(|os| (os, By::Chosen));
+    chosen.or_else(|| Some((known?.os?, By::Said)))
 }
 
 /// What is known of a server.
@@ -151,6 +272,20 @@ mod tests {
         assert_eq!(Os::of("SSH-2.0-OpenSSH_for_Windows_10.2 Win32-OpenSSH-GitHub"), Some(Os::Windows));
         assert_eq!(Os::of("SSH-2.0-OpenSSH_9.2p1 Raspbian-2+deb12u3"), Some(Os::Raspbian));
         assert_eq!(Os::of("SSH-2.0-OpenSSH_9.9p1 Kali-3"), Some(Os::Kali));
+        // what the person says is taken before it, where it is a system there is
+        let known = Known::of("SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.19".into());
+        let silent = Known::of("SSH-2.0-OpenSSH_10.2".into());
+        assert_eq!(system(None, Some(&known)), Some((Os::Ubuntu, By::Said)));
+        assert_eq!(system(Some("zorin"), Some(&known)), Some((Os::Zorin, By::Chosen)));
+        assert_eq!(system(Some(" Fedora "), Some(&silent)), Some((Os::Fedora, By::Chosen)));
+        assert_eq!(system(Some("macos"), None), Some((Os::MacOs, By::Chosen)));
+        assert_eq!(system(Some("plan9"), Some(&known)), Some((Os::Ubuntu, By::Said)), "one there is none of");
+        assert_eq!(system(None, Some(&silent)), None);
+        assert_eq!(system(None, None), None);
+        for os in Os::ALL {
+            assert_eq!(Os::named(os.id()), Some(os));
+            assert!(native_term_config::system::valid(os.id()), "{os:?}");
+        }
         // what is no system's name is none
         for said in
             ["SSH-2.0-dropbear_2022.83", "SSH-2.0-OpenSSH_9.6 Ubuntuish", "SSH-1.99-Cisco-1.25", "", "HTTP/1.1 400"]
