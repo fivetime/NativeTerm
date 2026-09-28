@@ -864,12 +864,20 @@ impl Core {
         }
         let shared = Arc::clone(&self.shared);
         std::thread::spawn(move || {
-            open_tabs(&shared, &target, &specs);
-            // each new tab took the focus; the batch ends on its first one
-            if specs.len() > 1 {
-                let snapshot = refresh(&shared);
-                if let Some((window, tab)) = snapshot.find(&specs[0].label) {
+            let failed = open_tabs(&shared, &target, &specs);
+            // the terminal in front, on the first new tab (each took the
+            // focus in turn): a tab added to a window behind NativeTerm's
+            // would stay out of sight
+            let Some(first) = specs.iter().find(|s| !failed.contains(&s.session)) else { return };
+            let snapshot = refresh(&shared);
+            match snapshot.find(&first.label) {
+                Some((window, tab)) => {
                     let _ = shared.terminal.select(window.handle, tab);
+                }
+                None => {
+                    if let Some(window) = shared.terminal.recent_window() {
+                        shared.terminal.activate(window);
+                    }
                 }
             }
         });

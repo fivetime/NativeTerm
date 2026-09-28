@@ -802,6 +802,16 @@
             shown so does a click anywhere on the row. Seen on Lingmo:
             three checkboxes, three hosts; two rows' clicks, one out
             and one in.
+      - [x] A session opened from the tree brings its terminal to the
+            front (the person, 2026-09-28): one tab added to a window
+            behind NativeTerm's stayed out of sight; only a batch of
+            several was selected afterwards. Now every open ends on
+            its first new tab, selected, its window in front (the
+            terminal's most recent window where the tab is not found).
+            Seen on Lingmo (X11, WezTerm): NativeTerm in front of the
+            terminal, a host connected twice, the terminal in front
+            each time. Not tried on Windows (no input is sent there):
+            the same call that brings a batch's tab forward.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open
