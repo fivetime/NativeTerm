@@ -698,9 +698,29 @@
             `WindowWanted`). Tried: Lingmo (X11) by clicks on the sign,
             both cases; Windows by the CLI on a terminal window of the
             test's own, minimized: restored and in front; Windows
-            Terminal's `wt -w new` with the portable copy. Not on
-            Wayland (no window can be brought forward from outside
-            there without the compositor's token); macOS not seen.
+            Terminal's `wt -w new` with the portable copy; macOS not
+            seen. Wayland: see the activation token below.
+      - [x] Wayland: the terminal comes forward with an activation
+            token (2026-09-29). Before, GNOME only put a badge on
+            WezTerm's dock icon. NativeTerm asks the compositor for a
+            token with its main window and hands it to WezTerm in
+            `XDG_ACTIVATION_TOKEN` (a GUI it starts; `activate-pane`,
+            `activate-tab`, whose cli hands it to the GUI: fork
+            `SetActivationToken`), as Chromium does. winit asked
+            without a serial (a request for attention only, to mutter)
+            and its button serial is the release's, where mutter
+            honours the press's only (`pointer->grab_serial`): winit
+            0.30.13 is carried in `third_party/winit` with the latest
+            press's serial set, as Chromium's `SerialTracker` keeps
+            it. Tried on Zorin OS 18 (GNOME 46) with the protocol log:
+            a new GUI, a GUI behind NativeTerm brought out by the
+            rail's terminal sign, and a double-clicked host (a new tab
+            in the GUI behind) all came to the front, no badge. Fedora
+            44 (GNOME 50) and EndeavourOS (KDE Plasma): a new GUI and a
+            GUI behind NativeTerm, three times each, NativeTerm's
+            surface losing the keyboard every time (protocol log; GNOME
+            50 refuses screenshots from outside its own apps now).
+            elementary OS runs WezTerm through Xwayland, no token.
       - [x] A menu for a tab without a session (WezTerm's "new tab": a
             right click on it showed nothing): Send Command…, Clear
             Screen and Scrollback, Rename Tab… (for as long as the tab

@@ -248,19 +248,37 @@ impl WezTerm {
         true
     }
 
-    /// Start the GUI with `program` in its first window.
+    /// Start the GUI with `program` in its first window (in front, with
+    /// an activation token where the system asks for one).
     fn start_gui(&self, program: &[OsString]) -> io::Result<std::process::Child> {
-        self.command(&self.gui)
-            .args(cli::start_args(program))
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        let mut command = self.command(&self.gui);
+        if let Some(token) = native_term_os::activation::token() {
+            command.env(native_term_os::activation::ENV, token);
+        }
+        command.args(cli::start_args(program)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()
     }
 
     /// Run `wezterm <args>`; its stdout, or what it said on stderr.
     fn run(&self, args: &[OsString]) -> io::Result<String> {
         let output = self.command(&self.exe).args(args).stdin(Stdio::null()).output()?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            let said = String::from_utf8_lossy(&output.stderr);
+            let said = said.lines().last().unwrap_or("").trim().to_string();
+            Err(io::Error::other(format!("wezterm {}: {said}", output.status)))
+        }
+    }
+
+    /// `wezterm <args>` that brings a window forward: with an activation
+    /// token where the system asks for one (Wayland), which the cli hands
+    /// to the GUI first.
+    fn run_forward(&self, args: &[OsString]) -> io::Result<String> {
+        let mut command = self.command(&self.exe);
+        if let Some(token) = native_term_os::activation::token() {
+            command.env(native_term_os::activation::ENV, token);
+        }
+        let output = command.args(args).stdin(Stdio::null()).output()?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
@@ -482,7 +500,7 @@ impl TerminalBackend for WezTerm {
         let shown = self.shown_tab(&w).unwrap_or(0);
         lock(&self.state).recent = Some(window.0);
         let pane = w.tabs.get(shown).or(w.tabs.first()).and_then(|t| t.active_pane());
-        pane.is_some_and(|p| self.run(&cli::activate_pane_args(p)).is_ok())
+        pane.is_some_and(|p| self.run_forward(&cli::activate_pane_args(p)).is_ok())
     }
 
     fn snapshot(&self, labels: &HashSet<String>) -> Snapshot {
@@ -576,7 +594,7 @@ impl TerminalBackend for WezTerm {
 
     fn select(&self, window: WindowId, tab: &TabView) -> io::Result<bool> {
         let Some(found) = self.find_tab(window, tab)? else { return Ok(false) };
-        self.run(&cli::activate_tab_args(found.tab_id))?;
+        self.run_forward(&cli::activate_tab_args(found.tab_id))?;
         let mut state = lock(&self.state);
         state.recent = Some(window.0);
         state.selected.insert(window.0, Chosen { tab_id: found.tab_id, at: Instant::now() });

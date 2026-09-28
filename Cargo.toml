@@ -30,6 +30,10 @@ repository = "https://github.com/fivetime/NativeTerm"
 # this section goes too and the version below is raised.
 [patch.crates-io]
 zmodem2 = { git = "https://codeberg.org/fivetime/zmodem2.git", rev = "94aec18" }
+# winit 0.30.13 with one change (see third_party/winit/NATIVETERM.md): the
+# Wayland activation token it asks for carries the latest press's serial,
+# which GNOME needs to bring another program's window forward.
+winit = { path = "third_party/winit" }
 
 [profile.release]
 lto = true

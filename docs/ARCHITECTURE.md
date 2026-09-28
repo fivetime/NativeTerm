@@ -4967,9 +4967,22 @@ does not say which has the focus), `screen_text` is `get-text`, and
 the fork's does: a pane a client asked for (both commands are
 `SetFocusedPane`) has its window brought to the front
 (`MuxNotification::WindowWanted`), a minimized one restored first, on
-macOS the application made the active one. Not on Wayland, where a
-window comes forward only with a token the compositor gave whoever had
-the focus, which WezTerm's Wayland window does not ask for.
+macOS the application made the active one. On Wayland a window comes
+forward only with an activation token (xdg-activation-v1) the compositor
+gives the program that has the person's input: NativeTerm, whose click
+or key it was, asks for one with its main window
+(`native-term-os::activation`, its source set in `window.rs`: a request
+from another thread goes to the event loop as a `UserEvent`, the
+answer, `ActivationTokenDone`, comes back on a channel, waited for at
+most a second; never asked on the event loop's own thread) and gives it
+to WezTerm in `XDG_ACTIVATION_TOKEN`: to a GUI it starts, and to the
+`activate-pane` / `activate-tab` calls, whose cli hands it to the GUI
+before `SetFocusedPane` (fork `SetActivationToken`). X11, Windows and
+macOS ask for none. The token is asked with the serial of the latest
+press, as Chromium's is: GNOME honours only the serial of the press
+that started the pointer's grab, and winit 0.30.13 sets no serial at
+all, so the workspace carries winit with that one change
+(`third_party/winit`, `NATIVETERM.md` there).
 `open_plain` is a window with no program named, which is the person's
 own shell (`start`, or `cli spawn --new-window`, with nothing after
 it); Windows Terminal's is `wt -w new`, its default profile. A GUI

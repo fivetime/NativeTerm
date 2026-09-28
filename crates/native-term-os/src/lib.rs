@@ -10,6 +10,7 @@
 //! What only Windows has (the registry, layered windows) is here under
 //! `cfg(windows)` only; the program keeps those behind the same `cfg`.
 
+pub mod activation;
 pub mod appearance;
 pub mod cloud;
 pub mod credentials;

@@ -244,8 +244,16 @@ enum Which {
 }
 
 enum UserEvent {
-    Repaint { which: Which, when: Instant, pass: u64 },
+    Repaint {
+        which: Which,
+        when: Instant,
+        pass: u64,
+    },
     AccessKit(accesskit_winit::Event),
+    /// An activation token for another program's window (Wayland), asked
+    /// for from another thread: the answer goes back on this.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    ActivationToken(std::sync::mpsc::Sender<Option<String>>),
 }
 
 impl From<accesskit_winit::Event> for UserEvent {
@@ -528,6 +536,10 @@ impl Pane {
 }
 
 struct Runner {
+    /// Activation tokens asked for and not given yet: the request's serial,
+    /// where the answer goes.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    token_asked: Vec<(winit::event_loop::AsyncRequestSerial, std::sync::mpsc::Sender<Option<String>>)>,
     proxy: EventLoopProxy<UserEvent>,
     viewport: egui::ViewportBuilder,
     factory: Option<Factory>,
@@ -580,7 +592,10 @@ pub fn run(
     }
     let event_loop = builder.build().map_err(|e| e.to_string())?;
     let proxy = event_loop.create_proxy();
+    activation_source(&event_loop, proxy.clone());
     let mut runner = Runner {
+        #[cfg(all(unix, not(target_os = "macos")))]
+        token_asked: Vec::new(),
         proxy,
         // shown after the first frame: no white flash, and AccessKit
         // must be set up before the window is visible
@@ -1224,6 +1239,14 @@ impl ApplicationHandler<UserEvent> for Runner {
             }
             return;
         }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        if let WindowEvent::ActivationTokenDone { serial, token } = &event {
+            if let Some(at) = self.token_asked.iter().position(|(s, _)| s == serial) {
+                let (_, answer) = self.token_asked.remove(at);
+                let _ = answer.send(Some(token.clone().into_raw()));
+            }
+            return;
+        }
         let Some((which, pane)) = self.pane(id) else { return };
         match event {
             WindowEvent::RedrawRequested => {
@@ -1284,6 +1307,8 @@ impl ApplicationHandler<UserEvent> for Runner {
                     pane.on_accesskit(event.window_event);
                 }
             }
+            #[cfg(all(unix, not(target_os = "macos")))]
+            UserEvent::ActivationToken(answer) => self.ask_activation_token(answer),
         }
     }
 
@@ -1374,6 +1399,49 @@ fn on_wayland(window: &Window) -> bool {
 fn frame_interval(window: &Window) -> Duration {
     let millihertz = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()).unwrap_or(60_000);
     Duration::from_micros(1_000_000_000 / u64::from(millihertz.max(1_000)))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+impl Runner {
+    /// An activation token from the compositor, asked with the main
+    /// window's last input (Wayland); none elsewhere, or without a window.
+    fn ask_activation_token(&mut self, answer: std::sync::mpsc::Sender<Option<String>>) {
+        use winit::platform::startup_notify::WindowExtStartupNotify;
+        match self.main.as_ref().and_then(|main| main.window.request_activation_token().ok()) {
+            Some(serial) => self.token_asked.push((serial, answer)),
+            None => {
+                let _ = answer.send(None);
+            }
+        }
+    }
+}
+
+/// Where activation tokens come from (Wayland only: X11 and the others
+/// bring a window forward without one): the main window, on the event
+/// loop's thread, asked from another and waited for there. Never asked
+/// on the event loop's own thread, which would wait for itself.
+fn activation_source<T>(event_loop: &winit::event_loop::EventLoop<T>, proxy: EventLoopProxy<UserEvent>) {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use winit::platform::wayland::EventLoopExtWayland;
+        if !event_loop.is_wayland() {
+            return;
+        }
+        let gui = std::thread::current().id();
+        native_term_os::activation::set_source(move || {
+            if std::thread::current().id() == gui {
+                return None;
+            }
+            let (tx, rx) = std::sync::mpsc::channel();
+            proxy.send_event(UserEvent::ActivationToken(tx)).ok()?;
+            // (the compositor answers at once; one that doesn't is let go)
+            rx.recv_timeout(std::time::Duration::from_secs(1)).ok().flatten()
+        });
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = (event_loop, proxy);
+    }
 }
 
 #[cfg(test)]
