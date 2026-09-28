@@ -4,7 +4,15 @@
 #[cfg(windows)]
 pub use native_term_win::desktop::process_image as image;
 #[cfg(windows)]
-pub use native_term_win::{parent_pid, process_started as started};
+pub use native_term_win::{parent_pid, process_started as started, terminate_process as terminate};
+
+/// End the process `pid` (SIGTERM off Windows). Whether it was told to.
+#[cfg(unix)]
+pub fn terminate(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else { return false };
+    // SAFETY: a signal to one process by its id; nothing is shared
+    pid > 0 && unsafe { libc::kill(pid, libc::SIGTERM) } == 0
+}
 
 #[cfg(target_os = "linux")]
 mod unix {

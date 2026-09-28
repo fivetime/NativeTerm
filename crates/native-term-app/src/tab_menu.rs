@@ -44,6 +44,9 @@ pub enum MenuRequest {
     /// one it has. The answer goes to `tab_title::answer` with this
     /// ticket.
     TabTitle { ticket: u64, current: String },
+    /// ssh asks for a password none is saved for: the answer goes to
+    /// `password_ask::answer` with this ticket.
+    Password { ticket: u64, question: crate::password_ask::Question },
     /// Rename this host.
     Rename(String),
     /// Closing these sessions would close tabs that hold other panes too.

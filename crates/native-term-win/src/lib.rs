@@ -73,6 +73,18 @@ pub fn process_started(pid: u32) -> Option<u64> {
     (code == STILL_ACTIVE).then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
 }
 
+/// End the process `pid` (as a console's close does not: at once).
+/// Whether it was ended.
+pub fn terminate_process(pid: u32) -> bool {
+    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    let Ok(handle) = (unsafe { OpenProcess(PROCESS_TERMINATE, false, pid) }) else { return false };
+    let ended = unsafe { TerminateProcess(handle, 1) }.is_ok();
+    unsafe {
+        let _ = CloseHandle(handle);
+    }
+    ended
+}
+
 /// The process that started `pid` (its parent id as Windows recorded it;
 /// the parent may have exited since).
 pub fn parent_pid(pid: u32) -> Option<u32> {

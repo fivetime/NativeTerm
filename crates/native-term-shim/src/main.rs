@@ -340,7 +340,13 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         if let Some(saved) = &saved {
             saved.started(child.id());
         }
-        let code = match supervise(&mut child, link, auth.as_ref(), None) {
+        // (a password given in NativeTerm's window is kept once logged in)
+        let logged_in = || {
+            if let Some(saved) = &saved {
+                saved.logged_in();
+            }
+        };
+        let code = match supervise(&mut child, link, auth.as_ref(), None, Some(&logged_in)) {
             Supervised::Exited(code) => code,
             Supervised::Close => return 0,
         };
@@ -389,6 +395,7 @@ fn supervise(
     link: Option<&Link>,
     auth: Option<&console::AuthEvent>,
     control: Option<&console::ControlPipe>,
+    logged_in: Option<&dyn Fn()>,
 ) -> Supervised {
     let mut reported = false;
     let process = console::child_handle(child);
@@ -408,6 +415,9 @@ fn supervise(
             if auth.is_set() {
                 link.send(ShimMessage::Authenticated);
                 reported = true;
+                if let Some(logged_in) = logged_in {
+                    logged_in();
+                }
             }
         }
         for message in link.map(Link::drain).unwrap_or_default() {

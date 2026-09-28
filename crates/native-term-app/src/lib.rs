@@ -14,6 +14,7 @@ pub mod fuzzy;
 pub mod i18n;
 pub mod import;
 pub mod notes;
+pub mod password_ask;
 mod previews;
 pub mod quick;
 pub mod quotation;
@@ -904,6 +905,10 @@ impl Core {
                         shared.terminal.activate(window);
                     }
                 }
+            }
+            // a password asked meanwhile stays in front of it
+            if let Some(ask) = lock(&shared.ask).clone() {
+                password_ask::raise(&*ask);
             }
         });
         ids
@@ -1841,6 +1846,23 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             let _ = conn.send(&AppMessage::TabMenu { items });
             return;
         }
+        if let Ok(Some(ShimMessage::AskPassword { user, host, retry, refused, can_save })) = &asked {
+            // asked in a window of the main program's; this connection
+            // has a thread of its own to wait on
+            let question = password_ask::Question {
+                label: found
+                    .as_ref()
+                    .and_then(|(_, id)| lock(&shared.sessions).iter().find(|s| s.id == *id).map(|s| s.label.clone())),
+                user: user.clone(),
+                host: host.clone(),
+                retry: *retry,
+                refused: *refused,
+                can_save: *can_save,
+            };
+            let answer = password_ask::ask(ask.as_deref(), question);
+            let _ = conn.send(&AppMessage::Password { answer });
+            return;
+        }
         if let Ok(Some(ShimMessage::TabTitle { current })) = &asked {
             // asked in a window of the main program's; this connection
             // has a thread of its own to wait on
@@ -2234,6 +2256,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::OpenFiles
             | ShimMessage::TabMenu { .. }
             | ShimMessage::TabTitle { .. }
+            | ShimMessage::AskPassword { .. }
             | ShimMessage::TabCard
             | ShimMessage::PasteQuotation
             | ShimMessage::Find { .. }
@@ -2248,6 +2271,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         | ShimMessage::Dropped { .. }
         | ShimMessage::TabMenu { .. }
         | ShimMessage::TabTitle { .. }
+        | ShimMessage::AskPassword { .. }
         | ShimMessage::TabCard
         | ShimMessage::PasteQuotation
         | ShimMessage::Find { .. }

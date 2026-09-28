@@ -2226,8 +2226,9 @@ through both prompts.
 
 ### Passwords
 
-NativeTerm has no password storage or encryption of its own. The intended
-path is key-based authentication plus `ssh-agent` (see "Installing public
+NativeTerm has no password storage or encryption of its own: saved
+passwords are in the system's store (below). The intended path is still
+key-based authentication plus `ssh-agent` (see "Installing public
 keys"), so a key passphrase is typed at most once per login session.
 
 #### Optional: saved passwords via Windows Credential Manager
@@ -2332,6 +2333,87 @@ Rules:
     the dialog (with the Chinese IME on), connected with no prompt; the
     server's password changed: refused, marked, notice for both tabs,
     the next reconnect asked in the tab. Test entries were removed.
+
+#### The system's store on every platform
+
+Since 2026-09-28 the saved passwords are kept in the system's own store
+everywhere, as browsers keep theirs (`native_term_os::credentials`):
+
+| Where | Store | An entry |
+| --- | --- | --- |
+| Windows | Credential Manager | as above |
+| macOS | the login keychain | a generic password, service `NativeTerm`, the entry's name as its account |
+| Linux, KDE | KWallet (kwalletd6, 5 or the oldest, the first there is) | the folder `NativeTerm`, the entry's name as its key |
+| Linux, elsewhere | the Secret Service (GNOME Keyring, KDE's ksecretd) | an item of the default collection, attributes `application=nativeterm`, `nativeterm-target=<name>` |
+
+As Chromium chooses and talks to them
+(`components/os_crypt/async/browser/freedesktop_secret_key_provider`):
+KWallet on KDE, the Secret Service elsewhere, over the session's D-Bus,
+the Secret Service with a `plain` session; where the first is not there
+the other is tried. Unlike Chromium, every KWallet is tried on KDE, the
+newest first: Chromium goes by `KDE_SESSION_VERSION`, which Lingmo's KDE
+does not set. Off Windows an entry's value is a small JSON object
+(`user`, `secret`, `comment`), the note on it (refused) going with it.
+A store that is locked asks the person to unlock it (KWallet's first use
+makes the wallet, in KWallet's own window). `supported()` is true where
+a store answers.
+
+Measured (2026-09-28, the store's own test: written, listed, read,
+changed, deleted): Fedora, Zorin OS, elementary OS, deepin (GNOME
+Keyring), EndeavourOS (KWallet 6), Lingmo (KWallet 5, its wallet made
+first). The Mac's login keychain, reached over ssh, can be read and not
+written ("User interaction is not allowed"): written only in the
+desktop's session, not tried there yet.
+
+#### A password asked in NativeTerm's window
+
+Where no password is saved for the account (or the saved one was
+refused), ssh's password prompt is asked in a window of NativeTerm's
+own, as SecureCRT asks it ("Enter Secure Shell Password", the person's
+pictures, 2026-09-28): the account, the password field (no input
+method, as the other password fields), "Save password" (ticked at
+first, as SecureCRT's, with a line on what keeping it means), OK,
+Cancel and Skip.
+
+- **Every ssh the shim starts for an account it knows** runs with the
+  shim as its forced askpass helper (per process, as before for saved
+  passwords): the helper asks the shim, the shim asks NativeTerm (a
+  `Request` connection: `ShimMessage::AskPassword`, answered by
+  `AppMessage::Password` with `PasswordAnswer::Given { secret, save }`,
+  `Skip` or `Cancel`). Only ssh's own prompt for this account, from the
+  ssh this shim started, reaches the window; a host key, a passphrase,
+  a code, a jump host's prompt is asked in the tab as ssh would (seen:
+  the host key question in the tab, answered there, then the window).
+- **OK**: the password goes to ssh. With "Save password" it is kept in
+  the shim's memory until the login worked (`LocalCommand`), and only
+  then written to the store (`Attempt::logged_in`): a wrong one is never
+  kept. ssh asks as often as it would (three times, where no saved
+  password is tried once): the window says when the one before was
+  wrong, or that the saved one was refused. A new one for a refused
+  entry clears its mark.
+- **Skip**: asked in the tab, for the rest of this attempt.
+- **Cancel** (and the window's close button): the login is given up;
+  the shim ends ssh, which given nothing would try an empty password
+  and ask again.
+- Where NativeTerm can't be reached the tab asks, as before.
+- The window is above the others and takes the keyboard. A tab that
+  opens after it was asked (the terminal brought forward over it) is
+  followed by the window brought forward again (`password_ask::raise`);
+  a window asked for again is only brought forward, and one made for
+  that and dropped unseen answers nothing.
+- The password crosses the user's own pipes only, as the saved ones
+  did; `PasswordAnswer`'s `Debug` hides it.
+
+Seen on Lingmo (X11, WezTerm, KWallet 5), against a throwaway account
+with a password on the box's own sshd: the window in front with the
+keyboard; a wrong password, asked again saying so; the right one, logged
+in, kept in the wallet (read back: the one typed, not the wrong one); a
+second session while the first was open and one after every terminal
+was closed, both logged in with nothing asked; Cancel: the login given
+up, no second window; Skip: the prompt in the tab. Tests: the shim with
+the fake ssh (Cancel, wrong then right, kept only after the login, not
+kept without "Save password", a refused entry replaced). Not tried by
+hand: Windows (no input is sent there) and macOS.
 
 #### Shared credential sets (`NativeTermCredential`)
 

@@ -1225,6 +1225,11 @@ impl App {
             crate::tab_title_window::open(ticket, current);
             return;
         }
+        if let MenuRequest::Password { ticket, question } = request {
+            // a window of its own too, whatever dialog is open here
+            crate::password_window::open(ticket, question);
+            return;
+        }
         if self.dialog.is_some() {
             self.notices.push(t!("notice-dialog-open"));
             return;
@@ -1257,6 +1262,7 @@ impl App {
             | MenuRequest::Dropped { .. }
             | MenuRequest::PasteQuotation(_)
             | MenuRequest::TabTitle { .. }
+            | MenuRequest::Password { .. }
             | MenuRequest::Find(_) => {}
             MenuRequest::ConfirmClose(ids) => {
                 let labels = self

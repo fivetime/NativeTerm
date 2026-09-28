@@ -37,23 +37,45 @@ pub fn is_password_prompt(prompt: &str) -> bool {
     asks && !["passphrase", "new ", "retype", "again", "code", "token", "otp"].iter().any(|w| prompt.contains(w))
 }
 
-/// Serve `password` to this batch's helpers; the pipe's name.
-pub fn serve(password: String) -> io::Result<String> {
-    serve_with(move |prompt, _| is_password_prompt(prompt).then(|| password.clone()))
+/// What the helper is told to do with a prompt.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub enum Reply {
+    /// Give ssh this.
+    Answer(String),
+    /// Ask in the console (or give up, where there is none to ask in).
+    Ask,
+    /// Give up: the person said so.
+    Cancel,
 }
 
-/// Serve answers decided by `answer(prompt, the helper's process id)`
-/// (`None`: the helper asks in the console); the pipe's name.
-pub fn serve_with(answer: impl Fn(&str, u32) -> Option<String> + Send + 'static) -> io::Result<String> {
+impl From<Option<String>> for Reply {
+    fn from(answer: Option<String>) -> Reply {
+        answer.map_or(Reply::Ask, Reply::Answer)
+    }
+}
+
+/// Serve `password` to this batch's helpers; the pipe's name.
+pub fn serve(password: String) -> io::Result<String> {
+    serve_with(move |prompt, _| is_password_prompt(prompt).then(|| password.clone()).into())
+}
+
+/// Serve answers decided by `answer(prompt, the helper's process id)`;
+/// the pipe's name. Each helper is answered on a thread of its own: an
+/// answer may wait for the person.
+pub fn serve_with(answer: impl Fn(&str, u32) -> Reply + Send + Sync + 'static) -> io::Result<String> {
     let random = std::collections::hash_map::RandomState::new().build_hasher().finish();
     let name = private_pipe_name(random);
     let mut listener = pipe::PipeListener::bind(&name)?;
+    let answer = std::sync::Arc::new(answer);
     std::thread::spawn(move || {
         while let Ok(conn) = listener.accept() {
-            if let Ok(Some(prompt)) = conn.recv::<String>(Duration::from_secs(5)) {
-                let pid = conn.client_pid().unwrap_or(0);
-                let _ = conn.send(&answer(&prompt, pid));
-            }
+            let answer = std::sync::Arc::clone(&answer);
+            std::thread::spawn(move || {
+                if let Ok(Some(prompt)) = conn.recv::<String>(Duration::from_secs(5)) {
+                    let pid = conn.client_pid().unwrap_or(0);
+                    let _ = conn.send(&answer(&prompt, pid));
+                }
+            });
         }
     });
     Ok(name)
@@ -75,15 +97,16 @@ fn private_pipe_name(random: u64) -> String {
 pub fn answer(pipe_name: &str, prompt: &str) -> i32 {
     let served = pipe::connect(pipe_name, Duration::from_secs(2)).ok().and_then(|conn| {
         conn.send(&prompt.to_string()).ok()?;
-        // long enough for an answer typed in NativeTerm's window (SFTP)
-        conn.recv::<Option<String>>(Duration::from_secs(300)).ok().flatten().flatten()
+        // long enough for an answer typed in NativeTerm's window
+        conn.recv::<Reply>(Duration::from_secs(660)).ok().flatten()
     });
-    let answer = match served {
-        Some(password) => password,
+    let answer = match served.unwrap_or(Reply::Ask) {
+        Reply::Answer(password) => password,
+        Reply::Cancel => return 1,
         // cancelled, with nobody at a console to ask
-        None if std::env::var_os(NO_CONSOLE_VAR).is_some() => return 1,
+        Reply::Ask if std::env::var_os(NO_CONSOLE_VAR).is_some() => return 1,
         // not a password: ask here, echoing only a yes/no question
-        None => match crate::console::read_line(prompt, prompt.contains("(yes/no")) {
+        Reply::Ask => match crate::console::read_line(prompt, prompt.contains("(yes/no")) {
             Ok(line) => line,
             Err(_) => return 1,
         },
@@ -129,7 +152,10 @@ mod tests {
         let ask = |prompt: &str| {
             let conn = pipe::connect(&name, Duration::from_secs(2)).unwrap();
             conn.send(&prompt.to_string()).unwrap();
-            conn.recv::<Option<String>>(Duration::from_secs(5)).unwrap().unwrap()
+            match conn.recv::<Reply>(Duration::from_secs(5)).unwrap().unwrap() {
+                Reply::Answer(password) => Some(password),
+                Reply::Ask | Reply::Cancel => None,
+            }
         };
         assert_eq!(ask("u@h's password: ").as_deref(), Some("s3cret"));
         assert_eq!(ask("Enter passphrase for key 'k': "), None);

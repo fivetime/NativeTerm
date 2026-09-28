@@ -836,6 +836,17 @@
             notice, no window left. Not tried: Windows Terminal (its
             tabs' ids are GUIDs, never used again), macOS and Wayland
             (no input can be sent there).
+      - [x] Passwords kept as SecureCRT keeps them (the person,
+            2026-09-28, with its dialogs): where none is saved, ssh's
+            password prompt is asked in NativeTerm's window ("Save
+            password" ticked at first, Skip to the tab, Cancel to give
+            up), and a password given there is kept once the login
+            worked, so another session of the same account (a clone)
+            logs in with nothing asked. Kept in the system's store on
+            every platform: Credential Manager, the login keychain,
+            KWallet or the Secret Service. See "A password asked in
+            NativeTerm's window" in ARCHITECTURE.md for what was seen.
+            Open: tried by hand on Windows and macOS.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

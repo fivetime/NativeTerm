@@ -737,6 +737,7 @@ impl Runner {
             }
             let n = self.next_extra;
             self.next_extra += 1;
+            let above = request.viewport.window_level == Some(egui::WindowLevel::AlwaysOnTop);
             let mut viewport = request.viewport.with_visible(false);
             if let Some(place) = request.place {
                 // the window is made where it is to be: a window moved
@@ -756,6 +757,11 @@ impl Runner {
                     if let Err(e) = pane.paint(self.frame_log.as_ref(), true) {
                         eprintln!("window {}: {e}", request.key);
                         continue;
+                    }
+                    // (above the others once it is shown: X11's window
+                    // managers take no such state from a window not shown yet)
+                    if above {
+                        pane.window.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
                     }
                     pane.window.focus_window();
                     self.extras.push((n, request.key, pane));

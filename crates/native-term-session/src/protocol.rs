@@ -95,6 +95,12 @@ pub enum ShimMessage {
     },
     /// From a `Request` helper: the item chosen from that menu.
     TabAction { id: u32 },
+    /// From a `Request` helper (the shim serving ssh's askpass): ssh asks
+    /// for `user@host`'s password and none is saved; answered by
+    /// `AppMessage::Password` once the person has said. `retry`: the one
+    /// given before was wrong; `refused`: the saved one was refused;
+    /// `can_save`: there is a store to keep it in.
+    AskPassword { user: String, host: String, retry: bool, refused: bool, can_save: bool },
     /// From a `Request` helper: the terminal gives a tab another title
     /// and asks which (`current`: the one it has), answered by
     /// `AppMessage::TabTitle` once the person has said.
@@ -177,6 +183,29 @@ impl MenuItem {
     }
 }
 
+/// What the person said when asked for a password.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PasswordAnswer {
+    /// This one; kept after the login where `save`.
+    Given { secret: String, save: bool },
+    /// Asked in the tab after all.
+    Skip,
+    /// The connection is given up.
+    Cancel,
+}
+
+impl std::fmt::Debug for PasswordAnswer {
+    // (a password is never written out: not in a log, not in a panic)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PasswordAnswer::Given { save, .. } => write!(f, "Given {{ secret: <hidden>, save: {save} }}"),
+            PasswordAnswer::Skip => f.write_str("Skip"),
+            PasswordAnswer::Cancel => f.write_str("Cancel"),
+        }
+    }
+}
+
 /// NativeTerm → shim.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -228,6 +257,10 @@ pub enum AppMessage {
     TabTitle {
         title: String,
         rename: bool,
+    },
+    /// The answer to `ShimMessage::AskPassword`.
+    Password {
+        answer: PasswordAnswer,
     },
     /// The answer to `ShimMessage::PasteQuotation`: every line goes
     /// between `chars` (`between`) or after them; `paste` false: the
@@ -292,6 +325,13 @@ mod tests {
             ShimMessage::TabMenu { place: None },
             ShimMessage::TabMenu { place: Some(TabPlace { index: 1, count: 3 }) },
             ShimMessage::TabTitle { current: "bash".into() },
+            ShimMessage::AskPassword {
+                user: "root".into(),
+                host: "192.0.2.1".into(),
+                retry: true,
+                refused: false,
+                can_save: true,
+            },
             ShimMessage::TabAction { id: 4 },
             ShimMessage::PasteQuotation,
             ShimMessage::Find { initial: Some("eth0".into()), result: None },
@@ -321,6 +361,16 @@ mod tests {
         let card = AppMessage::TabCard { title: "web01".into(), note: "Connected · 5 min".into(), show: true };
         assert_eq!(decode::<AppMessage>(&encode(&card)).unwrap(), card);
         let title = AppMessage::TabTitle { title: "构建".into(), rename: true };
+        for answer in [
+            PasswordAnswer::Given { secret: "p\"a ss".into(), save: true },
+            PasswordAnswer::Skip,
+            PasswordAnswer::Cancel,
+        ] {
+            let message = AppMessage::Password { answer };
+            assert_eq!(decode::<AppMessage>(&encode(&message)).unwrap(), message);
+        }
+        let shown = format!("{:?}", PasswordAnswer::Given { secret: "hunter2".into(), save: false });
+        assert!(!shown.contains("hunter2"), "{shown}");
         assert_eq!(decode::<AppMessage>(&encode(&title)).unwrap(), title);
         // an older shim asks without the tab's place
         let old = r#"{"type":"tab_menu"}"#;

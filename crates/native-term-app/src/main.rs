@@ -31,6 +31,7 @@ mod layout;
 mod logos;
 mod looks;
 mod options_dialog;
+mod password_window;
 mod plink_dialog;
 mod properties;
 mod quotation_window;

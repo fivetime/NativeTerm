@@ -282,7 +282,7 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         drop(later.lock().map(|mut t| t.take()));
     });
     let watch = Watch::start(child.id(), session.protocol, !ntplink, link.map(Link::sender));
-    let supervised = supervise(&mut child, link, auth, control.as_ref());
+    let supervised = supervise(&mut child, link, auth, control.as_ref(), None);
     watch.stop();
     drop(temporary.lock().map(|mut t| t.take()));
     let code = match supervised {

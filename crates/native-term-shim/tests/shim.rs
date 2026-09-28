@@ -9,7 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use native_term_session::pipe::{PipeConnection, PipeListener};
-use native_term_session::protocol::{AppMessage, Role, ShimMessage};
+use native_term_session::protocol::{AppMessage, PasswordAnswer, Role, ShimMessage};
 
 const WAIT: Duration = Duration::from_secs(10);
 
@@ -24,7 +24,10 @@ fn fake_ssh() -> PathBuf {
 }
 
 fn pipe_name(tag: &str) -> String {
-    format!(r"\\.\pipe\nativeterm-shimtest-{tag}-{}", std::process::id())
+    // (one of its own each time: a test may serve several at once)
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(r"\\.\pipe\nativeterm-shimtest-{tag}-{}-{n}", std::process::id())
 }
 
 fn spawn_shim(pipe: &str, args: &[&str], envs: &[(&str, &str)]) -> Child {
@@ -259,10 +262,14 @@ fn saved_passwords_are_given_once_and_marked_when_refused() {
                 ("FAKE_SSH_G", g),
                 ("FAKE_SSH_PASSWORD", password),
                 ("FAKE_SSH_LOG", log.to_str().unwrap()),
+                ("FAKE_SSH_LOGIN", "1"),
             ],
         );
         let conn = listener.accept().unwrap();
         assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+        // NativeTerm's window, asked where the saved password was refused:
+        // the new one is given, to be kept
+        let asked = answer_windows(listener, vec![PasswordAnswer::Given { secret: password.into(), save: true }]);
         let mut seen = Vec::new();
         for attempt in 1..=attempts {
             if attempt > 1 {
@@ -279,19 +286,27 @@ fn saved_passwords_are_given_once_and_marked_when_refused() {
         }
         conn.send(&AppMessage::Close).unwrap();
         assert_eq!(wait_exit(&mut shim), 0);
-        (seen, String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string())
+        let asked = asked.lock().unwrap().clone();
+        (seen, String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string(), asked)
     };
 
     credentials::write(&target, &Saved { user: "tester".into(), secret: "s3cret".into(), comment: String::new() })
         .unwrap();
-    let (seen, text) = run("s3cret", 1);
-    assert_eq!(seen, [ShimMessage::Connecting { attempt: 1 }, ShimMessage::Exited { code: 0 }], "{text}");
+    let (seen, text, asked) = run("s3cret", 1);
+    assert_eq!(
+        seen,
+        [ShimMessage::Connecting { attempt: 1 }, ShimMessage::Authenticated, ShimMessage::Exited { code: 0 }],
+        "{text}"
+    );
+    assert!(asked.is_empty(), "a saved password is given, nothing asked: {asked:?}");
     let lines = std::fs::read_to_string(&log).unwrap();
     assert!(lines.contains("-o | NumberOfPasswordPrompts=1"), "{lines}");
     assert!(!text.contains("s3cret"), "the password is never shown: {text}");
 
-    // the server's password changed: refused once, marked, not used again
-    let (seen, text) = run("changed", 2);
+    // the server's password changed: refused once, marked, not given
+    // again; the next attempt asks in NativeTerm's window, saying so, and
+    // the new one is kept once it logged in
+    let (seen, text, asked) = run("changed", 2);
     assert_eq!(
         seen,
         [
@@ -299,15 +314,122 @@ fn saved_passwords_are_given_once_and_marked_when_refused() {
             ShimMessage::PasswordRefused,
             ShimMessage::Exited { code: 255 },
             ShimMessage::Connecting { attempt: 2 },
-            ShimMessage::Exited { code: 255 },
+            ShimMessage::Authenticated,
+            ShimMessage::Exited { code: 0 },
         ],
         "{text}"
     );
     assert!(text.contains("The saved password was refused"), "{text}");
+    assert!(!text.contains("changed"), "the password is never shown: {text}");
+    assert_eq!(asked, [("tester".to_string(), "web01".to_string(), false, true)], "who, again, refused");
     let saved = credentials::read(&target).unwrap().unwrap();
-    assert_eq!(saved.comment, native_term_config::password::REFUSED);
-    assert_eq!(saved.secret, "s3cret", "kept, for the user to replace");
     credentials::delete(&target).unwrap();
+    assert_eq!((saved.secret.as_str(), saved.comment.as_str()), ("changed", ""), "the new one, the mark gone");
+}
+
+/// What NativeTerm's window was asked: (user, host, retry, refused).
+type Asked = std::sync::Arc<std::sync::Mutex<Vec<(String, String, bool, bool)>>>;
+
+/// NativeTerm's window, as a test plays it: each question on the pipe
+/// (`AskPassword`, from a `Request` helper) answered with the next of
+/// `answers`; what was asked: (user, host, retry, refused).
+fn answer_windows(mut listener: PipeListener, answers: Vec<PasswordAnswer>) -> Asked {
+    let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = std::sync::Arc::clone(&asked);
+    std::thread::spawn(move || {
+        let mut answers = answers.into_iter();
+        while let Ok(conn) = listener.accept() {
+            let Ok(Some(ShimMessage::Hello { role: Role::Request, .. })) = conn.recv::<ShimMessage>(WAIT) else {
+                continue;
+            };
+            let Ok(Some(ShimMessage::AskPassword { user, host, retry, refused, .. })) = conn.recv::<ShimMessage>(WAIT)
+            else {
+                continue;
+            };
+            seen.lock().unwrap().push((user, host, retry, refused));
+            let answer = answers.next().unwrap_or(PasswordAnswer::Cancel);
+            let _ = conn.send(&AppMessage::Welcome { protocol: 1 });
+            let _ = conn.send(&AppMessage::Password { answer });
+        }
+    });
+    asked
+}
+
+/// No password saved: NativeTerm's window asks (as SecureCRT does). A
+/// wrong one is asked for again, saying so; the right one is kept once
+/// logged in, and only then; Cancel gives the login up and keeps
+/// nothing; and the next time the saved one is given, nothing asked.
+#[test]
+fn a_password_asked_in_the_window_is_kept_once_the_login_worked() {
+    use native_term_win::credentials;
+    let prefix = format!("NativeTerm-Tests-shimask-{}", std::process::id());
+    let target = format!("{prefix}:tester@web01:22");
+    let run = |answers: Vec<PasswordAnswer>| {
+        let name = pipe_name("ask");
+        let mut listener = PipeListener::bind(&name).unwrap();
+        let mut shim = spawn_shim(
+            &name,
+            &["--session", "s-ask", "web01"],
+            &[
+                ("NATIVETERM_CRED_PREFIX", &prefix),
+                ("FAKE_SSH_G", "user tester;hostname web01;port 22"),
+                ("FAKE_SSH_PASSWORD", "right"),
+                ("FAKE_SSH_TRIES", "3"),
+                ("FAKE_SSH_LOGIN", "1"),
+            ],
+        );
+        let conn = listener.accept().unwrap();
+        assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+        let asked = answer_windows(listener, answers);
+        let mut seen = Vec::new();
+        loop {
+            let m = expect(&conn);
+            let done = matches!(m, ShimMessage::Exited { .. });
+            seen.push(m);
+            if done {
+                break;
+            }
+        }
+        conn.send(&AppMessage::Close).unwrap();
+        assert_eq!(wait_exit(&mut shim), 0);
+        let asked = asked.lock().unwrap().clone();
+        (seen, String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string(), asked)
+    };
+    let given = |secret: &str, save: bool| PasswordAnswer::Given { secret: secret.into(), save };
+    let cleanup = || {
+        let _ = credentials::delete(&target);
+    };
+    let result = std::panic::catch_unwind(|| {
+        // Cancel: given up, nothing kept
+        let (seen, _, asked) = run(vec![PasswordAnswer::Cancel]);
+        // (ssh is ended: given nothing it would try an empty password)
+        assert!(matches!(seen.last(), Some(ShimMessage::Exited { code }) if *code != 0), "{seen:?}");
+        assert_eq!(asked.len(), 1);
+        assert_eq!(credentials::read(&target).unwrap(), None);
+        // wrong, then right: asked again saying so; kept once logged in
+        let (seen, text, asked) = run(vec![given("wrong", true), given("right", true)]);
+        assert_eq!(
+            seen,
+            [ShimMessage::Connecting { attempt: 1 }, ShimMessage::Authenticated, ShimMessage::Exited { code: 0 }],
+            "{text}"
+        );
+        let who = |retry| ("tester".to_string(), "web01".to_string(), retry, false);
+        assert_eq!(asked, [who(false), who(true)]);
+        let saved = credentials::read(&target).unwrap().unwrap();
+        assert_eq!((saved.user.as_str(), saved.secret.as_str(), saved.comment.as_str()), ("tester", "right", ""));
+        assert!(!text.contains("right") && !text.contains("wrong"), "no password in the tab: {text}");
+        // saved now: given, nothing asked
+        let (seen, _, asked) = run(vec![]);
+        assert_eq!(seen[1], ShimMessage::Authenticated);
+        assert!(asked.is_empty(), "{asked:?}");
+        // "Save password" off: logged in, nothing kept
+        credentials::delete(&target).unwrap();
+        let (seen, _, _) = run(vec![given("right", false)]);
+        assert_eq!(seen[1], ShimMessage::Authenticated);
+        assert_eq!(credentials::read(&target).unwrap(), None);
+    });
+    cleanup();
+    result.unwrap();
 }
 
 /// A folder's credential set (`NativeTermCredential`): its password is

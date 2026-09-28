@@ -16,6 +16,8 @@ native-term-config = { path = "../native-term-config" }
 native-term-session = { path = "../native-term-session" }
 native-term-os = { path = "../native-term-os" }
 zmodem2 = "0.7"
+# what the askpass helper is told (askpass.rs)
+serde = { version = "1", features = ["derive"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

@@ -13,7 +13,9 @@
 //! - `FAKE_SSH_WINDOWS=1`: runs the remote command with `cmd.exe /c`, like
 //!   a Windows sshd.
 //! - `FAKE_SSH_PASSWORD=<p>`: logs in only if the forced `SSH_ASKPASS`
-//!   helper answers `<p>` (`<p>-other` for hosts named `other…`).
+//!   helper answers `<p>` (`<p>-other` for hosts named `other…`), asked
+//!   up to `FAKE_SSH_TRIES` times (1; once where the arguments say
+//!   `NumberOfPasswordPrompts=1`), before the `LocalCommand` runs.
 //! - `FAKE_SSH_INTERACTIVE=<bash>`: after the login, runs that shell
 //!   interactively (a local stand-in for the remote side).
 //! - As ntplink: with `-nt-control <pipe>`, opens that pipe and logs each
@@ -58,6 +60,41 @@ mod on_windows {
             control_log(pipe);
         }
         let env_num = |key: &str, default: i64| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
+        // like ssh with SSH_ASKPASS_REQUIRE=force: the password from the
+        // helper, as many times as FAKE_SSH_TRIES says (ssh's
+        // NumberOfPasswordPrompts: 1 where the arguments say so)
+        if let Ok(expected) = std::env::var("FAKE_SSH_PASSWORD") {
+            let host = args.iter().skip_while(|a| *a != "--").nth(1).cloned().unwrap_or_default();
+            // hosts named "other…" have a different password
+            let expected = if host.starts_with("other") { format!("{expected}-other") } else { expected };
+            let forced = std::env::var("SSH_ASKPASS_REQUIRE").as_deref() == Ok("force");
+            let once = args.iter().any(|a| a == "NumberOfPasswordPrompts=1");
+            let tries = if once { 1 } else { env_num("FAKE_SSH_TRIES", 1) };
+            let mut right = false;
+            for _ in 0..tries {
+                let given = std::env::var_os("SSH_ASKPASS").filter(|_| forced).and_then(|helper| {
+                    let output = Command::new(helper).arg(format!("tester@{host}'s password: ")).output().ok()?;
+                    // (a helper that fails is ssh's "cancelled": no more asking)
+                    output
+                        .status
+                        .success()
+                        .then(|| String::from_utf8_lossy(&output.stdout).trim_end_matches(['\r', '\n']).to_string())
+                });
+                match given {
+                    Some(given) if given == expected => {
+                        right = true;
+                        break;
+                    }
+                    Some(_) => continue,
+                    None => break,
+                }
+            }
+            if !right {
+                eprintln!("tester@{host}: Permission denied (password).");
+                std::process::exit(255);
+            }
+        }
+        // logged in: the LocalCommand
         let once = std::env::var("FAKE_SSH_LOGIN_ONCE").ok().filter(|f| std::fs::File::create_new(f).is_ok());
         if std::env::var("FAKE_SSH_LOGIN").as_deref() == Ok("1") || once.is_some() {
             std::thread::sleep(Duration::from_millis(env_num("FAKE_SSH_LOGIN_DELAY_MS", 0) as u64));
@@ -68,21 +105,6 @@ mod on_windows {
                     local.env("NATIVETERM_SERVER_VERSION", said);
                 }
                 let _ = local.arg("/c").raw_arg(command).status();
-            }
-        }
-        // like ssh with SSH_ASKPASS_REQUIRE=force: the password from the helper
-        if let Ok(expected) = std::env::var("FAKE_SSH_PASSWORD") {
-            let host = args.iter().skip_while(|a| *a != "--").nth(1).cloned().unwrap_or_default();
-            // hosts named "other…" have a different password
-            let expected = if host.starts_with("other") { format!("{expected}-other") } else { expected };
-            let forced = std::env::var("SSH_ASKPASS_REQUIRE").as_deref() == Ok("force");
-            let given = std::env::var_os("SSH_ASKPASS").filter(|_| forced).and_then(|helper| {
-                let output = Command::new(helper).arg(format!("tester@{host}'s password: ")).output().ok()?;
-                Some(String::from_utf8_lossy(&output.stdout).trim_end_matches(['\r', '\n']).to_string())
-            });
-            if given.as_deref() != Some(expected.as_str()) {
-                eprintln!("tester@{host}: Permission denied (password).");
-                std::process::exit(255);
             }
         }
         // run the remote command with a local POSIX shell (key installation)
