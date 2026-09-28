@@ -48,6 +48,11 @@ struct Armed {
     skipped: bool,
     /// Given in the window, to be kept once the login worked.
     keep: Option<String>,
+    /// Given in the window with it before: the answer to the first prompt.
+    preset: Option<String>,
+    /// Given in the window with another user name: to connect again as
+    /// that user (user, password, keep).
+    relogin: Option<(String, String, bool)>,
 }
 
 struct Server {
@@ -76,13 +81,18 @@ fn server() -> Option<&'static Server> {
 /// What the helper of `helper` (a process id) is told for `prompt`.
 fn answer(state: &Mutex<Armed>, served: &AtomicU32, prompt: &str, helper: u32) -> Reply {
     let (target, stored, refused, retry, ssh) = {
-        let armed = armed(state);
+        let mut armed = armed(state);
         let Some(target) = armed.target.clone() else { return Reply::Ask };
         // the helper of our own ssh only, for this account's own prompt
         let ours =
             native_term_os::process::parent_pid(helper).is_some_and(|p| armed.ssh_pid != 0 && p == armed.ssh_pid);
         if !ours || !target.answers(prompt) || armed.skipped {
             return Reply::Ask;
+        }
+        // (connected again as another user: the password given with it)
+        if let Some(secret) = armed.preset.take() {
+            armed.asked += 1;
+            return Reply::Answer(secret);
         }
         (target, armed.stored, armed.refused, armed.asked > 0, armed.ssh_pid)
     };
@@ -100,7 +110,14 @@ fn answer(state: &Mutex<Armed>, served: &AtomicU32, prompt: &str, helper: u32) -
     let asked = ask_nativeterm(&target, retry, refused);
     let mut armed = armed(state);
     match asked {
-        Some(PasswordAnswer::Given { secret, save }) => {
+        Some(PasswordAnswer::Given { secret, save, user: Some(user) }) if user != target.user => {
+            // ssh sent the user name already: ended, to connect again as
+            // this one (the password given to its first prompt)
+            armed.relogin = Some((user, secret, save));
+            native_term_os::process::terminate(ssh);
+            Reply::Cancel
+        }
+        Some(PasswordAnswer::Given { secret, save, .. }) => {
             armed.asked += 1;
             armed.keep = save.then(|| secret.clone());
             Reply::Answer(secret)
@@ -178,6 +195,27 @@ impl Attempt {
         Some(Attempt { stored: saved.is_some() && !refused, refused, target })
     }
 
+    /// Connecting as another user (given in the window): `secret` answers
+    /// the first prompt; kept once logged in where `keep`.
+    pub fn preset(&self, secret: String, keep: bool) {
+        if let Some(server) = server() {
+            let mut armed = armed(&server.armed);
+            armed.keep = keep.then(|| secret.clone());
+            armed.preset = Some(secret);
+        }
+    }
+
+    /// The window gave another user name: (user, password, keep). Asked
+    /// before `finish`.
+    pub fn relogin(&self) -> Option<(String, String, bool)> {
+        armed(&server()?.armed).relogin.take()
+    }
+
+    /// Whether a password given in the window is to be kept once logged in.
+    pub fn keeps(&self) -> bool {
+        server().is_some_and(|server| armed(&server.armed).keep.is_some())
+    }
+
     /// ssh asks the shim for every prompt (per process: never the user's
     /// environment); a saved password is tried once.
     pub fn configure(&self, ssh: &mut Command, arguments: &mut Vec<std::ffi::OsString>) -> bool {
@@ -189,8 +227,18 @@ impl Attempt {
             arguments.splice(at..at, ["-o".into(), "NumberOfPasswordPrompts=1".into()]);
         }
         server.served.store(0, Ordering::SeqCst);
-        *armed(&server.armed) =
-            Armed { target: Some(self.target.clone()), stored: self.stored, refused: self.refused, ..Armed::default() };
+        let mut armed = armed(&server.armed);
+        // (a password given with another user name stays for this attempt)
+        let (preset, keep) = (armed.preset.take(), armed.keep.take());
+        *armed = Armed {
+            target: Some(self.target.clone()),
+            stored: self.stored && preset.is_none(),
+            refused: self.refused,
+            preset,
+            keep,
+            ..Armed::default()
+        };
+        drop(armed);
         true
     }
 

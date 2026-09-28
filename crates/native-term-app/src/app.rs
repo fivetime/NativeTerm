@@ -1225,6 +1225,11 @@ impl App {
             crate::tab_title_window::open(ticket, current);
             return;
         }
+        if let MenuRequest::SetUser { alias, user } = request {
+            // (whatever dialog is open: nothing of it is asked)
+            self.set_user(&alias, &user);
+            return;
+        }
         if let MenuRequest::Password { ticket, question } = request {
             // a window of its own too, whatever dialog is open here
             crate::password_window::open(ticket, question);
@@ -1263,6 +1268,7 @@ impl App {
             | MenuRequest::PasteQuotation(_)
             | MenuRequest::TabTitle { .. }
             | MenuRequest::Password { .. }
+            | MenuRequest::SetUser { .. }
             | MenuRequest::Find(_) => {}
             MenuRequest::ConfirmClose(ids) => {
                 let labels = self
@@ -1403,6 +1409,24 @@ impl App {
         self.tags_changed();
         if !had_id {
             self.reload();
+        }
+    }
+
+    /// The host `alias` is logged in to as `user` from now on (the password
+    /// window's user name, with "Save password"): its own `User`.
+    fn set_user(&mut self, alias: &str, user: &str) {
+        let Some((_, host)) = self.tree.find(alias) else { return };
+        if host.plink.is_some() || host.user.as_deref() == Some(user) {
+            return;
+        }
+        let mut draft = HostDraft::from_host(host);
+        draft.user = Some(user.to_string());
+        match self.editor.update_host(host, &draft) {
+            Ok(()) => {
+                self.notices.push(t!("notice-user-changed", alias = alias, user = user));
+                self.reload();
+            }
+            Err(e) => self.notices.push(t!("notice-user-not-changed", alias = alias, error = e.to_string())),
         }
     }
 

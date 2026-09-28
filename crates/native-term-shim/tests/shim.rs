@@ -269,7 +269,8 @@ fn saved_passwords_are_given_once_and_marked_when_refused() {
         assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
         // NativeTerm's window, asked where the saved password was refused:
         // the new one is given, to be kept
-        let asked = answer_windows(listener, vec![PasswordAnswer::Given { secret: password.into(), save: true }]);
+        let asked =
+            answer_windows(listener, vec![PasswordAnswer::Given { secret: password.into(), save: true, user: None }]);
         let mut seen = Vec::new();
         for attempt in 1..=attempts {
             if attempt > 1 {
@@ -395,7 +396,7 @@ fn a_password_asked_in_the_window_is_kept_once_the_login_worked() {
         let asked = asked.lock().unwrap().clone();
         (seen, String::from_utf8_lossy(&shim.wait_with_output().unwrap().stdout).to_string(), asked)
     };
-    let given = |secret: &str, save: bool| PasswordAnswer::Given { secret: secret.into(), save };
+    let given = |secret: &str, save: bool| PasswordAnswer::Given { secret: secret.into(), save, user: None };
     let cleanup = || {
         let _ = credentials::delete(&target);
     };
@@ -422,8 +423,30 @@ fn a_password_asked_in_the_window_is_kept_once_the_login_worked() {
         let (seen, _, asked) = run(vec![]);
         assert_eq!(seen[1], ShimMessage::Authenticated);
         assert!(asked.is_empty(), "{asked:?}");
-        // "Save password" off: logged in, nothing kept
+        // another user name: connected again as that user, the password
+        // given to its first prompt, kept under that account, and the
+        // host's user to be that one
         credentials::delete(&target).unwrap();
+        let other = format!("{prefix}:admin@web01:22");
+        let (seen, text, asked) =
+            run(vec![PasswordAnswer::Given { secret: "right".into(), save: true, user: Some("admin".into()) }]);
+        let kept = credentials::read(&other).ok().flatten();
+        let _ = credentials::delete(&other);
+        assert_eq!(kept.map(|k| (k.user, k.secret)), Some(("admin".to_string(), "right".to_string())), "under admin");
+        assert_eq!(credentials::read(&target).unwrap(), None, "nothing under the old user");
+        assert_eq!(asked.len(), 1, "asked once: {asked:?}");
+        assert!(seen.contains(&ShimMessage::UserChanged { user: "admin".into() }), "{seen:?}");
+        assert_eq!(
+            seen[seen.len() - 3..],
+            [
+                ShimMessage::Authenticated,
+                ShimMessage::UserChanged { user: "admin".into() },
+                ShimMessage::Exited { code: 0 }
+            ],
+            "{seen:?}"
+        );
+        assert!(text.contains("admin"), "said in the tab: {text}");
+        // "Save password" off: logged in, nothing kept
         let (seen, _, _) = run(vec![given("right", false)]);
         assert_eq!(seen[1], ShimMessage::Authenticated);
         assert_eq!(credentials::read(&target).unwrap(), None);

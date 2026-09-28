@@ -847,6 +847,12 @@
             KWallet or the Secret Service. See "A password asked in
             NativeTerm's window" in ARCHITECTURE.md for what was seen.
             Open: tried by hand on Windows and macOS.
+            The user name can be changed in the window too (the
+            person): the connection is made again as that user, the
+            password given to it; with "Save password" the host's user
+            becomes that one once logged in. Seen on Lingmo: a host
+            whose user was wrong, set right in the window, logged in,
+            its config and the wallet's entry the new user's.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

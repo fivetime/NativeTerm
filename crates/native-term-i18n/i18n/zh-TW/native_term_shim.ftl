@@ -96,3 +96,4 @@ preconnect-running = 連線前執行：{ $command }
 preconnect-failed = 連線前命令結束碼 { $code }；仍然繼續連線（想在此停下可在命令前加 !）。
 preconnect-stopped = 連線前命令結束碼 { $code }；不再連線。
 preconnect-not-started = 連線前命令無法啟動：{ $error }
+connecting-as = [NativeTerm] 正在以 { $user } 重新連線…

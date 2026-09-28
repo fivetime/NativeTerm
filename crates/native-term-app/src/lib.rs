@@ -2065,6 +2065,12 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                 if lost_connect {
                     shared.queue_connect(std::slice::from_ref(&id));
                 }
+                if let ShimMessage::UserChanged { user } = &message {
+                    let alias = lock(&shared.sessions).iter().find(|s| s.id == id).map(|s| s.alias.clone());
+                    if let (Some(alias), Some(ask)) = (alias, lock(&shared.ask).clone()) {
+                        ask(tab_menu::MenuRequest::SetUser { alias, user: user.clone() });
+                    }
+                }
                 if let Some(command) = login {
                     Core { shared: Arc::clone(shared) }.send_text(std::slice::from_ref(&id), &command, true);
                 }
@@ -2267,6 +2273,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
     match message {
         // only from a `Request` helper, never on a session link
         ShimMessage::OpenFiles
+        | ShimMessage::UserChanged { .. }
         | ShimMessage::Server { .. }
         | ShimMessage::Dropped { .. }
         | ShimMessage::TabMenu { .. }

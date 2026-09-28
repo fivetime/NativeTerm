@@ -100,11 +100,11 @@ mod tests {
             // the person types, a moment later
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_millis(50));
-                answer(ticket, PasswordAnswer::Given { secret: "s3cret".into(), save: true });
+                answer(ticket, PasswordAnswer::Given { secret: "s3cret".into(), save: true, user: None });
             });
         };
         let got = ask(Some(&window), question.clone());
-        assert_eq!(got, PasswordAnswer::Given { secret: "s3cret".into(), save: true });
+        assert_eq!(got, PasswordAnswer::Given { secret: "s3cret".into(), save: true, user: None });
         assert_eq!(asked.lock().unwrap().as_slice(), std::slice::from_ref(&question));
         // no window to ask in: the tab asks
         assert_eq!(ask(None, question), PasswordAnswer::Skip);

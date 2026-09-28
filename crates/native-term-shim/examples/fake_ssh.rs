@@ -72,8 +72,10 @@ mod on_windows {
             let tries = if once { 1 } else { env_num("FAKE_SSH_TRIES", 1) };
             let mut right = false;
             for _ in 0..tries {
+                // (the user: -l's, else the config's in these tests)
+                let user = args.iter().position(|a| a == "-l").and_then(|i| args.get(i + 1)).map_or("tester", |u| u);
                 let given = std::env::var_os("SSH_ASKPASS").filter(|_| forced).and_then(|helper| {
-                    let output = Command::new(helper).arg(format!("tester@{host}'s password: ")).output().ok()?;
+                    let output = Command::new(helper).arg(format!("{user}@{host}'s password: ")).output().ok()?;
                     // (a helper that fails is ssh's "cancelled": no more asking)
                     output
                         .status

@@ -278,6 +278,10 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
 
     // another folder than ~/.ssh (--ssh-dir): ssh reads its config
     let config = plink::custom_ssh_dir().map(|dir| dir.join("config"));
+    // another user name than the host's, given in the password window: for
+    // the rest of this tab; the password given with it, for the next attempt
+    let mut user: Option<String> = None;
+    let mut preset: Option<(String, bool)> = None;
     loop {
         attempt += 1;
         look::apply(alias);
@@ -300,8 +304,12 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
                 }
             }
         }
-        let effective =
+        let mut effective =
             native_term_config::effective::effective_with(&ssh_path, config.as_deref(), alias).unwrap_or_default();
+        if let Some(user) = &user {
+            effective.retain(|(k, _)| k != "user");
+            effective.push(("user".into(), user.clone()));
+        }
         // read again on every attempt: an edit applies at the next connect
         let remote = persistent::remote_command(alias, session, &effective);
         let mut arguments =
@@ -322,8 +330,16 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         command.env_remove(SERVER_VERSION);
         // a saved password: the shim answers ssh's password prompt
         let set = saved::credential_set(alias);
-        let saved =
-            saved::Attempt::find(&effective, set.as_deref()).filter(|s| s.configure(&mut command, &mut arguments));
+        if let Some(user) = &user {
+            let at = arguments.iter().position(|a| a == "--").unwrap_or(arguments.len());
+            arguments.splice(at..at, ["-l".into(), user.into()]);
+        }
+        let saved = saved::Attempt::find(&effective, set.as_deref()).inspect(|s| {
+            if let Some((secret, keep)) = preset.take() {
+                s.preset(secret, keep);
+            }
+        });
+        let saved = saved.filter(|s| s.configure(&mut command, &mut arguments));
         let mut child = match command.args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {
@@ -340,10 +356,15 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         if let Some(saved) = &saved {
             saved.started(child.id());
         }
-        // (a password given in NativeTerm's window is kept once logged in)
+        // (a password given in NativeTerm's window is kept once logged in;
+        // and the user name given with it, where kept, is the host's)
         let logged_in = || {
             if let Some(saved) = &saved {
+                let keeps = saved.keeps();
                 saved.logged_in();
+                if let (true, Some(user)) = (keeps, &user) {
+                    send(ShimMessage::UserChanged { user: user.clone() });
+                }
             }
         };
         let code = match supervise(&mut child, link, auth.as_ref(), None, Some(&logged_in)) {
@@ -355,6 +376,16 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         let end = classify_exit(code, authenticated);
         // only a direct connection shows whether the server was reached
         let unreachable = end == SessionEnd::LoginFailed && reached.is_some_and(|r| !r.stop());
+        // another user name given in the window: connected again, at once
+        if let Some((again, secret, keep)) = saved.as_ref().and_then(saved::Attempt::relogin) {
+            if let Some(saved) = &saved {
+                saved.finish();
+            }
+            println!("\r\n{}", t!("connecting-as", user = again.as_str()));
+            user = Some(again);
+            preset = Some((secret, keep));
+            continue;
+        }
         // the saved password was given and the login failed anyway
         let refused = saved.as_ref().is_some_and(|s| s.finish()) && end == SessionEnd::LoginFailed && !unreachable;
         if let (true, Some(saved)) = (refused, &saved) {

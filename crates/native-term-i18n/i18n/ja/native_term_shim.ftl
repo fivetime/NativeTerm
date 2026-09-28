@@ -98,3 +98,4 @@ preconnect-running = 接続前の実行: { $command }
 preconnect-failed = 接続前のコマンドが { $code } で終了しました。接続は続けます（先頭に ! を書くとここで止まります）。
 preconnect-stopped = 接続前のコマンドが { $code } で終了しました。接続しません。
 preconnect-not-started = 接続前のコマンドを起動できませんでした: { $error }
+connecting-as = [NativeTerm] { $user } で接続し直しています…

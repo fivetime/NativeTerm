@@ -2391,6 +2391,15 @@ Cancel and Skip.
   password is tried once): the window says when the one before was
   wrong, or that the saved one was refused. A new one for a refused
   entry clears its mark.
+- **Another user name** (the field can be changed, the person's wish:
+  a user name typed wrong in the host is set right here): ssh sent the
+  old one already, so the shim ends it and connects again as the new
+  user (`-l`, for the rest of the tab), the password given to the new
+  connection's first prompt, nothing asked again. With "Save password"
+  the password is kept under the new account once logged in, and the
+  host's own `User` in the ssh config becomes the new one
+  (`ShimMessage::UserChanged`, then `App::set_user`, a notice saying
+  so); without it the new user is the tab's only.
 - **Skip**: asked in the tab, for the rest of this attempt.
 - **Cancel** (and the window's close button): the login is given up;
   the shim ends ssh, which given nothing would try an empty password

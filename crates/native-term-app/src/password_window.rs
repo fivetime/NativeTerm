@@ -11,7 +11,7 @@ use native_term_app::t;
 pub fn open(ticket: u64, question: Question) {
     let viewport = egui::ViewportBuilder::default()
         .with_title(t!("password-ask-title"))
-        .with_inner_size([460.0, if question.can_save { 250.0 } else { 220.0 }])
+        .with_inner_size([460.0, if question.can_save { 280.0 } else { 240.0 }])
         .with_resizable(false)
         .with_minimize_button(false)
         .with_maximize_button(false)
@@ -19,6 +19,7 @@ pub fn open(ticket: u64, question: Question) {
         .with_active(true);
     let window = PasswordWindow {
         ticket,
+        user: question.user.clone(),
         question,
         secret: String::new(),
         save: true,
@@ -32,6 +33,8 @@ pub fn open(ticket: u64, question: Question) {
 struct PasswordWindow {
     ticket: u64,
     question: Question,
+    /// The user name, as the person may change it.
+    user: String,
     secret: String,
     save: bool,
     /// The field gets the keyboard when the window opens.
@@ -57,7 +60,15 @@ impl PasswordWindow {
     fn given(&mut self) {
         let secret = std::mem::take(&mut self.secret);
         let save = self.save && self.question.can_save;
-        self.answer(PasswordAnswer::Given { secret, save });
+        let user = self.user.trim();
+        let user = (user != self.question.user).then(|| user.to_string());
+        self.answer(PasswordAnswer::Given { secret, save, user });
+    }
+
+    /// A user name ssh can be given: one word.
+    fn user_is_valid(&self) -> bool {
+        let user = self.user.trim();
+        !user.is_empty() && !user.chars().any(|c| c.is_whitespace() || c.is_control())
     }
 }
 
@@ -90,7 +101,8 @@ impl crate::window::Ui for PasswordWindow {
                     if ui.button(t!("button-cancel")).clicked() || escape {
                         self.answer(PasswordAnswer::Cancel);
                     }
-                    if ui.button(t!("button-ok")).clicked() || enter {
+                    let valid = self.user_is_valid();
+                    if ui.add_enabled(valid, egui::Button::new(t!("button-ok"))).clicked() || (enter && valid) {
                         self.given();
                     }
                 });
@@ -99,6 +111,7 @@ impl crate::window::Ui for PasswordWindow {
         let frame = frame.inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(14) });
         egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
+            let changed = self.user.trim() != self.question.user;
             let q = &self.question;
             let account = format!("{}@{}", q.user, q.host);
             let asks = match &q.label {
@@ -116,7 +129,8 @@ impl crate::window::Ui for PasswordWindow {
             }
             egui::Grid::new("password-fields").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
                 ui.label(t!("password-ask-user"));
-                ui.label(egui::RichText::new(&q.user).monospace());
+                let user = ui.add(egui::TextEdit::singleline(&mut self.user).desired_width(260.0));
+                user.on_hover_text(t!("password-ask-user-hint"));
                 ui.end_row();
                 ui.label(t!("password-ask-password"));
                 let field = ui.add(egui::TextEdit::singleline(&mut self.secret).password(true).desired_width(260.0));
@@ -132,6 +146,11 @@ impl crate::window::Ui for PasswordWindow {
                 if self.save {
                     ui.weak(t!("password-ask-save-note"));
                 }
+            }
+            if changed {
+                let note =
+                    if self.save && q.can_save { t!("password-ask-user-kept") } else { t!("password-ask-user-once") };
+                ui.weak(note);
             }
         });
     }

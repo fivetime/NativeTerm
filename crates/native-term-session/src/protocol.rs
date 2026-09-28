@@ -67,6 +67,9 @@ pub enum ShimMessage {
     /// Sent just before `Exited`: the account's saved password was given
     /// and the login failed; it is marked refused and no longer used.
     PasswordRefused,
+    /// Logged in as another user than the host's (given in the password
+    /// window, "Save password" ticked): the host's `User` is to be this.
+    UserChanged { user: String },
     /// The client takes these commands (`AppMessage::Special`) for this
     /// connection, e.g. "brk" (a serial line's Break, Telnet's Break);
     /// sent after `Connecting`, none until then.
@@ -187,8 +190,15 @@ impl MenuItem {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PasswordAnswer {
-    /// This one; kept after the login where `save`.
-    Given { secret: String, save: bool },
+    /// This one; kept after the login where `save`. `user`: another
+    /// user name than the one asked for (the connection is made again as
+    /// that user).
+    Given {
+        secret: String,
+        save: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+    },
     /// Asked in the tab after all.
     Skip,
     /// The connection is given up.
@@ -199,7 +209,9 @@ impl std::fmt::Debug for PasswordAnswer {
     // (a password is never written out: not in a log, not in a panic)
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PasswordAnswer::Given { save, .. } => write!(f, "Given {{ secret: <hidden>, save: {save} }}"),
+            PasswordAnswer::Given { save, user, .. } => {
+                write!(f, "Given {{ secret: <hidden>, save: {save}, user: {user:?} }}")
+            }
             PasswordAnswer::Skip => f.write_str("Skip"),
             PasswordAnswer::Cancel => f.write_str("Cancel"),
         }
@@ -322,6 +334,7 @@ mod tests {
             ShimMessage::Specials { names: vec!["brk".into(), "ayt".into()] },
             ShimMessage::Unreachable,
             ShimMessage::PasswordRefused,
+            ShimMessage::UserChanged { user: "admin".into() },
             ShimMessage::TabMenu { place: None },
             ShimMessage::TabMenu { place: Some(TabPlace { index: 1, count: 3 }) },
             ShimMessage::TabTitle { current: "bash".into() },
@@ -362,14 +375,15 @@ mod tests {
         assert_eq!(decode::<AppMessage>(&encode(&card)).unwrap(), card);
         let title = AppMessage::TabTitle { title: "构建".into(), rename: true };
         for answer in [
-            PasswordAnswer::Given { secret: "p\"a ss".into(), save: true },
+            PasswordAnswer::Given { secret: "p\"a ss".into(), save: true, user: None },
+            PasswordAnswer::Given { secret: "x".into(), save: false, user: Some("admin".into()) },
             PasswordAnswer::Skip,
             PasswordAnswer::Cancel,
         ] {
             let message = AppMessage::Password { answer };
             assert_eq!(decode::<AppMessage>(&encode(&message)).unwrap(), message);
         }
-        let shown = format!("{:?}", PasswordAnswer::Given { secret: "hunter2".into(), save: false });
+        let shown = format!("{:?}", PasswordAnswer::Given { secret: "hunter2".into(), save: false, user: None });
         assert!(!shown.contains("hunter2"), "{shown}");
         assert_eq!(decode::<AppMessage>(&encode(&title)).unwrap(), title);
         // an older shim asks without the tab's place
