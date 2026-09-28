@@ -174,9 +174,94 @@ pub fn save(
     write(&path_in(data_dir), notes)
 }
 
+/// A tag called something else from now on (`new`), or deleted
+/// (`None`): in every note that has it, in the database and in the file,
+/// and among the tags there are. How many notes had it.
+pub fn retag(
+    registry: &crate::registry::Registry,
+    data_dir: &Path,
+    notes: &mut BTreeMap<String, Note>,
+    old: &str,
+    new: Option<&str>,
+) -> io::Result<usize> {
+    let new = new.map(str::trim).filter(|new| !new.is_empty());
+    let now = crate::registry::now();
+    let mut changed = 0;
+    for (id, note) in notes.iter_mut().filter(|(_, note)| note.has_tag(old)) {
+        note.tags = retagged(&note.tags, old, new);
+        // (newer than the other computers' copy of it, which has the old tag)
+        note.updated_at = now.max(note.updated_at + 1);
+        registry.set_note(id, note).map_err(io::Error::other)?;
+        changed += 1;
+    }
+    // (the same tag in other letters is the same row: it goes, and comes back as it is written now)
+    registry.delete_tag(old).map_err(io::Error::other)?;
+    if let Some(new) = new {
+        registry.add_tag(new).map_err(io::Error::other)?;
+    }
+    if changed > 0 {
+        write(&path_in(data_dir), notes)?;
+    }
+    Ok(changed)
+}
+
+/// `tags` with `old` called `new` where it stood, or without it; a note
+/// that has both has the new one once.
+fn retagged(tags: &[String], old: &str, new: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in tags {
+        let tag = match (tag.eq_ignore_ascii_case(old), new) {
+            (true, Some(new)) => new,
+            (true, None) => continue,
+            (false, _) => tag.as_str(),
+        };
+        if !out.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
+            out.push(tag.to_string());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tag_is_renamed_and_deleted_everywhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = crate::registry::Registry::in_memory().unwrap();
+        let mut notes = BTreeMap::new();
+        for (id, tags) in [("a", vec!["prod", "ceph"]), ("b", vec!["Prod", "live"]), ("c", vec!["lab"])] {
+            let n = note("", &tags, 100);
+            registry.set_note(id, &n).unwrap();
+            notes.insert(id.to_string(), n);
+        }
+        assert_eq!(registry.tags().unwrap(), ["ceph", "lab", "live", "prod"], "once, as it was written first");
+        // called something else: where it stood, in every note that had it
+        assert_eq!(retag(&registry, dir.path(), &mut notes, "PROD", Some(" live ")).unwrap(), 2);
+        assert_eq!(notes["a"].tags, ["live", "ceph"]);
+        assert_eq!(notes["b"].tags, ["live"], "a note that had both has it once");
+        assert_eq!(notes["c"].tags, ["lab"]);
+        assert!(notes["a"].updated_at > 100, "newer than the copies that have the old tag");
+        assert_eq!(registry.tags().unwrap(), ["ceph", "lab", "live"]);
+        assert_eq!(registry.note("b").unwrap().unwrap().tags, ["live"]);
+        assert!(std::fs::read_to_string(path_in(dir.path())).unwrap().contains("live"));
+        // deleted: from the notes, and from the tags there are
+        assert_eq!(retag(&registry, dir.path(), &mut notes, "ceph", None).unwrap(), 1);
+        assert_eq!(notes["a"].tags, ["live"]);
+        assert_eq!(registry.tags().unwrap(), ["lab", "live"]);
+        // a tag no note has any more stays one that can be chosen, until it is deleted
+        let mut cleared = notes["c"].clone();
+        cleared.tags.clear();
+        save(&registry, dir.path(), &mut notes, "c", cleared).unwrap();
+        assert_eq!(registry.tags().unwrap(), ["lab", "live"]);
+        assert_eq!(retag(&registry, dir.path(), &mut notes, "lab", None).unwrap(), 0);
+        assert_eq!(registry.tags().unwrap(), ["live"]);
+        // in other letters only
+        assert_eq!(retag(&registry, dir.path(), &mut notes, "live", Some("Live")).unwrap(), 2);
+        assert_eq!(registry.tags().unwrap(), ["Live"]);
+        assert_eq!(notes["b"].tags, ["Live"]);
+    }
 
     fn note(text: &str, tags: &[&str], updated: i64) -> Note {
         Note { text: text.to_string(), tags: tags.iter().map(|t| t.to_string()).collect(), updated_at: updated }

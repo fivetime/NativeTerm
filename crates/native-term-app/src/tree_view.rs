@@ -1,4 +1,4 @@
-//! The session tree: a search field, filters, folders and hosts (or the
+//! The session tree: a search field, the tags, folders and hosts (or the
 //! hosts used lately, as a list). Folder labels like `生产 / 控制节点` (an
 //! imported SecureCRT tree) are shown as nested folders. Rows are
 //! virtualized (only visible rows are laid out), so thousands of hosts
@@ -60,6 +60,9 @@ pub enum TreeAction {
     FolderTabColor(PathBuf, Option<String>),
     FolderColorScheme(PathBuf, Option<String>),
     Reload,
+    /// A tag called something else, or deleted: everywhere it is.
+    RenameTag(String),
+    DeleteTag(String),
 }
 
 /// How a host's sessions are doing, for the dot next to it.
@@ -92,79 +95,73 @@ impl Activity {
     }
 }
 
-/// Which hosts are shown: the chips above the tree.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Which hosts are shown: the chips above the tree. They are the tags
+/// the hosts were given (`registry::Note`), and before them what is said
+/// of a host without being written: a favorite, connected.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Filter {
     #[default]
     All,
-    Ssh,
-    /// Telnet, rlogin, raw, SUPDUP.
-    Network,
-    Serial,
+    Favorites,
     /// Logged in, in a session that is open.
     Connected,
-    Favorites,
+    /// Those that have this tag.
+    Tag(String),
 }
 
 impl Filter {
-    fn label(self) -> String {
+    fn label(&self) -> String {
         match self {
             Filter::All => t!("filter-all"),
-            Filter::Ssh => "SSH".into(),
-            Filter::Network => t!("filter-network"),
-            Filter::Serial => t!("protocol-serial"),
-            Filter::Connected => t!("props-state-connected"),
-            Filter::Favorites => t!("tree-favorites"),
+            Filter::Favorites => icons::with(icons::STAR_FILLED, t!("tree-favorites")),
+            Filter::Connected => icons::with(icons::CONNECT, t!("props-state-connected")),
+            Filter::Tag(tag) => tag.clone(),
         }
     }
 
-    fn takes(self, host: &HostEntry, activity: &HashMap<String, Activity>) -> bool {
-        let serial = host.plink.as_ref().map(|p| p.protocol == Protocol::Serial);
+    fn takes(&self, host: &HostEntry, activity: &HashMap<String, Activity>, written: Written) -> bool {
         match self {
             Filter::All => true,
-            Filter::Ssh => serial.is_none(),
-            Filter::Network => serial == Some(false),
-            Filter::Serial => serial == Some(true),
-            Filter::Connected => activity.get(host.alias()) == Some(&Activity::Connected),
             Filter::Favorites => host.favorite(),
+            Filter::Connected => activity.get(host.alias()) == Some(&Activity::Connected),
+            Filter::Tag(tag) => written.of(host).is_some_and(|note| note.has_tag(tag)),
         }
     }
 }
 
-/// What the tree has hosts of: a filter nothing would pass is not offered.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Kinds {
-    ssh: bool,
-    network: bool,
-    serial: bool,
+/// What the chips offer: the favorites where there are some, and the
+/// tags there are with how many of the tree's hosts have each, those
+/// most hosts have first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct Chips {
     favorites: bool,
+    tags: Vec<(String, usize)>,
 }
 
-impl Kinds {
-    fn of(tree: &SessionTree) -> Kinds {
-        let mut kinds = Kinds::default();
+impl Chips {
+    fn of(tree: &SessionTree, written: Written, known: &[String]) -> Chips {
+        let mut tags: Vec<(String, usize)> = known.iter().map(|tag| (tag.clone(), 0)).collect();
+        let mut favorites = false;
         for (_, host) in tree.hosts() {
-            match host.plink.as_ref().map(|p| p.protocol) {
-                None => kinds.ssh = true,
-                Some(Protocol::Serial) => kinds.serial = true,
-                Some(_) => kinds.network = true,
+            favorites |= host.favorite();
+            for tag in written.of(host).map(|note| note.tags.as_slice()).unwrap_or_default() {
+                match tags.iter_mut().find(|(known, _)| known.eq_ignore_ascii_case(tag)) {
+                    Some((_, count)) => *count += 1,
+                    None => tags.push((tag.clone(), 1)),
+                }
             }
-            kinds.favorites |= host.favorite();
         }
-        kinds
+        tags.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase())));
+        Chips { favorites, tags }
     }
 
-    /// The filters to offer: a kind's where there is more than one kind.
-    fn filters(self) -> Vec<Filter> {
+    fn filters(&self) -> Vec<Filter> {
         let mut filters = vec![Filter::All];
-        let kinds = [(self.ssh, Filter::Ssh), (self.network, Filter::Network), (self.serial, Filter::Serial)];
-        if kinds.iter().filter(|(there, _)| *there).count() > 1 {
-            filters.extend(kinds.iter().filter(|(there, _)| *there).map(|(_, filter)| *filter));
-        }
-        filters.push(Filter::Connected);
         if self.favorites {
             filters.push(Filter::Favorites);
         }
+        filters.push(Filter::Connected);
+        filters.extend(self.tags.iter().map(|(tag, _)| Filter::Tag(tag.clone())));
         filters
     }
 }
@@ -187,6 +184,9 @@ pub struct Shown<'a> {
     pub recent: &'a [String],
     pub activity: &'a HashMap<String, Activity>,
     pub written: Written<'a>,
+    /// The tags there are (the database's), whether a host has them or
+    /// not.
+    pub tags: &'a [String],
     pub scope: Scope,
 }
 
@@ -300,8 +300,11 @@ pub struct TreeView {
     nodes: (u64, Vec<Node>),
     /// Pinyin forms of labels and folder names, per tree generation.
     pinyin: (u64, HashMap<String, (String, String)>),
-    /// What there are hosts of, per tree generation.
-    kinds: (Option<u64>, Kinds),
+    /// What the chips offer, per tree and per notes as they are.
+    chips: (Option<(u64, u64)>, Chips),
+    /// The chips are all shown, in as many lines as they take (one line
+    /// of them otherwise).
+    chips_open: bool,
 }
 
 struct SearchCache {
@@ -645,12 +648,13 @@ impl TreeView {
         })
     }
 
-    fn update_kinds(&mut self, tree: &SessionTree, generation: u64) {
-        if self.kinds.0 != Some(generation) {
-            self.kinds = (Some(generation), Kinds::of(tree));
+    fn update_chips(&mut self, shown: &Shown<'_>) {
+        let key = (shown.generation, shown.written.generation);
+        if self.chips.0 != Some(key) {
+            self.chips = (Some(key), Chips::of(shown.tree, shown.written, shown.tags));
         }
         // a filter that is not offered any more is off
-        if !self.kinds.1.filters().contains(&self.filter) {
+        if !self.chips.1.filters().contains(&self.filter) {
             self.filter = Filter::All;
         }
     }
@@ -715,6 +719,7 @@ impl TreeView {
                     host.target(),
                     host.user.as_deref().unwrap_or(""),
                     host.nt.get("note").unwrap_or(""),
+                    host.plink.as_ref().and_then(|session| session.note.as_deref()).unwrap_or(""),
                     note.map(|n| n.text.as_str()).unwrap_or(""),
                     &tags,
                     folder.label(),
@@ -752,9 +757,9 @@ impl TreeView {
         let folders: Vec<&Folder> = tree.folders().collect();
         let mut rows = Vec::new();
         let query = self.query.trim().to_string();
-        let filter = self.filter;
+        let filter = self.filter.clone();
         let lately = |host: &HostEntry| shown.recent.iter().any(|a| a == host.alias());
-        let takes = |host: &HostEntry| filter.takes(host, shown.activity);
+        let takes = |host: &HostEntry| filter.takes(host, shown.activity, shown.written);
         if !query.is_empty() {
             let hits = self.search(tree, shown.generation, shown.recent, shown.written);
             let hits: Vec<&HostEntry> = hits
@@ -785,7 +790,7 @@ impl TreeView {
             return rows;
         }
         let selected: std::collections::HashSet<&str> = self.selected.iter().map(String::as_str).collect();
-        let look = Look { filter, activity: shown.activity, selected: &selected };
+        let look = Look { filter: &filter, activity: shown.activity, written: shown.written, selected: &selected };
         // the main config's own hosts first, then the folder hierarchy
         if let Some((index, main)) = folders.iter().enumerate().find(|(_, f)| f.name.is_empty()) {
             let hosts: Vec<&HostEntry> = main.hosts.iter().filter(|h| takes(h)).collect();
@@ -821,11 +826,11 @@ impl TreeView {
     fn node_rows<'a>(&self, node: &Node, depth: usize, folders: &[&'a Folder], look: &Look, rows: &mut Vec<Row<'a>>) {
         let mut under = Vec::new();
         folders_under(node, &mut under);
-        let takes = |host: &&HostEntry| look.filter.takes(host, look.activity);
+        let takes = |host: &&HostEntry| look.filter.takes(host, look.activity, look.written);
         let hosts = || under.iter().flat_map(|&i| folders[i].hosts.iter()).filter(takes);
         let count = hosts().count();
         // a folder with nothing the filter passes is not shown
-        if count == 0 && look.filter != Filter::All {
+        if count == 0 && *look.filter != Filter::All {
             return;
         }
         let checked =
@@ -867,30 +872,101 @@ impl TreeView {
             .collect()
     }
 
-    /// The search field and the filters, in a bar of their own above the
+    /// The search field and the chips, in a bar of their own above the
     /// rows (`p-4 space-y-3`).
-    fn search_bar(&mut self, ui: &mut egui::Ui, tones: &Tones) -> (egui::Response, bool) {
+    fn search_bar(
+        &mut self,
+        ui: &mut egui::Ui,
+        tones: &Tones,
+        actions: &mut Vec<TreeAction>,
+    ) -> (egui::Response, bool) {
         let frame = layout::bar(tones, 16);
         egui::Panel::top("tree-search")
             .frame(frame)
             .show_inside(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 12.0;
                 let search = layout::search_field(ui, tones, &mut self.query, &t!("tree-search-hint"));
-                let hidden = egui::scroll_area::ScrollBarVisibility::AlwaysHidden;
-                egui::ScrollArea::horizontal().id_salt("tree-filters").scroll_bar_visibility(hidden).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        layout::caption(ui, tones, &t!("filter-label"));
-                        for filter in self.kinds.1.filters() {
-                            if layout::chip(ui, tones, &filter.label(), self.filter == filter).clicked() {
-                                self.filter = filter;
-                            }
-                        }
-                    });
-                });
+                self.chips_row(ui, tones, actions);
                 search
             })
             .inner
+    }
+
+    /// The chips: one line of them, and where they are more than a line
+    /// holds what opens the row (two chevrons at its end): then all of
+    /// them, in as many lines as they take (`CHIP_LINES` at most: the
+    /// others are scrolled to, the rows under them staying in sight).
+    /// In the one line the chip that is on is among those shown. A
+    /// tag's chip has a menu: the tag called something else, or deleted.
+    fn chips_row(&mut self, ui: &mut egui::Ui, tones: &Tones, actions: &mut Vec<TreeAction>) {
+        const BETWEEN: f32 = 6.0;
+        const CHIP_LINES: usize = 6;
+        let filters = self.chips.1.filters();
+        let caption = t!("filter-label");
+        let full = ui.available_width();
+        let widths: Vec<f32> = filters.iter().map(|f| layout::chip_width(ui, &f.label())).collect();
+        let before = layout::caption_width(ui, tones, &caption);
+        let folds = before + widths.iter().map(|w| BETWEEN + w).sum::<f32>() > full;
+        let room = if folds { full - layout::CHIP - BETWEEN } else { full };
+        let shown = match (folds, self.chips_open) {
+            (true, false) => {
+                in_one_line(&widths, filters.iter().position(|f| *f == self.filter), room - before, BETWEEN)
+            }
+            _ => (0..filters.len()).collect(),
+        };
+        let open = folds && self.chips_open;
+        let mut chosen = None;
+        let on = &self.filter;
+        let mut chips = |ui: &mut egui::Ui| {
+            let lines = egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(open);
+            ui.allocate_ui_with_layout(egui::vec2(room, layout::CHIP), lines, |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(BETWEEN, BETWEEN);
+                ui.set_min_height(layout::CHIP);
+                layout::caption(ui, tones, &caption);
+                for filter in shown.iter().map(|i| &filters[*i]) {
+                    let chip = layout::chip(ui, tones, &filter.label(), on == filter);
+                    if chip.clicked() {
+                        chosen = Some(filter.clone());
+                    }
+                    let Filter::Tag(tag) = filter else { continue };
+                    chip.context_menu(|ui| {
+                        if ui.button(icons::with(icons::RENAME, t!("tag-rename"))).clicked() {
+                            actions.push(TreeAction::RenameTag(tag.clone()));
+                            ui.close();
+                        }
+                        if ui.button(icons::with(icons::DELETE, t!("tag-delete"))).clicked() {
+                            actions.push(TreeAction::DeleteTag(tag.clone()));
+                            ui.close();
+                        }
+                    });
+                }
+            });
+        };
+        let first = ui.cursor().min;
+        if open && layout::chip_lines(&widths, before, room, BETWEEN) > CHIP_LINES {
+            // (as high as that whatever the bar was before: the bar is as
+            // high as what is in it, and what scrolls takes what there is)
+            let most = CHIP_LINES as f32 * layout::CHIP + (CHIP_LINES - 1) as f32 * BETWEEN;
+            ui.allocate_ui(egui::vec2(room, most), |ui| {
+                egui::ScrollArea::vertical().id_salt("tree-chips").auto_shrink(false).max_height(most).show(ui, chips);
+            });
+        } else {
+            chips(ui);
+        }
+        if folds {
+            // (at the first line's end, however many lines there are)
+            let place =
+                egui::Rect::from_min_size(first + egui::vec2(room + BETWEEN, 0.0), egui::Vec2::splat(layout::CHIP));
+            let mut end = ui.new_child(egui::UiBuilder::new().max_rect(place));
+            let hidden = filters.len() - shown.len();
+            let hint = if open { t!("tags-fold") } else { t!("tags-unfold", count = hidden) };
+            if layout::fold_button(&mut end, tones, open, &hint).clicked() {
+                self.chips_open = !self.chips_open;
+            }
+        }
+        if let Some(filter) = chosen {
+            self.filter = filter;
+        }
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, shown: &Shown<'_>) -> Vec<TreeAction> {
@@ -898,8 +974,8 @@ impl TreeView {
         let (tree, activity, written) = (shown.tree, shown.activity, shown.written);
         let mut actions = Vec::new();
         self.update_nodes(tree, shown.generation);
-        self.update_kinds(tree, shown.generation);
-        let (search, clear) = self.search_bar(ui, &tones);
+        self.update_chips(shown);
+        let (search, clear) = self.search_bar(ui, &tones, &mut actions);
         if std::mem::take(&mut self.focus_search) {
             search.request_focus();
         }
@@ -1328,12 +1404,12 @@ impl TreeView {
         if let Some((path, folder, on)) = check_folder {
             // the hosts under it the filter passes: those are what its
             // checkbox stood for
-            let filter = self.filter;
+            let filter = self.filter.clone();
             let under: Vec<String> = self
                 .hosts_under(tree, &path, folder)
                 .into_iter()
                 .map(|r| r.alias)
-                .filter(|a| tree.find(a).is_some_and(|(_, h)| filter.takes(h, activity)))
+                .filter(|a| tree.find(a).is_some_and(|(_, h)| filter.takes(h, activity, written)))
                 .collect();
             self.selected.retain(|a| !under.contains(a));
             if on {
@@ -1399,9 +1475,34 @@ impl TreeView {
     }
 }
 
+/// The chips that are shown in one line `room` wide (each as wide as
+/// `widths` says, `between` before each), by their places: from the
+/// first on as many as fit, the one that is on (`on`) among them, in the
+/// place of the last that would have fitted if it would not have.
+fn in_one_line(widths: &[f32], on: Option<usize>, room: f32, between: f32) -> Vec<usize> {
+    let mut shown = Vec::new();
+    let mut used = 0.0;
+    for (i, width) in widths.iter().enumerate() {
+        if used + between + width > room {
+            break;
+        }
+        used += between + width;
+        shown.push(i);
+    }
+    if let Some(on) = on.filter(|on| !shown.contains(on)) {
+        // (the first chip is "All": it stays)
+        while shown.len() > 1 && used + between + widths[on] > room {
+            used -= between + widths[shown.pop().unwrap_or_default()];
+        }
+        shown.push(on);
+    }
+    shown
+}
+
 /// What passes the filter, and what is selected, while the rows are made.
 struct Look<'a> {
-    filter: Filter,
+    filter: &'a Filter,
+    written: Written<'a>,
     activity: &'a HashMap<String, Activity>,
     selected: &'a std::collections::HashSet<&'a str>,
 }
@@ -1569,8 +1670,9 @@ mod tests {
         let main = "Include config.d/*.conf\n\nHost web\n  HostName 10.0.0.2\n  NativeTermFavorite yes\n";
         std::fs::write(dir.join("config"), main).unwrap();
         std::fs::create_dir_all(dir.join("config.d")).unwrap();
-        let lab = "Host __nativeterm_folder__\n  NativeTermLabel Lab\n\nHost db1\n  HostName 10.0.1.1\n\n\
-                   Host db2\n  HostName 10.0.1.2\n";
+        let lab = "Host __nativeterm_folder__\n  NativeTermLabel Lab\n\n\
+                   Host db1\n  HostName 10.0.1.1\n  NativeTermId id-db1\n\n\
+                   Host db2\n  HostName 10.0.1.2\n  NativeTermId id-db2\n  NativeTermNote the replica\n";
         std::fs::write(dir.join("config.d/lab.conf"), lab).unwrap();
         SessionTree::load_with(dir, dir)
     }
@@ -1586,26 +1688,43 @@ mod tests {
             .collect()
     }
 
+    fn noted(tags: &[(&str, &[&str])]) -> Notes {
+        let note = |tags: &[&str]| native_term_app::registry::Note {
+            text: String::new(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            updated_at: 1,
+        };
+        tags.iter().map(|(id, tags)| (id.to_string(), note(tags))).collect()
+    }
+
     #[test]
     fn the_filters_and_the_checkboxes() {
         let dir = tempfile::tempdir().unwrap();
         let tree = tree_of_kinds(dir.path());
-        let notes = Notes::new();
+        let notes = noted(&[("id-db1", &["prod", "ceph"]), ("id-db2", &["Prod"]), ("id-gone", &["old"])]);
+        let known: Vec<String> = ["ceph", "old", "prod", "unused"].iter().map(|t| t.to_string()).collect();
         let nothing = HashMap::new();
         let recent = vec!["db2".to_string(), "web".to_string()];
         let mut view = TreeView::default();
         view.update_nodes(&tree, 1);
-        view.update_kinds(&tree, 1);
-        // one kind of host: its filter would change nothing, and is not offered
-        assert_eq!(view.kinds.1.filters(), [Filter::All, Filter::Connected, Filter::Favorites]);
         let shown = |activity, scope| Shown {
             tree: &tree,
             generation: 1,
             recent: &recent,
             activity,
             written: Written { notes: &notes, generation: 0 },
+            tags: &known,
             scope,
         };
+        view.update_chips(&shown(&nothing, Scope::Tree));
+        // the tags there are, those most of the tree's hosts have first;
+        // one in other letters is the same one
+        let tag = |t: &str| Filter::Tag(t.to_string());
+        assert_eq!(
+            view.chips.1.filters(),
+            [Filter::All, Filter::Favorites, Filter::Connected, tag("prod"), tag("ceph"), tag("old"), tag("unused")]
+        );
+        assert_eq!(view.chips.1.tags[0], ("prod".to_string(), 2));
         let all = names_of(&view.rows(&shown(&nothing, Scope::Tree)));
         assert_eq!(all, ["[~/.ssh/config 1 Off]", "web", "[Lab 2 Off]", "db1", "db2"]);
         // what is selected shows on its folder
@@ -1620,6 +1739,12 @@ mod tests {
         view.filter = Filter::Favorites;
         let rows = names_of(&view.rows(&shown(&nothing, Scope::Tree)));
         assert_eq!(rows, ["[~/.ssh/config 1 Off]", "web"]);
+        view.filter = tag("ceph");
+        assert_eq!(names_of(&view.rows(&shown(&nothing, Scope::Tree))), ["[Lab 1 On]", "db1"]);
+        view.filter = tag("PROD");
+        assert_eq!(names_of(&view.rows(&shown(&nothing, Scope::Tree))), ["[Lab 2 On]", "db1", "db2"]);
+        view.filter = tag("unused");
+        assert_eq!(names_of(&view.rows(&shown(&nothing, Scope::Tree))), ["empty"]);
         view.filter = Filter::Connected;
         assert_eq!(names_of(&view.rows(&shown(&nothing, Scope::Tree))), ["empty"]);
         let activity = HashMap::from([("db2".to_string(), Activity::Connected), ("db1".to_string(), Activity::Failed)]);
@@ -1627,8 +1752,51 @@ mod tests {
         // the hosts used lately, the latest first, the filter over them
         view.filter = Filter::All;
         assert_eq!(names_of(&view.rows(&shown(&activity, Scope::Recent))), ["db2", "web"]);
-        view.filter = Filter::Favorites;
-        assert_eq!(names_of(&view.rows(&shown(&activity, Scope::Recent))), ["web"]);
+        view.filter = tag("prod");
+        assert_eq!(names_of(&view.rows(&shown(&activity, Scope::Recent))), ["db2"]);
+        // a tag that is no more is no filter any more
+        view.filter = tag("deleted");
+        view.update_chips(&shown(&activity, Scope::Tree));
+        assert_eq!(view.filter, Filter::All);
+    }
+
+    #[test]
+    fn a_host_is_found_by_its_tags_and_what_was_written_about_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = tree_of_kinds(dir.path());
+        let mut notes = noted(&[("id-db1", &["存储", "ceph"])]);
+        notes.get_mut("id-db1").unwrap().text = "rack 12, the second from the top".into();
+        let written = Written { notes: &notes, generation: 0 };
+        let mut view = TreeView::default();
+        let mut found = |query: &str| {
+            view.query = query.into();
+            let hits = view.search(&tree, 1, &[], written);
+            hits.iter().map(|(f, h)| tree.folders().nth(*f).unwrap().hosts[*h].label().to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(found("ceph"), ["db1"], "a tag");
+        assert_eq!(found("存储"), ["db1"], "a tag");
+        assert_eq!(found("rack 12"), ["db1"], "what was written about it");
+        assert_eq!(found("replica"), ["db2"], "its note in the configuration");
+        assert!(found("nowhere").is_empty());
+    }
+
+    #[test]
+    fn the_chips_of_one_line() {
+        let widths = [40.0, 60.0, 60.0, 80.0, 50.0];
+        // all of them, where there is room
+        assert_eq!(in_one_line(&widths, None, 400.0, 6.0), [0, 1, 2, 3, 4]);
+        // as many as fit, from the first
+        assert_eq!(in_one_line(&widths, None, 180.0, 6.0), [0, 1, 2]);
+        assert_eq!(in_one_line(&widths, Some(1), 180.0, 6.0), [0, 1, 2]);
+        // the one that is on is among them
+        assert_eq!(in_one_line(&widths, Some(4), 180.0, 6.0), [0, 1, 4]);
+        assert_eq!(in_one_line(&widths, Some(3), 180.0, 6.0), [0, 3]);
+        // "All" stays, whatever the room
+        assert_eq!(in_one_line(&widths, Some(3), 60.0, 6.0), [0, 3]);
+        // and the lines all of them take
+        assert_eq!(layout::chip_lines(&widths, 30.0, 400.0, 6.0), 1);
+        assert_eq!(layout::chip_lines(&widths, 30.0, 180.0, 6.0), 3);
+        assert_eq!(layout::chip_lines(&widths, 30.0, 60.0, 6.0), 6, "one in each, after what is said before them");
     }
 
     #[test]

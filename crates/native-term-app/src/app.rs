@@ -16,6 +16,7 @@ use native_term_config::SessionTree;
 
 use crate::dialogs::{
     ConfirmCloseMixed, ConfirmDelete, ConfirmForget, DropChoice, DropDialog, FolderDialog, HostDialog, Outcome,
+    TagDialog,
 };
 use crate::icons;
 use crate::import_dialog::ImportDialog;
@@ -39,6 +40,7 @@ enum Dialog {
     Host(Box<HostDialog>),
     Plink(Box<PlinkDialog>),
     Folder(FolderDialog),
+    Tag(TagDialog),
     Delete(ConfirmDelete),
     Forget(ConfirmForget),
     Key(Box<KeyDialog>),
@@ -255,6 +257,9 @@ pub struct App {
     notes: std::collections::BTreeMap<String, native_term_app::registry::Note>,
     /// Bumped when a note changes, so the search stops using its cache.
     notes_generation: u64,
+    /// The tags there are (`state.db`): what the chips above the tree
+    /// offer, and what a host's tags are chosen among.
+    tags: Vec<String>,
     /// OneDrive / Dropbox folders on this computer, for the wizard.
     sync_roots: Vec<(String, PathBuf)>,
     /// PuTTY has saved sessions (checked at start).
@@ -377,6 +382,8 @@ impl App {
         if let Some(problem) = note_problem {
             notices.push(t!("notice-notes", error = problem));
         }
+        let tags = core.as_ref().and_then(Core::registry).and_then(|r| r.tags().ok()).unwrap_or_default();
+        crate::dialogs::set_known_tags(&tags);
         let first_run = core.as_ref().is_some_and(|c| c.setting(crate::wizard::DONE_SETTING).is_none());
         let keys = crate::shortcut_ui::ShortcutUi::new(ctx, core.as_ref(), &profile.settings_json());
         App {
@@ -422,6 +429,7 @@ impl App {
             toasts: Default::default(),
             notes,
             notes_generation: 0,
+            tags,
             sync_roots: native_term_os::cloud::sync_roots(),
             putty_sessions: putty_has_sessions(),
             wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
@@ -710,6 +718,14 @@ impl App {
                 }
             }
             TreeAction::Reload => self.reload(),
+            TreeAction::RenameTag(tag) => {
+                let hosts = self.notes.values().filter(|note| note.has_tag(&tag)).count();
+                self.dialog = Some(Dialog::Tag(TagDialog::rename(&tag, hosts)));
+            }
+            TreeAction::DeleteTag(tag) => {
+                let hosts = self.notes.values().filter(|note| note.has_tag(&tag)).count();
+                self.dialog = Some(Dialog::Tag(TagDialog::delete(&tag, hosts)));
+            }
             TreeAction::NewFolder => self.dialog = Some(Dialog::Folder(FolderDialog::new_folder())),
             TreeAction::RenameFolder(file) => {
                 let label = self.folder_label(&file);
@@ -1364,15 +1380,64 @@ impl App {
         if let Err(e) = native_term_app::notes::save(registry, &self.data_dir, &mut self.notes, &id, note) {
             self.notices.push(t!("notice-notes", error = e.to_string()));
         }
-        self.notes_generation += 1;
+        self.tags_changed();
         if !had_id {
             self.reload();
         }
     }
 
+    /// The notes changed, and the tags there are may have with them:
+    /// read again, for the chips and the dialogs.
+    fn tags_changed(&mut self) {
+        self.notes_generation += 1;
+        if let Some(registry) = self.core.as_ref().and_then(Core::registry) {
+            match registry.tags() {
+                Ok(tags) => self.tags = tags,
+                Err(e) => self.notices.push(t!("notice-notes", error = e.to_string())),
+            }
+        }
+        crate::dialogs::set_known_tags(&self.tags);
+    }
+
+    /// A tag called something else (`new`) or deleted, everywhere it is;
+    /// the chip that was on for it is on for what it is called now.
+    fn retag(&mut self, old: &str, new: Option<&str>) -> Result<(), String> {
+        let Some(registry) = self.core.as_ref().and_then(Core::registry) else { return Ok(()) };
+        native_term_app::notes::retag(registry, &self.data_dir, &mut self.notes, old, new)
+            .map_err(|e| e.to_string())?;
+        self.tags_changed();
+        if self.view.filter == crate::tree_view::Filter::Tag(old.to_string()) {
+            self.view.filter = match new {
+                Some(new) => crate::tree_view::Filter::Tag(new.to_string()),
+                None => crate::tree_view::Filter::All,
+            };
+        }
+        Ok(())
+    }
+
     fn show_dialog(&mut self, ctx: &egui::Context) {
+        if let Some(Dialog::Tag(d)) = self.dialog.as_mut() {
+            // (apart from the others: what it does is the window's to do)
+            match d.show(ctx) {
+                Outcome::Open => {}
+                Outcome::Cancel => self.dialog = None,
+                Outcome::Submit(name) => {
+                    let tag = d.tag.clone();
+                    match self.retag(&tag, name.as_deref()) {
+                        Ok(()) => self.dialog = None,
+                        Err(e) => {
+                            if let Some(Dialog::Tag(d)) = self.dialog.as_mut() {
+                                d.error = Some(e);
+                            }
+                        }
+                    }
+                }
+            }
+            return;
+        }
         let Some(dialog) = self.dialog.as_mut() else { return };
         let done = match dialog {
+            Dialog::Tag(_) => false,
             Dialog::CredentialSets(d) => matches!(d.show(ctx), Outcome::Cancel),
             Dialog::Cleanup(d) => {
                 let mut actions = Vec::new();
@@ -1997,7 +2062,8 @@ impl App {
             self.footer(ui, tones);
         }
         let scope = if self.page == Page::Recent { Scope::Recent } else { Scope::Tree };
-        let shown = Shown { tree: &self.tree, generation: self.generation, recent, activity, written, scope };
+        let tags = &self.tags;
+        let shown = Shown { tree: &self.tree, generation: self.generation, recent, activity, written, tags, scope };
         let page = egui::Frame::new().fill(tones.page);
         let mut actions =
             egui::CentralPanel::default().frame(page).show_inside(ui, |ui| self.view.show(ui, &shown)).inner;

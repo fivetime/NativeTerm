@@ -57,7 +57,7 @@ settings-profile = 「NativeTerm SSH」設定：{ $status }
 ## 工作階段樹
 
 tree-reload-hint = 重新讀取 ~/.ssh
-tree-search-hint = 搜尋名稱、主機、使用者、備註…（Ctrl+F）
+tree-search-hint = 搜尋名稱、主機、標籤、備註、筆記…（Ctrl+F）
 tree-search-clear = 清除搜尋（Esc）
 tree-no-match = 沒有符合「{ $query }」的主機
 tree-favorites = 收藏
@@ -404,7 +404,7 @@ field-jump-hint = 例如 bastion 或 user@bastion:22
 field-keys = 金鑰
 field-keys-hint = 每行一個 IdentityFile，例如 ~/.ssh/id_ed25519
 notice-notes = 筆記：{ $error }
-field-tags = 分頁
+field-tags = 標籤
 field-tags-hint = 用來找到這台主機的詞，逗號分隔。搜尋時和名稱、備註一起符合；它們跟著筆記走（notes.toml），不寫進 ssh 設定。
 field-tags-hint-short = 生產, ceph
 field-long-note = 筆記
@@ -1012,9 +1012,8 @@ footer-hosts = 主機：
 footer-folders = 資料夾：
 footer-selected = 已選：
 footer-open = { $count } 個工作階段已開啟 · { $terminal }
-filter-label = 類型：
+filter-label = 標籤：
 filter-all = 全部
-filter-network = Telnet 等
 filter-empty = 沒有符合此篩選條件的主機。
 recent-empty = 還沒有連線過任何主機。
 props-title = 屬性
@@ -1069,3 +1068,19 @@ tabmenu-close-all-others = 關閉其他分頁
 tab-title-title = 重新命名分頁
 tab-title-name = 分頁名稱：
 tab-title-note = 只對這個分頁有效，分頁關閉後不保留。留空則恢復終端機自己的標題。
+tags-unfold = 展開全部標籤（還有 { $count } 個）
+tags-fold = 收起為一行
+tag-rename = 重新命名標籤…
+tag-delete = 刪除標籤…
+tag-rename-title = 重新命名標籤「{ $tag }」
+tag-delete-title = 刪除標籤「{ $tag }」
+tag-name-hint = 標籤名稱
+tag-rename-text = { $count ->
+        [0] 目前沒有主機使用這個標籤。
+       *[other] 有 { $count } 台主機使用這個標籤，它們會一起改成新名稱。
+    }
+tag-delete-text = { $count ->
+        [0] 目前沒有主機使用這個標籤。刪除後它不再出現在可選標籤裡。
+       *[other] 將從 { $count } 台主機上去掉這個標籤，主機本身不受影響。
+    }
+field-tags-choose = 點一下選用這個標籤，再點一次取消

@@ -733,6 +733,24 @@
             NativeTerm through its shim as before, which types Ctrl+L
             at the other side once logged in: a server whose shell
             shows it would show it.
+      - [x] The chips above the tree are the tags, not the kinds of
+            host (the person: with many hosts the tag, which says
+            what a server is for, is what it is found by). The tags
+            are kept in the database as a list of their own (schema
+            6), a host's tags are typed or chosen among them in its
+            dialog, the search finds a host by its tags, its one-line
+            note and what was written about it, and a row of more
+            tags than a line holds is opened and closed by two
+            chevrons at its end. A tag is renamed and deleted from
+            its chip's menu, everywhere it is. Seen on Lingmo (X11),
+            dark and light, 1100 and 600 wide, 18 and 58 tags: the
+            row closed, opened (three lines; six and scrolling), a
+            tag chosen and the row closed with it on, the search by
+            a tag, by the one-line note and by what was written, a
+            tag renamed and one deleted (the notes' file read after),
+            a host made with a tag typed and one chosen. Not tried by
+            hand on Windows and macOS (the same code; no input is
+            sent there).
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

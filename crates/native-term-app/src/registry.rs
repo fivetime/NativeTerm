@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub type Result<T> = rusqlite::Result<T>;
 
-const SCHEMA_VERSION: i64 = 5;
+const SCHEMA_VERSION: i64 = 6;
 
 /// What someone wrote about a host: as many lines as they like, and
 /// tags. Kept by the host's `NativeTermId`, so renaming it loses
@@ -25,6 +25,9 @@ pub struct Note {
     /// decides between two computers' copies.
     pub updated_at: i64,
 }
+
+/// What is between two tags in a line of them.
+const SEPARATORS: [char; 4] = [',', '\u{ff0c}', '\n', ';'];
 
 impl Note {
     /// Nothing written: the row is kept so that clearing a note reaches
@@ -40,12 +43,65 @@ impl Note {
         self.tags.join(", ")
     }
 
-    /// Tags from a line someone typed (commas or spaces, no empties, no
-    /// repeats).
+    /// Whether it has `tag` (as tags are told apart: `Prod` is `prod`).
+    #[must_use]
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
+    }
+
+    /// The line of tags `line` with `tag` in it (`on`) or not, as
+    /// choosing among the tags there are changes what was typed.
+    #[must_use]
+    pub fn line_with(line: &str, tag: &str, on: bool) -> String {
+        let mut tags = Note::tags_from(line);
+        tags.retain(|t| !t.eq_ignore_ascii_case(tag));
+        if on {
+            tags.extend(Note::tags_from(tag));
+        }
+        tags.join(", ")
+    }
+
+    /// What is typed of a tag at the end of `line` (after the last of
+    /// what is between tags), and what is before it.
+    #[must_use]
+    pub fn being_typed(line: &str) -> (&str, &str) {
+        let start = line.char_indices().rev().find(|(_, c)| SEPARATORS.contains(c)).map(|(i, c)| i + c.len_utf8());
+        let (before, typed) = line.split_at(start.unwrap_or(0));
+        (before, typed.trim())
+    }
+
+    /// The tags of `known` to choose among while `line` is typed: those
+    /// that have in them what is typed of a tag at the line's end; all
+    /// of them where that is nothing, or a whole tag, or in none.
+    #[must_use]
+    pub fn offered<'a>(line: &str, known: &'a [String]) -> Vec<&'a String> {
+        let typed = Note::being_typed(line).1.to_lowercase();
+        let whole = known.iter().any(|tag| tag.to_lowercase() == typed);
+        let narrowed: Vec<&String> = known.iter().filter(|tag| tag.to_lowercase().contains(&typed)).collect();
+        if typed.is_empty() || whole || narrowed.is_empty() {
+            known.iter().collect()
+        } else {
+            narrowed
+        }
+    }
+
+    /// `line` with `tag` chosen among those `offered`: in it, in the
+    /// place of what was typed of it where that is the tag's beginning
+    /// or another part of it.
+    #[must_use]
+    pub fn line_choosing(line: &str, tag: &str) -> String {
+        let (before, typed) = Note::being_typed(line);
+        let part = !typed.is_empty() && tag.to_lowercase().contains(&typed.to_lowercase());
+        Note::line_with(if part { before } else { line }, tag, true)
+    }
+
+    /// Tags from a line someone typed (commas, no empties, no repeats;
+    /// a tag may have spaces in it, and whatever a server's own labels
+    /// have: `ceph-osd=enabled`, `openpe.fivetime.io/rack=c2r6`).
     #[must_use]
     pub fn tags_from(line: &str) -> Vec<String> {
         let mut tags: Vec<String> = Vec::new();
-        for tag in line.split([',', '\u{ff0c}', '\n', ';']) {
+        for tag in line.split(SEPARATORS) {
             let tag = tag.trim();
             if !tag.is_empty() && !tags.iter().any(|t| t.eq_ignore_ascii_case(tag)) {
                 tags.push(tag.to_string());
@@ -175,6 +231,28 @@ impl Registry {
                  PRAGMA user_version = 5;
                  COMMIT;",
             )?;
+        }
+        if version < 6 {
+            // the tags there are, whether a host has them or not: what a
+            // new host's tags are chosen among
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE tags (
+                     name TEXT PRIMARY KEY COLLATE NOCASE,
+                     created_at INTEGER NOT NULL
+                 );
+                 PRAGMA user_version = 6;
+                 COMMIT;",
+            )?;
+            // (those the notes have are the first ones known)
+            let lines: Vec<String> = {
+                let mut statement = conn.prepare("SELECT tags FROM notes ORDER BY updated_at")?;
+                let rows = statement.query_map([], |r| r.get::<_, String>(0))?;
+                rows.collect::<Result<_>>()?
+            };
+            for tag in lines.iter().flat_map(|line| Note::tags_from(line)) {
+                conn.execute("INSERT OR IGNORE INTO tags (name, created_at) VALUES (?1, ?2)", params![tag, now()])?;
+            }
         }
         Ok(Registry { conn: Mutex::new(conn) })
     }
@@ -356,7 +434,8 @@ impl Registry {
     }
 
     /// Write what someone said about a host. An empty note keeps its row:
-    /// clearing one has to reach the other computers too.
+    /// clearing one has to reach the other computers too. Its tags are
+    /// tags there are from then on.
     pub fn set_note(&self, nt_id: &str, note: &Note) -> Result<()> {
         self.with(|c| {
             c.execute(
@@ -364,6 +443,36 @@ impl Registry {
                  ON CONFLICT (nt_id) DO UPDATE SET text = ?2, tags = ?3, updated_at = ?4",
                 params![nt_id, note.text, note.tag_line(), note.updated_at],
             )?;
+            for tag in &note.tags {
+                c.execute("INSERT OR IGNORE INTO tags (name, created_at) VALUES (?1, ?2)", params![tag, now()])?;
+            }
+            Ok(())
+        })
+    }
+
+    /// The tags there are, by name: those a host has, and those that
+    /// were some host's and have not been deleted since.
+    pub fn tags(&self) -> Result<Vec<String>> {
+        self.with(|c| {
+            let mut statement = c.prepare("SELECT name FROM tags ORDER BY name COLLATE NOCASE")?;
+            let rows = statement.query_map([], |r| r.get(0))?;
+            rows.collect()
+        })
+    }
+
+    /// `tag` is one of the tags there are.
+    pub fn add_tag(&self, tag: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("INSERT OR IGNORE INTO tags (name, created_at) VALUES (?1, ?2)", params![tag, now()])?;
+            Ok(())
+        })
+    }
+
+    /// `tag` is none of the tags there are any more (the notes that have
+    /// it are the caller's to change: `notes::retag`).
+    pub fn delete_tag(&self, tag: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute("DELETE FROM tags WHERE name = ?1", [tag])?;
             Ok(())
         })
     }
@@ -539,6 +648,76 @@ mod tests {
         // a replacement tab keeps the lock
         reg.opened(&clone).unwrap();
         assert!(reg.open_sessions().unwrap().iter().any(|r| r.id == "c" && r.locked));
+    }
+
+    #[test]
+    fn the_tags_the_notes_had_are_the_first_ones_known() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("state.db");
+        {
+            // as the schema before the tags' own table left it
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE notes (nt_id TEXT PRIMARY KEY, text TEXT NOT NULL, tags TEXT NOT NULL,
+                     updated_at INTEGER NOT NULL);
+                 INSERT INTO notes VALUES ('a', '', 'prod, ceph', 1);
+                 INSERT INTO notes VALUES ('b', 'x', 'Prod, 生产', 2);
+                 INSERT INTO notes VALUES ('c', '', '', 3);
+                 PRAGMA user_version = 5;",
+            )
+            .unwrap();
+        }
+        let reg = Registry::open(&path).unwrap();
+        assert_eq!(reg.tags().unwrap(), ["ceph", "prod", "生产"], "each once, as it was written first");
+        // a note's tags are tags there are; taking one from the note leaves it one
+        let note = Note { text: String::new(), tags: vec!["lab".into()], updated_at: 4 };
+        reg.set_note("a", &note).unwrap();
+        assert_eq!(reg.tags().unwrap(), ["ceph", "lab", "prod", "生产"]);
+        reg.delete_tag("PROD").unwrap();
+        reg.add_tag("Staging").unwrap();
+        reg.add_tag("staging").unwrap();
+        assert_eq!(reg.tags().unwrap(), ["ceph", "lab", "Staging", "生产"]);
+        drop(reg);
+        assert_eq!(Registry::open(&path).unwrap().tags().unwrap().len(), 4, "kept");
+    }
+
+    #[test]
+    fn what_is_typed_of_a_tag_narrows_those_to_choose_among() {
+        let known: Vec<String> =
+            ["ceph-mon=enabled", "ceph-osd=enabled", "openpe.fivetime.io/rack=c2r6", "openvswitch=enabled", "prod"]
+                .iter()
+                .map(|t| t.to_string())
+                .collect();
+        let offered = |line: &str| Note::offered(line, &known).into_iter().map(String::as_str).collect::<Vec<_>>();
+        assert_eq!(offered("").len(), 5);
+        assert_eq!(offered("prod, CEPH"), ["ceph-mon=enabled", "ceph-osd=enabled"]);
+        assert_eq!(offered("rack"), ["openpe.fivetime.io/rack=c2r6"], "any part of it");
+        assert_eq!(offered("prod，").len(), 5, "the next one is not begun");
+        assert_eq!(offered("ceph-osd=enabled, prod").len(), 5, "a whole tag");
+        assert_eq!(offered("a new one").len(), 5, "in none of them");
+        // the one chosen takes the place of what was typed of it
+        assert_eq!(Note::line_choosing("prod, CEPH", "ceph-osd=enabled"), "prod, ceph-osd=enabled");
+        assert_eq!(Note::line_choosing("rack", "openpe.fivetime.io/rack=c2r6"), "openpe.fivetime.io/rack=c2r6");
+        assert_eq!(Note::line_choosing("prod, ", "ceph-mon=enabled"), "prod, ceph-mon=enabled");
+        assert_eq!(Note::line_choosing("a new one", "prod"), "a new one, prod", "and of nothing else");
+        assert_eq!(Note::line_choosing("prod, ceph-mon=enabled", "prod"), "ceph-mon=enabled, prod", "once");
+        // a server's labels are tags as they are
+        let labels = "ceph-osd=enabled, openpe.fivetime.io/rack=c2r6; node-role.kubernetes.io/storage=";
+        assert_eq!(
+            Note::tags_from(labels),
+            ["ceph-osd=enabled", "openpe.fivetime.io/rack=c2r6", "node-role.kubernetes.io/storage="]
+        );
+    }
+
+    #[test]
+    fn a_tag_chosen_is_in_the_line_and_one_chosen_again_is_not() {
+        assert_eq!(Note::line_with("", "prod", true), "prod");
+        assert_eq!(Note::line_with("ceph，lab", "prod", true), "ceph, lab, prod");
+        assert_eq!(Note::line_with("ceph, Prod, lab", "prod", true), "ceph, lab, prod", "once");
+        assert_eq!(Note::line_with("ceph, Prod, lab", "prod", false), "ceph, lab");
+        assert_eq!(Note::line_with("ceph", "prod", false), "ceph");
+        let note = Note { tags: vec!["Prod".into()], ..Note::default() };
+        assert!(note.has_tag("prod") && !note.has_tag("pro"));
     }
 
     #[test]

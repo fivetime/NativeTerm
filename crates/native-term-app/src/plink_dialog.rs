@@ -407,11 +407,7 @@ impl PlinkDialog {
                     field(ui, t!("field-on-login"), &mut self.on_login, t!("plink-on-login-hint"));
                     field(ui, t!("field-pre-connect"), &mut self.pre_connect, t!("field-pre-connect-hint"));
                     ui.label(t!("field-tags")).on_hover_text(t!("field-tags-hint"));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.tags)
-                            .hint_text(t!("field-tags-hint-short"))
-                            .desired_width(280.0),
-                    );
+                    crate::dialogs::tags_field(ui, &mut self.tags);
                     ui.end_row();
                     ui.label(t!("field-long-note")).on_hover_text(t!("field-long-note-hint"));
                     ui.add(

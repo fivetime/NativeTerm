@@ -15,6 +15,139 @@ pub enum Outcome<T> {
     Submit(T),
 }
 
+/// The tags there are (the database's), for the dialogs that give a
+/// host its tags: the main window says them when they change.
+static KNOWN_TAGS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_known_tags(tags: &[String]) {
+    *KNOWN_TAGS.lock().unwrap_or_else(|e| e.into_inner()) = tags.to_vec();
+}
+
+/// A host's tags: typed, separated by commas, or chosen among the tags
+/// there are (under the field: a click puts one in, another takes it
+/// out again). Where they are many, what is typed of one narrows them
+/// to those that have it in them, and the one chosen takes its place.
+pub fn tags_field(ui: &mut egui::Ui, tags: &mut String) {
+    use native_term_app::registry::Note;
+    const WIDTH: f32 = 280.0;
+    ui.vertical(|ui| {
+        let field =
+            ui.add(egui::TextEdit::singleline(tags).hint_text(t!("field-tags-hint-short")).desired_width(WIDTH));
+        let known = KNOWN_TAGS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if known.is_empty() {
+            return;
+        }
+        const BETWEEN: f32 = 4.0;
+        const LINES: usize = 2;
+        let tones = crate::looks::tones(ui.visuals());
+        let has = Note::tags_from(tags);
+        let offered = Note::offered(tags, &known);
+        let mut chosen = None;
+        // (two lines of them, the others scrolled to or typed the beginning
+        // of; as high as that however many there are, so that nothing
+        // under them moves while a tag is typed)
+        let most = LINES as f32 * crate::layout::CHIP + (LINES - 1) as f32 * BETWEEN;
+        ui.allocate_ui(egui::vec2(WIDTH, most), |ui| {
+            egui::ScrollArea::vertical().id_salt("known-tags").auto_shrink(false).max_height(most).show(ui, |ui| {
+                ui.set_width(WIDTH);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(BETWEEN, BETWEEN);
+                    for tag in offered {
+                        let on = has.iter().any(|t| t.eq_ignore_ascii_case(tag));
+                        let chip = crate::layout::chip(ui, &tones, tag, on);
+                        if chip.on_hover_text(t!("field-tags-choose")).clicked() {
+                            chosen = Some((tag.clone(), !on));
+                        }
+                    }
+                });
+            });
+        });
+        if let Some((tag, on)) = chosen {
+            *tags = if on { Note::line_choosing(tags, &tag) } else { Note::line_with(tags, &tag, false) };
+            // (typing goes on after it)
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), field.id) {
+                let end = egui::text::CCursor::new(tags.chars().count());
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+                state.store(ui.ctx(), field.id);
+            }
+            field.request_focus();
+        }
+    });
+}
+
+/// A tag called something else, or deleted: everywhere it is.
+pub struct TagDialog {
+    pub tag: String,
+    /// What it is called from now on; `None`: it is deleted.
+    name: Option<String>,
+    /// How many hosts have it.
+    hosts: usize,
+    focused: bool,
+    pub error: Option<String>,
+}
+
+impl TagDialog {
+    pub fn rename(tag: &str, hosts: usize) -> TagDialog {
+        TagDialog { tag: tag.to_string(), name: Some(tag.to_string()), hosts, focused: false, error: None }
+    }
+
+    pub fn delete(tag: &str, hosts: usize) -> TagDialog {
+        TagDialog { tag: tag.to_string(), name: None, hosts, focused: false, error: None }
+    }
+
+    /// `Submit(Some(name))`: called that; `Submit(None)`: deleted.
+    pub fn show(&mut self, ctx: &egui::Context) -> Outcome<Option<String>> {
+        let mut outcome = Outcome::Open;
+        let mut open = true;
+        let title = match self.name {
+            Some(_) => t!("tag-rename-title", tag = self.tag.as_str()),
+            None => t!("tag-delete-title", tag = self.tag.as_str()),
+        };
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_max_width(320.0);
+                let mut entered = false;
+                match &mut self.name {
+                    Some(name) => {
+                        let edit = ui
+                            .add(egui::TextEdit::singleline(name).hint_text(t!("tag-name-hint")).desired_width(300.0));
+                        if !std::mem::replace(&mut self.focused, true) {
+                            edit.request_focus();
+                        }
+                        entered = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                        ui.weak(t!("tag-rename-text", count = self.hosts));
+                    }
+                    None => {
+                        ui.label(t!("tag-delete-text", count = self.hosts));
+                    }
+                }
+                if let Some(error) = &self.error {
+                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                }
+                ui.horizontal(|ui| {
+                    // (one name: a comma would make two tags of it)
+                    let named = self.name.as_deref().map(native_term_app::registry::Note::tags_from);
+                    let fine = named.as_ref().is_none_or(|tags| tags.len() == 1);
+                    let button = if self.name.is_some() { t!("button-save") } else { t!("button-delete") };
+                    if ui.add_enabled(fine, egui::Button::new(button)).clicked() || (entered && fine) {
+                        outcome = Outcome::Submit(named.and_then(|mut tags| tags.pop()));
+                    }
+                    if ui.button(t!("button-cancel")).clicked() {
+                        outcome = Outcome::Cancel;
+                    }
+                });
+            });
+        if !open {
+            outcome = Outcome::Cancel;
+        }
+        outcome
+    }
+}
+
 /// New or edited host.
 pub struct HostDialog {
     pub title: String,
@@ -389,11 +522,7 @@ impl HostDialog {
                     ui.end_row();
                     field(ui, t!("field-note"), &mut self.note, t!("field-note-hint"));
                     ui.label(t!("field-tags")).on_hover_text(t!("field-tags-hint"));
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.tags)
-                            .hint_text(t!("field-tags-hint-short"))
-                            .desired_width(280.0),
-                    );
+                    tags_field(ui, &mut self.tags);
                     ui.end_row();
                     ui.label(t!("field-long-note")).on_hover_text(t!("field-long-note-hint"));
                     ui.add(

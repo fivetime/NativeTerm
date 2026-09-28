@@ -60,7 +60,7 @@ settings-profile = "NativeTerm SSH" プロファイル: { $status }
 ## セッションツリー
 
 tree-reload-hint = ~/.ssh を読み直す
-tree-search-hint = 名前・ホスト・ユーザー・メモを検索…（Ctrl+F）
+tree-search-hint = 名前・ホスト・タグ・メモを検索…（Ctrl+F）
 tree-search-clear = 検索をクリア（Esc）
 tree-no-match = 「{ $query }」に一致するホストはありません
 tree-favorites = お気に入り
@@ -1028,9 +1028,8 @@ footer-hosts = ホスト:
 footer-folders = フォルダー:
 footer-selected = 選択:
 footer-open = { $count } 個のセッションが開いています · { $terminal }
-filter-label = 種類:
+filter-label = タグ:
 filter-all = すべて
-filter-network = Telnet など
 filter-empty = この条件に合うホストはありません。
 recent-empty = まだ接続したホストはありません。
 props-title = プロパティ
@@ -1085,3 +1084,19 @@ tabmenu-close-all-others = ほかのタブを閉じる
 tab-title-title = タブの名前を変更
 tab-title-name = タブの名前:
 tab-title-note = このタブを開いている間だけ有効で、保存されません。空にするとターミナルのタイトルに戻ります。
+tags-unfold = すべてのタグを表示（ほか { $count } 個）
+tags-fold = 1 行に折りたたむ
+tag-rename = タグの名前を変更…
+tag-delete = タグを削除…
+tag-rename-title = タグ「{ $tag }」の名前を変更
+tag-delete-title = タグ「{ $tag }」を削除
+tag-name-hint = タグの名前
+tag-rename-text = { $count ->
+        [0] このタグを使っているホストはありません。
+       *[other] { $count } 台のホストがこのタグを使っています。すべて新しい名前になります。
+    }
+tag-delete-text = { $count ->
+        [0] このタグを使っているホストはありません。選択肢からも消えます。
+       *[other] { $count } 台のホストからこのタグを外します。ホスト自体は変わりません。
+    }
+field-tags-choose = クリックでこのタグを付け、もう一度クリックで外します

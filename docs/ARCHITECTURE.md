@@ -1521,15 +1521,30 @@ later text, and the file is plain enough to sort out by hand. A host
 that has no `NativeTermId` gets one written into its block the first
 time something is kept about it (`Editor::ensure_id`), since that id is
 what the note belongs to. Notes and tags are searched along with the
-name, alias, host, user and the one-line note, and both show in the
-host's hover text.
+name, alias, host, user and the one-line note (a Telnet or serial
+session's too), and both show in the host's hover text.
+
+The tags there are have a table of their own (`tags(name, created_at)`,
+the name told apart without regard to case; schema 6, which begins
+with the tags the notes had). A tag is one of them from the moment a
+note has it, on this computer or on another (the notes' file brings
+it), and stays one when no host has it any more, until it is deleted:
+they are what a host's tags are chosen among. In the dialogs of a
+host and of a Telnet or serial session the field for the tags is
+typed in as before (commas between them), and under it are the tags
+there are, two lines of them and the others scrolled to: a click
+puts one into the line, another takes it out. What is typed of a tag
+narrows them to those that have it in them, and the one chosen takes
+its place. A chip is 240 wide at most and its text ends in dots
+beyond that (all of it under the pointer): tags are meant short.
 
 Tables, as a first sketch:
 
 - `sessions_open(session_guid, nt_id, label, window_hint, position_hint,
   opened_at)`;
 - `recent(nt_id, machine, last_connected, count)`;
-- `notes(nt_id, text, tags, updated_at)`.
+- `notes(nt_id, text, tags, updated_at)`;
+- `tags(name, created_at)`.
 
 ### Host aliases and display names
 
@@ -3985,10 +4000,18 @@ All UI surfaces invoke one shared app-level command layer
       conflict, sessions lost) and what was just said, in a bar under
       the header, which is there only while there is something to say
       (each of them has a `warns()`).
-    - **The tree** (`tree_view.rs`): the search field and the filters
-      in a bar of their own, the rows under it. A filter is offered
-      where it would pass something: a kind of host where there is
-      more than one kind, the favorites where there are some. A row
+    - **The tree** (`tree_view.rs`): the search field and the chips
+      in a bar of their own, the rows under it. The chips are the
+      tags (what a host is for, as the person writes it: `storage`,
+      `compute`), one of them on at a time, after "All", the
+      favorites where there are some, and "Connected"; the tags most
+      hosts have come first. They take one line; where they are more
+      than it holds, two chevrons at its end open the row (all of
+      them, in as many lines as they take, six at most and the others
+      scrolled to) and close it again, and in the one line the chip
+      that is on is among those shown. A tag's chip has a menu: the
+      tag called something else, or deleted, in every host that has
+      it (`notes::retag`). A row
       has a checkbox, the sign that opens a folder (a dot for a host),
       a picture in its kind's colour, the name, and at its end its
       marks (how its sessions are doing, its first tag) and where the

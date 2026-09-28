@@ -57,7 +57,7 @@ settings-profile = “NativeTerm SSH”配置：{ $status }
 ## 会话树
 
 tree-reload-hint = 重新读取 ~/.ssh
-tree-search-hint = 搜索名称、主机、用户、备注…（Ctrl+F）
+tree-search-hint = 搜索名称、主机、标签、备注、笔记…（Ctrl+F）
 tree-search-clear = 清除搜索（Esc）
 tree-no-match = 没有匹配“{ $query }”的主机
 tree-favorites = 收藏
@@ -1012,9 +1012,8 @@ footer-hosts = 主机：
 footer-folders = 文件夹：
 footer-selected = 已选：
 footer-open = { $count } 个会话已打开 · { $terminal }
-filter-label = 类型：
+filter-label = 标签：
 filter-all = 全部
-filter-network = Telnet 等
 filter-empty = 没有符合此筛选条件的主机。
 recent-empty = 还没有连接过任何主机。
 props-title = 属性
@@ -1069,3 +1068,19 @@ tabmenu-close-all-others = 关闭其他标签
 tab-title-title = 重命名标签
 tab-title-name = 标签名称：
 tab-title-note = 只对这个标签有效，标签关闭后不保留。留空则恢复终端自己的标题。
+tags-unfold = 展开全部标签（还有 { $count } 个）
+tags-fold = 收起为一行
+tag-rename = 重命名标签…
+tag-delete = 删除标签…
+tag-rename-title = 重命名标签“{ $tag }”
+tag-delete-title = 删除标签“{ $tag }”
+tag-name-hint = 标签名称
+tag-rename-text = { $count ->
+        [0] 目前没有主机使用这个标签。
+       *[other] 有 { $count } 台主机使用这个标签，它们会一起改成新名称。
+    }
+tag-delete-text = { $count ->
+        [0] 目前没有主机使用这个标签。删除后它不再出现在可选标签里。
+       *[other] 将从 { $count } 台主机上去掉这个标签，主机本身不受影响。
+    }
+field-tags-choose = 点击选用这个标签，再点一次取消

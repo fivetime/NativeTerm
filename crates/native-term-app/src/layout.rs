@@ -450,9 +450,13 @@ pub fn button(
 /// the one that is on in the accent's colours (the design's
 /// `chip-active`).
 pub fn chip(ui: &mut egui::Ui, tones: &Tones, text: &str, on: bool) -> egui::Response {
-    let galley = ui.painter().layout_no_wrap(text.to_string(), font(SMALL), tones.weak);
-    let size = egui::vec2(galley.size().x + 24.0, 26.0);
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let galley = elided(ui.painter(), text, font(SMALL), tones.weak, CHIP_MOST - 24.0);
+    let size = egui::vec2(galley.size().x + 24.0, CHIP);
+    let (rect, mut response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if galley.elided {
+        // (all of it, where the chip has its beginning only)
+        response = response.on_hover_text(text);
+    }
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, text));
     if ui.is_rect_visible(rect) {
         let near = response.hovered();
@@ -471,10 +475,73 @@ pub fn chip(ui: &mut egui::Ui, tones: &Tones, text: &str, on: bool) -> egui::Res
     response
 }
 
+/// A chip's height, how wide one is at most (a longer text ends in
+/// dots), and how wide one with `text` in it is.
+pub const CHIP: f32 = 26.0;
+pub const CHIP_MOST: f32 = 240.0;
+
+#[must_use]
+pub fn chip_width(ui: &egui::Ui, text: &str) -> f32 {
+    elided(ui.painter(), text, font(SMALL), egui::Color32::WHITE, CHIP_MOST - 24.0).size().x + 24.0
+}
+
+/// How many lines chips as wide as `widths` take in a row `room` wide,
+/// `between` of room between two of them, `before` of the first line
+/// taken by what is said before them.
+#[must_use]
+pub fn chip_lines(widths: &[f32], before: f32, room: f32, between: f32) -> usize {
+    let mut lines = 1;
+    let mut used = before;
+    for width in widths {
+        if used + between + width > room {
+            lines += 1;
+            used = *width;
+        } else {
+            used += between + width;
+        }
+    }
+    lines
+}
+
+fn caption_text(tones: &Tones, text: &str) -> egui::RichText {
+    egui::RichText::new(text.to_uppercase()).size(TINY).color(tones.weak).extra_letter_spacing(0.6)
+}
+
 /// What is said before a row of chips, and above a part of what is
 /// chosen (`text-[11px] font-semibold uppercase tracking-wider`).
 pub fn caption(ui: &mut egui::Ui, tones: &Tones, text: &str) {
-    ui.label(egui::RichText::new(text.to_uppercase()).size(TINY).color(tones.weak).extra_letter_spacing(0.6));
+    ui.label(caption_text(tones, text));
+}
+
+/// How wide `caption` is with `text`.
+#[must_use]
+pub fn caption_width(ui: &egui::Ui, tones: &Tones, text: &str) -> f32 {
+    let text = egui::WidgetText::from(caption_text(tones, text));
+    text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body).size().x
+}
+
+/// What opens a row of chips that has more of them than its one line
+/// shows, and closes it again: two chevrons, down while it is closed
+/// and up while it is open.
+pub fn fold_button(ui: &mut egui::Ui, tones: &Tones, open: bool, hint: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(CHIP, CHIP), egui::Sense::click());
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, open, hint));
+    if ui.is_rect_visible(rect) {
+        let near = response.hovered();
+        let painter = ui.painter();
+        painter.rect_filled(rect, 8.0, if near { tones.raised } else { tones.chip });
+        let line = if near { tones.near } else { tones.line };
+        painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.0_f32, line), egui::StrokeKind::Inside);
+        let stroke = egui::Stroke::new(1.5_f32, if near { tones.text } else { tones.weak });
+        // (each 8 wide and 4 high, 5 from the other; their points down, or up)
+        let way = if open { -1.0 } else { 1.0 };
+        for middle in [-2.5_f32, 2.5] {
+            let tip = rect.center() + egui::vec2(0.0, middle + 2.0 * way);
+            let arms = [tip + egui::vec2(-4.0, -4.0 * way), tip, tip + egui::vec2(4.0, -4.0 * way)];
+            painter.add(egui::Shape::line(arms.to_vec(), stroke));
+        }
+    }
+    response.on_hover_text(hint)
 }
 
 /// A badge's size with `text` in it (`px-2 py-0.5`).

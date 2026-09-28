@@ -60,7 +60,7 @@ settings-profile = "NativeTerm SSH" profile: { $status }
 ## Session tree
 
 tree-reload-hint = Reload ~/.ssh
-tree-search-hint = Search name, host, user, note…  (Ctrl+F)
+tree-search-hint = Search name, host, tags, notes…  (Ctrl+F)
 tree-search-clear = Clear the search (Esc)
 tree-no-match = No host matches "{ $query }"
 tree-favorites = Favorites
@@ -1050,9 +1050,8 @@ footer-open = { $count ->
         [one] 1 session open
        *[other] { $count } sessions open
     } · { $terminal }
-filter-label = Type:
+filter-label = Tags:
 filter-all = All
-filter-network = Telnet, raw
 filter-empty = No host passes this filter.
 recent-empty = No host was connected to yet.
 props-title = Properties
@@ -1110,3 +1109,21 @@ tabmenu-close-all-others = Close Other Tabs
 tab-title-title = Rename Tab
 tab-title-name = The tab's name:
 tab-title-note = For this tab, for as long as it is open: nothing is saved. Empty, the tab has the terminal's own title again.
+tags-unfold = Show all the tags ({ $count } more)
+tags-fold = Show one line of tags
+tag-rename = Rename Tag…
+tag-delete = Delete Tag…
+tag-rename-title = Rename the tag “{ $tag }”
+tag-delete-title = Delete the tag “{ $tag }”
+tag-name-hint = the tag's name
+tag-rename-text = { $count ->
+        [0] No host has this tag.
+        [one] 1 host has this tag: it has the new name from now on.
+       *[other] { $count } hosts have this tag: they have the new name from now on.
+    }
+tag-delete-text = { $count ->
+        [0] No host has this tag. It is taken from the tags to choose among.
+        [one] The tag is taken from the 1 host that has it. The host itself stays as it is.
+       *[other] The tag is taken from the { $count } hosts that have it. The hosts themselves stay as they are.
+    }
+field-tags-choose = Click to give the host this tag, or to take it from it
