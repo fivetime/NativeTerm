@@ -347,3 +347,58 @@ fn a_terminal_that_shows_the_menu_itself_gets_it_over_the_pipe() {
     wait_until(&core, &ids, "closed from the menu", |s| s[0].state == State::Closed);
     wait_for("its tab is gone", || fake.window_ids().is_empty());
 }
+
+/// NativeTerm's ssh tells its `LocalCommand` what the server said it is
+/// when the connection began, and the helper hands it on before it says
+/// that the login is done: it is the host's from then on, and kept.
+#[test]
+fn what_a_server_said_comes_with_the_login() {
+    use native_term_app::server::Os;
+    let name = pipe_name();
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("state.db");
+    let fake = FakeBackend::new(std::env::current_exe().unwrap());
+    let registry = Some(Registry::open(&db).unwrap());
+    let core = Core::start_with_pipe(fake.clone(), registry, &name).expect("a pipe of our own");
+    assert!(core.servers().is_empty());
+    let ids = core.open(&[HostRequest::new(HOST, "web01")], Target::NewWindow);
+    wait_until(&core, &ids, "located", located);
+    let pane = fake.calls().opened[0].1[0].terminal_session.clone();
+
+    let login = |said: Option<&str>| {
+        let conn = pipe::connect(&name, Duration::from_secs(2)).expect("the pipe answers");
+        let hello = ShimMessage::Hello {
+            protocol: native_term_session::PROTOCOL_VERSION,
+            role: Role::AuthSignal,
+            pid: std::process::id(),
+            wt_session: Some(pane.clone()),
+            session: None,
+            alias: None,
+            terminal_window: None,
+        };
+        conn.send(&hello).unwrap();
+        if let Some(said) = said {
+            conn.send(&ShimMessage::Server { version: said.into() }).unwrap();
+        }
+        conn.send(&ShimMessage::Authenticated).unwrap();
+        let _ = conn.recv::<AppMessage>(Duration::from_secs(2));
+    };
+    login(Some("SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.6\r\n"));
+    wait_until(&core, &ids, "logged in", |s| s[0].state == State::Connected);
+    wait_for("what it said is known", || core.servers().contains_key(HOST));
+    let known = core.servers()[HOST].clone();
+    assert_eq!((known.os, known.said.as_str()), (Some(Os::Ubuntu), "SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.6"));
+    // an ssh that tells nothing (the system's own) takes nothing away,
+    // and what is no identification is not one
+    login(None);
+    login(Some("rm -rf /"));
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(core.servers()[HOST], known);
+    // the server set up anew says something else
+    login(Some("SSH-2.0-OpenSSH_10.2"));
+    wait_for("what it says now", || core.servers()[HOST].os.is_none());
+    drop(core);
+    // kept for the next run
+    let (core, _fake) = start(Some(Registry::open(&db).unwrap()));
+    assert_eq!(core.servers()[HOST].said, "SSH-2.0-OpenSSH_10.2");
+}

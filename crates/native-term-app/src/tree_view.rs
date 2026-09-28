@@ -187,6 +187,8 @@ pub struct Shown<'a> {
     /// The tags there are (the database's), whether a host has them or
     /// not.
     pub tags: &'a [String],
+    /// What the hosts' servers said they are.
+    pub servers: &'a native_term_app::server::Servers,
     pub scope: Scope,
 }
 
@@ -305,6 +307,8 @@ pub struct TreeView {
     /// The chips are all shown, in as many lines as they take (one line
     /// of them otherwise).
     chips_open: bool,
+    /// The systems' pictures, as made for the rows so far.
+    logos: crate::logos::Logos,
 }
 
 struct SearchCache {
@@ -375,6 +379,9 @@ struct RowLook {
     /// The sign that opens and closes a folder; a host has a dot there.
     chevron: Option<char>,
     picture: Option<(char, Kind)>,
+    /// In the picture's place: the system the host's server is of, and
+    /// what it is drawn with (`logos.rs`).
+    logo: Option<(egui::TextureId, egui::Color32)>,
     /// Said after the name, weakly.
     after: Option<String>,
     /// A favorite.
@@ -490,7 +497,14 @@ fn draw_row(ui: &mut egui::Ui, tones: &Tones, height: f32, text: &str, look: Row
                 Kind::Link => tones.accent,
             };
             let at = egui::pos2(x + PICTURE / 2.0, middle);
-            painter.text(at, egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(PICTURE), tint);
+            match look.logo {
+                Some((logo, tint)) => {
+                    crate::logos::paint(&painter, logo, crate::logos::place(ui.ctx(), at, PICTURE), tint);
+                }
+                None => {
+                    painter.text(at, egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(PICTURE), tint);
+                }
+            }
             x += PICTURE + GAP;
         }
         // the row's end, from the right: what does not fit is left out
@@ -973,6 +987,8 @@ impl TreeView {
         let tones = crate::looks::tones(ui.visuals());
         let (tree, activity, written) = (shown.tree, shown.activity, shown.written);
         let mut actions = Vec::new();
+        // (the pictures made so far: the view's again when the rows are drawn)
+        let mut logos = std::mem::take(&mut self.logos);
         self.update_nodes(tree, shown.generation);
         self.update_chips(shown);
         let (search, clear) = self.search_bar(ui, &tones, &mut actions);
@@ -1237,6 +1253,12 @@ impl TreeView {
                             Some(Protocol::Serial) => icons::SERIAL,
                             Some(_) => icons::NETWORK,
                         };
+                        // (an SSH host whose server said what system it is of)
+                        let os = shown.servers.get(alias).filter(|_| plink.is_none()).and_then(|known| known.os);
+                        let logo = os.and_then(|os| {
+                            let picture = logos.picture(ui.ctx(), os, PICTURE)?;
+                            Some((picture, crate::logos::tint(os, &tones, ui.visuals().dark_mode)))
+                        });
                         let stripe = native_term_config::appearance::for_host(folders[*folder], host)
                             .tab_color
                             .and_then(|hex| egui::Color32::from_hex(&hex).ok());
@@ -1257,6 +1279,7 @@ impl TreeView {
                             level: *depth,
                             check: Some(if selected { Check::On } else { Check::Off }),
                             picture: Some((icon, Kind::Host)),
+                            logo,
                             // (in a list the host's folder is said too)
                             after: listed.then(|| folder_title(folders[*folder])),
                             star: host.favorite(),
@@ -1440,6 +1463,7 @@ impl TreeView {
             self.click(&host_rows, index, alias, modifiers);
             self.focus = None;
         }
+        self.logos = logos;
         actions
     }
 
@@ -1704,6 +1728,7 @@ mod tests {
         let notes = noted(&[("id-db1", &["prod", "ceph"]), ("id-db2", &["Prod"]), ("id-gone", &["old"])]);
         let known: Vec<String> = ["ceph", "old", "prod", "unused"].iter().map(|t| t.to_string()).collect();
         let nothing = HashMap::new();
+        let servers = Default::default();
         let recent = vec!["db2".to_string(), "web".to_string()];
         let mut view = TreeView::default();
         view.update_nodes(&tree, 1);
@@ -1714,6 +1739,7 @@ mod tests {
             activity,
             written: Written { notes: &notes, generation: 0 },
             tags: &known,
+            servers: &servers,
             scope,
         };
         view.update_chips(&shown(&nothing, Scope::Tree));

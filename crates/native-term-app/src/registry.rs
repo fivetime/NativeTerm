@@ -11,7 +11,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 pub type Result<T> = rusqlite::Result<T>;
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 7;
 
 /// What someone wrote about a host: as many lines as they like, and
 /// tags. Kept by the host's `NativeTermId`, so renaming it loses
@@ -253,6 +253,20 @@ impl Registry {
             for tag in lines.iter().flat_map(|line| Note::tags_from(line)) {
                 conn.execute("INSERT OR IGNORE INTO tags (name, created_at) VALUES (?1, ?2)", params![tag, now()])?;
             }
+        }
+        if version < 7 {
+            // what each host's server said it is, the last time it was
+            // logged in to (`server.rs`)
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE servers (
+                     alias TEXT PRIMARY KEY,
+                     said TEXT NOT NULL,
+                     seen_at INTEGER NOT NULL
+                 );
+                 PRAGMA user_version = 7;
+                 COMMIT;",
+            )?;
         }
         Ok(Registry { conn: Mutex::new(conn) })
     }
@@ -505,6 +519,27 @@ impl Registry {
         })
     }
 
+    /// `alias`' server said this of itself, now.
+    pub fn set_server(&self, alias: &str, said: &str) -> Result<()> {
+        self.with(|c| {
+            c.execute(
+                "INSERT INTO servers (alias, said, seen_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT (alias) DO UPDATE SET said = ?2, seen_at = ?3",
+                params![alias, said, now()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// What the hosts' servers said of themselves: (alias, what).
+    pub fn servers(&self) -> Result<Vec<(String, String)>> {
+        self.with(|c| {
+            let mut statement = c.prepare("SELECT alias, said FROM servers ORDER BY alias")?;
+            let rows = statement.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect()
+        })
+    }
+
     /// Most recently opened hosts first.
     pub fn recent(&self, limit: usize) -> Result<Vec<Usage>> {
         self.with(|c| {
@@ -706,6 +741,26 @@ mod tests {
         assert_eq!(
             Note::tags_from(labels),
             ["ceph-osd=enabled", "openpe.fivetime.io/rack=c2r6", "node-role.kubernetes.io/storage="]
+        );
+    }
+
+    #[test]
+    fn what_a_server_said_is_kept_per_host() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("state.db");
+        {
+            let reg = Registry::open(&path).unwrap();
+            assert!(reg.servers().unwrap().is_empty());
+            reg.set_server("web01", "SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u10").unwrap();
+            reg.set_server("db01", "SSH-2.0-OpenSSH_10.2").unwrap();
+            // (the server was set up anew)
+            reg.set_server("web01", "SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.6").unwrap();
+        }
+        let kept = Registry::open(&path).unwrap().servers().unwrap();
+        let said = |alias: &str, said: &str| (alias.to_string(), said.to_string());
+        assert_eq!(
+            kept,
+            [said("db01", "SSH-2.0-OpenSSH_10.2"), said("web01", "SSH-2.0-OpenSSH_10.2p1 Ubuntu-2ubuntu3.6")]
         );
     }
 

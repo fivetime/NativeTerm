@@ -1915,6 +1915,7 @@ dependencies = [
  "native-term-session",
  "native-term-sftp",
  "native-term-wezterm",
+ "png",
  "rusqlite",
  "serde",
  "serde_json",

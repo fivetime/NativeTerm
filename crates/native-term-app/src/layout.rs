@@ -143,15 +143,33 @@ pub fn rail_button(ui: &mut egui::Ui, tones: &Tones, rail: Rail<'_>) -> egui::Re
     response.on_hover_text(hint)
 }
 
+/// What a tile's picture is 24 a side.
+pub const TILE_PICTURE: f32 = 24.0;
+
 /// A square with an icon in it: the header's (the accent's colours) and
-/// the chosen thing's (a button's).
-pub fn tile(ui: &mut egui::Ui, side: f32, icon: char, fill: egui::Color32, line: egui::Color32, color: egui::Color32) {
+/// the chosen thing's (a button's). With `logo` a picture is in the
+/// icon's place (`logos.rs`).
+pub fn tile(
+    ui: &mut egui::Ui,
+    side: f32,
+    icon: char,
+    logo: Option<(egui::TextureId, egui::Color32)>,
+    (fill, line, color): (egui::Color32, egui::Color32, egui::Color32),
+) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         painter.rect_filled(rect, 12.0, fill);
         painter.rect_stroke(rect, 12.0, egui::Stroke::new(1.0_f32, line), egui::StrokeKind::Inside);
-        painter.text(rect.center(), egui::Align2::CENTER_CENTER, icon, font(24.0), color);
+        match logo {
+            Some((logo, tint)) => {
+                let place = crate::logos::place(ui.ctx(), rect.center(), TILE_PICTURE);
+                crate::logos::paint(painter, logo, place, tint);
+            }
+            None => {
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, icon, font(TILE_PICTURE), color);
+            }
+        }
     }
 }
 

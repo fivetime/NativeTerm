@@ -8,6 +8,8 @@
 //!   OpenSSH if `FAKE_SSH_LOGIN=1`, with `FAKE_SSH_ECHO=1` logs typed lines
 //!   (`input: …`) until `exit`, sleeps `FAKE_SSH_MS`, and exits with
 //!   `FAKE_SSH_CODE`. Arguments are appended to `FAKE_SSH_LOG`.
+//! - `FAKE_SSH_SAID=<s>`: the `LocalCommand` has `<s>` as what the server
+//!   said it is (`NATIVETERM_SERVER_VERSION`), like NativeTerm's ssh.
 //! - `FAKE_SSH_WINDOWS=1`: runs the remote command with `cmd.exe /c`, like
 //!   a Windows sshd.
 //! - `FAKE_SSH_PASSWORD=<p>`: logs in only if the forced `SSH_ASKPASS`
@@ -61,7 +63,11 @@ mod on_windows {
             std::thread::sleep(Duration::from_millis(env_num("FAKE_SSH_LOGIN_DELAY_MS", 0) as u64));
             let local = args.iter().find_map(|a| a.strip_prefix("LocalCommand="));
             if let Some(command) = local {
-                let _ = Command::new("cmd.exe").arg("/c").raw_arg(command).status();
+                let mut local = Command::new("cmd.exe");
+                if let Ok(said) = std::env::var("FAKE_SSH_SAID") {
+                    local.env("NATIVETERM_SERVER_VERSION", said);
+                }
+                let _ = local.arg("/c").raw_arg(command).status();
             }
         }
         // like ssh with SSH_ASKPASS_REQUIRE=force: the password from the helper

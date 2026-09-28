@@ -751,6 +751,28 @@
             a host made with a tag typed and one chosen. Not tried by
             hand on Windows and macOS (the same code; no input is
             sent there).
+      - [x] A host that was logged in to has its system's picture
+            (the person's wish, 2026-09-28; in colour, a host of an
+            unknown system as before). From what the server says of
+            itself as the connection begins, and from nothing else:
+            no command is run on the server (the person: it would be
+            in the server's logs and look like something done to it).
+            The OpenSSH fork hands the string to the shim's login
+            helper, NativeTerm keeps it per host (schema 7). Known:
+            Ubuntu, Debian, Deepin, Raspbian, Kali, FreeBSD, Windows;
+            a system that takes another's package says that one
+            (Zorin and elementary: Ubuntu), and Fedora, Arch and macOS
+            say nothing of themselves. Seen: what eight machines say
+            (the six test boxes, the Mac, the person's control1); on
+            Windows the fork's ssh hands it to its local command, and
+            nothing where NativeTerm did not start it; on Lingmo
+            (X11), with the fork's ssh built there, a login to the
+            box's own sshd from the tree gives the row Debian's
+            picture and the card the system and the software; all
+            seven pictures, dark and light. Not tried by hand: a
+            login from NativeTerm on Windows and macOS.
+            Open: the fork's ssh is next to NativeTerm on Windows and
+            where it was built by hand; shipping it is packaging.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

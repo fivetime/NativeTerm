@@ -273,6 +273,13 @@ script does instead:
 Warnings: 7 × C4819 (source characters outside code page 936) and 2 ×
 C4047 in `clientloop.c` / `serverloop.c`, both upstream as is.
 
+## What else the fork does
+
+Since 2026-09-28 (`c3286be20`) the fork's ssh also tells its
+`LocalCommand` what the server said it is when the connection began
+(`NATIVETERM_SERVER_VERSION`, only with `$NATIVETERM_ZMODEM` set): see
+"What system a server is of" in `ARCHITECTURE.md`.
+
 ## On Linux (built and verified 2026-09-22, Deepin 25 with WezTerm)
 
 The same fork builds the same ssh on Linux: the `nativeterm` branch's

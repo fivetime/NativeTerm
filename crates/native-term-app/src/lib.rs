@@ -18,6 +18,7 @@ mod previews;
 pub mod quick;
 pub mod quotation;
 pub mod registry;
+pub mod server;
 pub mod settings;
 pub mod shortcuts;
 pub mod tab_menu;
@@ -320,6 +321,8 @@ pub(crate) struct Shared {
     /// restored placeholders, not shown.
     restorable: Mutex<Vec<Session>>,
     notices: Mutex<Vec<String>>,
+    /// What the hosts' servers said they are (`server.rs`), as kept.
+    servers: Mutex<Arc<server::Servers>>,
     snapshot: Mutex<Snapshot>,
     /// Terminal windows in the order NativeTerm first saw them, for
     /// stable window numbers (Z order changes with every activation).
@@ -427,6 +430,22 @@ impl Shared {
         }
     }
 
+    /// `alias`' server said this of itself as the login began.
+    fn server_said(&self, alias: &str, said: &str) {
+        let Some(said) = server::cleaned(said) else { return };
+        {
+            let mut servers = lock(&self.servers);
+            if servers.get(alias).is_some_and(|known| known.said == said) {
+                return;
+            }
+            let mut all = server::Servers::clone(&servers);
+            all.insert(alias.to_string(), server::Known::of(said.clone()));
+            *servers = Arc::new(all);
+        }
+        self.db("server", |r| r.set_server(alias, &said));
+        self.changed();
+    }
+
     /// Change a session; a session that ends or comes back is recorded.
     fn update<R>(&self, id: &str, f: impl FnOnce(&mut Session) -> R) -> Option<R> {
         let (result, ended, back) = {
@@ -529,9 +548,18 @@ impl Core {
                 Err(e) => notices.push(format!("state.db: {e}")),
             }
         }
+        let servers: server::Servers = match registry.as_ref().map(Registry::servers) {
+            Some(Ok(rows)) => rows.into_iter().map(|(alias, said)| (alias, server::Known::of(said))).collect(),
+            Some(Err(e)) => {
+                notices.push(format!("state.db: {e}"));
+                Default::default()
+            }
+            None => Default::default(),
+        };
         let shared = Arc::new(Shared {
             terminal,
             registry,
+            servers: Mutex::new(Arc::new(servers)),
             sessions: Mutex::new(sessions),
             restorable: Mutex::new(restorable),
             notices: Mutex::new(notices),
@@ -740,6 +768,11 @@ impl Core {
 
     pub fn registry(&self) -> Option<&Registry> {
         self.shared.registry.as_ref()
+    }
+
+    /// What the hosts' servers said they are, by alias.
+    pub fn servers(&self) -> Arc<server::Servers> {
+        Arc::clone(&lock(&self.shared.servers))
     }
 
     pub fn sessions(&self) -> Vec<SessionView> {
@@ -1788,17 +1821,24 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     }
 
     if role == Role::AuthSignal {
-        // the LocalCommand helper: one message, then it's gone
-        if let Ok(Some(ShimMessage::Authenticated)) = conn.recv::<ShimMessage>(Duration::from_secs(5)) {
-            if let Some(guid) = wt_session {
-                let id =
-                    lock(&shared.sessions).iter().find(|s| s.matches_terminal_session(&guid)).map(|s| s.id.clone());
-                if let Some(id) = id {
-                    shared.update(&id, |s| {
+        // the LocalCommand helper: what the server said it is (where
+        // ssh told), that the login is done, then it's gone
+        let session = wt_session.as_deref().and_then(|guid| {
+            let sessions = lock(&shared.sessions);
+            sessions.iter().find(|s| s.matches_terminal_session(guid)).map(|s| (s.id.clone(), s.alias.clone()))
+        });
+        for _ in 0..2 {
+            match (conn.recv::<ShimMessage>(Duration::from_secs(5)), &session) {
+                (Ok(Some(ShimMessage::Server { version })), Some((_, alias))) => shared.server_said(alias, &version),
+                (Ok(Some(ShimMessage::Server { .. })), None) => {}
+                (Ok(Some(ShimMessage::Authenticated)), Some((id, _))) => {
+                    shared.update(id, |s| {
                         s.authenticated = true;
                         s.state = State::Connected;
                     });
+                    break;
                 }
+                _ => break,
             }
         }
         return;
@@ -2149,6 +2189,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
     match message {
         // only from a `Request` helper, never on a session link
         ShimMessage::OpenFiles
+        | ShimMessage::Server { .. }
         | ShimMessage::Dropped { .. }
         | ShimMessage::TabMenu { .. }
         | ShimMessage::TabTitle { .. }

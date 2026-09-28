@@ -28,6 +28,7 @@ mod icons;
 mod import_dialog;
 mod key_dialog;
 mod layout;
+mod logos;
 mod looks;
 mod options_dialog;
 mod plink_dialog;

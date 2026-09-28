@@ -45,6 +45,11 @@ pub enum ShimMessage {
     Connecting { attempt: u32 },
     /// Logged in (`LocalCommand` fired).
     Authenticated,
+    /// From the `LocalCommand` helper, before `Authenticated`: what the
+    /// server said it is when the connection began (its identification
+    /// string, `SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13`), where the
+    /// client tells (NativeTerm's own ssh).
+    Server { version: String },
     /// The client exited with this code.
     Exited { code: i32 },
     /// The tab is being closed (`CTRL_CLOSE_EVENT`).
@@ -278,6 +283,7 @@ mod tests {
             ShimMessage::Waiting,
             ShimMessage::Connecting { attempt: 2 },
             ShimMessage::Authenticated,
+            ShimMessage::Server { version: "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.19".into() },
             ShimMessage::Exited { code: -1 },
             ShimMessage::Closing,
             ShimMessage::Specials { names: vec!["brk".into(), "ayt".into()] },

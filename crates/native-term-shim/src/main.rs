@@ -146,6 +146,10 @@ fn wt_session() -> Option<String> {
     var("WT_SESSION").or_else(|| var("WEZTERM_PANE"))
 }
 
+/// What the server said it is, where ssh tells (NativeTerm's own does,
+/// in the environment of its `LocalCommand`).
+const SERVER_VERSION: &str = "NATIVETERM_SERVER_VERSION";
+
 /// The `LocalCommand` helper: runs synchronously inside ssh, so it must be
 /// quick and print nothing.
 fn authenticated(shim_pid: u32) {
@@ -161,6 +165,9 @@ fn authenticated(shim_pid: u32) {
             alias: None,
             terminal_window: None,
         });
+        if let Some(version) = std::env::var(SERVER_VERSION).ok().filter(|said| !said.is_empty()) {
+            let _ = conn.send(&ShimMessage::Server { version });
+        }
         let _ = conn.send(&ShimMessage::Authenticated);
         // NativeTerm checks what program is at the other end before it
         // reads a word (on Unix through /proc, which a process that has
@@ -311,6 +318,8 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
         // NativeTerm's ssh hands rz / sz to the shim (`--zmodem`); any
         // other ssh ignores it
         command.env("NATIVETERM_ZMODEM", &shim_exe);
+        // what the server said it is comes from this ssh, of this server
+        command.env_remove(SERVER_VERSION);
         // a saved password: the shim answers ssh's password prompt
         let set = saved::credential_set(alias);
         let saved =

@@ -1084,3 +1084,5 @@ tag-delete-text = { $count ->
        *[other] 将从 { $count } 台主机上去掉这个标签，主机本身不受影响。
     }
 field-tags-choose = 点击选用这个标签，再点一次取消
+props-os = 系统
+props-server = SSH 服务端

@@ -260,6 +260,8 @@ pub struct App {
     /// The tags there are (`state.db`): what the chips above the tree
     /// offer, and what a host's tags are chosen among.
     tags: Vec<String>,
+    /// The systems' pictures, as made for what is chosen so far.
+    logos: std::cell::RefCell<crate::logos::Logos>,
     /// OneDrive / Dropbox folders on this computer, for the wizard.
     sync_roots: Vec<(String, PathBuf)>,
     /// PuTTY has saved sessions (checked at start).
@@ -430,6 +432,7 @@ impl App {
             notes,
             notes_generation: 0,
             tags,
+            logos: Default::default(),
             sync_roots: native_term_os::cloud::sync_roots(),
             putty_sessions: putty_has_sessions(),
             wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
@@ -2039,7 +2042,10 @@ impl App {
         let narrow = ui.available_width() < layout::NARROW - layout::RAIL;
         let chosen = self.view.chosen(&self.tree);
         let written = crate::tree_view::Written { notes: &self.notes, generation: self.notes_generation };
-        let about = crate::properties::About { tree: &self.tree, view: &self.view, activity, written };
+        let servers = self.core.as_ref().map(Core::servers).unwrap_or_default();
+        let servers = &*servers;
+        let logos = &self.logos;
+        let about = crate::properties::About { tree: &self.tree, view: &self.view, activity, written, servers, logos };
         let frame = egui::Frame::new().fill(tones.bar);
         let mut asked = Vec::new();
         if narrow {
@@ -2063,7 +2069,10 @@ impl App {
         }
         let scope = if self.page == Page::Recent { Scope::Recent } else { Scope::Tree };
         let tags = &self.tags;
-        let shown = Shown { tree: &self.tree, generation: self.generation, recent, activity, written, tags, scope };
+        let servers = self.core.as_ref().map(Core::servers).unwrap_or_default();
+        let servers = &*servers;
+        let generation = self.generation;
+        let shown = Shown { tree: &self.tree, generation, recent, activity, written, tags, servers, scope };
         let page = egui::Frame::new().fill(tones.page);
         let mut actions =
             egui::CentralPanel::default().frame(page).show_inside(ui, |ui| self.view.show(ui, &shown)).inner;
@@ -2146,7 +2155,7 @@ impl App {
             layout::card(ui, tones, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
-                    layout::tile(ui, 48.0, icon, tones.bar, tones.line, tones.accent);
+                    layout::tile(ui, 48.0, icon, None, (tones.bar, tones.line, tones.accent));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let clicked =
                             layout::button(ui, tones, Kind::Primary, Room::Panel, Some(icons::IMPORT), &button)

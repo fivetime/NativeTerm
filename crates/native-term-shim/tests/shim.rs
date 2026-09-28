@@ -82,8 +82,18 @@ fn wait_exit(child: &mut Child) -> i32 {
 fn login_disconnect_reconnect_close() {
     let name = pipe_name("lifecycle");
     let mut listener = PipeListener::bind(&name).unwrap();
-    let mut shim =
-        spawn_shim(&name, &["--session", "s-1", "web01"], &[("FAKE_SSH_LOGIN", "1"), ("FAKE_SSH_CODE", "255")]);
+    let said = "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.19";
+    let mut shim = spawn_shim(
+        &name,
+        &["--session", "s-1", "web01"],
+        &[
+            ("FAKE_SSH_LOGIN", "1"),
+            ("FAKE_SSH_CODE", "255"),
+            ("FAKE_SSH_SAID", said),
+            // (what another server said, left in the environment, is not this one's)
+            ("NATIVETERM_SERVER_VERSION", "SSH-2.0-OpenSSH_for_Windows_9.5"),
+        ],
+    );
 
     let conn = listener.accept().unwrap();
     assert_eq!(conn.client_pid().unwrap(), shim.id());
@@ -112,6 +122,8 @@ fn login_disconnect_reconnect_close() {
         }
         other => panic!("{other:?}"),
     }
+    // what the server said it is, as ssh told, and that the login is done
+    assert_eq!(expect(&helper), ShimMessage::Server { version: said.into() });
     assert_eq!(expect(&helper), ShimMessage::Authenticated);
 
     assert_eq!(expect_skipping_login(&conn), ShimMessage::Exited { code: 255 });

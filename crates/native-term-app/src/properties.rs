@@ -21,6 +21,10 @@ pub struct About<'a> {
     pub view: &'a TreeView,
     pub activity: &'a HashMap<String, Activity>,
     pub written: Written<'a>,
+    /// What the hosts' servers said they are.
+    pub servers: &'a native_term_app::server::Servers,
+    /// The systems' pictures, as made for the card so far.
+    pub logos: &'a std::cell::RefCell<crate::logos::Logos>,
 }
 
 /// What was asked for here.
@@ -84,12 +88,26 @@ pub fn show(ui: &mut egui::Ui, about: &About, chosen: &Chosen) -> Vec<Asked> {
     asked
 }
 
+/// A card's picture: an icon in a colour, or a system's picture in its
+/// place.
+struct Picture {
+    icon: char,
+    tint: egui::Color32,
+    logo: Option<(egui::TextureId, egui::Color32)>,
+}
+
+impl Picture {
+    fn icon(icon: char, tint: egui::Color32) -> Picture {
+        Picture { icon, tint, logo: None }
+    }
+}
+
 /// The chosen thing's card: its picture, its name, and a line about it.
-fn card(ui: &mut egui::Ui, tones: &Tones, icon: char, tint: egui::Color32, name: &str, under: &str, fixed: bool) {
+fn card(ui: &mut egui::Ui, tones: &Tones, picture: Picture, name: &str, under: &str, fixed: bool) {
     layout::card(ui, tones, |ui| {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
-            layout::tile(ui, 48.0, icon, tones.bar, tones.line, tint);
+            layout::tile(ui, 48.0, picture.icon, picture.logo, (tones.bar, tones.line, picture.tint));
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 3.0;
                 ui.add_space(4.0);
@@ -151,7 +169,13 @@ fn one_host(
         Some(session) => session.target(),
         None => tree_view::address(host),
     };
-    card(ui, tones, icon, tones.host, host.label(), &address, true);
+    // (an SSH host whose server said what system it is of has its picture)
+    let os = about.servers.get(&alias).filter(|_| plink.is_none()).and_then(|known| known.os);
+    let logo = os.and_then(|os| {
+        let picture = about.logos.borrow_mut().picture(ui.ctx(), os, layout::TILE_PICTURE)?;
+        Some((picture, crate::logos::tint(os, tones, ui.visuals().dark_mode)))
+    });
+    card(ui, tones, Picture { icon, tint: tones.host, logo }, host.label(), &address, true);
     let note = about.written.of(host);
     list(ui, |ui| {
         layout::property(ui, tones, &t!("props-alias"), |ui| layout::value(ui, tones, &alias, true));
@@ -188,6 +212,15 @@ fn one_host(
                 if let Some(program) = native_term_config::persistent::for_host(folder, host) {
                     layout::property(ui, tones, &t!("props-kept"), |ui| {
                         layout::value(ui, tones, program.name(), false);
+                    });
+                }
+                // what its server said it is, the last time it was logged in to
+                if let Some(known) = about.servers.get(&alias) {
+                    if let Some(os) = known.os {
+                        layout::property(ui, tones, &t!("props-os"), |ui| layout::value(ui, tones, os.name(), false));
+                    }
+                    layout::property(ui, tones, &t!("props-server"), |ui| {
+                        layout::value(ui, tones, &known.software(), true);
                     });
                 }
             }
@@ -256,7 +289,7 @@ fn several(ui: &mut egui::Ui, tones: &Tones, about: &About, aliases: &[String], 
     let count = hosts.len();
     let open = hosts.iter().filter(|h| about.activity.get(h.alias()) == Some(&Activity::Connected)).count();
     let name = t!("props-group", count = count);
-    card(ui, tones, icons::LAYERS, tones.accent, &name, &t!("props-group-open", count = open), false);
+    card(ui, tones, Picture::icon(icons::LAYERS, tones.accent), &name, &t!("props-group-open", count = open), false);
     part(ui, tones, &t!("props-group-hosts"), |ui| {
         // the first of them; the rest are counted
         const NAMED: usize = 12;
@@ -297,7 +330,8 @@ fn several(ui: &mut egui::Ui, tones: &Tones, about: &About, aliases: &[String], 
 
 fn one_folder(ui: &mut egui::Ui, tones: &Tones, about: &About, folder: &FolderView, asked: &mut Vec<Asked>) {
     let count = folder.hosts.len();
-    card(ui, tones, icons::FOLDER_OPEN, tones.folder, &folder.name, &t!("props-folder-hosts", count = count), false);
+    let picture = Picture::icon(icons::FOLDER_OPEN, tones.folder);
+    card(ui, tones, picture, &folder.name, &t!("props-folder-hosts", count = count), false);
     let own = folder.index.and_then(|i| about.tree.folders().nth(i));
     list(ui, |ui| {
         layout::property(ui, tones, &t!("props-hosts"), |ui| layout::value(ui, tones, &count.to_string(), false));

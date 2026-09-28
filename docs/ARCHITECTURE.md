@@ -1544,7 +1544,55 @@ Tables, as a first sketch:
   opened_at)`;
 - `recent(nt_id, machine, last_connected, count)`;
 - `notes(nt_id, text, tags, updated_at)`;
-- `tags(name, created_at)`.
+- `tags(name, created_at)`;
+- `servers(alias, said, seen_at)`.
+
+### What system a server is of
+
+A host that was logged in to once has its system's picture in the tree
+(and on its card at the right, with the system's name and what the
+server's software is), where its server said what it is of. What is
+known comes from one place only: the identification string the server
+sends first, before anything else (RFC 4253, 4.2: `SSH-2.0-OpenSSH_9.6p1
+Ubuntu-3ubuntu13.19`). **Nothing is asked of the server and nothing is
+run on it for this** (decided 2026-09-28, the person: reading
+`/etc/os-release` would say more, but a command run on a server is in
+its logs where those are kept, and looks like something done to it).
+
+- NativeTerm's ssh (the OpenSSH fork) has the string from the key
+  exchange and puts it into the environment of its `LocalCommand`
+  (`NATIVETERM_SERVER_VERSION`; `nt_export_server_version` in `ssh.c`),
+  only where NativeTerm started it. The `LocalCommand` is the shim's
+  `--authenticated` helper, which hands it on
+  (`ShimMessage::Server`) before it says that the login is done. The
+  shim takes the variable out of the environment it starts ssh with,
+  so what is there is this server's. Another ssh (the system's) tells
+  nothing, and nothing is known then.
+- NativeTerm keeps it per alias (`state.db`, `servers(alias, said,
+  seen_at)`, schema 7; in memory with the core, `Core::servers`), what
+  can be printed of it and 253 characters at most (`server::cleaned`),
+  and written again at each login: a server set up anew is what it
+  says then.
+- The system is read from it when it is shown (`server::Os::of`), so a
+  NativeTerm that knows more systems knows them of the hosts it has
+  seen. What servers say (measured on the test machines and read in
+  their packages' sources, in `server.rs`): Debian's package says the
+  vendor it was built for (`Debian-…`, `Ubuntu-…`, so `Raspbian-…`,
+  `Kali-…`), Deepin's says `Deepin`, FreeBSD's `FreeBSD-…`, Windows' is
+  `OpenSSH_for_Windows_…`. **It is the family, not always the system**:
+  Zorin OS and elementary OS say Ubuntu, Lingmo says Debian. Fedora,
+  Arch and macOS say the software only: they stay unknown, with the
+  picture any host has. A Telnet or serial session has no such string.
+- The pictures (`assets/os`, its README for where each is from): the
+  logos in their own colours from gilbarbara/logos (CC0), and for the
+  systems that has none of, shapes from font-logos (the Unlicense),
+  drawn in a colour: Deepin's in its own logo's blue (the lighter on a
+  dark row, the darker on a light one), Kali's in the colour of any
+  host's picture. They are kept 96 pixels a side and brought to the
+  size they are shown at, in the screen's own pixels, by the mean of
+  what each pixel covers (`logos::sized`), and drawn on whole pixels:
+  sharp at 100 %, 125 %, 150 %, 200 %. Debian's red is dark on a dark
+  row (2.3 : 1 against it); it is the logo as it is.
 
 ### Host aliases and display names
 
@@ -4019,6 +4067,9 @@ All UI surfaces invoke one shared app-level command layer
       address first, and the name ends in "…". A checkbox is what
       Ctrl with a click was and still is; a folder's says how much of
       what is under it is selected and selects or lets go all of it.
+      An SSH host whose server said what system it is of has that
+      system's picture in place of the picture any host has (below:
+      "What system a server is of").
     - **What is chosen**, at the right (`properties.rs`, the design's
       "Item Properties"; 320 wide and can be dragged wider, where the
       design has 384: a docked window is narrow): a host (its alias,

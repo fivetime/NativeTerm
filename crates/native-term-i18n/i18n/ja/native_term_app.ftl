@@ -1100,3 +1100,5 @@ tag-delete-text = { $count ->
        *[other] { $count } 台のホストからこのタグを外します。ホスト自体は変わりません。
     }
 field-tags-choose = クリックでこのタグを付け、もう一度クリックで外します
+props-os = システム
+props-server = SSH サーバー

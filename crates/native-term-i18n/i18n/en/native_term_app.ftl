@@ -1127,3 +1127,5 @@ tag-delete-text = { $count ->
        *[other] The tag is taken from the { $count } hosts that have it. The hosts themselves stay as they are.
     }
 field-tags-choose = Click to give the host this tag, or to take it from it
+props-os = System
+props-server = SSH server
