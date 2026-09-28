@@ -63,6 +63,8 @@ pub enum TreeAction {
     /// A tag called something else, or deleted: everywhere it is.
     RenameTag(String),
     DeleteTag(String),
+    /// The rows' checkboxes shown or not, from now on.
+    Checks(bool),
 }
 
 /// How a host's sessions are doing, for the dot next to it.
@@ -309,6 +311,12 @@ pub struct TreeView {
     chips_open: bool,
     /// The systems' pictures, as made for the rows so far.
     logos: crate::logos::Logos,
+    /// How many folders the tree has (files), as the rows count them for
+    /// which are open at first.
+    folder_count: usize,
+    /// The rows have their checkboxes (off: hosts are chosen by clicks,
+    /// Ctrl and Shift with them).
+    pub checks: bool,
 }
 
 struct SearchCache {
@@ -466,9 +474,10 @@ fn draw_row(ui: &mut egui::Ui, tones: &Tones, height: f32, text: &str, look: Row
             painter.rect_stroke(within, 8.0, line, egui::StrokeKind::Inside);
         }
         // a line down each level the row is under, from under that
-        // level's checkbox
+        // level's checkbox (its chevron, where there are none)
+        let first = if look.check.is_some() { CHECK } else { CARET };
         for level in 0..look.level {
-            let under = (within.left() + ROW_PAD + level as f32 * LEVEL + CHECK / 2.0).round() + 0.5;
+            let under = (within.left() + ROW_PAD + level as f32 * LEVEL + first / 2.0).round() + 0.5;
             let whole = egui::Rangef::new(rect.top() - ROW_GAP, rect.bottom());
             ui.painter().vline(under, whole, egui::Stroke::new(1.0_f32, tones.guide));
         }
@@ -482,6 +491,10 @@ fn draw_row(ui: &mut egui::Ui, tones: &Tones, height: f32, text: &str, look: Row
         if let Some(check) = look.check {
             paint_check(&painter, tones, check_at, check, near && on(ui.ctx().pointer_hover_pos()));
             x += CHECK + GAP;
+        }
+        // a folder's chevron; a host's dot beside the checkboxes (without
+        // them, nothing: the picture is where the host begins)
+        if look.check.is_some() || look.chevron.is_some() {
             let sign = egui::pos2(x + CARET / 2.0, middle);
             let (glyph, size, color) = match look.chevron {
                 Some(chevron) => (chevron, 12.0, if near { tones.text } else { tones.weak }),
@@ -621,6 +634,22 @@ impl TreeView {
         self.focus = None;
     }
 
+    /// A view whose rows have their checkboxes, or not.
+    pub fn with_checks(checks: bool) -> TreeView {
+        TreeView { checks, ..TreeView::default() }
+    }
+
+    /// Whether a folder is open (what one button opens or closes all by).
+    fn any_open(&self) -> bool {
+        fn each(view: &TreeView, nodes: &[Node], depth: usize, count: usize) -> bool {
+            nodes
+                .iter()
+                .any(|node| view.is_open(&node.path, depth, count) || each(view, &node.children, depth + 1, count))
+        }
+        // (the main configuration's folder, and the others, as the rows have them)
+        self.toggled.get("").copied().unwrap_or(true) || each(self, &self.nodes.1, 0, self.folder_count)
+    }
+
     /// Every folder open, or every folder closed.
     pub fn open_all(&mut self, open: bool) {
         fn each(nodes: &[Node], open: bool, toggled: &mut HashMap<String, bool>) {
@@ -684,6 +713,7 @@ impl TreeView {
             .map(|(i, f)| (i, f.label().to_string()))
             .collect();
         self.nodes = (generation, hierarchy(&labels));
+        self.folder_count = tree.folders().count();
     }
 
     fn update_pinyin(&mut self, tree: &SessionTree, generation: u64) {
@@ -906,6 +936,34 @@ impl TreeView {
             .inner
     }
 
+    /// The two switches at `rect`: the checkboxes, and every folder opened
+    /// or closed. The second does what the tree asks for as it is: while
+    /// a folder is open it closes them all, else it opens them all.
+    fn switches(&mut self, ui: &mut egui::Ui, tones: &Tones, rect: egui::Rect, actions: &mut Vec<TreeAction>) {
+        layout::switches_frame(ui.painter(), tones, rect);
+        let side = egui::Vec2::splat(layout::SWITCH);
+        let first = egui::Rect::from_min_size(rect.left_center() + egui::vec2(2.0, -layout::SWITCH / 2.0), side);
+        let second = egui::Rect::from_min_size(
+            rect.right_center() - egui::vec2(2.0 + layout::SWITCH, layout::SWITCH / 2.0),
+            side,
+        );
+        let checks = layout::Switch::Checks { on: self.checks };
+        let hint = if self.checks { t!("tree-checks-off") } else { t!("tree-checks-on") };
+        if layout::switch(ui, tones, first, checks, &hint).clicked() {
+            self.checks = !self.checks;
+            actions.push(TreeAction::Checks(self.checks));
+        }
+        let open = self.any_open();
+        let (what, hint) = if open {
+            (layout::Switch::CloseAll, t!("header-collapse"))
+        } else {
+            (layout::Switch::OpenAll, t!("header-expand"))
+        };
+        if layout::switch(ui, tones, second, what, &hint).clicked() {
+            self.open_all(!open);
+        }
+    }
+
     /// The chips: one line of them, and where they are more than a line
     /// holds what opens the row (two chevrons at its end): then all of
     /// them, in as many lines as they take (`CHIP_LINES` at most: the
@@ -917,7 +975,13 @@ impl TreeView {
         const CHIP_LINES: usize = 6;
         let filters = self.chips.1.filters();
         let caption = t!("filter-label");
-        let full = ui.available_width();
+        // (the two switches at the row's end: the chips have what they leave)
+        let switches = egui::Rect::from_min_size(
+            egui::pos2(ui.max_rect().right() - layout::SWITCHES, ui.cursor().min.y),
+            egui::vec2(layout::SWITCHES, layout::CHIP),
+        );
+        self.switches(ui, tones, switches, actions);
+        let full = ui.available_width() - layout::SWITCHES - BETWEEN;
         let widths: Vec<f32> = filters.iter().map(|f| layout::chip_width(ui, &f.label())).collect();
         let before = layout::caption_width(ui, tones, &caption);
         let folds = before + widths.iter().map(|w| BETWEEN + w).sum::<f32>() > full;
@@ -1062,7 +1126,7 @@ impl TreeView {
                         let file = folder.and_then(|i| folders.get(i)).map(|f| f.file.clone());
                         let look = RowLook {
                             level: *depth,
-                            check: Some(*check),
+                            check: self.checks.then_some(*check),
                             chevron: Some(chevron),
                             picture: Some((icon, Kind::Folder)),
                             after: Some(count.to_string()),
@@ -1281,7 +1345,7 @@ impl TreeView {
                         };
                         let look = RowLook {
                             level: *depth,
-                            check: Some(if selected { Check::On } else { Check::Off }),
+                            check: self.checks.then_some(if selected { Check::On } else { Check::Off }),
                             picture: Some((icon, Kind::Host)),
                             logo,
                             // (in a list the host's folder is said too)
@@ -1808,6 +1872,23 @@ mod tests {
         assert_eq!(found("rack 12"), ["db1"], "what was written about it");
         assert_eq!(found("replica"), ["db2"], "its note in the configuration");
         assert!(found("nowhere").is_empty());
+    }
+
+    #[test]
+    fn one_button_opens_or_closes_every_folder_as_the_tree_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = tree_of_kinds(dir.path());
+        let mut view = TreeView::default();
+        view.update_nodes(&tree, 1);
+        // few folders: open at first, so the button closes them
+        assert!(view.any_open());
+        view.open_all(false);
+        assert!(!view.any_open());
+        // one opened by hand: the button closes again
+        view.toggled.insert("Lab".into(), true);
+        assert!(view.any_open());
+        view.open_all(true);
+        assert!(view.any_open() && view.is_open("Lab", 0, 2));
     }
 
     #[test]

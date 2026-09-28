@@ -1091,3 +1091,5 @@ field-system-hint = 主机运行的系统，用来显示图标。自动：取服
 system-auto = 自动
 system-auto-said = 自动（{ $name }）
 props-os-chosen = { $name }（手动选择）
+tree-checks-on = 显示勾选框
+tree-checks-off = 隐藏勾选框

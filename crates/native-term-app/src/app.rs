@@ -385,6 +385,7 @@ impl App {
             notices.push(t!("notice-notes", error = problem));
         }
         let tags = core.as_ref().and_then(Core::registry).and_then(|r| r.tags().ok()).unwrap_or_default();
+        let checks = core.as_ref().and_then(|c| c.setting(CHECKS_SETTING)).as_deref() == Some("on");
         crate::dialogs::set_known_tags(&tags);
         let first_run = core.as_ref().is_some_and(|c| c.setting(crate::wizard::DONE_SETTING).is_none());
         let keys = crate::shortcut_ui::ShortcutUi::new(ctx, core.as_ref(), &profile.settings_json());
@@ -417,7 +418,7 @@ impl App {
             editor: editor_for(&options.ssh_dir, &data_dir),
             data_dir,
             ssh_dir: options.ssh_dir,
-            view: TreeView::default(),
+            view: TreeView::with_checks(checks),
             send_line: SendLine::default(),
             recent_cache: std::cell::RefCell::new((None, Vec::new())),
             open_files: std::env::var("NATIVETERM_OPEN_FILES").ok().filter(|a| !a.is_empty()),
@@ -721,6 +722,11 @@ impl App {
                 }
             }
             TreeAction::Reload => self.reload(),
+            TreeAction::Checks(on) => {
+                if let Some(core) = &self.core {
+                    core.set_setting(CHECKS_SETTING, if on { "on" } else { "off" });
+                }
+            }
             TreeAction::RenameTag(tag) => {
                 let hosts = self.notes.values().filter(|note| note.has_tag(&tag)).count();
                 self.dialog = Some(Dialog::Tag(TagDialog::rename(&tag, hosts)));
@@ -1848,10 +1854,6 @@ impl App {
                     if !cfg!(target_os = "macos") {
                         caption = layout::caption_buttons(ui, tones, maximized);
                     }
-                    let (icon, hint) = other_theme(ui);
-                    if layout::theme_button(ui, tones, icon, &hint).clicked() {
-                        self.change_theme(ui);
-                    }
                     if self.page == Page::Tree {
                         self.header_buttons(ui, tones, short, &mut actions);
                     }
@@ -1956,12 +1958,6 @@ impl App {
                 ui.close();
             }
         });
-        if button(ui, Kind::Plain, icons::CHEVRON_RIGHT, t!("header-collapse")).clicked() {
-            self.view.open_all(false);
-        }
-        if button(ui, Kind::Plain, icons::CHEVRON_DOWN, t!("header-expand")).clicked() {
-            self.view.open_all(true);
-        }
         let reload = layout::button(ui, tones, Kind::Plain, Room::Header, Some(icons::REFRESH), "");
         if reload.on_hover_text(t!("tree-reload-hint")).clicked() {
             actions.push(TreeAction::Reload);
@@ -2727,6 +2723,9 @@ fn about(ui: &mut egui::Ui, tones: &Tones) {
 
 /// The theme that is not the one shown: its sign, and what changing to
 /// it is called (the design's sun in the dark, its moon in the light).
+/// Whether the tree's rows have their checkboxes (`on`; off otherwise).
+const CHECKS_SETTING: &str = "tree.checks";
+
 fn other_theme(ui: &egui::Ui) -> (char, String) {
     match ui.visuals().dark_mode {
         true => (icons::SUN, t!("rail-light")),

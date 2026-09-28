@@ -366,21 +366,6 @@ pub fn frame_cursor(to: egui::viewport::ResizeDirection) -> egui::CursorIcon {
     }
 }
 
-/// The button that changes between light and dark, in the header (`p-2`
-/// around an icon of 16; `hover:text-amber-500`).
-pub fn theme_button(ui: &mut egui::Ui, tones: &Tones, icon: char, hint: &str) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint));
-    if ui.is_rect_visible(rect) {
-        let color = if response.hovered() { tones.sun } else { tones.weak };
-        let painter = ui.painter();
-        painter.rect_filled(rect, 8.0, tones.card);
-        painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.0_f32, tones.line), egui::StrokeKind::Inside);
-        painter.text(rect.center(), egui::Align2::CENTER_CENTER, icon, font(16.0), color);
-    }
-    response.on_hover_text(hint)
-}
-
 /// What a button is for, which is how it looks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -557,6 +542,85 @@ pub fn fold_button(ui: &mut egui::Ui, tones: &Tones, open: bool, hint: &str) -> 
             let tip = rect.center() + egui::vec2(0.0, middle + 2.0 * way);
             let arms = [tip + egui::vec2(-4.0, -4.0 * way), tip, tip + egui::vec2(4.0, -4.0 * way)];
             painter.add(egui::Shape::line(arms.to_vec(), stroke));
+        }
+    }
+    response.on_hover_text(hint)
+}
+
+/// What a switch at the end of the chips' row draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Switch {
+    /// The checkboxes, shown (`on`) or not: a box with a tick in it.
+    Checks { on: bool },
+    /// Every folder opened: two arrows away from a line.
+    OpenAll,
+    /// Every folder closed: two arrows toward a line.
+    CloseAll,
+}
+
+/// A switch's side, and how wide two of them are in their frame (`p-0.5`
+/// around them, a line of 1 between them, `gap-1`).
+pub const SWITCH: f32 = 22.0;
+pub const SWITCHES: f32 = 2.0 * SWITCH + 2.0 * 4.0 + 1.0 + 2.0 * 2.0;
+
+/// The two switches' frame at `rect` (`bg-dark-800/80 border rounded-md`),
+/// and the line between them.
+pub fn switches_frame(painter: &egui::Painter, tones: &Tones, rect: egui::Rect) {
+    painter.rect_filled(rect, 6.0, tones.chip);
+    painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0_f32, tones.line), egui::StrokeKind::Inside);
+    let middle = rect.center().x;
+    painter.vline(middle, rect.center().y - 6.0..=rect.center().y + 6.0, egui::Stroke::new(1.0_f32, tones.line));
+}
+
+/// A switch at `rect`: drawn with lines, as the window's buttons are.
+pub fn switch(ui: &mut egui::Ui, tones: &Tones, rect: egui::Rect, what: Switch, hint: &str) -> egui::Response {
+    let response = ui.interact(rect, ui.id().with(("switch", hint)), egui::Sense::click());
+    let on = what == Switch::Checks { on: true };
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, hint));
+    if ui.is_rect_visible(rect) {
+        let near = response.hovered();
+        let painter = ui.painter();
+        if on {
+            painter.rect_filled(rect, 4.0, tones.chip_on.fill);
+        } else if near {
+            painter.rect_filled(rect, 4.0, tones.raised);
+        }
+        let color = match (on, near) {
+            (true, _) => tones.chip_on.text,
+            (false, true) => tones.text,
+            (false, false) => tones.weak,
+        };
+        let stroke = egui::Stroke::new(1.5_f32, color);
+        let c = rect.center();
+        let at = |x: f32, y: f32| c + egui::vec2(x, y);
+        match what {
+            Switch::Checks { on } => {
+                // (a box of 11 with a tick; the tick's end out of it, as
+                // Phosphor's check-square-offset)
+                let square = egui::Rect::from_center_size(at(-0.5, 0.5), egui::Vec2::splat(10.0));
+                painter.rect_stroke(square, 2.0, stroke, egui::StrokeKind::Middle);
+                painter.add(egui::Shape::line(vec![at(-3.0, 0.5), at(-0.5, 3.0), at(5.5, -4.5)], stroke));
+                if on {
+                    // the dot at its corner (`bg-brand-500`)
+                    painter.circle_filled(rect.right_top() + egui::vec2(-2.0, 2.0), 2.5, tones.accent);
+                }
+            }
+            Switch::OpenAll | Switch::CloseAll => {
+                // a line across, and an arrow above and under it: away
+                // from it to open, toward it to close
+                painter.hline(c.x - 5.0..=c.x + 5.0, c.y, stroke);
+                let away = what == Switch::OpenAll;
+                for side in [-1.0_f32, 1.0] {
+                    let (from, to) = if away { (2.5, 7.5) } else { (7.5, 2.5) };
+                    painter.line_segment([at(0.0, side * from), at(0.0, side * to)], stroke);
+                    let tip = at(0.0, side * to);
+                    let back = if away { -side } else { side };
+                    painter.add(egui::Shape::line(
+                        vec![tip + egui::vec2(-2.5, back * 2.5), tip, tip + egui::vec2(2.5, back * 2.5)],
+                        stroke,
+                    ));
+                }
+            }
         }
     }
     response.on_hover_text(hint)

@@ -4076,7 +4076,18 @@ All UI surfaces invoke one shared app-level command layer
       scrolled to) and close it again, and in the one line the chip
       that is on is among those shown. A tag's chip has a menu: the
       tag called something else, or deleted, in every host that has
-      it (`notes::retag`). A row
+      it (`notes::retag`). At the chips' row's end, in a frame of their
+      own, two switches (2026-09-28, the person's design): the
+      checkboxes shown or not (off at first, kept: `tree.checks`;
+      without them hosts are chosen by clicks, Ctrl and Shift as
+      before, and a host's row begins with its picture), and every
+      folder opened or closed, one button that does what the tree asks
+      for as it is: while a folder is open it closes them all, else it
+      opens them all (a flag of its own would be wrong once a folder is
+      opened by hand). The chips have what the switches leave; the
+      chevrons that open their row stay at their line's end. The
+      header has no buttons for the folders and no light/dark button
+      any more (the rail has that). A row
       has a checkbox, the sign that opens a folder (a dot for a host),
       a picture in its kind's colour, the name, and at its end its
       marks (how its sessions are doing, its first tag) and where the

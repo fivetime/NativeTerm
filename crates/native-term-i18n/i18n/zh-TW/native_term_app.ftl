@@ -1091,3 +1091,5 @@ field-system-hint = 主機執行的系統，用來顯示圖示。自動：取伺
 system-auto = 自動
 system-auto-said = 自動（{ $name }）
 props-os-chosen = { $name }（手動選擇）
+tree-checks-on = 顯示核取方塊
+tree-checks-off = 隱藏核取方塊

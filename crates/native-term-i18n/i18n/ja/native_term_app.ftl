@@ -1107,3 +1107,5 @@ field-system-hint = ホストで動いているシステムです（アイコン
 system-auto = 自動
 system-auto-said = 自動（{ $name }）
 props-os-chosen = { $name }（手動で選択）
+tree-checks-on = チェックボックスを表示
+tree-checks-off = チェックボックスを隠す

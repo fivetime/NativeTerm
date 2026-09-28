@@ -1134,3 +1134,5 @@ field-system-hint = What the host runs, for its picture. Automatic: what its ser
 system-auto = Automatic
 system-auto-said = Automatic ({ $name })
 props-os-chosen = { $name } (chosen)
+tree-checks-on = Show checkboxes
+tree-checks-off = Hide checkboxes

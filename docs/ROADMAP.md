@@ -786,6 +786,14 @@
             chosen for a host whose server says nothing (its row,
             its card, the line in its file), "Automatic (Ubuntu)"
             for one that said so, the dialog of a new host.
+      - [x] Expand and collapse all are one button, the checkboxes
+            are shown by a switch (off at first, kept), both at the
+            chips' row's end; the header's light/dark button is gone
+            (the person, 2026-09-28, with a design of it). Seen on
+            Lingmo (X11), dark and light, with 18 tags (the chips'
+            chevrons beside the switches, the row opened), each
+            switch both ways, the checkboxes still shown after a
+            restart.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open
