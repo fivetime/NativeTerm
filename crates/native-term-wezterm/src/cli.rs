@@ -217,9 +217,17 @@ pub fn spawn_args(into: Into, program: &[OsString]) -> Vec<OsString> {
         Into::NewWindow => args.push("--new-window".into()),
         Into::Window(id) => args.extend(["--window-id".into(), id.to_string().into()]),
     }
-    args.push("--".into());
-    args.extend(program.iter().cloned());
+    args.extend(after_dashes(program));
     args
+}
+
+/// `-- program`, or nothing where no program is named (WezTerm then runs
+/// the person's own shell).
+fn after_dashes(program: &[OsString]) -> Vec<OsString> {
+    if program.is_empty() {
+        return Vec::new();
+    }
+    std::iter::once(OsString::from("--")).chain(program.iter().cloned()).collect()
 }
 
 pub fn list_args() -> Vec<OsString> {
@@ -279,8 +287,8 @@ pub fn send_text_args(pane_id: u64, text: &str) -> Vec<OsString> {
 /// a GUI started with the flag publishes no discovery socket, and no
 /// `wezterm cli` finds it.)
 pub fn start_args(program: &[OsString]) -> Vec<OsString> {
-    let mut args: Vec<OsString> = vec!["start".into(), "--".into()];
-    args.extend(program.iter().cloned());
+    let mut args: Vec<OsString> = vec!["start".into()];
+    args.extend(after_dashes(program));
     args
 }
 
@@ -1358,6 +1366,10 @@ local results = {
         );
         assert_eq!(strings(&spawn_args(Into::NewWindow, &program))[3], "--new-window");
         assert_eq!(strings(&start_args(&program))[..2], ["start", "--"]);
+        // no program named: the person's own shell, and nothing after
+        // the command that WezTerm would take for one
+        assert_eq!(strings(&start_args(&[])), ["start"]);
+        assert_eq!(strings(&spawn_args(Into::NewWindow, &[])), ["cli", "--no-auto-start", "spawn", "--new-window"]);
         let shim = Path::new("/opt/nt/nativeterm-shim");
         let unknown = default_config(&Look::default(), shim);
         assert!(unknown.contains("local shim = \"/opt/nt/nativeterm-shim\"\n"));

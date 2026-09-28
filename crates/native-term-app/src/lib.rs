@@ -914,6 +914,22 @@ impl Core {
         });
     }
 
+    /// The terminal brought out: its window in front, or, while it has
+    /// none, a new one with the person's own shell in it (no session).
+    pub fn show_terminal(&self) {
+        let shared = Arc::clone(&self.shared);
+        std::thread::spawn(move || {
+            if let Err(e) = shared.terminal.show() {
+                shared.notice(t!(
+                    "notice-terminal-not-shown",
+                    terminal = shared.terminal.name(),
+                    error = e.to_string()
+                ));
+            }
+            refresh(&shared);
+        });
+    }
+
     /// Bring the session's tab to the front.
     pub fn focus(&self, id: &str) {
         let shared = Arc::clone(&self.shared);

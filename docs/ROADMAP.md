@@ -690,6 +690,17 @@
             Linux where the desktop gives an undecorated window none
             (GNOME); Windows 11's snap layouts under the pointer on
             "maximize"; the window's menu on a right click.
+      - [x] The rail's own sign (the terminal) brings the terminal
+            out: no window, a new one with the person's own shell and
+            no session; a window, it comes to the front and no other is
+            made. WezTerm's CLI raised no window, so "Switch to" on a
+            session's card had not either: the fork's does now (fork
+            `WindowWanted`). Tried: Lingmo (X11) by clicks on the sign,
+            both cases; Windows by the CLI on a terminal window of the
+            test's own, minimized: restored and in front; Windows
+            Terminal's `wt -w new` with the portable copy. Not on
+            Wayland (no window can be brought forward from outside
+            there without the compositor's token); macOS not seen.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

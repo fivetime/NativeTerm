@@ -386,6 +386,12 @@ impl crate::TerminalBackend for WindowsTerminal {
         WindowsTerminal::open_tool(self, title, shim_args)
     }
 
+    /// A new window (`-w new`) with what Terminal opens by itself: the
+    /// person's default profile.
+    fn open_plain(&self) -> io::Result<()> {
+        launch::run(&self.launcher(), &["-w".into(), "new".into()])
+    }
+
     fn select(&self, window: WindowId, tab: &TabView) -> io::Result<bool> {
         WindowsTerminal::select(self, window, tab)
     }

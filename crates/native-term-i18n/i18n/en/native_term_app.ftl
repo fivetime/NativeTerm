@@ -1102,3 +1102,5 @@ window-minimize = Minimize
 window-maximize = Maximize
 window-restore = Restore
 window-close = Close
+rail-terminal = Terminal: brings its window to the front, or opens a new one without a session
+notice-terminal-not-shown = { $terminal } could not be brought out: { $error }

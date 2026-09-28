@@ -3936,7 +3936,11 @@ All UI surfaces invoke one shared app-level command layer
     - **A rail of icons** at the left (`w-14`), one for each page: the
       session tree, the hosts used lately, the open sessions (how many,
       in a bubble), all tabs, sending commands, importing. What is shown
-      is in the accent's colour with a bar at the window's edge. From
+      is in the accent's colour with a bar at the window's edge. At its
+      top the terminal's own sign brings the terminal out
+      (`TerminalBackend::show`): its window in front, the one last
+      activated or made, or, while it has none, a new one with the
+      person's own shell and no session. From
       its lower end: the settings, light or dark, and the pin while the
       window is docked. In a low window the icons are nearer to each
       other (`layout::rail_gap`).
@@ -4762,9 +4766,19 @@ logs, so a state in which every call logs one leaves two files a second
 (a Linux session's tmpfs has some 200 000 inodes, and with none left
 WezTerm can't make its socket).
 `select` is `activate-tab`, `close` kills the tab's panes, `activate` is
-`activate-pane` (the CLI can't raise a window; `foreground` is the
-window last activated), `screen_text` is `get-text`, and `type_text` is
-`send-text --no-paste`. A GUI NativeTerm starts, and every `cli` call,
+`activate-pane` (`foreground` is the window last activated: the CLI
+does not say which has the focus), `screen_text` is `get-text`, and
+`type_text` is `send-text --no-paste`. Upstream's CLI raises no window;
+the fork's does: a pane a client asked for (both commands are
+`SetFocusedPane`) has its window brought to the front
+(`MuxNotification::WindowWanted`), a minimized one restored first, on
+macOS the application made the active one. Not on Wayland, where a
+window comes forward only with a token the compositor gave whoever had
+the focus, which WezTerm's Wayland window does not ask for.
+`open_plain` is a window with no program named, which is the person's
+own shell (`start`, or `cli spawn --new-window`, with nothing after
+it); Windows Terminal's is `wt -w new`, its default profile. A GUI
+NativeTerm starts, and every `cli` call,
 carries `WEZTERM_CONFIG_FILE=<data dir>/wezterm/wezterm.lua` (a folder
 of its own: WezTerm watches a configuration's folder and reloads on any
 change in it, and a reload has every window resize every tab and refresh

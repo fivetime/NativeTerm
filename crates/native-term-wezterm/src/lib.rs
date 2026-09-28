@@ -544,6 +544,19 @@ impl TerminalBackend for WezTerm {
         Ok(OpenReport { launched, pending: Vec::new(), window: made.then_some(WindowId(window)) })
     }
 
+    fn recent_window(&self) -> Option<WindowId> {
+        self.recent(&self.list()).map(WindowId)
+    }
+
+    /// A new window with no program named: WezTerm runs the person's
+    /// own shell in it.
+    fn open_plain(&self) -> io::Result<()> {
+        let before = self.list();
+        let window = self.new_window(&[], &before)?;
+        lock(&self.state).recent = Some(window);
+        Ok(())
+    }
+
     fn open_tool(&self, title: &str, shim_args: &[String]) -> io::Result<()> {
         let mut program: Vec<OsString> = vec![self.shim.clone().into()];
         program.extend(shim_args.iter().map(OsString::from));

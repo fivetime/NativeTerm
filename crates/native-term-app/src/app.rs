@@ -1657,8 +1657,12 @@ impl App {
                 }
                 let sign = egui::FontId::proportional(24.0);
                 ui.painter().text(tile.center(), egui::Align2::CENTER_CENTER, icons::TERMINAL, sign, tones.accent);
-                if logo.on_hover_text(t!("about-title", version = env!("CARGO_PKG_VERSION"))).clicked() {
-                    self.page = Page::Tree;
+                // the terminal itself: its window in front, or a new
+                // one with the person's own shell
+                if logo.on_hover_text(t!("rail-terminal")).clicked() {
+                    if let Some(core) = &self.core {
+                        core.show_terminal();
+                    }
                 }
                 for page in Page::ALL {
                     let count = if page == Page::Sessions { open } else { 0 };

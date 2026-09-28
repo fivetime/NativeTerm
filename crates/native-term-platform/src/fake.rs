@@ -44,6 +44,8 @@ pub struct Calls {
     pub selected: Vec<(WindowId, usize)>,
     pub closed: Vec<(WindowId, usize)>,
     pub activated: Vec<WindowId>,
+    /// Windows opened without a session.
+    pub plain: usize,
 }
 
 #[derive(Default)]
@@ -306,6 +308,21 @@ impl TerminalBackend for FakeBackend {
         Ok(OpenReport { launched: tabs.len(), pending: Vec::new(), window: made.then_some(window) })
     }
 
+    fn recent_window(&self) -> Option<WindowId> {
+        let state = lock(&self.0.state);
+        let recent = state.recent.filter(|id| state.windows.iter().any(|w| w.id == *id));
+        recent.or(state.windows.last().map(|w| w.id))
+    }
+
+    fn open_plain(&self) -> io::Result<()> {
+        let mut state = lock(&self.0.state);
+        state.calls.plain += 1;
+        let window = Self::make_window(&mut state);
+        let w = state.windows.iter_mut().find(|w| w.id == window).expect("just made");
+        w.tabs.push(FakeTab { title: "shell".to_string(), spec: None });
+        Ok(())
+    }
+
     fn open_tool(&self, title: &str, shim_args: &[String]) -> io::Result<()> {
         let mut state = lock(&self.0.state);
         state.calls.tools.push((title.to_string(), shim_args.to_vec()));
@@ -407,6 +424,27 @@ mod tests {
         assert_eq!(fake.windows()[0].tabs.len(), 2, "into the activated one");
         assert_eq!(fake.foreground(), Some(a));
         assert_eq!(fake.calls().activated, [a]);
+    }
+
+    #[test]
+    fn the_terminal_is_brought_out() {
+        let fake = FakeBackend::new("shim");
+        // no window: a new one, with nothing of NativeTerm's in it
+        fake.show().unwrap();
+        assert_eq!(fake.calls().plain, 1);
+        assert_eq!(fake.windows().len(), 1);
+        assert!(fake.windows()[0].tabs[0].spec.is_none(), "no session");
+        let first = fake.windows()[0].id;
+        assert!(fake.calls().activated.is_empty());
+        // a window: it comes forward, and no other is made
+        fake.show().unwrap();
+        assert_eq!(fake.calls().plain, 1);
+        assert_eq!(fake.calls().activated, [first]);
+        // of several, the one last activated or made
+        let second = fake.open(&Target::NewWindow, &[spec("a")]).unwrap().window.unwrap();
+        fake.show().unwrap();
+        assert_eq!(fake.calls().activated, [first, second]);
+        assert_eq!(fake.windows().len(), 2);
     }
 
     #[test]

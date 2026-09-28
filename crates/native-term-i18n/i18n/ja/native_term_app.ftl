@@ -1077,3 +1077,5 @@ window-minimize = 最小化
 window-maximize = 最大化
 window-restore = 元に戻す
 window-close = 閉じる
+rail-terminal = ターミナル: 開いているウィンドウを前面に出します。なければセッションなしで新しく開きます
+notice-terminal-not-shown = { $terminal } を開けませんでした: { $error }

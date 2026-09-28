@@ -142,6 +142,29 @@ pub trait TerminalBackend: Send + Sync + 'static {
     /// (tools like installing a key), titled `title`.
     fn open_tool(&self, title: &str, shim_args: &[String]) -> io::Result<()>;
 
+    /// The window the person means by "the terminal": the one in front,
+    /// else the one last activated or made, else any; `None` while the
+    /// terminal has no window.
+    fn recent_window(&self) -> Option<WindowId> {
+        self.foreground().or_else(|| self.window_ids().into_iter().next())
+    }
+
+    /// A new window with nothing of NativeTerm's in it: the person's own
+    /// shell, no session.
+    fn open_plain(&self) -> io::Result<()> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "this terminal can't be opened without a session"))
+    }
+
+    /// The terminal brought out: its window in front, or, while it has
+    /// none, a new one with the person's own shell in it.
+    fn show(&self) -> io::Result<()> {
+        match self.recent_window() {
+            Some(window) if self.activate(window) => Ok(()),
+            Some(_) => Err(io::Error::other("the terminal's window did not come forward")),
+            None => self.open_plain(),
+        }
+    }
+
     /// Bring the window forward and select the tab. `Ok(false)` if the tab
     /// changed since the snapshot (its index or name no longer match).
     fn select(&self, window: WindowId, tab: &TabView) -> io::Result<bool>;

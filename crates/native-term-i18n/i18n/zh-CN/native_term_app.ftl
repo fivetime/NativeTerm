@@ -1061,3 +1061,5 @@ window-minimize = 最小化
 window-maximize = 最大化
 window-restore = 还原
 window-close = 关闭
+rail-terminal = 终端：把已有的终端窗口切到最前；没有时新开一个空白终端（不连接会话）
+notice-terminal-not-shown = 无法打开 { $terminal }：{ $error }

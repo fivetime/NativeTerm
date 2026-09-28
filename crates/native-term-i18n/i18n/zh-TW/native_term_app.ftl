@@ -1061,3 +1061,5 @@ window-minimize = 最小化
 window-maximize = 最大化
 window-restore = 還原
 window-close = 關閉
+rail-terminal = 終端機：把已有的終端機視窗切到最前；沒有時新開一個空白終端機（不連線工作階段）
+notice-terminal-not-shown = 無法開啟 { $terminal }：{ $error }
