@@ -192,9 +192,14 @@ impl ProfileSetup {
         }
     }
 
+    /// Whether `banner` has something to say.
+    pub fn warns(&self) -> bool {
+        !(self.status.usable() || self.install.is_none())
+    }
+
     /// A warning line when tabs can't open; empty otherwise.
     pub fn banner(&mut self, ui: &mut egui::Ui, notices: &mut Vec<String>) {
-        if self.status.usable() || self.install.is_none() {
+        if !self.warns() {
             return;
         }
         let red = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);

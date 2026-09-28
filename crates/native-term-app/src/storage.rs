@@ -197,6 +197,12 @@ impl StorageCheck {
         });
     }
 
+    /// Whether `banner` has something to say.
+    pub fn warns(&self) -> bool {
+        let health = self.result.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        health.is_some_and(|health| !health.is_fine() && self.dismissed.as_ref() != Some(&health))
+    }
+
     /// `ssh_dir` and `data_dir`: to look again after the permissions
     /// were put back.
     pub fn banner(&mut self, ui: &mut egui::Ui, ssh_dir: &Path, data_dir: &Path) {

@@ -55,6 +55,20 @@ pub enum Icon {
     CloseOthers,
     CloseEnded,
     CloseRight,
+    /// The main window's layout: the light and the dark theme,
+    Sun,
+    Moon,
+    /// what was used lately, what something is, how many there are,
+    History,
+    Info,
+    Layers,
+    /// something new (a plus in a circle), "choose something" (a
+    /// pointer that clicks),
+    PlusCircle,
+    Pointer,
+    /// the session tree, the program itself.
+    Tree,
+    Terminal,
 }
 
 impl Icon {
@@ -109,6 +123,16 @@ impl Icon {
             Icon::CloseOthers => '\u{E8BB}',
             Icon::CloseEnded => '\u{E894}',
             Icon::CloseRight => '\u{E72A}',
+            // (each looked at in both fonts, as the others were)
+            Icon::Sun => '\u{E706}',
+            Icon::Moon => '\u{E708}',
+            Icon::History => '\u{E81C}',
+            Icon::Info => '\u{E946}',
+            Icon::Layers => '\u{E81E}',
+            Icon::PlusCircle => '\u{ECC8}',
+            Icon::Pointer => '\u{E7C9}',
+            Icon::Tree => '\u{F003}',
+            Icon::Terminal => '\u{E756}',
         }
     }
 }

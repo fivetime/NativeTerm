@@ -3927,23 +3927,72 @@ All UI surfaces invoke one shared app-level command layer
     on screen). It is only `egui` style, so switching costs nothing;
     every window has an egui context of its own and takes the look
     chosen when it paints (`window::Pane`).
-  - **The modern look** (`Preset::Modern`): the first step of the main
-    window's new design, after the design the person brought (a web page,
-    Tailwind's classes; nothing of it is a picture, and nothing here
-    is): its colours and its rows, the window laid out as it was. Dark,
-    the design's own: the page `#121316`, the bars `#16181d`, fields
-    `#1a1c22`, buttons `#22252e` and `#2e323e` under the pointer, lines
-    `#2a2e3b`, text slate 300, weak text slate 400, the accent blue 600;
-    corners of 8 (its `rounded-lg`), 12 for windows. The design has no
-    light side: here the same scales from their other end (slate 50 to
-    200 for the grounds, 700 for text, 600 for weak text, 500 being too
-    pale on the bars: a test keeps every text at WCAG's 4.5 against
-    every ground). The tree's rows (`looks::rows`, `tree_view::
-    draw_row`): round and a little within the row, what is chosen in
-    the accent thinly (15%) with a line around it (blue 500 at 30%), the
-    folders amber and the hosts blue, each its picture after the sign
-    that opens it, a folder's count after its name, weakly, and a line
-    down each level (white or black at 6%). No shadows and nothing that
+  - **The main window** is laid out after the design the person
+    brought (`interactive_modern_tree_view_ui-v2.html`, a web page
+    written with Tailwind's classes; nothing of it is a picture, and
+    nothing here is: rectangles, lines, the text font, the icon font).
+    `layout.rs` draws the parts with the classes' numbers, `app.rs` puts
+    them together:
+    - **A rail of icons** at the left (`w-14`), one for each page: the
+      session tree, the hosts used lately, the open sessions (how many,
+      in a bubble), all tabs, sending commands, importing. What is shown
+      is in the accent's colour with a bar at the window's edge. From
+      its lower end: the settings, light or dark, and the pin while the
+      window is docked. In a low window the icons are nearer to each
+      other (`layout::rail_gap`).
+    - **A header** (`p-4 sm:p-5`): the page's icon in a tile, its name,
+      a line about it; for the tree "Expand All", "Collapse All", and
+      the blue "New" (a host, another kind of session, a folder: in the
+      folder that is chosen, else in the main config), and what reads
+      `~/.ssh` again; at its end light or dark. A window narrower than
+      720 has the buttons' signs only.
+    - **What is wrong** (no terminal profile, no agent, files in
+      conflict, sessions lost) and what was just said, in a bar under
+      the header, which is there only while there is something to say
+      (each of them has a `warns()`).
+    - **The tree** (`tree_view.rs`): the search field and the filters
+      in a bar of their own, the rows under it. A filter is offered
+      where it would pass something: a kind of host where there is
+      more than one kind, the favorites where there are some. A row
+      has a checkbox, the sign that opens a folder (a dot for a host),
+      a picture in its kind's colour, the name, and at its end its
+      marks (how its sessions are doing, its first tag) and where the
+      host is, in the fixed font; what does not fit is left out, the
+      address first, and the name ends in "…". A checkbox is what
+      Ctrl with a click was and still is; a folder's says how much of
+      what is under it is selected and selects or lets go all of it.
+    - **What is chosen**, at the right (`properties.rs`, the design's
+      "Item Properties"; 320 wide and can be dragged wider, where the
+      design has 384: a docked window is narrow): a host (its alias,
+      state, folder, address, tags, note; connect, in a new window,
+      favorite, edit, options, files, delete), several hosts (connect
+      them, install the key, let go), or the folder clicked last (its
+      hosts, its file, what it gives its hosts; connect all, a new
+      host, rename, options). Everything there is in the rows' menus
+      too. In a window narrower than 680 it is under the tree, and
+      only while something is chosen.
+    - **A bar below** (`h-9`): hosts, folders, how many are selected,
+      and at its end how many sessions are open in which terminal.
+    - **The settings** are a window of their own over the main one
+      (the rail's gear), their pages at its left: general, theme,
+      terminal, keys and passwords, keyboard shortcuts, files and
+      data. It is egui's window inside the main one and not one of the
+      desktop's: the settings are the app's own state.
+  - **The colours** are the design's variables, for its dark and its
+    light theme (`looks::Tones::modern`): `--bg-main` the page,
+    `--bg-surface` the bars, `--bg-card` what is typed into and
+    pressed, `--bg-hover` under the pointer, `--border-color` every
+    line, the rail's own, the filter's and the chosen row's. Two
+    things are not the design's: a mark's text is a shade darker in
+    the light and lighter in the dark than its one shade for both (on
+    its own thin colour that one is a sign's contrast, not a text's: a
+    test keeps every text at WCAG's 4.5 on the page and the bars), and
+    the muted text on a card in the light is the design's 4.3. The
+    modern look is what a window has when nothing else was chosen
+    (`theme.preset` empty); the older looks (`plain`, `accent`, `dim`,
+    `compact`) lay the window out the same way in the colours they
+    give egui (`Tones::of`). No shadows and nothing that moves: the
+    window is painted on the CPU, and only when something happens.
     moves: the window is painted on the CPU, and only when something
     happens.
   - **Icons:** named by what they mean (`native_term_platform::Icon`),

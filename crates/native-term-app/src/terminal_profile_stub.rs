@@ -79,6 +79,10 @@ impl ProfileSetup {
         t!("profile-no-terminal")
     }
 
+    pub fn warns(&self) -> bool {
+        false
+    }
+
     pub fn banner(&mut self, _ui: &mut egui::Ui, _notices: &mut [String]) {}
 
     pub fn shim_path(&self) -> &PathBuf {

@@ -76,11 +76,15 @@ impl AgentCheck {
         self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
+    /// Whether `banner` has something to say.
+    pub fn warns(&self, core: Option<&Core>) -> bool {
+        let dismissed = core.and_then(|c| c.setting(HINT_SETTING)).as_deref() == Some("1");
+        self.status().is_some_and(|status| status.needs_agent()) && !dismissed
+    }
+
     /// The hint line at the top (unless dismissed).
     pub fn banner(&self, ui: &mut egui::Ui, core: Option<&Core>, open_settings: &mut bool) {
-        let Some(status) = self.status() else { return };
-        let dismissed = core.and_then(|c| c.setting(HINT_SETTING)).as_deref() == Some("1");
-        if !status.needs_agent() || dismissed {
+        if !self.warns(core) {
             return;
         }
         ui.horizontal_wrapped(|ui| {

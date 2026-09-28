@@ -16,8 +16,14 @@ pub const SETTING: &str = "theme.preset";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Preset {
-    /// egui's own colours and spacing.
+    /// A dark editor's colours (slate and blue), round corners, more
+    /// room: the design the person brought for the main window
+    /// (`docs/ARCHITECTURE.md`, "The main window"), and what a window
+    /// has when nothing else was chosen. Its light side is the same
+    /// scales' light end.
     #[default]
+    Modern,
+    /// egui's own colours and spacing.
     Plain,
     /// The Windows accent colour for what is selected, as the rest of
     /// the desktop uses it.
@@ -26,11 +32,6 @@ pub enum Preset {
     Dim,
     /// The same colours, less room per row: more hosts on screen.
     Compact,
-    /// A dark editor's colours (slate and blue), round corners, more
-    /// room, the tree's rows as such a program draws them: after the
-    /// design the person brought (`docs/ARCHITECTURE.md`, "The modern
-    /// look"). Its light side is the same scales' light end.
-    Modern,
 }
 
 /// The look every window follows (the floating button has its own egui
@@ -38,17 +39,18 @@ pub enum Preset {
 static CHOSEN: Mutex<Option<Preset>> = Mutex::new(None);
 
 impl Preset {
-    pub const ALL: [Preset; 5] = [Preset::Plain, Preset::Accent, Preset::Dim, Preset::Compact, Preset::Modern];
+    pub const ALL: [Preset; 5] = [Preset::Modern, Preset::Plain, Preset::Accent, Preset::Dim, Preset::Compact];
 
-    /// What is written in the settings (the plain look writes nothing).
+    /// What is written in the settings (the modern look, which a window
+    /// has anyway, writes nothing).
     #[must_use]
     pub fn setting(self) -> &'static str {
         match self {
-            Preset::Plain => "",
+            Preset::Modern => "",
+            Preset::Plain => "plain",
             Preset::Accent => "accent",
             Preset::Dim => "dim",
             Preset::Compact => "compact",
-            Preset::Modern => "modern",
         }
     }
 
@@ -135,23 +137,23 @@ pub fn chosen() -> Option<Preset> {
     *CHOSEN.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The modern look's colours. The dark ones are the design's own (its
-/// `nexus` colours, and Tailwind's slate and blue, which it names the
-/// rest by); the design has no light side, which is here the same two
-/// scales from their other end.
+/// The modern look's colours: the design's variables (its second
+/// version has them for the dark and for the light theme), by what they
+/// are for here.
 struct Palette {
-    /// The window, the bars along its sides, what is typed into.
+    /// The window (`--bg-main`), the bars around the page
+    /// (`--bg-surface`), what is typed into and what is pressed
+    /// (`--bg-card`), and what the pointer is on (`--bg-hover`).
     page: egui::Color32,
     bar: egui::Color32,
-    field: egui::Color32,
-    /// A button, and one the pointer is on.
     card: egui::Color32,
     raised: egui::Color32,
-    /// The lines between things, and around what the pointer is on.
+    /// The lines between things and around them (`--border-color`), and
+    /// around what the pointer is on.
     line: egui::Color32,
     near: egui::Color32,
+    /// `--text-main`, `--text-muted`.
     text: egui::Color32,
-    strong: egui::Color32,
     weak: egui::Color32,
     /// What is chosen, and what leads somewhere.
     accent: egui::Color32,
@@ -167,48 +169,53 @@ fn thin(color: egui::Color32, alpha: u8) -> egui::Color32 {
     egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
+/// `percent` of 100 as an alpha of 255, as CSS rounds it.
+const fn alpha(percent: u32) -> u8 {
+    ((percent * 255 + 50) / 100) as u8
+}
+
+const BLUE_500: egui::Color32 = rgb(0x3b82f6);
+const BLUE_600: egui::Color32 = rgb(0x2563eb);
+
 impl Palette {
     const fn of(dark: bool) -> Palette {
         if dark {
             Palette {
                 page: rgb(0x121316),
                 bar: rgb(0x16181d),
-                field: rgb(0x1a1c22),
-                card: rgb(0x22252e),
-                raised: rgb(0x2e323e),
+                card: rgb(0x1a1c22),
+                raised: rgb(0x22252e),
                 line: rgb(0x2a2e3b),
                 near: rgb(0x475569),
-                text: rgb(0xcbd5e1),
-                strong: rgb(0xffffff),
+                text: rgb(0xf1f5f9),
                 weak: rgb(0x94a3b8),
-                accent: rgb(0x2563eb),
+                accent: BLUE_600,
                 link: rgb(0x60a5fa),
             }
         } else {
             Palette {
                 page: rgb(0xf8fafc),
-                bar: rgb(0xf1f5f9),
-                field: rgb(0xffffff),
-                card: rgb(0xffffff),
+                bar: rgb(0xffffff),
+                card: rgb(0xf1f5f9),
                 raised: rgb(0xe2e8f0),
-                line: rgb(0xe2e8f0),
+                line: rgb(0xcbd5e1),
                 near: rgb(0x94a3b8),
-                text: rgb(0x334155),
-                strong: rgb(0x0f172a),
-                // (slate 600: 500 is too pale to read on the bars)
-                weak: rgb(0x475569),
-                accent: rgb(0x2563eb),
-                link: rgb(0x2563eb),
+                text: rgb(0x0f172a),
+                weak: rgb(0x64748b),
+                accent: BLUE_600,
+                link: BLUE_600,
             }
         }
     }
 
+    /// egui's own widgets in these colours (the dialogs, the settings):
+    /// a window is a bar, what is in it is a card.
     fn paint(&self, visuals: &mut egui::Visuals) {
         let round = egui::CornerRadius::same(8);
         visuals.panel_fill = self.page;
-        visuals.window_fill = self.field;
-        visuals.extreme_bg_color = self.field;
-        visuals.faint_bg_color = self.bar;
+        visuals.window_fill = self.bar;
+        visuals.extreme_bg_color = self.card;
+        visuals.faint_bg_color = self.card;
         visuals.code_bg_color = self.card;
         visuals.window_stroke = egui::Stroke::new(1.0_f32, self.line);
         visuals.window_corner_radius = egui::CornerRadius::same(12);
@@ -232,46 +239,186 @@ impl Palette {
             widget.bg_fill = self.raised;
             widget.weak_bg_fill = self.raised;
             widget.bg_stroke = egui::Stroke::new(1.0_f32, self.near);
-            widget.fg_stroke = egui::Stroke::new(1.0_f32, self.strong);
+            widget.fg_stroke = egui::Stroke::new(1.0_f32, self.text);
             widget.corner_radius = round;
             widget.expansion = 0.0;
         }
     }
 }
 
-/// How the session tree's rows look, where the look has them its own way
-/// (the modern one): round, what is chosen in the accent's colour thinly
-/// with a line around it, the folders and the hosts each in a colour,
-/// lines down the tree's levels.
-pub struct Rows {
-    pub chosen: egui::Color32,
-    pub chosen_line: egui::Color32,
-    pub under_pointer: egui::Color32,
-    pub chosen_text: egui::Color32,
-    pub folder: egui::Color32,
-    pub host: egui::Color32,
-    pub guide: egui::Color32,
-    pub radius: u8,
+/// How something is marked: a colour thinly under it, less thinly around
+/// it, and its text in a shade that can be read on that.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tint {
+    pub fill: egui::Color32,
+    pub line: egui::Color32,
+    pub text: egui::Color32,
 }
 
-/// The rows of the look chosen, in the dark or the light.
-#[must_use]
-pub fn rows(dark: bool) -> Option<Rows> {
-    if chosen() != Some(Preset::Modern) {
-        return None;
+impl Tint {
+    /// `base` at `fill` percent under, at `line` percent around.
+    fn of(base: egui::Color32, fill: u32, line: u32, text: egui::Color32) -> Tint {
+        Tint { fill: thin(base, alpha(fill)), line: thin(base, alpha(line)), text }
     }
-    let palette = Palette::of(dark);
-    Some(Rows {
-        chosen: thin(palette.accent, 0x26),
-        chosen_line: thin(rgb(0x3b82f6), 0x4d),
-        under_pointer: palette.field,
-        chosen_text: palette.strong,
-        // (amber and blue 400 in the dark, 600 in the light, where 400 is pale)
-        folder: if dark { rgb(0xfbbf24) } else { rgb(0xd97706) },
-        host: if dark { rgb(0x60a5fa) } else { rgb(0x2563eb) },
-        guide: if dark { thin(egui::Color32::WHITE, 0x0f) } else { thin(egui::Color32::BLACK, 0x14) },
-        radius: 8,
-    })
+}
+
+/// The colours the main window is laid out in (`layout.rs`), whatever
+/// the look: the modern look's are the design's own, the other looks'
+/// are what they give egui.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tones {
+    /// Where the rows are (`--bg-main`), the bars around it
+    /// (`--bg-surface`: the header, the search, the bar below, the
+    /// properties), the rail (`--rail-bg`) and the line at its side.
+    pub page: egui::Color32,
+    pub bar: egui::Color32,
+    pub rail: egui::Color32,
+    pub rail_line: egui::Color32,
+    /// What is typed into and what is pressed (`--bg-card`), a filter
+    /// that is off (`--chip-bg`), what the pointer is on (`--bg-hover`).
+    pub card: egui::Color32,
+    pub chip: egui::Color32,
+    pub raised: egui::Color32,
+    /// The lines (`--border-color`), and around what the pointer is on.
+    pub line: egui::Color32,
+    pub near: egui::Color32,
+    /// `--text-main`, `--text-muted`.
+    pub text: egui::Color32,
+    pub weak: egui::Color32,
+    /// What is shown, in the rail; a sign in the accent's colour (the
+    /// design's blue 500, in both themes).
+    pub accent: egui::Color32,
+    /// The header's tile (`bg-blue-500/10 border-blue-500/30
+    /// text-blue-500`), the filter that is on (`--chip-active-*`), the
+    /// row that is chosen (`--item-selected-*`).
+    pub tile: Tint,
+    pub chip_on: Tint,
+    pub chosen: Tint,
+    /// The button that makes something new (`bg-blue-600`), the same
+    /// under the pointer (`hover:bg-blue-500`), and what is on it.
+    pub primary: egui::Color32,
+    pub primary_near: egui::Color32,
+    pub on_primary: egui::Color32,
+    /// What takes something away (the design's red 500, thinly).
+    pub danger: egui::Color32,
+    /// What the pointer is on, in the rail (`hover:text-blue-600`; the
+    /// light and the dark, `hover:text-amber-500`).
+    pub rail_near: egui::Color32,
+    pub sun: egui::Color32,
+    /// The folders' and the hosts' pictures (amber and blue 500).
+    pub folder: egui::Color32,
+    pub host: egui::Color32,
+    /// A mark that says nothing about how it goes (`bg-slate-500/10
+    /// border-slate-500/20`), and: doing well, not yet, not at all.
+    pub plain: Tint,
+    pub good: Tint,
+    pub busy: Tint,
+    pub bad: Tint,
+    /// The dot that says something is open (`bg-emerald-500`).
+    pub alive: egui::Color32,
+    /// The line down each level of the tree (`--guide-line`).
+    pub guide: egui::Color32,
+}
+
+/// `a` with `t` of `b` in it.
+fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
+    let one = |a: u8, b: u8| (f32::from(a) + (f32::from(b) - f32::from(a)) * t).round() as u8;
+    egui::Color32::from_rgb(one(a.r(), b.r()), one(a.g(), b.g()), one(a.b(), b.b()))
+}
+
+impl Tones {
+    /// The modern look's: the design's, in the dark or the light.
+    #[must_use]
+    pub fn modern(dark: bool) -> Tones {
+        let p = Palette::of(dark);
+        let shade = |dark_one: u32, light_one: u32| if dark { rgb(dark_one) } else { rgb(light_one) };
+        let slate = rgb(0x64748b);
+        // (a mark's text: the design has one shade for both themes, 600,
+        // which on its own thin colour over white is a sign's contrast
+        // and not a text's: 400 in the dark, 700 in the light, amber 800)
+        let mark = |base: u32, dark_one: u32, light_one: u32| Tint::of(rgb(base), 15, 30, shade(dark_one, light_one));
+        Tones {
+            page: p.page,
+            bar: p.bar,
+            rail: shade(0x111216, 0xf1f5f9),
+            rail_line: shade(0x22252e, 0xe2e8f0),
+            card: p.card,
+            chip: shade(0x1a1c22, 0xe2e8f0),
+            raised: p.raised,
+            line: p.line,
+            near: p.near,
+            text: p.text,
+            weak: p.weak,
+            accent: BLUE_500,
+            tile: Tint::of(BLUE_500, 10, 30, BLUE_500),
+            chip_on: if dark {
+                Tint::of(BLUE_500, 20, 40, rgb(0x60a5fa))
+            } else {
+                Tint::of(BLUE_600, 12, 35, rgb(0x1d4ed8))
+            },
+            chosen: if dark {
+                Tint::of(BLUE_500, 18, 40, rgb(0xffffff))
+            } else {
+                Tint::of(BLUE_600, 12, 35, rgb(0x1e3a8a))
+            },
+            primary: BLUE_600,
+            primary_near: BLUE_500,
+            on_primary: egui::Color32::WHITE,
+            danger: rgb(0xef4444),
+            rail_near: BLUE_600,
+            sun: rgb(0xf59e0b),
+            folder: rgb(0xf59e0b),
+            host: BLUE_500,
+            plain: Tint::of(slate, 10, 20, p.weak),
+            good: mark(0x10b981, 0x34d399, 0x047857),
+            busy: mark(0xf59e0b, 0xfbbf24, 0x92400e),
+            bad: mark(0xef4444, 0xf87171, 0xb91c1c),
+            alive: rgb(0x10b981),
+            guide: if dark { thin(egui::Color32::WHITE, alpha(8)) } else { thin(rgb(0x0f172a), alpha(12)) },
+        }
+    }
+
+    /// Another look's: what it gave egui, and the marks' colours as the
+    /// modern look has them.
+    fn of(visuals: &egui::Visuals) -> Tones {
+        let modern = Tones::modern(visuals.dark_mode);
+        let page = visuals.panel_fill;
+        let text = visuals.text_color();
+        let chosen = visuals.selection.bg_fill.to_opaque();
+        let link = visuals.hyperlink_color;
+        let line = visuals.widgets.noninteractive.bg_stroke.color;
+        Tones {
+            page,
+            bar: mix(page, text, 0.04),
+            rail: mix(page, text, 0.07),
+            rail_line: line,
+            card: visuals.widgets.inactive.weak_bg_fill,
+            chip: visuals.widgets.inactive.weak_bg_fill,
+            raised: visuals.widgets.hovered.weak_bg_fill,
+            line,
+            near: visuals.widgets.hovered.bg_stroke.color,
+            text,
+            weak: visuals.weak_text_color(),
+            accent: link,
+            tile: Tint::of(chosen, 10, 30, link),
+            chip_on: Tint::of(chosen, 20, 40, link),
+            chosen: Tint::of(chosen, 18, 40, visuals.strong_text_color()),
+            primary: chosen,
+            primary_near: mix(chosen, text, 0.15),
+            on_primary: readable_on(chosen),
+            rail_near: link,
+            ..modern
+        }
+    }
+}
+
+/// The colours of the look chosen, as `visuals` has it (dark or light).
+#[must_use]
+pub fn tones(visuals: &egui::Visuals) -> Tones {
+    match chosen() {
+        Some(Preset::Modern) | None => Tones::modern(visuals.dark_mode),
+        Some(_) => Tones::of(visuals),
+    }
 }
 
 fn gray(v: u8) -> egui::Color32 {
@@ -310,16 +457,16 @@ mod tests {
         for preset in Preset::ALL {
             assert_eq!(Preset::from_setting(Some(preset.setting())), preset);
         }
-        assert_eq!(Preset::from_setting(None), Preset::Plain);
-        assert_eq!(Preset::from_setting(Some("")), Preset::Plain);
-        assert_eq!(Preset::from_setting(Some("something else")), Preset::Plain, "an unknown look is the plain one");
-        assert_eq!(Preset::Plain.setting(), "", "and the plain one writes nothing");
+        assert_eq!(Preset::from_setting(None), Preset::Modern);
+        assert_eq!(Preset::from_setting(Some("")), Preset::Modern);
+        assert_eq!(Preset::from_setting(Some("something else")), Preset::Modern, "an unknown look is the modern one");
+        assert_eq!(Preset::from_setting(Some("modern")), Preset::Modern, "as it was written while it was chosen");
+        assert_eq!(Preset::Modern.setting(), "", "and the modern one writes nothing");
     }
 
-    #[test]
-    fn the_modern_look_can_be_read() {
-        // the text against what it is on, as WCAG counts contrast: 4.5
-        // for text, 3 for what is only a sign
+    /// The text against what it is on, as WCAG counts contrast: 4.5
+    /// for text, 3 for what is only a sign.
+    fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
         fn light(c: egui::Color32) -> f32 {
             let one = |v: u8| {
                 let v = f32::from(v) / 255.0;
@@ -331,35 +478,83 @@ mod tests {
             };
             0.2126 * one(c.r()) + 0.7152 * one(c.g()) + 0.0722 * one(c.b())
         }
-        fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
-            let (a, b) = (light(a), light(b));
-            (a.max(b) + 0.05) / (a.min(b) + 0.05)
-        }
+        let (a, b) = (light(a), light(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    /// `over` (thin) on `under`, as it is seen.
+    fn seen(over: egui::Color32, under: egui::Color32) -> egui::Color32 {
+        let [r, g, b, a] = over.to_srgba_unmultiplied();
+        mix(under, egui::Color32::from_rgb(r, g, b), f32::from(a) / 255.0)
+    }
+
+    #[test]
+    fn the_modern_look_can_be_read() {
         for dark in [true, false] {
-            let p = Palette::of(dark);
-            for ground in [p.page, p.bar, p.field, p.card] {
-                assert!(contrast(p.text, ground) >= 4.5, "text, dark {dark}: {}", contrast(p.text, ground));
-                assert!(contrast(p.weak, ground) >= 4.5, "weak text, dark {dark}: {}", contrast(p.weak, ground));
-                assert!(contrast(p.link, ground) >= 4.5, "a link, dark {dark}: {}", contrast(p.link, ground));
+            let tones = Tones::modern(dark);
+            for ground in [tones.page, tones.bar, tones.rail, tones.card, tones.chip, tones.raised] {
+                assert!(contrast(tones.text, ground) >= 4.5, "text, dark {dark}: {}", contrast(tones.text, ground));
             }
-            assert!(contrast(p.strong, p.raised) >= 4.5, "under the pointer, dark {dark}");
+            // the muted text: a text's contrast on the page and the
+            // bars; on a card and on a filter it is the design's, which
+            // in the light is less (4.3 and 3.8)
+            for ground in [tones.page, tones.bar] {
+                assert!(contrast(tones.weak, ground) >= 4.5, "muted, dark {dark}: {}", contrast(tones.weak, ground));
+            }
+            for ground in [tones.card, tones.chip, tones.rail] {
+                assert!(contrast(tones.weak, ground) >= 3.5, "muted, dark {dark}: {}", contrast(tones.weak, ground));
+            }
+            // the marks, on their own thin colour over the page and the bars
+            for tint in [tones.good, tones.busy, tones.bad, tones.chip_on, tones.chosen] {
+                for ground in [tones.page, tones.bar] {
+                    let under = seen(tint.fill, ground);
+                    assert!(contrast(tint.text, under) >= 4.5, "a mark, dark {dark}: {}", contrast(tint.text, under));
+                }
+            }
+            assert!(contrast(tones.on_primary, tones.primary) >= 4.5, "the button that makes something new");
+            // what is only a sign
+            for sign in [tones.accent, tones.folder, tones.host, tones.danger] {
+                assert!(contrast(sign, tones.page) >= 2.0, "a sign, dark {dark}: {}", contrast(sign, tones.page));
+            }
         }
         let mut visuals = egui::Visuals::dark();
         Palette::of(true).paint(&mut visuals);
         assert_eq!(visuals.panel_fill, rgb(0x121316), "the design's page");
-        assert_eq!(visuals.widgets.inactive.bg_fill, rgb(0x22252e), "its buttons");
+        assert_eq!(visuals.widgets.inactive.bg_fill, rgb(0x1a1c22), "its buttons");
         assert_eq!(visuals.widgets.inactive.corner_radius, egui::CornerRadius::same(8), "its rounded-lg");
     }
 
     #[test]
-    fn rows_of_their_own_with_the_modern_look_only() {
-        *CHOSEN.lock().unwrap() = Some(Preset::Compact);
-        assert!(rows(true).is_none());
-        *CHOSEN.lock().unwrap() = Some(Preset::Modern);
-        let rows = rows(true).expect("the modern look's rows");
-        assert_eq!(rows.folder, rgb(0xfbbf24));
-        assert_eq!(rows.chosen.a(), 0x26, "thin: what is under it shows");
-        *CHOSEN.lock().unwrap() = None;
+    fn the_layout_has_its_colours_with_every_look() {
+        // the design's own, in the dark
+        let tones = Tones::modern(true);
+        assert_eq!(tones.page, rgb(0x121316));
+        assert_eq!(tones.bar, rgb(0x16181d), "its header, its properties");
+        assert_eq!(tones.rail, rgb(0x111216));
+        assert_eq!(tones.line, rgb(0x2a2e3b));
+        assert_eq!(tones.text, rgb(0xf1f5f9));
+        assert_eq!(tones.accent, rgb(0x3b82f6), "what is shown, in the rail");
+        assert_eq!(tones.primary, rgb(0x2563eb), "its blue button");
+        assert_eq!(tones.chosen.fill, thin(rgb(0x3b82f6), 46), "18%: what is under it shows");
+        assert_eq!(tones.chosen.text, egui::Color32::WHITE);
+        // and in the light
+        let tones = Tones::modern(false);
+        assert_eq!(tones.page, rgb(0xf8fafc));
+        assert_eq!(tones.bar, rgb(0xffffff));
+        assert_eq!(tones.rail, rgb(0xf1f5f9));
+        assert_eq!(tones.card, rgb(0xf1f5f9));
+        assert_eq!(tones.line, rgb(0xcbd5e1));
+        assert_eq!(tones.text, rgb(0x0f172a));
+        assert_eq!(tones.weak, rgb(0x64748b));
+        assert_eq!(tones.chip_on.text, rgb(0x1d4ed8));
+        assert_eq!(tones.chosen.fill, thin(rgb(0x2563eb), 31), "12%");
+        assert_eq!(tones.chosen.text, rgb(0x1e3a8a));
+        // another look's are what egui was given
+        let visuals = egui::Visuals::dark();
+        let plain = Tones::of(&visuals);
+        assert_eq!(plain.page, visuals.panel_fill);
+        assert_ne!(plain.bar, plain.page, "the bars can be told from the page");
+        assert_eq!(plain.good, Tones::modern(true).good, "the marks are the same");
     }
 
     #[test]

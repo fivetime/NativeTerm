@@ -59,17 +59,13 @@ settings-profile = "NativeTerm SSH" profile: { $status }
 
 ## Session tree
 
-tree-heading = Sessions
 tree-reload-hint = Reload ~/.ssh
-tree-new-folder = Folder
 tree-search-hint = Search name, host, user, note…  (Ctrl+F)
 tree-search-clear = Clear the search (Esc)
 tree-no-match = No host matches "{ $query }"
 tree-favorites = Favorites
 menu-favorite = Add to Favorites
 menu-unfavorite = Remove from Favorites
-tree-recent = Recent
-tree-all = All sessions
 tree-empty = No hosts yet: right-click a folder, or add a folder first.
 tree-main-config = ~/.ssh/config
 fab-open = NativeTerm: connect, tabs, sessions
@@ -264,9 +260,7 @@ host-alias = alias { $alias }
 
 ## Open sessions
 
-sessions-heading = Open sessions ({ $count })
 view-tabs = All tabs
-view-tabs-hint = Every tab in every Windows Terminal window, yours too (Ctrl+T)
 tabs-search-hint = Search tab titles…  (Ctrl+T)
 tabs-none = No Windows Terminal tabs found.
 tabs-no-match = No tab matches.
@@ -288,7 +282,7 @@ sessions-restored-waiting =
 sessions-connect-all = Connect all
 sessions-close-all = Close all
 sessions-one-by-one = Or connect them one by one below.
-sessions-empty = Double-click a host; Ctrl+click or Shift+click selects several; right-click a host or folder for more.
+sessions-empty = No session is open. Double-click a host in the session tree to open one.
 session-renamed = now called { $name }
 session-renamed-hint = The host was renamed after this tab opened. Windows Terminal keeps the tab's title; clones and reopened tabs use the new name.
 session-attempt = attempt { $n }
@@ -959,7 +953,7 @@ toast-connecting = Connecting { $count } sessions
 # the look on top of light and dark
 theme-look-label = Look
 theme-look-hint = Colours and spacing on top of light and dark. Every NativeTerm window follows it.
-theme-look-plain = Standard
+theme-look-plain = Classic
 theme-look-accent = Windows accent colour
 theme-look-dim = Soft
 theme-look-compact = Compact
@@ -1028,3 +1022,79 @@ lookup-own = Another…
 lookup-hint = What “Lookup Selection” in the terminal's menu searches the web with
 lookup-own-hint = The search's address, with %s where the selected text goes
 lookup-baidu = Baidu
+page-tree = Session Tree
+page-tree-about = Hosts and folders · { $count } saved
+page-recent = Recent Hosts
+page-recent-about = The hosts connected to lately, the latest first
+page-sessions = Open Sessions
+page-sessions-about = What is open in the terminal, and how it is doing
+page-tabs-about = Every tab in every terminal window, yours too
+page-send = Send Commands
+page-send-about = A command to the session in front, or to all that are logged in
+page-import = Import
+page-import-about = Sessions from SecureCRT and PuTTY
+settings-general = General
+settings-terminal-page = Terminal
+settings-keys = Keys and Passwords
+settings-data = Files and Data
+rail-light = Switch to the light theme
+rail-dark = Switch to the dark theme
+header-new = New
+header-new-folder = New Folder…
+header-collapse = Collapse All
+header-expand = Expand All
+footer-hosts = Hosts:
+footer-folders = Folders:
+footer-selected = Selected:
+footer-open = { $count ->
+        [one] 1 session open
+       *[other] { $count } sessions open
+    } · { $terminal }
+filter-label = Type:
+filter-all = All
+filter-network = Telnet, raw
+filter-empty = No host passes this filter.
+recent-empty = No host was connected to yet.
+props-title = Properties
+props-empty = Select a host or a folder in the tree to see what is known about it
+props-kind-none = Nothing
+props-kind-group = Several
+props-folder = Folder
+props-alias = Alias
+props-state = State
+props-state-none = Not connected
+props-state-connected = Connected
+props-state-busy = Connecting
+props-state-failed = Failed
+props-charset = Character set
+props-host = Host
+props-user = User
+props-port = Port
+props-jump = Jump host
+props-kept = Kept on the server
+props-tags = Tags
+props-note = Note
+props-no-note = Nothing was written about it.
+props-group = { $count } hosts selected
+props-group-open = { $count } of them connected
+props-group-hosts = Hosts
+props-group-more = and { $count } more
+props-folder-hosts = { $count ->
+        [one] 1 host
+       *[other] { $count } hosts
+    }
+props-hosts = Hosts
+props-folders = Folders in it
+props-folder-open = { $count } connected
+props-file = File
+props-credential = Credential set
+props-group-send = Sending to several
+props-group-send-off = Left out
+send-history = Sent in this run
+send-history-none = Nothing was sent yet.
+send-history-hint = Click to have it in the line again
+import-found = Found: { $path }
+import-securecrt-none = Its configuration was not found on this computer; its folder can be chosen.
+import-button = Import…
+import-putty-about = The sessions saved in PuTTY on this computer
+import-openssh = The hosts in { $dir }/config need no import: they are in the tree already.

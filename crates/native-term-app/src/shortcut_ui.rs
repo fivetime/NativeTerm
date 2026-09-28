@@ -95,7 +95,8 @@ impl ShortcutUi {
     /// The settings section: each command's shortcut in the window and
     /// global, recorded by pressing it, with what is wrong with it.
     pub fn settings_ui(&mut self, ui: &mut egui::Ui, core: Option<&Core>) {
-        egui::CollapsingHeader::new(t!("keys-title")).id_salt("keys").show(ui, |ui| {
+        // (open: it has a page of the settings to itself)
+        egui::CollapsingHeader::new(t!("keys-title")).id_salt("keys").default_open(true).show(ui, |ui| {
             ui.weak(t!("keys-intro"));
             if let Some((command, global)) = self.recording {
                 self.record(ui, core, command, global);

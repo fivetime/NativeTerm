@@ -1,5 +1,8 @@
-//! The main window: the session tree, the open sessions, and the dialogs
-//! that edit sessions.
+//! The main window: a rail of icons for its pages (the session tree,
+//! the hosts used lately, the open sessions, all tabs, sending commands,
+//! importing), a header, the page, a bar below, and the dialogs that
+//! edit sessions. Laid out after the design the person brought
+//! (`layout.rs`; `docs/ARCHITECTURE.md`, "The main window").
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,6 +20,8 @@ use crate::dialogs::{
 use crate::icons;
 use crate::import_dialog::ImportDialog;
 use crate::key_dialog::KeyDialog;
+use crate::layout::{self, Kind, Room};
+use crate::looks::Tones;
 use crate::options_dialog::{OptionsDialog, OptionsTarget};
 use crate::plink_dialog::PlinkDialog;
 use crate::send_dialog::SendDialog;
@@ -24,7 +29,7 @@ use crate::send_line::SendLine;
 use crate::server_sessions::ServerSessionsDialog;
 use crate::tab_list::TabList;
 use crate::terminal_profile::ProfileSetup;
-use crate::tree_view::{Activity, TreeAction, TreeView};
+use crate::tree_view::{Activity, Chosen, Scope, Shown, TreeAction, TreeView};
 use crate::Setup;
 
 /// `state.db` setting: the docked window stays out.
@@ -50,11 +55,92 @@ enum Dialog {
 /// Opening at least this many hosts that forward the ssh-agent is pointed out.
 const AGENT_NOTICE_MIN: usize = 3;
 
-/// What the right side shows.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum View {
+/// What the window shows: the rail's icons, from its top.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Page {
+    /// The session tree, and what is chosen in it.
+    Tree,
+    /// The hosts used lately, the latest first.
+    Recent,
+    /// The open sessions.
     Sessions,
+    /// Every tab of the terminal, the person's own too.
     Tabs,
+    /// A command to the active session, or to all of them.
+    Send,
+    /// Sessions from SecureCRT and PuTTY.
+    Import,
+}
+
+impl Page {
+    const ALL: [Page; 6] = [Page::Tree, Page::Recent, Page::Sessions, Page::Tabs, Page::Send, Page::Import];
+
+    fn icon(self) -> char {
+        match self {
+            Page::Tree => icons::TREE,
+            Page::Recent => icons::HISTORY,
+            Page::Sessions => icons::CONNECT,
+            Page::Tabs => icons::TABS,
+            Page::Send => icons::SEND,
+            Page::Import => icons::IMPORT,
+        }
+    }
+
+    fn title(self) -> String {
+        match self {
+            Page::Tree => t!("page-tree"),
+            Page::Recent => t!("page-recent"),
+            Page::Sessions => t!("page-sessions"),
+            Page::Tabs => t!("view-tabs"),
+            Page::Send => t!("page-send"),
+            Page::Import => t!("page-import"),
+        }
+    }
+
+    /// A line about it, under its title (`hosts`: how many are saved).
+    fn about(self, hosts: usize) -> String {
+        match self {
+            Page::Tree => t!("page-tree-about", count = hosts),
+            Page::Recent => t!("page-recent-about"),
+            Page::Sessions => t!("page-sessions-about"),
+            Page::Tabs => t!("page-tabs-about"),
+            Page::Send => t!("page-send-about"),
+            Page::Import => t!("page-import-about"),
+        }
+    }
+}
+
+/// The settings' pages, in the window the rail's gear opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SettingsPage {
+    General,
+    Look,
+    Terminal,
+    Keys,
+    Shortcuts,
+    Data,
+}
+
+impl SettingsPage {
+    const ALL: [SettingsPage; 6] = [
+        SettingsPage::General,
+        SettingsPage::Look,
+        SettingsPage::Terminal,
+        SettingsPage::Keys,
+        SettingsPage::Shortcuts,
+        SettingsPage::Data,
+    ];
+
+    fn title(self) -> String {
+        match self {
+            SettingsPage::General => icons::with(icons::SETTINGS, t!("settings-general")),
+            SettingsPage::Look => icons::with(icons::SUN, t!("theme-label")),
+            SettingsPage::Terminal => icons::with(icons::TERMINAL, t!("settings-terminal-page")),
+            SettingsPage::Keys => icons::with(icons::KEY, t!("settings-keys")),
+            SettingsPage::Shortcuts => icons::with(icons::LIST, t!("keys-title")),
+            SettingsPage::Data => icons::with(icons::FOLDER, t!("settings-data")),
+        }
+    }
 }
 
 /// What the session tree was loaded from: the config files with their
@@ -127,7 +213,8 @@ pub struct App {
     folders_move: Option<String>,
     ssh_changed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     loaded_from: Fingerprint,
-    view_right: View,
+    page: Page,
+    settings_page: SettingsPage,
     tab_list: TabList,
     agent: crate::agent::AgentCheck,
     storage: crate::storage::StorageCheck,
@@ -300,7 +387,8 @@ impl App {
             folders_move: None,
             ssh_changed,
             loaded_from,
-            view_right: View::Sessions,
+            page: Page::Tree,
+            settings_page: SettingsPage::General,
             tab_list: TabList::default(),
             agent: {
                 let check = crate::agent::AgentCheck::default();
@@ -469,13 +557,17 @@ impl App {
                 if global || command == Command::ShowNativeTerm {
                     crate::shell::show_main();
                 }
+                // (the search field is the tree's and the recent hosts')
+                if !matches!(self.page, Page::Tree | Page::Recent) {
+                    self.page = Page::Tree;
+                }
                 self.view.focus_search();
             }
             Command::AllTabs => {
                 if global {
                     crate::shell::show_tabs();
                 }
-                self.view_right = View::Tabs;
+                self.page = Page::Tabs;
                 self.tab_list.focus_search();
             }
             Command::SendToActive | Command::SendToSeveral => {
@@ -1532,29 +1624,538 @@ impl App {
     }
 
     /// The right side: open sessions, or every tab.
-    fn right_panel(&mut self, ui: &mut egui::Ui) {
-        let Some(core) = self.core.clone() else { return };
-        let open = core.sessions().iter().filter(|s| s.state.is_open()).count();
-        ui.horizontal(|ui| {
-            let sessions = egui::RichText::new(t!("sessions-heading", count = open)).heading();
-            ui.selectable_value(&mut self.view_right, View::Sessions, sessions);
-            let tabs = egui::RichText::new(icons::with(icons::TABS, t!("view-tabs"))).heading();
-            ui.selectable_value(&mut self.view_right, View::Tabs, tabs).on_hover_text(t!("view-tabs-hint"));
-        });
-        match self.view_right {
-            View::Sessions => {
-                core.want_all_tabs(false);
-                self.sessions_panel(ui, &core);
-            }
-            View::Tabs => {
-                ui.separator();
-                // a tab of ours here can take files as its own tab does
-                if let Some((session, paths)) = self.tab_list.show(ui, &core) {
-                    let alias = core.sessions().into_iter().find(|s| s.id == session).map(|s| s.alias);
-                    if let Some(alias) = alias {
-                        let text = paths_as_text(&paths);
-                        self.dropped(&alias, &session, paths, &text, true);
+    /// The rail of icons at the window's left: the pages from its top,
+    /// and from its bottom the settings, light or dark, and (docked)
+    /// the pin.
+    fn rail(&mut self, ui: &mut egui::Ui, tones: &Tones) {
+        let open = self.core.as_ref().map_or(0, |c| c.sessions().iter().filter(|s| s.state.is_open()).count());
+        let docked = crate::dock::docked_edge();
+        let frame = egui::Frame::new().fill(tones.rail).inner_margin(egui::Margin::symmetric(0, 12));
+        fn rail<'a>(tones: &Tones, icon: char, hint: &'a str, active: bool) -> layout::Rail<'a> {
+            layout::Rail { icon, hint, active, count: 0, near: tones.rail_near }
+        }
+        // (the line at its side is the rail's own)
+        let whole = ui.max_rect();
+        egui::Panel::left("rail")
+            .exact_size(layout::RAIL)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(frame)
+            .show_inside(ui, |ui| {
+                // the design's gaps, or less in a low window
+                const LOGO: f32 = 44.0;
+                let below = if docked.is_some() { 3 } else { 2 };
+                let buttons = Page::ALL.len() + below;
+                let gap = layout::rail_gap(ui.available_height() - LOGO - 12.0, buttons);
+                ui.spacing_mut().item_spacing = egui::vec2(0.0, gap);
+                // the program's own sign (`p-2 rounded-xl`, `mb-1`)
+                let (at, logo) = ui.allocate_exact_size(egui::vec2(layout::RAIL, LOGO), egui::Sense::click());
+                let tile = egui::Rect::from_center_size(at.center(), egui::vec2(40.0, 40.0));
+                if logo.hovered() {
+                    // (`hover:bg-blue-500/10`)
+                    ui.painter().rect_filled(tile, 12.0, tones.tile.fill);
+                }
+                let sign = egui::FontId::proportional(24.0);
+                ui.painter().text(tile.center(), egui::Align2::CENTER_CENTER, icons::TERMINAL, sign, tones.accent);
+                if logo.on_hover_text(t!("about-title", version = env!("CARGO_PKG_VERSION"))).clicked() {
+                    self.page = Page::Tree;
+                }
+                for page in Page::ALL {
+                    let count = if page == Page::Sessions { open } else { 0 };
+                    let title = page.title();
+                    let button = layout::Rail { count, ..rail(tones, page.icon(), &title, self.page == page) };
+                    if layout::rail_button(ui, tones, button).clicked() {
+                        self.page = page;
+                        match page {
+                            Page::Tree | Page::Recent => self.view.focus_search(),
+                            Page::Tabs => self.tab_list.focus_search(),
+                            _ => {}
+                        }
                     }
+                }
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    // (`space-y-3`)
+                    ui.spacing_mut().item_spacing.y = gap.min(12.0);
+                    let settings = t!("settings-toggle");
+                    if layout::rail_button(ui, tones, rail(tones, icons::SETTINGS, &settings, self.show_settings))
+                        .clicked()
+                    {
+                        self.show_settings = !self.show_settings;
+                    }
+                    let (icon, hint) = other_theme(ui);
+                    let button = layout::Rail { near: tones.sun, ..rail(tones, icon, &hint, false) };
+                    if layout::rail_button(ui, tones, button).clicked() {
+                        self.change_theme(ui);
+                    }
+                    if let Some(edge) = docked {
+                        let pinned = crate::dock::pinned();
+                        let hint = t!("dock-pin-hint", edge = edge.name());
+                        if layout::rail_button(ui, tones, rail(tones, icons::PIN, &hint, pinned)).clicked() {
+                            crate::dock::set_pinned(!pinned);
+                            if let Some(core) = &self.core {
+                                core.set_setting(PINNED_SETTING, if pinned { "0" } else { "1" });
+                            }
+                        }
+                    }
+                });
+            });
+        let side = (whole.left() + layout::RAIL).round() - 0.5;
+        ui.painter().vline(side, whole.y_range(), egui::Stroke::new(1.0_f32, tones.rail_line));
+    }
+
+    /// From light to dark, or from dark to light: the setting, and the
+    /// terminal with it.
+    fn change_theme(&mut self, ui: &egui::Ui) {
+        let theme = if ui.visuals().dark_mode { "light" } else { "dark" };
+        if let Some(core) = &self.core {
+            core.set_setting(THEME_SETTING, theme);
+            sync_terminal_look(core);
+        }
+        apply_theme(ui.ctx(), Some(theme));
+    }
+
+    /// Where a new host goes: the folder that is chosen, the chosen
+    /// host's, or the main config.
+    fn new_host_file(&self) -> PathBuf {
+        let chosen = match self.view.chosen(&self.tree) {
+            Chosen::Folder(path) => self.view.folder(&self.tree, &path).and_then(|folder| folder.file),
+            Chosen::Host(alias) => self.tree.find(&alias).map(|(_, host)| host.file.clone()),
+            _ => None,
+        };
+        chosen.unwrap_or_else(|| self.editor.main_config())
+    }
+
+    /// The header: what the page is, and for the tree what is done to
+    /// all of it (the design's "Expand All", "Collapse All" and its blue
+    /// "New").
+    fn header(&mut self, ui: &mut egui::Ui, tones: &Tones) -> Vec<TreeAction> {
+        let mut actions = Vec::new();
+        // (the design's widths are the whole window's)
+        let width = ui.available_width() + layout::RAIL;
+        let short = width < layout::SHORT_HEADER;
+        let frame = layout::bar(tones, layout::header_pad(width));
+        egui::Panel::top("header").frame(frame).show_inside(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 12.0;
+                layout::header_tile(ui, tones, self.page.icon());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let (icon, hint) = other_theme(ui);
+                    if layout::theme_button(ui, tones, icon, &hint).clicked() {
+                        self.change_theme(ui);
+                    }
+                    if self.page == Page::Tree {
+                        self.header_buttons(ui, tones, short, &mut actions);
+                    }
+                    ui.add_space(4.0);
+                    // the title has what the buttons leave
+                    let about = self.page.about(self.tree.hosts().count());
+                    let size = layout::title_size(width);
+                    layout::header_title(ui, tones, &self.page.title(), &about, ui.available_width(), size);
+                });
+            });
+        });
+        actions
+    }
+
+    /// The tree's buttons, from the right: a narrow window has their
+    /// signs only.
+    fn header_buttons(&mut self, ui: &mut egui::Ui, tones: &Tones, short: bool, actions: &mut Vec<TreeAction>) {
+        let button = |ui: &mut egui::Ui, kind: Kind, icon: char, text: String| {
+            if short {
+                layout::button(ui, tones, kind, Room::Header, Some(icon), "").on_hover_text(text)
+            } else {
+                let icon = (kind == Kind::Primary).then_some(icon);
+                layout::button(ui, tones, kind, Room::Header, icon, &text)
+            }
+        };
+        let new = button(ui, Kind::Primary, icons::PLUS_CIRCLE, t!("header-new"));
+        egui::Popup::menu(&new).show(|ui| {
+            if ui.button(icons::with(icons::HOST, t!("menu-new-host"))).clicked() {
+                actions.push(TreeAction::NewHost(self.new_host_file()));
+                ui.close();
+            }
+            if ui.button(icons::with(icons::NETWORK, t!("menu-new-plink"))).clicked() {
+                actions.push(TreeAction::NewPlink(self.new_host_file()));
+                ui.close();
+            }
+            if ui.button(icons::with(icons::NEW_FOLDER, t!("header-new-folder"))).clicked() {
+                actions.push(TreeAction::NewFolder);
+                ui.close();
+            }
+        });
+        if button(ui, Kind::Plain, icons::CHEVRON_RIGHT, t!("header-collapse")).clicked() {
+            self.view.open_all(false);
+        }
+        if button(ui, Kind::Plain, icons::CHEVRON_DOWN, t!("header-expand")).clicked() {
+            self.view.open_all(true);
+        }
+        let reload = layout::button(ui, tones, Kind::Plain, Room::Header, Some(icons::REFRESH), "");
+        if reload.on_hover_text(t!("tree-reload-hint")).clicked() {
+            actions.push(TreeAction::Reload);
+        }
+    }
+
+    /// Whether there is something to say above the page.
+    fn warns(&self) -> bool {
+        self.profile.warns()
+            || self.agent.warns(self.core.as_ref())
+            || self.storage.warns()
+            || self.core.as_ref().is_some_and(|core| !core.lost_at_start().is_empty())
+            || !self.notices.is_empty()
+    }
+
+    /// What is wrong, and what was just said, under the header.
+    fn banners(&mut self, ui: &mut egui::Ui, tones: &Tones) {
+        if !self.warns() {
+            return;
+        }
+        let frame = layout::bar(tones, egui::Margin::symmetric(20, 10));
+        egui::Panel::top("notices").frame(frame).show_inside(ui, |ui| {
+            self.profile.banner(ui, &mut self.notices);
+            let mut settings = false;
+            self.agent.banner(ui, self.core.as_ref(), &mut settings);
+            if settings {
+                self.show_settings = true;
+                self.settings_page = SettingsPage::Keys;
+            }
+            self.storage.banner(ui, &self.ssh_dir, &self.data_dir);
+            self.lost_banner(ui);
+            if !self.notices.is_empty() {
+                let mut clear = false;
+                ui.horizontal_wrapped(|ui| {
+                    ui.colored_label(tones.busy.text, self.notices.join("  ·  "));
+                    clear = ui.small_button(icons::CLEAR.to_string()).clicked();
+                });
+                if clear {
+                    self.notices.clear();
+                }
+            }
+        });
+    }
+
+    /// The bar below the page (`h-9`): how much there is, and at its
+    /// end what is open, in which terminal.
+    fn footer(&self, ui: &mut egui::Ui, tones: &Tones) {
+        let frame = layout::bar(tones, egui::Margin::symmetric(16, 0));
+        let hosts = self.tree.hosts().count();
+        let folders = self.tree.folders().filter(|f| !f.name.is_empty()).count();
+        let selected = self.view.selected();
+        let open = self.core.as_ref().map_or(0, |c| c.sessions().iter().filter(|s| s.state.is_open()).count());
+        let terminal = self.core.as_ref().map_or(default_terminal_name(), |c| c.terminal_name().to_string());
+        egui::Panel::bottom("footer").exact_size(layout::FOOTER).resizable(false).frame(frame).show_inside(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                layout::footer_count(ui, tones, icons::LAYERS, &t!("footer-hosts"), hosts);
+                layout::footer_count(ui, tones, icons::FOLDER, &t!("footer-folders"), folders);
+                if selected > 0 {
+                    layout::footer_count(ui, tones, icons::ACCEPT, &t!("footer-selected"), selected);
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    let text = t!("footer-open", count = open, terminal = terminal.as_str());
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(text).size(layout::SMALL).color(tones.weak)).truncate(),
+                    );
+                    layout::dot(ui, if open > 0 { tones.alive } else { tones.near });
+                });
+            });
+        });
+    }
+
+    /// The tree (or the hosts used lately), what is chosen in it at its
+    /// right, the bar below it. A narrow window has what is chosen under
+    /// the tree, and only while something is.
+    fn tree_page(
+        &mut self,
+        ui: &mut egui::Ui,
+        tones: &Tones,
+        recent: &[String],
+        activity: &HashMap<String, Activity>,
+    ) -> Vec<TreeAction> {
+        let narrow = ui.available_width() < layout::NARROW - layout::RAIL;
+        let chosen = self.view.chosen(&self.tree);
+        let written = crate::tree_view::Written { notes: &self.notes, generation: self.notes_generation };
+        let about = crate::properties::About { tree: &self.tree, view: &self.view, activity, written };
+        let frame = egui::Frame::new().fill(tones.bar);
+        let mut asked = Vec::new();
+        if narrow {
+            self.footer(ui, tones);
+            if chosen != Chosen::Nothing {
+                egui::Panel::bottom("properties-under")
+                    .resizable(true)
+                    .default_size(260.0)
+                    .size_range(160.0..=420.0)
+                    .frame(frame)
+                    .show_inside(ui, |ui| asked = crate::properties::show(ui, &about, &chosen));
+            }
+        } else {
+            egui::Panel::right("properties")
+                .resizable(true)
+                .default_size(layout::PROPERTIES)
+                .size_range(260.0..=480.0)
+                .frame(frame)
+                .show_inside(ui, |ui| asked = crate::properties::show(ui, &about, &chosen));
+            self.footer(ui, tones);
+        }
+        let scope = if self.page == Page::Recent { Scope::Recent } else { Scope::Tree };
+        let shown = Shown { tree: &self.tree, generation: self.generation, recent, activity, written, scope };
+        let page = egui::Frame::new().fill(tones.page);
+        let mut actions =
+            egui::CentralPanel::default().frame(page).show_inside(ui, |ui| self.view.show(ui, &shown)).inner;
+        for asked in asked {
+            match asked {
+                crate::properties::Asked::Tree(action) => actions.push(action),
+                crate::properties::Asked::Nothing => self.view.choose_nothing(),
+            }
+        }
+        actions
+    }
+
+    /// A page that is not the tree: the bar below, and the page with
+    /// room around it.
+    fn page(&mut self, ui: &mut egui::Ui, tones: &Tones, inside: impl FnOnce(&mut App, &mut egui::Ui)) {
+        self.footer(ui, tones);
+        let frame = egui::Frame::new().fill(tones.page).inner_margin(16);
+        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| inside(self, ui));
+    }
+
+    /// Every tab of the terminal; a tab of ours here can take files as
+    /// its own tab does.
+    fn tabs_page(&mut self, ui: &mut egui::Ui) {
+        let Some(core) = self.core.clone() else { return };
+        if let Some((session, paths)) = self.tab_list.show(ui, &core) {
+            let alias = core.sessions().into_iter().find(|s| s.id == session).map(|s| s.alias);
+            if let Some(alias) = alias {
+                let text = paths_as_text(&paths);
+                self.dropped(&alias, &session, paths, &text, true);
+            }
+        }
+    }
+
+    /// A command to the session in front or to all that are logged in,
+    /// the dialog that chooses among them, and what was sent in this run.
+    fn send_page(&mut self, ui: &mut egui::Ui, tones: &Tones) {
+        let Some(core) = self.core.clone() else { return };
+        let no_group_send = self.no_group_send();
+        ui.spacing_mut().item_spacing.y = 12.0;
+        layout::card(ui, tones, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            self.send_line.show(ui, &core, &no_group_send);
+        });
+        let tmux = self.tmux_hosts();
+        let reachable =
+            core.sessions().iter().filter(|s| s.state == State::Connected || tmux.contains(&s.alias)).count();
+        ui.add_enabled_ui(reachable > 0, |ui| {
+            let several =
+                layout::button(ui, tones, Kind::Plain, Room::Panel, Some(icons::SEND), &t!("sessions-send-many"));
+            if several.clicked() && self.dialog.is_none() {
+                self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(&core, &[]))));
+            }
+        });
+        layout::caption(ui, tones, &t!("send-history"));
+        if self.send_line.history().is_empty() {
+            ui.label(egui::RichText::new(t!("send-history-none")).size(layout::SMALL).color(tones.weak));
+            return;
+        }
+        let mut again = None;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            // the latest first
+            for line in self.send_line.history().iter().rev() {
+                let text = egui::RichText::new(line).monospace().color(tones.text);
+                let row = ui.add(egui::Button::new(text).frame(false).truncate());
+                if row.on_hover_text(t!("send-history-hint")).clicked() {
+                    again = Some(line.clone());
+                }
+            }
+        });
+        if let Some(line) = again {
+            self.send_line.take(&line);
+        }
+    }
+
+    /// Where sessions can be taken from.
+    fn import_page(&mut self, ui: &mut egui::Ui, tones: &Tones) {
+        ui.spacing_mut().item_spacing.y = 12.0;
+        let source = |ui: &mut egui::Ui, icon: char, name: &str, about: String, button: String| {
+            layout::card(ui, tones, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 12.0;
+                    layout::tile(ui, 48.0, icon, tones.bar, tones.line, tones.accent);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let clicked =
+                            layout::button(ui, tones, Kind::Primary, Room::Panel, Some(icons::IMPORT), &button)
+                                .clicked();
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                            ui.spacing_mut().item_spacing.y = 3.0;
+                            ui.add_space(4.0);
+                            let name = egui::RichText::new(name).size(layout::MIDDLE).color(tones.text);
+                            ui.add(egui::Label::new(name).truncate());
+                            let line = egui::RichText::new(about.as_str()).size(layout::SMALL).color(tones.weak);
+                            ui.add(egui::Label::new(line).truncate()).on_hover_text(about.as_str());
+                        });
+                        clicked
+                    })
+                    .inner
+                })
+                .inner
+            })
+        };
+        let securecrt = match &self.securecrt {
+            Some(path) => t!("import-found", path = path.display().to_string()),
+            None => t!("import-securecrt-none"),
+        };
+        if source(ui, icons::LOCK, "SecureCRT", securecrt, t!("import-button")) && self.dialog.is_none() {
+            let dialog = ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone());
+            self.dialog = Some(Dialog::Import(Box::new(dialog)));
+        }
+        if self.putty_sessions
+            && source(ui, icons::NETWORK, "PuTTY", t!("import-putty-about"), t!("import-button"))
+            && self.dialog.is_none()
+        {
+            let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.egui_ctx);
+            self.dialog = Some(Dialog::Import(Box::new(dialog)));
+        }
+        let ssh = t!("import-openssh", dir = self.ssh_dir.display().to_string());
+        ui.label(egui::RichText::new(ssh).size(layout::SMALL).color(tones.weak));
+    }
+
+    /// The settings, in a window of their own over the main one: their
+    /// pages at its left, the page chosen beside them.
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        if !self.show_settings {
+            return;
+        }
+        let tones = crate::looks::tones(&ctx.global_style().visuals);
+        // as large as the main window leaves it, in its middle
+        let around = ctx.content_rect();
+        let size =
+            egui::vec2((around.width() - 64.0).clamp(320.0, 720.0), (around.height() - 120.0).clamp(240.0, 520.0));
+        const PAGES: f32 = 168.0;
+        let mut open = true;
+        egui::Window::new(icons::with(icons::SETTINGS, t!("settings-toggle")))
+            .id(egui::Id::new("settings-window"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .fixed_size(size)
+            .show(ctx, |ui| {
+                ui.set_min_height(size.y);
+                egui::Panel::left("settings-pages")
+                    .exact_size(PAGES)
+                    .resizable(false)
+                    .frame(egui::Frame::new().inner_margin(egui::Margin { right: 12, ..egui::Margin::ZERO }))
+                    .show_inside(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        for page in SettingsPage::ALL {
+                            let on = self.settings_page == page;
+                            let row = egui::Button::selectable(on, page.title());
+                            let width = ui.available_width();
+                            if ui.add_sized([width, 30.0], row).clicked() {
+                                self.settings_page = page;
+                            }
+                        }
+                        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| about(ui, &tones));
+                    });
+                let page = egui::Frame::new().inner_margin(egui::Margin { left: 16, ..egui::Margin::ZERO });
+                egui::CentralPanel::default().frame(page).show_inside(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("settings-page").auto_shrink([false, false]).show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        self.settings_page(ui);
+                    });
+                });
+            });
+        if !open {
+            self.show_settings = false;
+        }
+    }
+
+    fn settings_page(&mut self, ui: &mut egui::Ui) {
+        match self.settings_page {
+            SettingsPage::General => {
+                let Some(core) = self.core.clone() else { return };
+                language_choice(ui, &core);
+                let mut auto = core.auto_reconnect();
+                if ui.checkbox(&mut auto, t!("auto-reconnect-setting")).changed() {
+                    core.set_auto_reconnect(auto);
+                }
+                let mut close = core.close_on_exit();
+                let response =
+                    ui.checkbox(&mut close, t!("close-on-exit-setting")).on_hover_text(t!("close-on-exit-hint"));
+                if response.changed() {
+                    core.set_setting(native_term_app::CLOSE_ON_EXIT_SETTING, if close { "1" } else { "0" });
+                }
+                let mut ask = self.remembered_drop().is_none();
+                let response = ui.checkbox(&mut ask, t!("drop-ask-setting")).on_hover_text(t!("drop-ask-hint"));
+                if response.changed() && ask {
+                    core.set_setting("drop.action", "");
+                }
+                let mut ask = native_term_app::quotation::prompts(&core);
+                let response = ui.checkbox(&mut ask, t!("quote-ask-setting")).on_hover_text(t!("quote-ask-hint"));
+                if response.changed() {
+                    native_term_app::quotation::set_prompts(&core, ask);
+                }
+                lookup_choice(ui, &core);
+                ui.separator();
+                if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {
+                    self.wizard = Some(crate::wizard::Wizard::new(ui.ctx()));
+                    self.show_settings = false;
+                }
+            }
+            SettingsPage::Look => {
+                let Some(core) = self.core.clone() else { return };
+                theme_choice(ui, &core);
+                look_choice(ui, &core);
+                let mut cards = core.setting(native_term_app::tab_menu::HOVER_SETTING).as_deref() != Some("off");
+                if ui.checkbox(&mut cards, t!("tabs-hover-setting")).on_hover_text(t!("tabs-hover-hint")).changed() {
+                    core.set_setting(native_term_app::tab_menu::HOVER_SETTING, if cards { "on" } else { "off" });
+                }
+                let mut switcher = core.ctrl_tab();
+                if ui
+                    .checkbox(&mut switcher, t!("tabs-switcher-setting"))
+                    .on_hover_text(t!("tabs-switcher-hint"))
+                    .changed()
+                {
+                    core.set_ctrl_tab(switcher);
+                    sync_terminal_look(&core);
+                }
+            }
+            SettingsPage::Terminal => {
+                let before = self.profile.favorites_on(self.core.as_ref());
+                self.profile.settings_ui(ui, self.core.as_ref(), &mut self.notices);
+                if self.profile.favorites_on(self.core.as_ref()) != before {
+                    self.refresh_terminal_favorites();
+                }
+            }
+            SettingsPage::Keys => {
+                self.agent.settings_ui(ui, &self.ssh_dir, self.core.as_ref());
+                if ui.small_button(t!("button-check-again")).clicked() {
+                    self.agent.refresh(&self.ssh_dir, ui.ctx());
+                }
+                ui.separator();
+                let sets = ui.button(t!("cred-sets-button")).on_hover_text(t!("cred-sets-intro"));
+                if sets.clicked() && self.dialog.is_none() {
+                    let dialog = crate::credential_sets::CredentialSetsDialog::new(&self.tree);
+                    self.dialog = Some(Dialog::CredentialSets(Box::new(dialog)));
+                }
+            }
+            SettingsPage::Shortcuts => self.keys.settings_ui(ui, self.core.as_ref()),
+            SettingsPage::Data => {
+                self.folders_ui(ui);
+                self.data_dir_ui(ui);
+                ui.separator();
+                // before the program folder is deleted
+                if ui.button(t!("cleanup-button")).on_hover_text(t!("cleanup-intro")).clicked() && self.dialog.is_none()
+                {
+                    let cleanup = crate::cleanup::Cleanup::new(
+                        &self.ssh_dir,
+                        &self.editor.folders_dir(),
+                        self.profile.shim_path(),
+                        self.data_dir.clone(),
+                    );
+                    let dialog = crate::cleanup::CleanupDialog::new(cleanup);
+                    self.dialog = Some(Dialog::Cleanup(Box::new(dialog)));
                 }
             }
         }
@@ -1563,14 +2164,22 @@ impl App {
     fn sessions_panel(&mut self, ui: &mut egui::Ui, core: &Core) {
         let core = core.clone();
         let sessions = core.sessions();
+        let tones = crate::looks::tones(ui.visuals());
+        // nothing open: what the page is for, and where sessions come from
+        if sessions.is_empty() {
+            layout::empty(ui, &tones, icons::CONNECT, &t!("sessions-empty"));
+            return;
+        }
         ui.horizontal(|ui| {
-            if ui.small_button(t!("sessions-clear-finished")).clicked() {
+            let button = |ui: &mut egui::Ui, icon: char, text: String| {
+                layout::button(ui, &tones, Kind::Plain, Room::Header, Some(icon), &text)
+            };
+            if button(ui, icons::CLEAR, t!("sessions-clear-finished")).clicked() {
                 core.clear_finished();
             }
             let unlocated = core.unlocated();
             if unlocated > 0
-                && ui
-                    .small_button(t!("sessions-locate", count = unlocated))
+                && button(ui, icons::SEARCH, t!("sessions-locate", count = unlocated))
                     .on_hover_text(t!("sessions-locate-hint"))
                     .clicked()
             {
@@ -1579,11 +2188,11 @@ impl App {
             // logged in, or kept in tmux on the server (sent there through it)
             let tmux = self.tmux_hosts();
             let reachable = sessions.iter().filter(|s| s.state == State::Connected || tmux.contains(&s.alias)).count();
-            if ui.add_enabled(reachable > 0, egui::Button::new(t!("sessions-send-many")).small()).clicked()
-                && self.dialog.is_none()
-            {
-                self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(&core, &[]))));
-            }
+            ui.add_enabled_ui(reachable > 0, |ui| {
+                if button(ui, icons::SEND, t!("sessions-send-many")).clicked() && self.dialog.is_none() {
+                    self.dialog = Some(Dialog::Send(Box::new(self.send_dialog(&core, &[]))));
+                }
+            });
         });
         // after a restart or a Terminal restore: reconnect all, some, or none
         let waiting: Vec<&SessionView> = sessions.iter().filter(|s| s.state == State::Waiting && s.linked).collect();
@@ -1604,11 +2213,7 @@ impl App {
                 ui.weak(t!("sessions-one-by-one"));
             });
         }
-        ui.separator();
-        if sessions.is_empty() {
-            ui.label(t!("sessions-empty"));
-            return;
-        }
+        ui.add_space(4.0);
         let mut save = None;
         let mut send = None;
         let mut dropped: Option<(String, String, Vec<PathBuf>)> = None;
@@ -1935,12 +2540,19 @@ fn theme_choice(ui: &mut egui::Ui, core: &Core) {
 /// is the point of the section: a tool that drives your terminal and
 /// holds your passwords should say plainly that it sends nothing
 /// anywhere (the README says it too).
-fn about(ui: &mut egui::Ui) {
-    ui.separator();
-    ui.horizontal_wrapped(|ui| {
-        ui.strong(t!("about-title", version = env!("CARGO_PKG_VERSION")));
-        ui.weak(t!("about-no-telemetry"));
-    });
+fn about(ui: &mut egui::Ui, tones: &Tones) {
+    // (from the settings' lower end: what is said last is the uppermost)
+    ui.label(egui::RichText::new(t!("about-no-telemetry")).size(layout::TINY).color(tones.weak));
+    ui.label(egui::RichText::new(t!("about-title", version = env!("CARGO_PKG_VERSION"))).color(tones.text));
+}
+
+/// The theme that is not the one shown: its sign, and what changing to
+/// it is called (the design's sun in the dark, its moon in the light).
+fn other_theme(ui: &egui::Ui) -> (char, String) {
+    match ui.visuals().dark_mode {
+        true => (icons::SUN, t!("rail-light")),
+        false => (icons::MOON, t!("rail-dark")),
+    }
 }
 
 /// The look on top of light and dark (see `looks.rs`).
@@ -2215,149 +2827,15 @@ impl crate::window::Ui for App {
             self.handle_menu_request(request);
         }
         if crate::shell::take_show_tabs() {
-            self.view_right = View::Tabs;
+            self.page = Page::Tabs;
             self.tab_list.focus_search();
         }
-        egui::Panel::top("status").show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.toggle_value(&mut self.show_settings, icons::with(icons::SETTINGS, t!("settings-toggle")));
-                if let Some(edge) = crate::dock::docked_edge() {
-                    let mut pinned = crate::dock::pinned();
-                    let toggle = ui
-                        .toggle_value(&mut pinned, icons::with(icons::PIN, t!("dock-pin")))
-                        .on_hover_text(t!("dock-pin-hint", edge = edge.name()));
-                    if toggle.changed() {
-                        crate::dock::set_pinned(pinned);
-                        if let Some(core) = &self.core {
-                            core.set_setting(PINNED_SETTING, if pinned { "1" } else { "0" });
-                        }
-                    }
-                }
-                if ui.button(icons::with(icons::IMPORT, t!("import-securecrt-button"))).clicked()
-                    && self.dialog.is_none()
-                {
-                    self.dialog =
-                        Some(Dialog::Import(Box::new(ImportDialog::new(self.ssh_dir.clone(), self.data_dir.clone()))));
-                }
-                if self.putty_sessions
-                    && ui.button(icons::with(icons::IMPORT, t!("import-putty-button"))).clicked()
-                    && self.dialog.is_none()
-                {
-                    let dialog = ImportDialog::putty(self.ssh_dir.clone(), self.data_dir.clone(), &self.egui_ctx);
-                    self.dialog = Some(Dialog::Import(Box::new(dialog)));
-                }
-            });
-            if self.show_settings {
-                ui.group(|ui| {
-                    let before = self.profile.favorites_on(self.core.as_ref());
-                    self.profile.settings_ui(ui, self.core.as_ref(), &mut self.notices);
-                    if self.profile.favorites_on(self.core.as_ref()) != before {
-                        self.refresh_terminal_favorites();
-                    }
-                    if let Some(core) = &self.core {
-                        ui.separator();
-                        let mut auto = core.auto_reconnect();
-                        if ui.checkbox(&mut auto, t!("auto-reconnect-setting")).changed() {
-                            core.set_auto_reconnect(auto);
-                        }
-                        let mut close = core.close_on_exit();
-                        let response = ui
-                            .checkbox(&mut close, t!("close-on-exit-setting"))
-                            .on_hover_text(t!("close-on-exit-hint"));
-                        if response.changed() {
-                            core.set_setting(native_term_app::CLOSE_ON_EXIT_SETTING, if close { "1" } else { "0" });
-                        }
-                        let mut cards =
-                            core.setting(native_term_app::tab_menu::HOVER_SETTING).as_deref() != Some("off");
-                        if ui
-                            .checkbox(&mut cards, t!("tabs-hover-setting"))
-                            .on_hover_text(t!("tabs-hover-hint"))
-                            .changed()
-                        {
-                            core.set_setting(
-                                native_term_app::tab_menu::HOVER_SETTING,
-                                if cards { "on" } else { "off" },
-                            );
-                        }
-                        let mut switcher = core.ctrl_tab();
-                        if ui
-                            .checkbox(&mut switcher, t!("tabs-switcher-setting"))
-                            .on_hover_text(t!("tabs-switcher-hint"))
-                            .changed()
-                        {
-                            core.set_ctrl_tab(switcher);
-                            sync_terminal_look(core);
-                        }
-                        let mut ask = self.remembered_drop().is_none();
-                        let response = ui.checkbox(&mut ask, t!("drop-ask-setting")).on_hover_text(t!("drop-ask-hint"));
-                        if response.changed() && ask {
-                            core.set_setting("drop.action", "");
-                        }
-                        let mut ask = native_term_app::quotation::prompts(core);
-                        let response =
-                            ui.checkbox(&mut ask, t!("quote-ask-setting")).on_hover_text(t!("quote-ask-hint"));
-                        if response.changed() {
-                            native_term_app::quotation::set_prompts(core, ask);
-                        }
-                        language_choice(ui, core);
-                        theme_choice(ui, core);
-                        look_choice(ui, core);
-                        lookup_choice(ui, core);
-                    }
-                    ui.separator();
-                    self.agent.settings_ui(ui, &self.ssh_dir, self.core.as_ref());
-                    if ui.small_button(t!("button-check-again")).clicked() {
-                        self.agent.refresh(&self.ssh_dir, ui.ctx());
-                    }
-                    ui.separator();
-                    self.keys.settings_ui(ui, self.core.as_ref());
-                    let sets = ui.button(t!("cred-sets-button")).on_hover_text(t!("cred-sets-intro"));
-                    if sets.clicked() && self.dialog.is_none() {
-                        let dialog = crate::credential_sets::CredentialSetsDialog::new(&self.tree);
-                        self.dialog = Some(Dialog::CredentialSets(Box::new(dialog)));
-                    }
-                    ui.separator();
-                    self.folders_ui(ui);
-                    self.data_dir_ui(ui);
-                    about(ui);
-                    ui.separator();
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button(t!("wizard-open")).clicked() && self.wizard.is_none() {
-                            self.wizard = Some(crate::wizard::Wizard::new(ui.ctx()));
-                        }
-                        // before the program folder is deleted
-                        if ui.button(t!("cleanup-button")).on_hover_text(t!("cleanup-intro")).clicked()
-                            && self.dialog.is_none()
-                        {
-                            let cleanup = crate::cleanup::Cleanup::new(
-                                &self.ssh_dir,
-                                &self.editor.folders_dir(),
-                                self.profile.shim_path(),
-                                self.data_dir.clone(),
-                            );
-                            let dialog = crate::cleanup::CleanupDialog::new(cleanup);
-                            self.dialog = Some(Dialog::Cleanup(Box::new(dialog)));
-                        }
-                    });
-                });
-            }
-            self.profile.banner(ui, &mut self.notices);
-            self.agent.banner(ui, self.core.as_ref(), &mut self.show_settings);
-            self.storage.banner(ui, &self.ssh_dir, &self.data_dir);
-            self.lost_banner(ui);
-            if !self.notices.is_empty() {
-                let mut clear = false;
-                ui.horizontal_wrapped(|ui| {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x9a, 0x1a), self.notices.join("  ·  "));
-                    clear = ui.small_button("×").clicked();
-                });
-                if clear {
-                    self.notices.clear();
-                }
-            }
-        });
+        let tones = crate::looks::tones(ui.visuals());
+        self.rail(ui, &tones);
+        let mut actions = self.header(ui, &tones);
+        self.banners(ui, &tones);
         let recent = self.recent();
-        // the best state per host, for the dots in the tree
+        // the best state per host, for the marks in the tree
         let mut activity: HashMap<String, Activity> = HashMap::new();
         for s in self.core.as_ref().map(|c| c.sessions()).unwrap_or_default() {
             if let Some(a) = Activity::of(&s.state) {
@@ -2365,19 +2843,23 @@ impl crate::window::Ui for App {
                 *best = (*best).max(a);
             }
         }
-        let mut actions = Vec::new();
-        let no_group_send = self.no_group_send();
-        egui::Panel::left("tree").resizable(true).default_size(320.0).size_range(220.0..=640.0).show_inside(ui, |ui| {
+        // (all the terminal's tabs are asked for while they are shown)
+        if self.page != Page::Tabs {
             if let Some(core) = &self.core {
-                egui::Panel::bottom("send-line").show_inside(ui, |ui| {
-                    ui.add_space(4.0);
-                    self.send_line.show(ui, core, &no_group_send);
-                    ui.add_space(2.0);
-                });
+                core.want_all_tabs(false);
             }
-            let written = crate::tree_view::Written { notes: &self.notes, generation: self.notes_generation };
-            actions = self.view.show(ui, &self.tree, self.generation, &recent, &activity, written);
-        });
+        }
+        match self.page {
+            Page::Tree | Page::Recent => actions.extend(self.tree_page(ui, &tones, &recent, &activity)),
+            Page::Sessions => self.page(ui, &tones, |app, ui| {
+                if let Some(core) = app.core.clone() {
+                    app.sessions_panel(ui, &core);
+                }
+            }),
+            Page::Tabs => self.page(ui, &tones, |app, ui| app.tabs_page(ui)),
+            Page::Send => self.page(ui, &tones, |app, ui| app.send_page(ui, &tones)),
+            Page::Import => self.page(ui, &tones, |app, ui| app.import_page(ui, &tones)),
+        }
         for action in actions {
             self.handle(action);
         }
@@ -2388,7 +2870,7 @@ impl crate::window::Ui for App {
                 self.open_files(alias, session.as_ref().filter(|_| i == 0));
             }
         }
-        egui::CentralPanel::default().show_inside(ui, |ui| self.right_panel(ui));
+        self.settings_window(ctx);
         self.show_dialog(ctx);
         self.show_wizard(ctx);
         // over everything else, in the corner

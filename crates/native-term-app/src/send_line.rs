@@ -31,6 +31,18 @@ pub struct SendLine {
 const HISTORY: usize = 100;
 
 impl SendLine {
+    /// What was sent in this run, the oldest first.
+    pub fn history(&self) -> &[String] {
+        &self.history
+    }
+
+    /// `text` in the line again, to be sent or changed.
+    pub fn take(&mut self, text: &str) {
+        self.text = text.to_string();
+        self.browsing = None;
+        self.result = None;
+    }
+
     /// `no_group_send`: aliases whose folder is marked "No group send".
     pub fn show(&mut self, ui: &mut egui::Ui, core: &Core, no_group_send: &HashSet<String>) {
         let sessions = core.sessions();

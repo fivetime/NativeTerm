@@ -635,35 +635,45 @@
       keeps the title fixed)
 - [x] Light / dark / system theme (title bar included), Fluent/MDL2 icons,
       nested folders in the tree, status dots on hosts
-- [ ] The main window's new design (2026-09-28), after a design the
-      person brought (`interactive_modern_tree_view_ui.html`: a tree with
-      a rail of icons at its left, a search field and filters above it,
-      the chosen item's properties at its right, a bar below; dark).
-      Until now everything was put into one window as it came, the work
-      going into what it does. Nothing of the design is a picture:
-      shapes, lines, an icon font, which is what NativeTerm draws with
-      already. In four steps, each to be looked at before the next:
-      - [x] 1. Its colours and its rows, as a fifth look ("Modern",
-            Settings -> Look), the window laid out as it was. Seen on
-            Lingmo, dark and light, with nine hosts in nested folders.
-            Found on the way: off Windows the theme setting lost to the
-            desktop's (dark chosen on a light desktop stayed light: the
-            two were read in the wrong order); the other windows (files,
-            Find, the quotation) had egui's own look whatever was
-            chosen. Not the person's to see yet: Windows, macOS.
-            The window's title bar is the window manager's, in the
-            desktop's colours (light on Lingmo, over the dark window).
-      - [ ] 2. The layout: a rail of icons at the left for the views
-            (the session tree, open sessions, all tabs) and for what is
-            in the window now (recent hosts, import, sending commands),
-            a header, a bar below; the settings in a window of their
-            own, from the rail's gear (the person's decision).
-      - [ ] 3. Filters above the tree, badges on the rows.
-      - [ ] 4. The chosen host's properties at the right.
-      Open: a light side (made here, the design has none: is it
-      wanted?), the window's width against the properties (it docks at
-      the screen's edge, 729 wide on Lingmo), a checkbox on every row,
-      Inter bundled or the system's font.
+- [x] The main window's new design (2026-09-28), after a design the
+      person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
+      with a rail of icons at its left, a search field and filters above
+      it, the chosen item's properties at its right, a bar below; dark
+      and light). Until now everything was put into one window as it
+      came, the work going into what it does. Nothing of the design is
+      a picture: shapes, lines, an icon font, which is what NativeTerm
+      draws with already.
+      - [x] Its colours and its rows first, as a fifth look with the
+            window laid out as it was: not what was asked for ("nothing
+            has changed: lay it out as the page is"). Found on the way
+            and kept: off Windows the theme setting lost to the
+            desktop's; the other windows had egui's own look whatever
+            was chosen.
+      - [x] The layout, all of it, and as what a window has without
+            anything being chosen: the rail (session tree, recent
+            hosts, open sessions, all tabs, send commands, import; the
+            settings, light or dark, the pin), the header with the
+            tree's buttons, the filters, rows with checkboxes and
+            marks, the properties of what is chosen, the bar below,
+            the settings in a window of their own (the person's
+            decisions: what was in the one window goes into the rail's
+            pages, the settings into a window from the rail's gear).
+            The second version of the design brought the light theme:
+            its variables are the colours in both.
+            Seen on Lingmo (X11) at 1100x720 and 600x640, dark and
+            light, in English and Chinese, with eight hosts in nested
+            folders: nothing chosen, a host, several, a folder, every
+            page, the settings. Tests: the filters and the checkboxes,
+            what is chosen, the rail in a low window, a long name's
+            end, the colours and their contrast.
+            Not seen by me: Windows and macOS (the person's to look
+            at), a session open (the marks, the bubble), a window of
+            many hundred hosts.
+      Open: the design's font (Inter, bold titles; here the text font
+      NativeTerm has, which has one weight), the properties' width (320
+      here, 384 in the design), the pages that are not the tree (open
+      sessions' cards, all tabs, the dialogs) still drawn with egui's
+      own widgets in the design's colours.
 - [x] NativeTerm themes (rest): looks on top of light and dark
       (`looks.rs`, Settings -> Look): standard, the Windows accent colour
       for what is selected, soft (less contrast, for a dark room) and

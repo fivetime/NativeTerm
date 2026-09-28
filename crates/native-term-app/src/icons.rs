@@ -58,6 +58,15 @@ pub const PAUSE: char = glyph(Icon::Pause);
 pub const SYNC: char = glyph(Icon::Sync);
 pub const LIST: char = glyph(Icon::List);
 pub const GRID: char = glyph(Icon::Grid);
+pub const SUN: char = glyph(Icon::Sun);
+pub const MOON: char = glyph(Icon::Moon);
+pub const HISTORY: char = glyph(Icon::History);
+pub const INFO: char = glyph(Icon::Info);
+pub const LAYERS: char = glyph(Icon::Layers);
+pub const PLUS_CIRCLE: char = glyph(Icon::PlusCircle);
+pub const POINTER: char = glyph(Icon::Pointer);
+pub const TREE: char = glyph(Icon::Tree);
+pub const TERMINAL: char = glyph(Icon::Terminal);
 
 /// `glyph` then `text`, for buttons.
 pub fn with(glyph: char, text: impl AsRef<str>) -> String {
@@ -115,6 +124,15 @@ const fn phosphor(icon: Icon) -> char {
         Icon::CloseOthers => p::X_SQUARE,
         Icon::CloseEnded => p::X_CIRCLE,
         Icon::CloseRight => p::ARROW_LINE_RIGHT,
+        Icon::Sun => p::SUN,
+        Icon::Moon => p::MOON,
+        Icon::History => p::CLOCK_COUNTER_CLOCKWISE,
+        Icon::Info => p::INFO,
+        Icon::Layers => p::STACK,
+        Icon::PlusCircle => p::PLUS_CIRCLE,
+        Icon::Pointer => p::CURSOR_CLICK,
+        Icon::Tree => p::TREE_STRUCTURE,
+        Icon::Terminal => p::TERMINAL_WINDOW,
     })
 }
 
