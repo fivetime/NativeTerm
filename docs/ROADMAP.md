@@ -794,6 +794,14 @@
             chevrons beside the switches, the row opened), each
             switch both ways, the checkboxes still shown after a
             restart.
+      - [x] A host's checkbox chose that host alone (the person's
+            picture: several ticked, one chosen): a click on it was
+            taken as a Ctrl with a click and then again as a plain
+            one, a line the new layout (`900ebe4`) left behind. A
+            checkbox adds its host now, and while the checkboxes are
+            shown so does a click anywhere on the row. Seen on Lingmo:
+            three checkboxes, three hosts; two rows' clicks, one out
+            and one in.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

@@ -1363,15 +1363,8 @@ impl TreeView {
                         let response = response.on_hover_ui(|ui| {
                             ui.label(hover(folders[*folder], host, written));
                         });
-                        if on_check {
-                            // (as Ctrl with a click does)
-                            let ctrl = egui::Modifiers { ctrl: true, ..egui::Modifiers::NONE };
-                            click = Some((index, alias.to_string(), ctrl));
-                        } else if response.clicked() {
-                            click = Some((index, alias.to_string(), modifiers));
-                        }
-                        if response.clicked() {
-                            click = Some((index, alias.to_string(), modifiers));
+                        if let Some(how) = host_click(self.checks, on_check, response.clicked(), modifiers) {
+                            click = Some((index, alias.to_string(), how));
                         }
                         // dragging one of several selected hosts takes them all
                         if response.drag_started() {
@@ -1565,6 +1558,17 @@ impl TreeView {
             }
         }
     }
+}
+
+/// What a click on a host's row does, as `TreeView::click` takes it: its
+/// checkbox, or the whole row while the checkboxes are shown, is a Ctrl
+/// with a click (the host joins what is chosen, or leaves it); Shift
+/// still takes a range. Elsewhere a click is what it was.
+fn host_click(checks: bool, on_check: bool, clicked: bool, modifiers: egui::Modifiers) -> Option<egui::Modifiers> {
+    if !(clicked || on_check) {
+        return None;
+    }
+    Some(if (on_check || checks) && !modifiers.shift { egui::Modifiers { ctrl: true, ..modifiers } } else { modifiers })
 }
 
 /// The chips that are shown in one line `room` wide (each as wide as
@@ -1889,6 +1893,38 @@ mod tests {
         assert!(view.any_open());
         view.open_all(true);
         assert!(view.any_open() && view.is_open("Lab", 0, 2));
+    }
+
+    #[test]
+    fn a_checkbox_adds_the_host_and_so_does_its_row_while_they_are_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let tree = tree_of_kinds(dir.path());
+        let rows = [(0, "web"), (1, "db1"), (2, "db2")];
+        let plain = egui::Modifiers::NONE;
+        let shift = egui::Modifiers { shift: true, ..plain };
+        let mut view = TreeView::default();
+        let click = |view: &mut TreeView, index: usize, checks, on_check, modifiers| {
+            if let Some(how) = host_click(checks, on_check, true, modifiers) {
+                view.click(&rows, index, rows[index].1.to_string(), how);
+            }
+        };
+        // the checkboxes of two hosts, one after the other: both
+        click(&mut view, 1, false, true, plain);
+        click(&mut view, 2, false, true, plain);
+        assert_eq!(view.selected, ["db1", "db2"]);
+        // a row's click where the checkboxes are not shown: that one alone
+        click(&mut view, 0, false, false, plain);
+        assert_eq!(view.selected, ["web"]);
+        // while they are shown, the row is its checkbox: in, and out again
+        click(&mut view, 1, true, false, plain);
+        assert_eq!(view.selected, ["web", "db1"]);
+        click(&mut view, 0, true, false, plain);
+        assert_eq!(view.selected, ["db1"]);
+        // Shift takes a range, as ever: from the row clicked last to this one
+        click(&mut view, 2, true, false, shift);
+        assert_eq!(view.selected, ["web", "db1", "db2"]);
+        assert_eq!(view.chosen(&tree), Chosen::Hosts(vec!["web".into(), "db1".into(), "db2".into()]));
+        assert_eq!(host_click(true, false, false, plain), None, "no click, nothing");
     }
 
     #[test]

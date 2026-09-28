@@ -4079,8 +4079,10 @@ All UI surfaces invoke one shared app-level command layer
       it (`notes::retag`). At the chips' row's end, in a frame of their
       own, two switches (2026-09-28, the person's design): the
       checkboxes shown or not (off at first, kept: `tree.checks`;
-      without them hosts are chosen by clicks, Ctrl and Shift as
-      before, and a host's row begins with its picture), and every
+      while they are shown a click anywhere on a host's row is its
+      checkbox, the host joining what is chosen or leaving it; without
+      them hosts are chosen by clicks, Ctrl and Shift as before, and a
+      host's row begins with its picture), and every
       folder opened or closed, one button that does what the tree asks
       for as it is: while a folder is open it closes them all, else it
       opens them all (a flag of its own would be wrong once a folder is
