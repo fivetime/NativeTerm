@@ -812,6 +812,30 @@
             terminal, a host connected twice, the terminal in front
             each time. Not tried on Windows (no input is sent there):
             the same call that brings a batch's tab forward.
+      - [x] Sessions opened and closed at once lost track of each other
+            (the person, 2026-09-28: states that no longer matched,
+            sessions left "opening" that only Close in the Sessions
+            page ended). With WezTerm a tab's id is its pane's number,
+            and a GUI started anew (the last window closed, the next
+            session opened) numbers from 0 again: the new tab's hello
+            was taken for the closed session with that number, which
+            came back to life, and the new session stayed "opening" for
+            good. A shim that names its session (all of NativeTerm's
+            do) is that session now; a tab's id finds a session only
+            where the shim names none, an open one and the newest
+            first (`known_session`); the login helper, which has only
+            the tab's id, finds an open one, the newest first. A tab
+            closed before it was seen is not reported as one that did
+            not appear when its shim had said hello; and the notices
+            that did name the terminal as "Windows Terminal" under
+            WezTerm too name the terminal in use. Each change of a
+            session's state is a line of the local log now. Seen on
+            Lingmo (X11, WezTerm): fifty sessions opened and their
+            window closed at once (after the login, before it, with
+            pauses of 0 to 2 s): each one ended, none came back, no
+            notice, no window left. Not tried: Windows Terminal (its
+            tabs' ids are GUIDs, never used again), macOS and Wayland
+            (no input can be sent there).
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open

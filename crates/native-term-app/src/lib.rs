@@ -290,6 +290,26 @@ impl Session {
     }
 }
 
+/// The session a shim's hello is of: the one it names (`--session`),
+/// else the one its tab's id (`wt_session`) is of, an open one first and
+/// the newest first. A terminal may give a tab an id a closed tab had:
+/// WezTerm numbers its panes from 0 again in a GUI started anew, so a
+/// shim that names its session must never be taken for another.
+fn known_session(sessions: &[Session], session: Option<&str>, wt_session: Option<&str>) -> Option<String> {
+    if let Some(named) = session.and_then(|id| sessions.iter().find(|s| s.id == id)) {
+        return Some(named.id.clone());
+    }
+    let guid = wt_session?;
+    let of_tab =
+        |open: bool| sessions.iter().rev().find(|s| s.state.is_open() == open && s.matches_terminal_session(guid));
+    of_tab(true).or_else(|| of_tab(false)).map(|s| s.id.clone())
+}
+
+/// A session's id as the log says it: its beginning.
+fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
+}
+
 /// A restored pane waiting to be replaced by a proper tab.
 struct Placeholder {
     session: String,
@@ -452,8 +472,13 @@ impl Shared {
             let mut sessions = lock(&self.sessions);
             let s = sessions.iter_mut().find(|s| s.id == id)?;
             let was_open = s.state.is_open();
+            let before = s.state.clone();
             let result = f(s);
             let open = s.state.is_open();
+            if s.state != before {
+                // (the states a session went through, for troubleshooting)
+                crate::diag::line(&format!("session {:?} {}: {before:?} -> {:?}", s.label, short_id(id), s.state));
+            }
             (result, was_open && !open, (!was_open && open).then(|| s.current_terminal_session.clone()))
         };
         if ended {
@@ -1470,7 +1495,16 @@ fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String>
         if missing.is_empty() {
             break;
         }
-        let gone: Vec<TabSpec> = sent.into_iter().filter(|s| missing.contains(&s.label)).collect();
+        // (a tab whose shim has said hello is there, or was: closed before
+        // it was seen, it is not one that did not appear)
+        let gone: Vec<TabSpec> = sent
+            .into_iter()
+            .filter(|s| missing.contains(&s.label))
+            .filter(|s| shared.update(&s.session, |s| waiting_to_open(s)).unwrap_or(false))
+            .collect();
+        if gone.is_empty() {
+            break;
+        }
         // one more try, unless a window could not be read (the tab may be
         // in it, and a second one would be a duplicate) or its shim is
         // already talking to us (then the tab is there under another name)
@@ -1481,7 +1515,12 @@ fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String>
             .collect();
         if once_more && snapshot.complete && !again.is_empty() {
             once_more = false;
-            shared.notice(t!("notice-tabs-resent", count = again.len(), labels = label_list(&again)));
+            shared.notice(t!(
+                "notice-tabs-resent",
+                count = again.len(),
+                labels = label_list(&again),
+                terminal = shared.terminal.name()
+            ));
             // `-w 0` goes to the most recently activated window: the one
             // this try made, so the tabs don't land in a window of their own
             if let Some(handle) = report.window {
@@ -1493,7 +1532,12 @@ fn open_tabs(shared: &Shared, target: &Target, specs: &[TabSpec]) -> Vec<String>
                 continue;
             }
         }
-        shared.notice(t!("notice-tabs-missing", count = gone.len(), labels = label_list(&gone)));
+        shared.notice(t!(
+            "notice-tabs-missing",
+            count = gone.len(),
+            labels = label_list(&gone),
+            terminal = shared.terminal.name()
+        ));
         failed.extend(fail(&gone, "tab didn't appear"));
         break;
     }
@@ -1753,8 +1797,10 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
         // a helper in a tab: one request, then it's gone
         let asked = conn.recv::<ShimMessage>(Duration::from_secs(5));
         let found = wt_session.as_deref().and_then(|guid| {
+            // (the newest first: see `known_session`)
             lock(&shared.sessions)
                 .iter()
+                .rev()
                 .find(|s| s.state.is_open() && s.matches_terminal_session(guid))
                 .map(|s| (s.alias.clone(), s.id.clone()))
         });
@@ -1831,9 +1877,16 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     if role == Role::AuthSignal {
         // the LocalCommand helper: what the server said it is (where
         // ssh told), that the login is done, then it's gone
+        // (only the tab's id to go by: an open session's, the newest
+        // first; a closed one may have had the same id, WezTerm numbering
+        // its panes from 0 again in a GUI started anew)
         let session = wt_session.as_deref().and_then(|guid| {
             let sessions = lock(&shared.sessions);
-            sessions.iter().find(|s| s.matches_terminal_session(guid)).map(|s| (s.id.clone(), s.alias.clone()))
+            sessions
+                .iter()
+                .rev()
+                .find(|s| s.state.is_open() && s.matches_terminal_session(guid))
+                .map(|s| (s.id.clone(), s.alias.clone()))
         });
         for _ in 0..2 {
             match (conn.recv::<ShimMessage>(Duration::from_secs(5)), &session) {
@@ -1903,13 +1956,7 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
         return;
     };
 
-    let known = lock(&shared.sessions)
-        .iter()
-        .find(|s| {
-            session.as_deref() == Some(s.id.as_str())
-                || wt_session.as_deref().is_some_and(|g| s.matches_terminal_session(g))
-        })
-        .map(|s| s.id.clone());
+    let known = known_session(&lock(&shared.sessions), session.as_deref(), wt_session.as_deref());
     let id = match known {
         Some(id) => id,
         None => {
@@ -2250,6 +2297,36 @@ pub fn default_shim_path() -> io::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shim_that_names_its_session_is_that_session() {
+        let session = |id: &str, pane: &str, state: State| {
+            let mut s = Session::new(id.into(), native_term_config::new_id(), id.into(), "test".into(), state);
+            s.current_terminal_session = Some(pane.into());
+            s
+        };
+        // closed with a GUI that went away; a new GUI numbers from 0 again
+        let sessions = vec![
+            session("old", "0", State::Gone),
+            session("new", "0", State::Opening),
+            session("other", "1", State::Connected),
+        ];
+        let known = |named: Option<&str>, pane: Option<&str>| known_session(&sessions, named, pane);
+        assert_eq!(known(Some("new"), Some("0")).as_deref(), Some("new"), "the one it names, not the one of its pane");
+        assert_eq!(known(Some("old"), Some("0")).as_deref(), Some("old"));
+        // named none: by its pane, an open one first
+        assert_eq!(known(None, Some("0")).as_deref(), Some("new"));
+        assert_eq!(known(None, Some("1")).as_deref(), Some("other"));
+        // one it names that is not known, by its pane then
+        assert_eq!(known(Some("elsewhere"), Some("1")).as_deref(), Some("other"));
+        assert_eq!(known(None, Some("7")), None);
+        let only_closed = vec![session("old", "0", State::Gone)];
+        assert_eq!(
+            known_session(&only_closed, None, Some("0")).as_deref(),
+            Some("old"),
+            "a closed one where none is open"
+        );
+    }
 
     #[test]
     fn unique_labels() {
