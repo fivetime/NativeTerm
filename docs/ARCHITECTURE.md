@@ -4902,6 +4902,33 @@ without a session (`tab_menu::choose_plain`): the send dialog with
 nobody chosen yet, and the ended sessions closed. Windows Terminal's
 own tabs keep Terminal's own menu: NativeTerm draws none over them.
 
+"Clear Screen and Scrollback" for a pane without a session (the tab's
+menu and the pane's: `clear_pane` in the written configuration) is the
+terminal's own doing, and nothing is typed into a program that would
+show it. WezTerm's recipe types Ctrl+L after clearing, for the shell
+to draw its prompt again; `cmd.exe` shows `^L` (2026-09-28, seen by the
+person), and so does whatever reads a line. Off Windows clearing is
+all there is to do: the line the cursor is in stays, as the screen's
+first (what was typed in it too), and the program notices nothing. On
+Windows ConPTY keeps a picture of the screen of its own, and what a
+program writes goes where ConPTY's cursor is: the fork tells ConPTY
+(`ConptyClearPseudoConsole`, as Windows Terminal's "clear buffer"),
+which clears all of it, puts its cursor at the start and writes
+nothing to the terminal (measured: `pty/examples/clear_probe.rs` in
+the fork), so the terminal clears all of its own then too. That
+leaves no prompt, and a program that remembers where its prompt was
+(PowerShell's line editor) goes on writing there; so what draws its
+prompt again at Ctrl+L is typed it (PowerShell, a Unix shell's port,
+`wsl`, `ssh`: by the foreground program's name), and `cmd.exe`, which
+has no key for it, is typed its own command after Esc (which empties
+its line: what was half typed is gone, not run): `cls` clears the
+screen and what scrolled away, through ConPTY, and draws the prompt
+anew. Any other program on Windows has an empty screen, its cursor at
+the start. A program that has the whole screen (the alternate one)
+keeps it: only what scrolled away before it took the screen is
+cleared (the fork: the scrollback is the primary screen's whichever
+is shown).
+
 Ctrl+Tab is left to WezTerm unless the
 switcher setting is on, when it shows the fork's `ShowTabSwitcher`
 grid (per window, unlike the grid on Windows): tiles of the window's

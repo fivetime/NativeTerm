@@ -415,6 +415,7 @@ config.use_fancy_tab_bar = true
 "#,
     );
     lua.push_str(&gpu_lua(look.gpu));
+    lua.push_str(CLEAR_LUA);
     lua.push_str(&MENU_LUA.replace("__SHIM__", &lua_escape(&shim.display().to_string())));
     if let Some(menu) = &look.pane_menu {
         lua.push_str(&pane_menu_lua(menu));
@@ -465,6 +466,60 @@ config.command_palette_bg_color = dark and "#2C2C2C" or "#F9F9F9"
 config.command_palette_fg_color = dark and "#FFFFFF" or "#1A1A1A"
 "##;
 
+/// "Clear Screen and Scrollback" for a pane that has no session (a
+/// session's is cleared by NativeTerm through its shim): the terminal
+/// clears its own screen, and nothing is typed into a program that
+/// would show it (WezTerm's own recipe types Ctrl+L after clearing, for
+/// the shell to draw its prompt again: `cmd.exe` shows `^L`, and so does
+/// whatever reads a line).
+///
+/// Off Windows that is all: the line the cursor is in stays, as the
+/// screen's first, and the program notices nothing. On Windows ConPTY
+/// keeps a picture of the screen of its own, which NativeTerm's WezTerm
+/// clears with the terminal's (all of it, the cursor at its start:
+/// ConPTY keeps no line); a program that remembers where its prompt was
+/// (PowerShell's line editor) would go on writing there, so those that
+/// draw their prompt again at Ctrl+L are typed it; and `cmd.exe`, which
+/// has no key for it, is typed its own command after Esc (which empties
+/// its line): `cls` clears the screen and what scrolled away, through
+/// ConPTY, and the prompt is drawn anew. A program that has the whole
+/// screen (the alternate one) draws it itself: only what scrolled away
+/// before it is cleared.
+const CLEAR_LUA: &str = r#"-- "Clear Screen and Scrollback" for a pane without a session
+local on_windows = wezterm.target_triple:find("windows") ~= nil
+-- what draws its prompt again when Ctrl+L is typed
+local redraws_at_ctrl_l = {
+  ["powershell.exe"] = true,
+  ["pwsh.exe"] = true,
+  ["bash.exe"] = true,
+  ["zsh.exe"] = true,
+  ["fish.exe"] = true,
+  ["nu.exe"] = true,
+  ["wsl.exe"] = true,
+  ["ssh.exe"] = true,
+}
+local function clear_pane(window, pane)
+  local act = wezterm.action
+  if pane:is_alt_screen_active() then
+    window:perform_action(act.ClearScrollback("ScrollbackOnly"), pane)
+    return
+  end
+  if not on_windows then
+    window:perform_action(act.ClearScrollback("ScrollbackAndViewport"), pane)
+    return
+  end
+  local program = (pane:get_foreground_process_name() or ""):lower():match("([^/\\]+)$") or ""
+  if program == "cmd.exe" then
+    window:perform_action(act.Multiple({ act.SendKey({ key = "Escape" }), act.SendString("cls\r") }), pane)
+    return
+  end
+  window:perform_action(act.ClearScrollback("ScrollbackAndViewport"), pane)
+  if redraws_at_ctrl_l[program] then
+    window:perform_action(act.SendKey({ key = "L", mods = "CTRL" }), pane)
+  end
+end
+"#;
+
 /// NativeTerm's tab menu: Ctrl+Shift+M, or a right click, runs the shim's
 /// `--tab-menu` for the pane, which prints what applies to its session;
 /// the choice goes back the same way. NativeTerm's WezTerm
@@ -512,11 +567,7 @@ end
 -- those at its left, 7 those at its right, 5 all the others
 local function here(window, pane, id)
   if id == "10" then
-    local act = wezterm.action
-    window:perform_action(
-      act.Multiple({ act.ClearScrollback("ScrollbackAndViewport"), act.SendKey({ key = "L", mods = "CTRL" }) }),
-      pane
-    )
+    clear_pane(window, pane)
     return
   end
   if id == "15" then
@@ -746,10 +797,7 @@ __HELPERS__
       wezterm.run_child_process({ shim, "--tab-menu", "10", "--pane", id })
       return
     end
-    window:perform_action(
-      act.Multiple({ act.ClearScrollback("ScrollbackAndViewport"), act.SendKey({ key = "L", mods = "CTRL" }) }),
-      pane
-    )
+    clear_pane(window, pane)
   end
   local function paste_quotation(window, pane)
     -- NativeTerm asks (or knows); without it, SecureCRT's defaults
@@ -1326,6 +1374,28 @@ mod tests {
             clear: "Clear Screen and Scrollback".into(),
             lookup_url: PaneMenu::lookup_url(None),
         }
+    }
+
+    /// Both menus clear a pane without a session the same way, and
+    /// Ctrl+L is typed only at what draws its prompt again for it.
+    #[test]
+    fn a_pane_is_cleared_without_typing_at_what_would_show_it() {
+        let shim = Path::new("/opt/nt/nativeterm-shim");
+        let config = default_config(&Look { pane_menu: Some(pane_menu()), ..Look::default() }, shim);
+        let routine = config.find("local function clear_pane(window, pane)").expect("the routine");
+        let tab_menu = config.find("local function tab_menu(window, pane)").expect("the tab's menu");
+        assert!(routine < tab_menu, "known where it is used");
+        assert_eq!(config.matches("clear_pane(window, pane)").count(), 3, "itself, and the two menus");
+        assert_eq!(config.matches("key = \"L\", mods = \"CTRL\"").count(), 1, "nowhere else");
+        let typed = config.find("key = \"L\", mods = \"CTRL\"").unwrap();
+        let asked = config[..typed].rfind("if redraws_at_ctrl_l[program] then").expect("only where it is known");
+        assert!(typed - asked < 120, "{}", &config[asked..typed]);
+        // cmd.exe has no key for it: its own command, after Esc
+        assert!(config.contains("act.SendKey({ key = \"Escape\" }), act.SendString(\"cls\\r\")"));
+        // a program that has the whole screen keeps it
+        assert!(config.contains("if pane:is_alt_screen_active() then"));
+        // the program's name, whatever the folder it is in
+        assert!(config.contains(":match(\"([^/\\\\]+)$\")"));
     }
 
     #[test]

@@ -713,6 +713,26 @@
             through NativeTerm. Not seen: Windows, macOS, Wayland (the
             same configuration and shim; the menu itself was tried
             there before).
+      - [x] "Clear Screen and Scrollback" left `^L` on the screen in
+            `cmd.exe` (the person's picture, Windows), some rows down:
+            Ctrl+L was typed after clearing, which `cmd.exe` shows, and
+            ConPTY's own picture of the screen was not cleared, so its
+            cursor was where it had been. Nothing is typed now into
+            what would show it; on Windows ConPTY is cleared with the
+            terminal (fork), `cmd.exe` is typed `cls` after Esc, and
+            what redraws at Ctrl+L is typed that. Measured (what the
+            terminal shows, read from it; the menu's own routine run
+            by a file, no key or click sent): Windows 11 `cmd.exe`
+            (also with a command half typed: gone, not run),
+            PowerShell, Python, a program that reads lines; Lingmo
+            (X11) bash, `cat`, Python, `less`; macOS zsh, `cat`,
+            `less`. No `^L` anywhere, what scrolled away is gone, the
+            next command is written after the prompt. Not tried: WSL
+            (it did not start in the test's window), Wayland (the
+            same terminal code as X11). A session's tab is cleared by
+            NativeTerm through its shim as before, which types Ctrl+L
+            at the other side once logged in: a server whose shell
+            shows it would show it.
       Open: the design's font (Inter, bold titles; here the text font
       NativeTerm has, which has one weight), the properties' width (320
       here, 384 in the design), the pages that are not the tree (open
