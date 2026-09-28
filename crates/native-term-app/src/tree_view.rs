@@ -191,6 +191,11 @@ const INDENT: f32 = 16.0;
 struct Dragged(Vec<String>);
 
 struct RowLook {
+    /// What the row is, after `icon`, in its kind's colour, and what is
+    /// said after its text, weakly: where the look draws the rows its
+    /// own way (`looks::rows`).
+    picture: Option<(char, Kind)>,
+    after: Option<String>,
     icon: Option<char>,
     /// The host's tab color, as a bar at the row's start.
     stripe: Option<egui::Color32>,
@@ -204,8 +209,19 @@ struct RowLook {
     indent: f32,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Folder,
+    Host,
+}
+
+/// Where a row begins that has no sign to open it, for its picture to be
+/// under its folder's.
+const NO_CHEVRON: f32 = 22.0;
+
 fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::Response {
     let width = ui.available_width();
+    let own = crate::looks::rows(ui.visuals().dark_mode);
     // a host can be dragged into another folder; a click is still a click
     // (egui only calls it a drag once the pointer has moved)
     let sense = if look.draggable { egui::Sense::click_and_drag() } else { egui::Sense::click() };
@@ -215,8 +231,29 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, look.selected, text));
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact_selectable(&response, look.selected);
-        if look.selected || response.hovered() || response.highlighted() {
-            ui.painter().rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+        match &own {
+            Some(rows) => {
+                // a little within the row: round, with room between rows
+                let within = rect.shrink2(egui::vec2(4.0, 1.0));
+                if look.selected {
+                    ui.painter().rect_filled(within, rows.radius, rows.chosen);
+                    let line = egui::Stroke::new(1.0_f32, rows.chosen_line);
+                    ui.painter().rect_stroke(within, rows.radius, line, egui::StrokeKind::Inside);
+                } else if response.hovered() || response.highlighted() {
+                    ui.painter().rect_filled(within, rows.radius, rows.under_pointer);
+                }
+                // a line down each level the row is under
+                let levels = (look.indent / INDENT).round() as usize;
+                for level in 0..levels {
+                    let x = (rect.left() + 6.0 + level as f32 * INDENT + 7.0).round() + 0.5;
+                    ui.painter().vline(x, rect.y_range(), egui::Stroke::new(1.0_f32, rows.guide));
+                }
+            }
+            None => {
+                if look.selected || response.hovered() || response.highlighted() {
+                    ui.painter().rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+                }
+            }
         }
         if drop_here {
             // where the dragged hosts would land
@@ -230,7 +267,12 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
             );
         }
         let weak = ui.visuals().weak_text_color();
-        let color = if look.weak { weak } else { visuals.text_color() };
+        let color = match &own {
+            _ if look.weak => weak,
+            Some(rows) if look.selected => rows.chosen_text,
+            Some(_) => ui.visuals().text_color(),
+            None => visuals.text_color(),
+        };
         let font = egui::TextStyle::Body.resolve(ui.style());
         let painter = ui.painter().with_clip_rect(rect);
         let mut x = rect.left() + 6.0 + look.indent;
@@ -244,9 +286,24 @@ fn draw_row(ui: &mut egui::Ui, height: f32, text: &str, look: RowLook) -> egui::
             painter.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, weak);
             x += 22.0;
         }
-        let galley = painter.layout_no_wrap(text.to_string(), font, color);
-        let text_width = galley.size().x;
+        if let (Some((glyph, kind)), Some(rows)) = (look.picture, &own) {
+            if look.icon.is_none() {
+                x += NO_CHEVRON;
+            }
+            let tint = if kind == Kind::Folder { rows.folder } else { rows.host };
+            let galley = painter.layout_no_wrap(glyph.to_string(), font.clone(), tint);
+            painter.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, tint);
+            x += 24.0;
+        }
+        let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
+        let mut text_width = galley.size().x;
         painter.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, color);
+        if let Some(after) = look.after.as_deref().filter(|_| own.is_some()) {
+            let galley = painter.layout_no_wrap(after.to_string(), font, weak);
+            let at = egui::pos2(x + text_width + 8.0, rect.center().y - galley.size().y / 2.0);
+            text_width += 8.0 + galley.size().x;
+            painter.galley(at, galley, weak);
+        }
         if let Some(dot) = look.dot {
             let center = egui::pos2((x + text_width + 10.0).min(rect.right() - 8.0), rect.center().y);
             painter.circle_filled(center, 4.0, dot);
@@ -584,6 +641,8 @@ impl TreeView {
                 match row {
                     Row::Heading(text) => {
                         let look = RowLook {
+                            picture: None,
+                            after: None,
                             icon: None,
                             stripe: None,
                             dot: None,
@@ -597,6 +656,8 @@ impl TreeView {
                     }
                     Row::Quick(target) => {
                         let look = RowLook {
+                            picture: None,
+                            after: None,
                             icon: Some(icons::CONNECT),
                             stripe: None,
                             dot: None,
@@ -620,6 +681,8 @@ impl TreeView {
                     }
                     Row::Empty(text) => {
                         let look = RowLook {
+                            picture: None,
+                            after: None,
                             icon: None,
                             stripe: None,
                             dot: None,
@@ -634,11 +697,16 @@ impl TreeView {
                     Row::Folder { depth, name, path, folder, count, open } => {
                         let chevron = if *open { icons::CHEVRON_DOWN } else { icons::CHEVRON_RIGHT };
                         let icon = if *open { icons::FOLDER_OPEN } else { icons::FOLDER };
-                        let text = format!("{icon}  {name}  ({count})");
+                        // the folder's picture in the text, or on its own
+                        // where the look colours it
+                        let own = crate::looks::rows(ui.visuals().dark_mode).is_some();
+                        let text = if own { name.clone() } else { format!("{icon}  {name}  ({count})") };
                         // a folder with a file of its own can take hosts;
                         // a grouping node (no file) can't
                         let file = folder.and_then(|i| folders.get(i)).map(|f| f.file.clone());
                         let look = RowLook {
+                            picture: Some((icon, Kind::Folder)),
+                            after: Some(count.to_string()),
                             icon: Some(chevron),
                             stripe: None,
                             dot: None,
@@ -833,8 +901,13 @@ impl TreeView {
                         let stripe = native_term_config::appearance::for_host(folders[*folder], host)
                             .tab_color
                             .and_then(|hex| egui::Color32::from_hex(&hex).ok());
+                        // (its picture as its sign, or on its own under
+                        // its folder's where the look colours it)
+                        let own = crate::looks::rows(ui.visuals().dark_mode).is_some();
                         let look = RowLook {
-                            icon: Some(icon),
+                            picture: Some((icon, Kind::Host)),
+                            after: None,
+                            icon: (!own).then_some(icon),
                             stripe,
                             dot: activity.get(alias).map(|a| a.color()),
                             selected,

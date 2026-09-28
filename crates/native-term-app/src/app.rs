@@ -1746,15 +1746,26 @@ pub const THEME_SETTING: &str = "theme";
 pub static THEME: std::sync::Mutex<Option<egui::ThemePreference>> = std::sync::Mutex::new(None);
 
 pub fn apply_theme(ctx: &egui::Context, setting: Option<&str>) {
-    let (preference, title_bar) = match (setting, system_dark()) {
-        (Some("light"), _) | (_, Some(false)) => (egui::ThemePreference::Light, egui::SystemTheme::Light),
-        (Some("dark"), _) | (_, Some(true)) => (egui::ThemePreference::Dark, egui::SystemTheme::Dark),
-        _ => (egui::ThemePreference::System, egui::SystemTheme::SystemDefault),
+    let (preference, title_bar) = match theme_for(setting, system_dark()) {
+        Some(false) => (egui::ThemePreference::Light, egui::SystemTheme::Light),
+        Some(true) => (egui::ThemePreference::Dark, egui::SystemTheme::Dark),
+        None => (egui::ThemePreference::System, egui::SystemTheme::SystemDefault),
     };
     ctx.set_theme(preference);
     *THEME.lock().unwrap_or_else(|e| e.into_inner()) = Some(preference);
     // the window's own title bar follows too
     ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(title_bar));
+}
+
+/// Dark or light: what the setting says, else what the system is known to
+/// be (`None`: the toolkit follows the system). The setting first: read
+/// the other way round, "dark" on a light desktop stayed light.
+fn theme_for(setting: Option<&str>, system_dark: Option<bool>) -> Option<bool> {
+    match setting {
+        Some("light") => Some(false),
+        Some("dark") => Some(true),
+        _ => system_dark,
+    }
 }
 
 /// What "system" means for the window: on Windows the toolkit knows
@@ -2402,6 +2413,12 @@ mod tests {
     /// too; without one, the desktop does (whatever it could say).
     #[test]
     fn the_terminal_follows_the_theme_setting() {
+        // what the person chose, whatever the desktop is
+        assert_eq!(theme_for(Some("dark"), Some(false)), Some(true));
+        assert_eq!(theme_for(Some("light"), Some(true)), Some(false));
+        assert_eq!(theme_for(None, Some(true)), Some(true));
+        assert_eq!(theme_for(Some(""), Some(false)), Some(false));
+        assert_eq!(theme_for(None, None), None, "the toolkit follows the system");
         assert_eq!(terminal_look(Some("light"), false, Default::default()).dark, Some(false));
         assert_eq!(terminal_look(Some("dark"), false, Default::default()).dark, Some(true));
         // (on Windows WezTerm asks the system itself)

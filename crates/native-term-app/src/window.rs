@@ -270,6 +270,8 @@ struct Pane {
     last_paint: Option<Instant>,
     repaint_at: Option<Instant>,
     hwnd: isize,
+    /// The look it has (every window follows the one chosen).
+    look: Option<crate::looks::Preset>,
 }
 
 impl Pane {
@@ -324,6 +326,7 @@ impl Pane {
             last_paint: None,
             repaint_at: None,
             hwnd,
+            look: None,
         })
     }
 
@@ -338,6 +341,11 @@ impl Pane {
         };
         let started = Instant::now();
         egui_winit::update_viewport_info(&mut self.info, &self.ctx, &self.window, false);
+        // the look chosen in the main window is every window's
+        if let Some(look) = crate::looks::chosen().filter(|look| self.look != Some(*look)) {
+            look.apply(&self.ctx);
+            self.look = Some(look);
+        }
         let mut input = self.state.take_egui_input(&self.window);
         input.viewports = std::iter::once((ViewportId::ROOT, self.info.clone())).collect();
         let ui = &mut self.ui;

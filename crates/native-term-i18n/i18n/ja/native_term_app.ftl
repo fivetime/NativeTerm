@@ -950,6 +950,7 @@ theme-look-plain = 標準
 theme-look-accent = Windows のアクセントカラー
 theme-look-dim = 落ち着いた色
 theme-look-compact = コンパクト
+theme-look-modern = モダン
 toast-cleared = 終了したセッション { $count } 件を消しました
 
 # 他人が変更できるため ssh が受け付けないファイル

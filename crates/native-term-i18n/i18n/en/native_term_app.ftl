@@ -963,6 +963,7 @@ theme-look-plain = Standard
 theme-look-accent = Windows accent colour
 theme-look-dim = Soft
 theme-look-compact = Compact
+theme-look-modern = Modern
 toast-cleared = Cleared { $count } finished { $count ->
         [one] session
        *[other] sessions

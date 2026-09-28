@@ -3924,8 +3924,28 @@ All UI surfaces invoke one shared app-level command layer
     theme so a dark accent still shows, with black or white on it by
     brightness), soft (less contrast, quieter lines, no page-white
     window) and compact (the same colours, less room per row: more hosts
-    on screen). It is only `egui` style, so switching costs nothing; the
-    floating button has its own egui context and follows the choice.
+    on screen). It is only `egui` style, so switching costs nothing;
+    every window has an egui context of its own and takes the look
+    chosen when it paints (`window::Pane`).
+  - **The modern look** (`Preset::Modern`): the first step of the main
+    window's new design, after the design the person brought (a web page,
+    Tailwind's classes; nothing of it is a picture, and nothing here
+    is): its colours and its rows, the window laid out as it was. Dark,
+    the design's own: the page `#121316`, the bars `#16181d`, fields
+    `#1a1c22`, buttons `#22252e` and `#2e323e` under the pointer, lines
+    `#2a2e3b`, text slate 300, weak text slate 400, the accent blue 600;
+    corners of 8 (its `rounded-lg`), 12 for windows. The design has no
+    light side: here the same scales from their other end (slate 50 to
+    200 for the grounds, 700 for text, 600 for weak text, 500 being too
+    pale on the bars: a test keeps every text at WCAG's 4.5 against
+    every ground). The tree's rows (`looks::rows`, `tree_view::
+    draw_row`): round and a little within the row, what is chosen in
+    the accent thinly (15%) with a line around it (blue 500 at 30%), the
+    folders amber and the hosts blue, each its picture after the sign
+    that opens it, a folder's count after its name, weakly, and a line
+    down each level (white or black at 6%). No shadows and nothing that
+    moves: the window is painted on the CPU, and only when something
+    happens.
   - **Icons:** named by what they mean (`native_term_platform::Icon`),
     drawn with the platform's icon font: Segoe Fluent Icons (Windows 11)
     or Segoe MDL2 Assets (Windows 10), memory-mapped like the CJK font

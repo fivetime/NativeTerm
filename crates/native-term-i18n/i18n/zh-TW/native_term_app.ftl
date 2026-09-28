@@ -934,6 +934,7 @@ theme-look-plain = 標準
 theme-look-accent = Windows 強調色
 theme-look-dim = 柔和
 theme-look-compact = 緊湊
+theme-look-modern = 現代
 toast-cleared = 已清除 { $count } 條結束的工作階段記錄
 
 # ssh 因為別人能改而拒絕使用的檔案
