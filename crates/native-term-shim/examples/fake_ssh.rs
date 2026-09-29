@@ -25,6 +25,9 @@
 //! - `FAKE_SSH_LOGIN_ONCE=<file>`: logs in (as `FAKE_SSH_LOGIN=1`) only
 //!   while `<file>` doesn't exist, and creates it: the host "goes away"
 //!   after the first connection.
+//! - `FAKE_SSH_FEED=<text>`: while it runs, writes `<text>` and a line end
+//!   every 100 ms into the session log's pipe (`NATIVETERM_LOG`), as an
+//!   output record, like NativeTerm's ssh.
 
 #[cfg(windows)]
 mod on_windows {
@@ -149,8 +152,37 @@ mod on_windows {
                 }
             }
         }
-        std::thread::sleep(Duration::from_millis(env_num("FAKE_SSH_MS", 200) as u64));
+        let ms = env_num("FAKE_SSH_MS", 200) as u64;
+        match (std::env::var("FAKE_SSH_FEED"), std::env::var("NATIVETERM_LOG")) {
+            (Ok(text), Ok(handle)) => feed(&text, &handle, Duration::from_millis(ms)),
+            _ => std::thread::sleep(Duration::from_millis(ms)),
+        }
         std::process::exit(env_num("FAKE_SSH_CODE", 0) as i32);
+    }
+
+    /// `text` as output records into the inherited pipe, for `how_long`.
+    fn feed(text: &str, handle: &str, how_long: Duration) {
+        use std::os::windows::io::FromRawHandle;
+        let Ok(raw) = handle.parse::<usize>() else { return };
+        // SAFETY: the handle is the pipe's write end this process
+        // inherited, open for its whole life and used only here.
+        let mut pipe = unsafe { std::fs::File::from_raw_handle(raw as *mut std::ffi::c_void) };
+        let body = format!("{text}\r\n");
+        let mut record = vec![b'O'];
+        record.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        record.extend_from_slice(body.as_bytes());
+        let until = std::time::Instant::now() + how_long;
+        let mut result = Ok(());
+        while std::time::Instant::now() < until {
+            result = result.and(pipe.write_all(&record));
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if let Ok(log) = std::env::var("FAKE_SSH_LOG") {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {
+                let _ = writeln!(f, "feed {handle}: {result:?}");
+            }
+        }
+        std::mem::forget(pipe);
     }
 
     /// Like ntplink: reads NativeTerm's commands from its control pipe.

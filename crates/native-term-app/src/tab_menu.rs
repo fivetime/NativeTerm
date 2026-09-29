@@ -32,6 +32,8 @@ pub const FILES: u32 = 13;
 /// as long as the tab lives.
 pub const CLOSE_LEFT: u32 = 14;
 pub const RENAME_TAB: u32 = 15;
+pub const LOG: u32 = 16;
+pub const LOG_OPEN: u32 = 17;
 
 /// What the menu asks the main window to do (its dialogs live there).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,6 +205,8 @@ fn nerd_icon(icon: Icon) -> &'static str {
         Icon::Lock => "cod_lock",
         Icon::Unlock => "cod_unlock",
         Icon::Folder => "cod_folder_opened",
+        Icon::Save => "cod_save",
+        Icon::Open => "cod_go_to_file",
         Icon::Clear => "cod_close",
         Icon::CloseOthers => "cod_close_all",
         Icon::CloseRight => "cod_arrow_right",
@@ -256,6 +260,8 @@ fn command(id: u32) -> Option<SessionCommand> {
         CLEAR => Some(SessionCommand::ClearScreen),
         SEND => Some(SessionCommand::Send),
         BREAK => Some(SessionCommand::SendBreak),
+        LOG => Some(SessionCommand::ToggleLog),
+        LOG_OPEN => Some(SessionCommand::OpenLog),
         _ => None,
     }
 }
@@ -290,6 +296,11 @@ impl Provider for Actions {
             entries.push(action(BREAK, Icon::Break, &t!("tabmenu-break"), applies(BREAK)));
         }
         entries.push(action(CLEAR, Icon::ClearScreen, &t!("tabmenu-clear"), applies(CLEAR)));
+        let log = if this.log_file.is_some() { t!("tabmenu-log-stop") } else { t!("tabmenu-log-start") };
+        entries.push(action(LOG, Icon::Save, &log, applies(LOG)));
+        if this.log_file.is_some() {
+            entries.push(action(LOG_OPEN, Icon::Open, &t!("tabmenu-log-open"), applies(LOG_OPEN)));
+        }
         entries.push(action(RENAME, Icon::Rename, &t!("tabmenu-rename"), true));
         if this.locked {
             entries.push(action(LOCK, Icon::Unlock, &t!("tabmenu-unlock"), applies(LOCK)));

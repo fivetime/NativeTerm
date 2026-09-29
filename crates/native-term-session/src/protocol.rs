@@ -128,6 +128,17 @@ pub enum ShimMessage {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         result: Option<FindResult>,
     },
+    /// The tab's session log: the file being written, or none (stopped,
+    /// or never started). Sent when it changes, replayed to a NativeTerm
+    /// that starts later.
+    Logging {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        file: Option<String>,
+    },
+    /// From a `Request` helper: a session log starts and its settings say
+    /// to ask for the file; `suggested` is the one they name. Answered by
+    /// `AppMessage::LogFile`.
+    AskLogFile { suggested: String },
 }
 
 /// What a find came to: the match shown, counted from the first (0: none,
@@ -224,6 +235,10 @@ impl std::fmt::Debug for PasswordAnswer {
 pub enum AppMessage {
     Welcome {
         protocol: u32,
+        /// NativeTerm's data folder: where session logs go when no other
+        /// file is named.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data_dir: Option<String>,
     },
     /// Start (or restart) the client.
     Connect,
@@ -232,10 +247,7 @@ pub enum AppMessage {
     /// End everything and exit with 0, which closes the tab.
     Close,
     /// Type text into the tab's console, then Enter if `enter`.
-    SendText {
-        text: String,
-        enter: bool,
-    },
+    SendText { text: String, enter: bool },
     /// Clear the tab's scrollback, and its screen: after login by typing
     /// Ctrl+L for the remote side, otherwise directly.
     ClearScreen,
@@ -246,52 +258,36 @@ pub enum AppMessage {
     Hold,
     /// Send one of the client's special commands (see
     /// `ShimMessage::Specials`) over the connection.
-    Special {
-        name: String,
-    },
+    Special { name: String },
     /// Asks for the tab's console screen (`ShimMessage::Screen`).
     Screen,
     /// The tab menu `ShimMessage::TabMenu` asked for: what applies now,
     /// in order, headings included; empty when the tab has no session.
-    TabMenu {
-        items: Vec<MenuItem>,
-    },
+    TabMenu { items: Vec<MenuItem> },
     /// The hover card `ShimMessage::TabCard` asked for: the session's
     /// name, and under it its state; `show` false when cards are off in
     /// the settings. Empty `title` when the tab has no session.
-    TabCard {
-        title: String,
-        note: String,
-        show: bool,
-    },
+    TabCard { title: String, note: String, show: bool },
     /// The answer to `ShimMessage::TabTitle`: the tab's new title (empty:
     /// the terminal's own again); `rename` false: the person said no.
-    TabTitle {
-        title: String,
-        rename: bool,
-    },
+    TabTitle { title: String, rename: bool },
     /// The answer to `ShimMessage::AskPassword`.
-    Password {
-        answer: PasswordAnswer,
-    },
+    Password { answer: PasswordAnswer },
     /// The answer to `ShimMessage::PasteQuotation`: every line goes
     /// between `chars` (`between`) or after them; `paste` false: the
     /// person said no, nothing is pasted.
-    Quotation {
-        chars: String,
-        between: bool,
-        paste: bool,
+    Quotation { chars: String, between: bool, paste: bool },
+    /// Start (`on`) or stop the tab's session log, from the session's menu.
+    Log { on: bool },
+    /// The answer to `ShimMessage::AskLogFile`: the file, or none (the
+    /// person cancelled: no log).
+    LogFile {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
     },
     /// The answer to `ShimMessage::Find`: what to find and how; `find`
     /// false: the person is done, the dialog is closed.
-    Find {
-        find: bool,
-        text: String,
-        match_case: bool,
-        whole_word: bool,
-        wrap: bool,
-        up: bool,
-    },
+    Find { find: bool, text: String, match_case: bool, whole_word: bool, wrap: bool, up: bool },
 }
 
 pub fn encode<T: Serialize>(message: &T) -> String {

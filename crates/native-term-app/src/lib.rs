@@ -180,6 +180,8 @@ pub struct SessionView {
     /// The special commands its connection takes now (`AppMessage::Special`),
     /// e.g. "brk".
     pub specials: Vec<String>,
+    /// The file its session log is being written to, if one is on.
+    pub log_file: Option<String>,
 }
 
 pub(crate) struct Session {
@@ -216,6 +218,8 @@ pub(crate) struct Session {
     last_position: Option<(usize, usize)>,
     quiet_since: Option<u64>,
     specials: Vec<String>,
+    /// The session log's file, as the shim last said.
+    log_file: Option<String>,
     /// The tab's console screen, and when it was last asked for.
     pub(crate) screen: Option<Screen>,
     /// The shim said the server wasn't reached in this attempt.
@@ -249,6 +253,7 @@ impl Session {
             last_position: None,
             quiet_since: None,
             specials: Vec::new(),
+            log_file: None,
             screen: None,
             unreachable: false,
             retry_attempt: None,
@@ -273,6 +278,7 @@ impl Session {
             last_position: self.last_position,
             quiet_since: self.quiet_since.filter(|_| self.state.is_open()),
             specials: if self.state.is_open() { self.specials.clone() } else { Vec::new() },
+            log_file: self.log_file.clone().filter(|_| self.state.is_open()),
         }
     }
 
@@ -375,6 +381,9 @@ pub(crate) struct Shared {
     told_of_stranger: std::sync::atomic::AtomicBool,
     /// Where sent commands are recorded (`<data dir>\\audit`).
     audit_dir: Mutex<Option<PathBuf>>,
+    /// NativeTerm's data folder, told to every shim (session logs go
+    /// there when no other file is named).
+    data_dir: Mutex<Option<PathBuf>>,
     /// `settings.toml`, once the data directory is known. Without it
     /// (tests, a data directory that can't be read) settings fall back to
     /// `state.db`.
@@ -605,6 +614,7 @@ impl Core {
             last_terminal: Default::default(),
             told_of_stranger: Default::default(),
             audit_dir: Mutex::new(None),
+            data_dir: Mutex::new(None),
             settings: Mutex::new(None),
             host_labels: Mutex::new(HashMap::new()),
             host_looks: Mutex::new(HashMap::new()),
@@ -1106,6 +1116,11 @@ impl Core {
         self.clear_finished();
     }
 
+    /// NativeTerm's data folder, for the shims' session logs.
+    pub fn set_data_dir(&self, dir: PathBuf) {
+        *lock(&self.shared.data_dir) = Some(dir);
+    }
+
     /// Record sent commands in `dir` (one file per month).
     pub fn set_audit_dir(&self, dir: PathBuf) {
         *lock(&self.shared.audit_dir) = Some(dir);
@@ -1327,6 +1342,21 @@ impl Core {
     /// Clear the tab's scrollback and screen.
     pub fn clear_screen(&self, id: &str) {
         self.send(id, AppMessage::ClearScreen);
+    }
+
+    /// Start or stop the session's log (its shim writes it).
+    pub fn set_logging(&self, id: &str, on: bool) {
+        self.send(id, AppMessage::Log { on });
+    }
+
+    /// Open the file the session's log is being written to.
+    pub fn open_log(&self, id: &str) {
+        let file = lock(&self.shared.sessions).iter().find(|s| s.id == id).and_then(|s| s.log_file.clone());
+        if let Some(file) = file {
+            if let Err(e) = native_term_os::shell::open_file(Path::new(&file)) {
+                self.shared.notice(t!("notice-log-open-failed", file = file.as_str(), error = e.to_string()));
+            }
+        }
     }
 
     /// Send one of the connection's special commands (see
@@ -1796,7 +1826,8 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
     if protocol != PROTOCOL_VERSION {
         shared.notice(t!("notice-old-shim", protocol = protocol, expected = PROTOCOL_VERSION));
     }
-    let _ = conn.send(&AppMessage::Welcome { protocol: PROTOCOL_VERSION });
+    let data_dir = lock(&shared.data_dir).as_ref().map(|d| d.display().to_string());
+    let _ = conn.send(&AppMessage::Welcome { protocol: PROTOCOL_VERSION, data_dir });
 
     if role == Role::Request {
         // a helper in a tab: one request, then it's gone
@@ -1861,6 +1892,21 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             };
             let answer = password_ask::ask(ask.as_deref(), question);
             let _ = conn.send(&AppMessage::Password { answer });
+            return;
+        }
+        if let Ok(Some(ShimMessage::AskLogFile { suggested })) = &asked {
+            // the desktop's own dialog, on this connection's thread; a
+            // desktop without one: the file the settings name
+            let label = found
+                .as_ref()
+                .and_then(|(_, id)| lock(&shared.sessions).iter().find(|s| s.id == *id).map(|s| s.label.clone()))
+                .unwrap_or_default();
+            let suggested = PathBuf::from(suggested);
+            let path = match native_term_os::picker::available() {
+                true => native_term_os::picker::pick_save(&t!("log-ask-title", label = label), &suggested),
+                false => Some(suggested),
+            };
+            let _ = conn.send(&AppMessage::LogFile { path: path.map(|p| p.display().to_string()) });
             return;
         }
         if let Ok(Some(ShimMessage::TabTitle { current })) = &asked {
@@ -2267,6 +2313,8 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::PasteQuotation
             | ShimMessage::Find { .. }
             | ShimMessage::TabAction { .. }
+            | ShimMessage::Logging { .. }
+            | ShimMessage::AskLogFile { .. }
     ) {
         s.quiet_since = None;
     }
@@ -2282,7 +2330,9 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         | ShimMessage::TabCard
         | ShimMessage::PasteQuotation
         | ShimMessage::Find { .. }
-        | ShimMessage::TabAction { .. } => {}
+        | ShimMessage::TabAction { .. }
+        | ShimMessage::AskLogFile { .. } => {}
+        ShimMessage::Logging { file } => s.log_file = file.clone(),
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {
             s.authenticated = false;

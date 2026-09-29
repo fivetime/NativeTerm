@@ -32,7 +32,7 @@ fn main() {
                             "{:>6} ms pid {pid} {role:?} {wt_session:?} {alias:?}: closing",
                             started.elapsed().as_millis()
                         );
-                        let _ = conn.send(&AppMessage::Welcome { protocol: 1 });
+                        let _ = conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None });
                         let _ = conn.send(&AppMessage::Close);
                     }
                     Ok(Some(other)) => println!("{:>6} ms pid {pid} {other:?}", started.elapsed().as_millis()),

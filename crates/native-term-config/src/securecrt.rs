@@ -267,6 +267,44 @@ pub struct CrtSession {
     pub serial: Option<crate::plink::Serial>,
     /// PuTTY options for a non-SSH session (see `PlinkSession::putty`).
     pub putty: BTreeMap<String, crate::plink::PuttyValue>,
+    /// The session log's settings, where the session logs (see
+    /// `log_from`).
+    pub log: Option<crate::session_log::LogSettings>,
+}
+
+/// SecureCRT's Log File page (the same options and substitutions as
+/// NativeTerm's, see `session_log`), when the session logs at all: it
+/// starts a log on connecting, asks for a file, logs raw bytes, traces,
+/// keeps a new file each day, or writes texts of its own on connecting or
+/// disconnecting. Every session file has the page's keys, so the defaults
+/// alone (SecureCRT's file name and line text included) aren't taken over.
+/// "Log Mode" 0 is Overwrite, as SecureCRT's page shows by default.
+fn log_from(ini: &Ini) -> Option<crate::session_log::LogSettings> {
+    let on = |key: &str| ini.num(key).is_some_and(|n| n != 0);
+    let text = |key: &str| ini.str(key).unwrap_or("").to_string();
+    let settings = crate::session_log::LogSettings {
+        file: text("Log Filename").trim().to_string(),
+        prompt: on("Log Prompt"),
+        start: on("Start Log Upon Connect"),
+        raw: on("Raw Log"),
+        midnight: on("New Log File At Midnight"),
+        append: ini.num("Log Mode") == Some(1),
+        timestamp: false,
+        trace: ini.num("Trace Level").unwrap_or(0).min(u32::from(crate::session_log::MAX_TRACE)) as u8,
+        upon_connect: text("Custom Log Message Connect"),
+        upon_disconnect: text("Custom Log Message Disconnect"),
+        each_line: text("Custom Log Message Each Line"),
+        only_custom: on("Log Only Custom"),
+    };
+    let logs = settings.start
+        || settings.prompt
+        || settings.raw
+        || settings.midnight
+        || settings.trace > 0
+        || settings.only_custom
+        || !settings.upon_connect.trim().is_empty()
+        || !settings.upon_disconnect.trim().is_empty();
+    logs.then_some(settings)
 }
 
 fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
@@ -328,6 +366,7 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
         options: Vec::new(),
         serial: ini.str("Com Port").filter(|_| protocol_is(ini, "serial")).map(|line| serial_from(ini, line)),
         putty: BTreeMap::new(),
+        log: log_from(ini),
     }
 }
 
@@ -724,7 +763,12 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             proxy_jump,
             identity_file: s.identity_file.clone(),
             forwards: s.forwards.clone(),
-            options: s.options.clone(),
+            options: s
+                .options
+                .iter()
+                .cloned()
+                .chain(s.log.iter().flat_map(crate::session_log::LogSettings::directives))
+                .collect(),
             note,
         });
     }
@@ -798,6 +842,7 @@ fn plink_session(
         note: Some(s.description.join(" · ")).filter(|n| !n.is_empty()),
         source: Some(format!("{}{}", origin.source_prefix(), s.path)),
         putty: s.putty.clone(),
+        log: s.log.as_ref().map(crate::session_log::LogSettings::to_keys).unwrap_or_default(),
         ..PlinkSession::default()
     };
     if session.check().is_err() {
@@ -943,6 +988,36 @@ mod tests {
         );
         fs::create_dir_all(s.join("空文件夹")).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_log_page_comes_along_where_the_session_logs() {
+        // SecureCRT's defaults alone: nothing is taken over
+        let defaults = [
+            "S:\"Hostname\"=h",
+            "S:\"Log Filename\"=%S_%M%D%h%m.log",
+            "S:\"Custom Log Message Each Line\"=[%M-%D %h:%m:%s]",
+            "D:\"Start Log Upon Connect\"=00000000",
+            "D:\"Log Mode\"=00000000",
+            "D:\"Trace Level\"=00000000",
+        ];
+        assert_eq!(session_from(&parse_ini(&session_file(&defaults)), vec![], "n".into()).log, None);
+        let logs = [
+            "S:\"Hostname\"=h",
+            r#"S:"Log Filename"=D:\logs\%S-%Y%M%D.log"#,
+            "S:\"Custom Log Message Connect\"=== %S ==",
+            "S:\"Custom Log Message Each Line\"=[%h:%m:%s] ",
+            "D:\"Start Log Upon Connect\"=00000001",
+            "D:\"Log Mode\"=00000001",
+            "D:\"New Log File At Midnight\"=00000001",
+            "D:\"Trace Level\"=00000009",
+        ];
+        let log = session_from(&parse_ini(&session_file(&logs)), vec![], "n".into()).log.unwrap();
+        assert!(log.start && log.append && log.midnight && !log.raw);
+        assert_eq!(log.trace, 9);
+        assert_eq!(log.file, r"D:\logs\%S-%Y%M%D.log");
+        assert_eq!(log.upon_connect, "== %S ==");
+        assert_eq!(log.each_line, "[%h:%m:%s] ");
     }
 
     #[test]

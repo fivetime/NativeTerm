@@ -81,7 +81,7 @@ fn start_server() -> Receiver<Shim> {
             if let Ok(Some(ShimMessage::Hello { role: Role::Shim, wt_session, session, alias, .. })) =
                 conn.recv::<ShimMessage>(WAIT)
             {
-                let _ = conn.send(&AppMessage::Welcome { protocol: 1 });
+                let _ = conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None });
                 let _ = tx.send(Shim { conn, wt_session, session, alias });
             }
         });

@@ -461,7 +461,9 @@
       falls back to plink with the old workarounds
 - [ ] Serial Break on a real device (the virtual COM driver doesn't pass
       Break on)
-- [x] Output logging for non-SSH sessions: ntplink writes PuTTY's
+- [x] Output logging for non-SSH sessions (replaced on 2026-09-29 by
+      the session logs of every session type, `SESSION-LOG.md`; these
+      settings are read as a session's own set): ntplink writes PuTTY's
       `LogType` 1 (text without escape sequences) / 2 (every byte) to
       `LogFileName` (PuTTY's `&H` `&Y&M&D` `&T` codes, appended); "Session
       log" in the session dialog, default `<data dir>\logs\&H-&Y&M&D.log`
@@ -2454,13 +2456,29 @@
 ## Possible now, undecided
 
 Once "not planned" because they looked impossible; whether to build them
-is the person's decision (2026-09-29). The first four needed an SSH
-session's output or input, which NativeTerm never saw: every SSH tab now
-runs NativeTerm's OpenSSH fork, which already reads the output (ZMODEM)
-and holds back input (dropped files). The last one needed a terminal
-that can move a tab, which WezTerm can.
+is the person's decision (2026-09-29). Session logging and the next
+three needed an SSH session's output or input, which NativeTerm never
+saw: every SSH tab now runs NativeTerm's OpenSSH fork, which already
+reads the output (ZMODEM) and holds back input (dropped files). The last
+one needed a terminal that can move a tab, which WezTerm can.
 
-- [ ] Client-side session logging for SSH sessions
+- [x] Client-side session logs, every session type (2026-09-29, asked
+      for with SecureCRT's Log File page as the model; `SESSION-LOG.md`):
+      NativeTerm's ssh (fork `nativeterm/nt_log.c`) and ntplink copy
+      what they write to the terminal into a pipe of the tab's shim, which
+      writes the log: SecureCRT's substitutions, prompt for filename,
+      start upon connect (before the client starts, so the trace and the
+      pre-login text are in it), raw or text (escape sequences out, a
+      legacy code page read as what it is), new file at midnight,
+      overwrite / append, timestamps, trace level (ssh's debug levels to
+      the log only, ntplink's Event Log), custom data upon connect /
+      disconnect / each line, only custom data. Settings: a host's own
+      set or its folder's (`NativeTermLog*`), a non-SSH session's `log`
+      table; a "Log File" page in the session options and the non-SSH
+      dialog. Start / stop and "Open Log File" in the session's menu;
+      the SecureCRT and PuTTY importers take the log pages over. Tried
+      on Windows against the deepin box (fork alone, shim with the fork,
+      ntplink raw to port 22, a shim test from NativeTerm's menu)
 - [ ] Conditional logon actions ("wait for X, send Y", SecureCRT's
       Expect/Send table) and logon scripts
 - [ ] Per-session key mapping for SSH sessions

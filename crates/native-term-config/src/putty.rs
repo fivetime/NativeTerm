@@ -195,7 +195,29 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
         options,
         serial: v.str("SerialLine").filter(|_| serial).map(|line| serial_from(v, line)),
         putty: if ssh { BTreeMap::new() } else { putty_options(v) },
+        log: log_from(v),
     }
+}
+
+/// PuTTY's Logging page, where the session logs its output (`LogType` 1
+/// "printable output", 2 "all session output"; SSH packets and raw data
+/// are not what NativeTerm logs): from the connection on, in the file
+/// named (PuTTY's `&` codes turned into SecureCRT's), added to unless
+/// `LogFileClash` says to overwrite (0); PuTTY asking (-1) is taken as
+/// adding, which loses nothing.
+fn log_from(v: &Values) -> Option<crate::session_log::LogSettings> {
+    let raw = match v.num("LogType") {
+        Some(1) => false,
+        Some(2) => true,
+        _ => return None,
+    };
+    Some(crate::session_log::LogSettings {
+        file: crate::session_log::from_putty_name(v.str("LogFileName").unwrap_or("").trim()),
+        start: true,
+        raw,
+        append: v.num("LogFileClash") != Some(0),
+        ..Default::default()
+    })
 }
 
 /// PuTTY's Serial page (`SerialStopHalfbits`: 2 = 1, 3 = 1.5, 4 = 2).
@@ -436,6 +458,26 @@ mod tests {
     use super::*;
     use crate::securecrt::{self, Skip};
     use crate::SessionTree;
+
+    #[test]
+    fn the_logging_page_comes_along() {
+        let values =
+            |pairs: Vec<(&str, RegValue)>| Values(pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect());
+        assert_eq!(log_from(&values(vec![("logtype", RegValue::Dword(0))])), None);
+        // SSH packets are no session log
+        assert_eq!(log_from(&values(vec![("logtype", RegValue::Dword(3))])), None);
+        let log = log_from(&values(vec![
+            ("logtype", RegValue::Dword(2)),
+            ("logfilename", RegValue::Str(r"C:\logs\&H-&Y&M&D.log".into())),
+            ("logfileclash", RegValue::Dword(0)),
+        ]))
+        .unwrap();
+        assert!(log.start && log.raw && !log.append);
+        assert_eq!(log.file, r"C:\logs\%H-%Y%M%D.log");
+        // PuTTY asking (-1) adds to the file
+        let log = log_from(&values(vec![("logtype", RegValue::Dword(1)), ("logfileclash", RegValue::Dword(u32::MAX))]));
+        assert!(log.is_some_and(|l| l.append && !l.raw));
+    }
 
     #[test]
     fn names() {

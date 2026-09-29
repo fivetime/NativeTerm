@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use native_term_config::plink::{self, PlinkSession, Protocol, PuttyValue};
+use native_term_config::plink::{self, PlinkSession, Protocol, PuttyValue, PUTTY_LOG};
 use native_term_session::protocol::ShimMessage;
 
 use crate::link::{Link, LinkSender};
@@ -132,6 +132,7 @@ pub fn run(alias: &str, link: Option<&Link>, flags: crate::args::Flags) -> i32 {
     };
     let pid = std::process::id();
     let auth = win::AuthEvent::create(pid).ok();
+    crate::session_log::init(link);
     if flags.wait {
         send(ShimMessage::Waiting);
         println!("{}", t!("restored", alias = alias));
@@ -200,22 +201,14 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
         }
     }
     let ntplink = matches!(client, Client::Ntplink(_));
-    if let Some(file) = session.log_file() {
-        match ntplink {
-            // PuTTY doesn't make the folder; one with `&` codes can't be
-            // made before they are filled in
-            true => {
-                let folder = std::path::Path::new(&file).parent().filter(|f| !f.as_os_str().is_empty());
-                if let Some(folder) = folder.filter(|f| !f.to_string_lossy().contains('&')) {
-                    if let Err(e) = std::fs::create_dir_all(folder) {
-                        let folder = folder.display().to_string();
-                        println!("{}", t!("plink-log-folder", folder = folder, error = e.to_string()));
-                    }
-                }
-            }
-            false => println!("{}", t!("plink-no-log")),
-        }
+    // the session log is the shim's (see `session_log`); only ntplink
+    // hands it the output
+    let (log_settings, log_names) = crate::session_log::for_alias(alias, &[]);
+    if log_settings.start && !ntplink {
+        println!("{}", t!("plink-no-log"));
     }
+    let tab_log = crate::session_log::init(link);
+    tab_log.configure(log_settings, log_names, session.charset.clone());
     let temporary = match ntplink {
         true => None,
         false => match TemporarySession::create(&session, attempt) {
@@ -257,6 +250,13 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
     // ntplink hands rz / sz to the shim (`--zmodem`); plink ignores it
     if let Ok(shim) = std::env::current_exe() {
         command.env("NATIVETERM_ZMODEM", shim);
+    }
+    if ntplink && tab_log.prepare(&mut command) > 0 {
+        // its event log as the trace
+        command.env(crate::session_log::TRACE_ENV, "1");
+    }
+    if ntplink {
+        tab_log.connecting();
     }
     let mut child = match command.spawn() {
         Ok(child) => child,
@@ -308,6 +308,10 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
 fn ntplink_arguments(session: &PlinkSession, control: Option<&str>) -> Vec<String> {
     let mut args = Vec::new();
     for (key, value) in &session.putty {
+        // the log is the shim's now; PuTTY's own would write it twice
+        if key == PUTTY_LOG[0].key() || key == PUTTY_LOG[1].key() {
+            continue;
+        }
         let value = match value {
             PuttyValue::Number(n) => n.to_string(),
             PuttyValue::Text(s) => s.clone(),

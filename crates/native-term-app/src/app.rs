@@ -11,6 +11,7 @@ use native_term_app::actions::{CloseSet, Closing, SessionCommand};
 use native_term_app::tab_menu::MenuRequest;
 use native_term_app::{t, Core, SessionView, State};
 use native_term_config::ops::{Editor, HostDraft};
+use native_term_config::session_log::LogSettings;
 use native_term_config::write::Writer;
 use native_term_config::SessionTree;
 
@@ -324,6 +325,7 @@ impl App {
         let mut profile = ProfileSetup::new(shim.clone(), data_dir.join("backups"));
         if let Some(core) = &core {
             core.set_audit_dir(data_dir.join("audit"));
+            core.set_data_dir(data_dir.to_path_buf());
         }
         notices.extend(profile.fix_moved());
         // the program folder may have moved: put our path right in what we
@@ -753,14 +755,17 @@ impl App {
             }
             TreeAction::NewPlink(file) => {
                 let label = self.folder_label(&file);
-                let dialog = PlinkDialog::new_session(file, &label).with_data_dir(&self.data_dir);
+                let folder_log = self.tree.folders().find(|f| f.file == file).and_then(LogSettings::of_folder);
+                let dialog = PlinkDialog::new_session(file, &label).with_log(None, folder_log, &self.data_dir);
                 self.dialog = Some(Dialog::Plink(Box::new(dialog)));
             }
             TreeAction::Edit(alias) => {
-                if let Some((_, host)) = self.tree.find(&alias) {
+                if let Some((tree_folder, host)) = self.tree.find(&alias) {
                     self.dialog = Some(match &host.plink {
                         Some(session) => Dialog::Plink(Box::new(
-                            PlinkDialog::edit(session).with_data_dir(&self.data_dir).with_note(self.note_of(host)),
+                            PlinkDialog::edit(session)
+                                .with_log(LogSettings::own(host), LogSettings::of_folder(tree_folder), &self.data_dir)
+                                .with_note(self.note_of(host)),
                         )),
                         None => {
                             let folder = self.folder_persistent(&host.file);
@@ -786,13 +791,19 @@ impl App {
                 }
             }
             TreeAction::Options(alias) => {
-                if let Some((_, host)) = self.tree.find(&alias) {
+                if let Some((folder, host)) = self.tree.find(&alias) {
                     match self.editor.host_options(host) {
                         Ok(values) => {
                             let effective = self.editor.effective(&alias).unwrap_or_default();
                             let target = OptionsTarget::Host(alias.clone());
+                            let log = crate::log_page::LogPage::for_session(
+                                LogSettings::own(host),
+                                LogSettings::of_folder(folder),
+                                &self.data_dir,
+                            );
                             let dialog =
-                                OptionsDialog::new(target, host.label(), &values, effective, self.editor.ssh());
+                                OptionsDialog::new(target, host.label(), &values, effective, self.editor.ssh())
+                                    .with_log(log);
                             self.dialog = Some(Dialog::Options(Box::new(dialog)));
                         }
                         Err(e) => self.notices.push(e.to_string()),
@@ -814,8 +825,13 @@ impl App {
                             .and_then(|f| f.hosts.iter().find(|h| h.plink.is_none()));
                         let effective = first.and_then(|h| self.editor.effective(h.alias()).ok()).unwrap_or_default();
                         let label = self.folder_label(&file);
+                        let log = crate::log_page::LogPage::for_folder(
+                            self.tree.folders().find(|f| f.file == file).and_then(LogSettings::of_folder),
+                            &self.data_dir,
+                        );
                         let target = OptionsTarget::Folder(file);
-                        let dialog = OptionsDialog::new(target, &label, &values, effective, self.editor.ssh());
+                        let dialog =
+                            OptionsDialog::new(target, &label, &values, effective, self.editor.ssh()).with_log(log);
                         self.dialog = Some(Dialog::Options(Box::new(dialog)));
                     }
                     Err(e) => self.notices.push(e.to_string()),
@@ -1662,9 +1678,17 @@ impl App {
                 Outcome::Open => false,
                 Outcome::Cancel => true,
                 Outcome::Submit(values) => {
+                    let log = d.log_result();
                     let result = match &d.target {
                         OptionsTarget::Host(alias) => match self.tree.find(alias) {
-                            Some((_, host)) => self.editor.set_host_options(host, &values).map_err(|e| e.to_string()),
+                            Some((_, host)) => self
+                                .editor
+                                .set_host_options(host, &values)
+                                .and_then(|()| match &log {
+                                    Some(log) => self.editor.set_host_log(host, log.as_ref()),
+                                    None => Ok(()),
+                                })
+                                .map_err(|e| e.to_string()),
                             None => Err(t!("error-host-gone", alias = alias.as_str())),
                         },
                         OptionsTarget::Folder(file) => match self.editor.set_folder_options(file, &values) {
@@ -1672,7 +1696,12 @@ impl App {
                                 if !own.is_empty() {
                                     self.notices.push(t!("folder-options-own-tag", hosts = own.join(", ")));
                                 }
-                                Ok(())
+                                match &log {
+                                    Some(log) => {
+                                        self.editor.set_folder_log(file, log.as_ref()).map_err(|e| e.to_string())
+                                    }
+                                    None => Ok(()),
+                                }
                             }
                             Err(e) => Err(e.to_string()),
                         },

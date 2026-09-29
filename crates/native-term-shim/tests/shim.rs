@@ -109,7 +109,7 @@ fn login_disconnect_reconnect_close() {
         }
         other => panic!("{other:?}"),
     }
-    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None }).unwrap();
     assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
 
     // the LocalCommand helper connects separately
@@ -349,7 +349,7 @@ fn answer_windows(mut listener: PipeListener, answers: Vec<PasswordAnswer>) -> A
             };
             seen.lock().unwrap().push((user, host, retry, refused));
             let answer = answers.next().unwrap_or(PasswordAnswer::Cancel);
-            let _ = conn.send(&AppMessage::Welcome { protocol: 1 });
+            let _ = conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None });
             let _ = conn.send(&AppMessage::Password { answer });
         }
     });
@@ -671,7 +671,7 @@ fn close_sent_right_before_nativeterm_disconnects() {
     // the shim reconnects; answer and hang up at once, without reading on
     let conn = listener.accept().unwrap();
     assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
-    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None }).unwrap();
     conn.send(&AppMessage::Close).unwrap();
     drop(conn);
     assert_eq!(wait_exit(&mut shim), 0);
@@ -844,7 +844,7 @@ fn plink_session_with_putty_options() {
     );
     let conn = listener.accept().unwrap();
     assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
-    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None }).unwrap();
     assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
 
     // while plink runs: its session exists, the stale one is gone
@@ -909,7 +909,7 @@ fn ntplink_session_with_options_and_break() {
     );
     let conn = listener.accept().unwrap();
     assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
-    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None }).unwrap();
     assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
     let message = expect(&conn);
     let ShimMessage::Specials { names } = message else {
@@ -973,7 +973,7 @@ fn plink_always_loads_its_own_session() {
     );
     let conn = listener.accept().unwrap();
     assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
-    conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+    conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None }).unwrap();
     assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
     std::thread::sleep(Duration::from_millis(500));
     let temporary = format!("NativeTerm-{}-1", shim.id());
@@ -1259,4 +1259,56 @@ Host sw
     let text = std::fs::read_to_string(&log).unwrap();
     let pages: Vec<&str> = text.lines().filter_map(|l| l.strip_prefix("codepage ")).collect();
     assert!(pages.contains(&"950"), "the folder's charset (Big5) was set: {text}");
+}
+
+/// The session log from NativeTerm's menu: started (in the data folder
+/// NativeTerm's welcome names, as no file is set), fed by the client,
+/// stopped; NativeTerm told each time.
+#[test]
+fn the_session_log_starts_and_stops_from_nativeterm() {
+    let data = tempfile::tempdir().unwrap();
+    let name = pipe_name("log");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = spawn_shim(
+        &name,
+        &["web01"],
+        &[
+            ("FAKE_SSH_LOGIN", "1"),
+            ("FAKE_SSH_FEED", "from the server"),
+            ("FAKE_SSH_MS", "8000"),
+            ("FAKE_SSH_LOG", &data.path().join("ssh.log").display().to_string()),
+        ],
+    );
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    let data_dir = data.path().display().to_string();
+    conn.send(&AppMessage::Welcome { protocol: 1, data_dir: Some(data_dir) }).unwrap();
+    assert_eq!(expect(&conn), ShimMessage::Connecting { attempt: 1 });
+    assert_eq!(expect(&conn), ShimMessage::Authenticated);
+    conn.send(&AppMessage::Log { on: true }).unwrap();
+    let file = match expect_skipping_login(&conn) {
+        ShimMessage::Logging { file: Some(file) } => PathBuf::from(file),
+        other => panic!("{other:?}"),
+    };
+    assert!(file.starts_with(data.path().join("logs")), "{}", file.display());
+    let fed = |at_least: usize| {
+        let lines = std::fs::read_to_string(&file).unwrap_or_default();
+        lines.lines().filter(|l| *l == "from the server").count() >= at_least
+    };
+    for _ in 0..100 {
+        if fed(2) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    conn.send(&AppMessage::Log { on: false }).unwrap();
+    assert_eq!(expect_skipping_login(&conn), ShimMessage::Logging { file: None });
+    let text = std::fs::read_to_string(&file).unwrap();
+    let ssh_log = || std::fs::read_to_string(data.path().join("ssh.log")).unwrap_or_default();
+    assert!(text.lines().filter(|l| *l == "from the server").count() >= 2, "{text:?} / ssh: {}", ssh_log());
+    // stopped: nothing more is written
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), text);
+    conn.send(&AppMessage::Close).unwrap();
+    assert_eq!(wait_exit(&mut shim), 0);
 }

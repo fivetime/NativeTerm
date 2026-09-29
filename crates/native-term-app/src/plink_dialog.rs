@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use native_term_app::t;
 use native_term_config::plink::{
-    self, Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_LINE,
-    PUTTY_LOG, PUTTY_SUPDUP, PUTTY_TELNET,
+    Flow, Parity, PlinkSession, Protocol, PuttyOption, PuttyValue, Serial, PUTTY_CONNECTION, PUTTY_LINE, PUTTY_LOG,
+    PUTTY_SUPDUP, PUTTY_TELNET,
 };
 
 use crate::dialogs::Outcome;
@@ -50,8 +50,8 @@ pub struct PlinkDialog {
     ports: Vec<String>,
     /// The PuTTY options being edited (only `putty` is used).
     options: PlinkSession,
-    /// The log file used when logging is turned on without one.
-    default_log: String,
+    /// The session log's page (see `log_page`).
+    log: crate::log_page::LogPage,
     pub error: Option<String>,
 }
 
@@ -100,14 +100,20 @@ impl PlinkDialog {
             tags: String::new(),
             ports,
             options: s.clone(),
-            default_log: String::new(),
+            log: crate::log_page::LogPage::for_session(None, None, Path::new("")),
             error: None,
         }
     }
 
-    /// The data directory, for the default log file.
-    pub fn with_data_dir(mut self, data_dir: &Path) -> PlinkDialog {
-        self.default_log = plink::default_log_file(data_dir);
+    /// The session log's settings: the session's own (`None`: its
+    /// folder's), the folder's, and the data folder for the default file.
+    pub fn with_log(
+        mut self,
+        own: Option<native_term_config::session_log::LogSettings>,
+        folder: Option<native_term_config::session_log::LogSettings>,
+        data_dir: &Path,
+    ) -> PlinkDialog {
+        self.log = crate::log_page::LogPage::for_session(own, folder, data_dir);
         self
     }
 
@@ -129,47 +135,11 @@ impl PlinkDialog {
         }
     }
 
-    /// Log type and file; a log turned on without a file gets the default.
+    /// The session log (SecureCRT's page, see `log_page`).
     fn log_ui(&mut self, ui: &mut egui::Ui) {
-        let on = self.options.log_file().is_some() || self.options.putty.contains_key(PUTTY_LOG[0].key());
+        let on = self.log.result().is_some_and(|l| l.start);
         egui::CollapsingHeader::new(t!("plink-log")).id_salt("plink-log").default_open(on).show(ui, |ui| {
-            egui::Grid::new("plink-log-fields").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
-                ui.label(t!("plink-log-type"));
-                let mut n = match self.options.putty_value(PUTTY_LOG[0]) {
-                    PuttyValue::Number(n) if n <= 2 => n,
-                    _ => 0,
-                };
-                let choices = [(0u32, t!("plink-log-off")), (1, t!("plink-log-text")), (2, t!("plink-log-raw"))];
-                let shown = choices.iter().find(|(v, _)| *v == n).map(|(_, text)| text.clone()).unwrap_or_default();
-                egui::ComboBox::from_id_salt("plink-log-type").selected_text(shown).show_ui(ui, |ui| {
-                    for (v, text) in &choices {
-                        ui.selectable_value(&mut n, *v, text.clone());
-                    }
-                });
-                self.options.set_putty_value(PUTTY_LOG[0], PuttyValue::Number(n));
-                ui.end_row();
-                ui.label(t!("plink-log-file"));
-                let mut file = match self.options.putty_value(PUTTY_LOG[1]) {
-                    PuttyValue::Text(t) => t,
-                    PuttyValue::Number(n) => n.to_string(),
-                };
-                if n != 0 && file.is_empty() && !self.default_log.is_empty() {
-                    file = self.default_log.clone();
-                }
-                ui.add_enabled(n != 0, egui::TextEdit::singleline(&mut file).desired_width(360.0));
-                self.options.set_putty_value(PUTTY_LOG[1], PuttyValue::Text(file.clone()));
-                ui.end_row();
-                // the folder, once there is one without codes to fill in
-                let folder = Path::new(&file).parent().filter(|f| f.is_dir()).map(Path::to_path_buf);
-                if let (true, Some(folder)) = (n != 0, folder) {
-                    ui.label("");
-                    if ui.button(t!("plink-log-open-folder")).clicked() {
-                        let _ = native_term_os::shell::open_folder(&folder);
-                    }
-                    ui.end_row();
-                }
-            });
-            ui.weak(t!("plink-log-note"));
+            self.log.ui(ui);
         });
     }
 
@@ -253,15 +223,15 @@ impl PlinkDialog {
                 session.putty.remove(option.key());
             }
         }
-        for option in shown.into_iter().chain(PUTTY_LOG) {
+        for option in shown {
             session.set_putty_value(option, self.options.putty_value(option));
         }
-        // no log without a file (none is turned on without one)
-        if session.log_file().is_none() {
-            for option in PUTTY_LOG {
-                session.putty.remove(option.key());
-            }
+        // the log is NativeTerm's own now: PuTTY's settings become its
+        // (`LogSettings::own` read them), and go
+        for option in PUTTY_LOG {
+            session.putty.remove(option.key());
         }
+        session.log = self.log.result().map(|l| l.to_keys()).unwrap_or_default();
         session.check()?;
         Ok(session)
     }
@@ -615,23 +585,24 @@ mod tests {
         assert_eq!(s.putty.keys().collect::<Vec<_>>(), ["PingIntervalSecs"], "the Telnet page doesn't apply to raw");
     }
 
-    /// (Windows paths: the log file is joined the Windows way.)
-    #[cfg(windows)]
     #[test]
-    fn a_log_needs_a_type_and_a_file() {
-        let mut d = PlinkDialog::new_session(PathBuf::from("lab.conf"), "Lab").with_data_dir(Path::new(r"D:\NT"));
+    fn the_log_is_the_sessions_own_set_or_its_folders() {
+        use native_term_config::session_log::LogSettings;
+        let mut d = PlinkDialog::new_session(PathBuf::from("lab.conf"), "Lab");
         d.host = "h".into();
-        assert!(d.session("sw").unwrap().putty.is_empty(), "no log by default");
-        d.options.set_putty_value(PUTTY_LOG[0], PuttyValue::Number(1));
-        assert!(d.session("sw").unwrap().putty.is_empty(), "no file: not logged");
-        d.options.set_putty_value(PUTTY_LOG[1], PuttyValue::Text(plink::default_log_file(Path::new(r"D:\NT"))));
+        assert!(d.session("sw").unwrap().log.is_empty(), "the folder's: nothing of its own");
+        // a session logged by PuTTY's settings before: they become its own
+        // set, and PuTTY's go
+        let mut old = PlinkSession { name: "sw".into(), host: Some("h".into()), ..Default::default() };
+        old.putty.insert("LogType".into(), PuttyValue::Number(2));
+        old.putty.insert("LogFileName".into(), PuttyValue::Text("D:/logs/&H-&Y&M&D.log".into()));
+        let entry = old.to_entry(Path::new("lab.nt.toml"));
+        let d = PlinkDialog::edit(&old).with_log(LogSettings::own(&entry), None, Path::new("D:/NT"));
         let s = d.session("sw").unwrap();
-        assert_eq!(s.log_file().as_deref(), Some(r"D:\NT\logs\&H-&Y&M&D.log"));
-        d.protocol = Protocol::Serial;
-        d.line = "COM3".into();
-        assert!(d.session("console").unwrap().log_file().is_some(), "every protocol");
-        d.options.set_putty_value(PUTTY_LOG[0], PuttyValue::Number(0));
-        assert!(d.session("console").unwrap().putty.is_empty(), "off: the file goes too");
+        assert!(s.putty.is_empty());
+        let own = LogSettings::from_keys(|k| s.log.get(k).map(String::as_str)).unwrap();
+        assert!(own.start && own.raw && own.append);
+        assert_eq!(own.file, "D:/logs/%H-%Y%M%D.log");
     }
 
     #[test]

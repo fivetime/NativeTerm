@@ -18,6 +18,12 @@ native-term-os = { path = "../native-term-os" }
 zmodem2 = "0.7"
 # what the askpass helper is told (askpass.rs)
 serde = { version = "1", features = ["derive"] }
+# the session log (session_log.rs): escape sequences taken out of the text,
+# the time of each line, a legacy code page read as what it is
+vte = "0.15"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+encoding_rs = "0.8"
+codepage = "0.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

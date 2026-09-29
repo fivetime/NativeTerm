@@ -12,6 +12,7 @@ use native_term_config::proxy::{self, Proxy};
 use native_term_os::credentials::{self, Saved};
 
 use crate::dialogs::Outcome;
+use crate::log_page::LogPage;
 
 /// What the options are for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,6 +75,10 @@ pub struct OptionsDialog {
     /// `ssh -Q` answers, asked when a list is first opened.
     names: HashMap<&'static str, Vec<String>>,
     ssh: PathBuf,
+    /// The session log's page (NativeTerm's own settings, not ssh's).
+    log: Option<LogPage>,
+    /// That page is the one shown.
+    log_shown: bool,
     pub error: Option<String>,
 }
 
@@ -189,8 +194,22 @@ impl OptionsDialog {
             effective: by_keyword,
             names: HashMap::new(),
             ssh: ssh.to_path_buf(),
+            log: None,
+            log_shown: false,
             error: None,
         }
+    }
+
+    /// With the session log's page.
+    pub fn with_log(mut self, page: LogPage) -> OptionsDialog {
+        self.log = Some(page);
+        self
+    }
+
+    /// The session log's settings to write: `None` without that page;
+    /// `Some(None)` for none of the host's (folder's) own.
+    pub fn log_result(&self) -> Option<Option<native_term_config::session_log::LogSettings>> {
+        self.log.as_ref().map(LogPage::result)
     }
 
     pub fn values(&self) -> Values {
@@ -442,15 +461,26 @@ impl OptionsDialog {
                     ui.vertical(|ui| {
                         ui.set_width(120.0);
                         for category in Category::ALL {
-                            if ui.selectable_label(self.category == category, category_name(category)).clicked() {
+                            let chosen = self.category == category && !self.log_shown;
+                            if ui.selectable_label(chosen, category_name(category)).clicked() {
                                 self.category = category;
+                                self.log_shown = false;
                             }
+                        }
+                        if self.log.is_some() && ui.selectable_label(self.log_shown, t!("options-log")).clicked() {
+                            self.log_shown = true;
                         }
                     });
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
                         ui.set_width(500.0);
                         ui.set_min_height(300.0);
+                        if let (true, Some(page)) = (self.log_shown, self.log.as_mut()) {
+                            egui::ScrollArea::vertical().id_salt("log-page").max_height(420.0).show(ui, |ui| {
+                                page.ui(ui);
+                            });
+                            return;
+                        }
                         egui::ScrollArea::vertical().max_height(380.0).show(ui, |ui| {
                             egui::Grid::new("session-options").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                                 let category = self.category;

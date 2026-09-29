@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 #[cfg(windows)]
-pub use native_term_win::picker::{pick_files, pick_folder};
+pub use native_term_win::picker::{pick_files, pick_folder, pick_save};
 
 /// Whether a dialog can be shown here at all.
 #[cfg(windows)]
@@ -114,6 +114,25 @@ mod unix {
         };
         super::paths_in(&output).into_iter().next()
     }
+
+    pub fn pick_save(title: &str, suggested: &Path) -> Option<PathBuf> {
+        let output = match tool()? {
+            "zenity" => run(
+                "zenity",
+                &[
+                    "--file-selection".into(),
+                    "--save".into(),
+                    format!("--title={title}"),
+                    format!("--filename={}", suggested.display()),
+                ],
+            )?,
+            _ => run(
+                "kdialog",
+                &["--getsavefilename".into(), suggested.display().to_string(), "--title".into(), title.to_string()],
+            )?,
+        };
+        super::paths_in(&output).into_iter().next()
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -170,10 +189,21 @@ mod unix {
         let script = format!("POSIX path of (choose folder with prompt {}{})", quoted(title), default_location(start));
         super::paths_in(&osascript(&script)?).into_iter().next()
     }
+
+    pub fn pick_save(title: &str, suggested: &Path) -> Option<PathBuf> {
+        let name = suggested.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let script = format!(
+            "POSIX path of (choose file name with prompt {} default name {}{})",
+            quoted(title),
+            quoted(&name),
+            default_location(suggested.parent())
+        );
+        super::paths_in(&osascript(&script)?).into_iter().next()
+    }
 }
 
 #[cfg(unix)]
-pub use unix::{available, pick_files, pick_folder};
+pub use unix::{available, pick_files, pick_folder, pick_save};
 
 #[cfg(all(test, unix))]
 mod tests {

@@ -218,6 +218,10 @@ pub struct PlinkSession {
     /// Where it came from (`putty:<name>`, `securecrt:<path>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// The session log's settings (`session_log`), as lowercase keys
+    /// without the `NativeTerm` prefix; none: the folder's.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub log: BTreeMap<String, String>,
     /// PuTTY options that plink only takes from a saved session; the shim
     /// writes them to a temporary one (`-load`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -287,11 +291,10 @@ pub const PUTTY_SUPDUP: [PuttyOption; 4] = [
     PuttyOption::Flag { key: "SUPDUPScrolling", default: false },
 ];
 
-/// The session log, written by ntplink (plink writes none: PuTTY logs what
-/// its terminal shows). `LogType` 0 off, 1 the text without escape
-/// sequences, 2 every byte; `LogFileName` with PuTTY's `&H` (host or
-/// serial line), `&Y` `&M` `&D`, `&T` (time of connecting), `&P` (port).
-/// An existing file is appended to.
+/// PuTTY's session log settings, as ntplink was given them before the
+/// shim wrote the log itself (`session_log`): `LogType` 0 off, 1 the text,
+/// 2 every byte; `LogFileName` with PuTTY's `&` codes. Only read now, as a
+/// session's log set (`PlinkSession::legacy_log`), never passed on.
 pub const PUTTY_LOG: [PuttyOption; 2] =
     [PuttyOption::Number { key: "LogType", default: 0 }, PuttyOption::Text { key: "LogFileName", default: "" }];
 
@@ -305,20 +308,21 @@ pub fn backspace_code(value: &str) -> Option<&'static str> {
     }
 }
 
-/// Where a session's log goes unless another file is chosen: `logs` in
-/// NativeTerm's data directory, a file per host and day.
-pub fn default_log_file(data_dir: &Path) -> String {
-    data_dir.join("logs").join("&H-&Y&M&D.log").display().to_string()
-}
-
 impl PlinkSession {
-    /// The log file, when the session is logged.
-    pub fn log_file(&self) -> Option<String> {
-        let on = matches!(self.putty_value(PUTTY_LOG[0]), PuttyValue::Number(1 | 2));
-        match self.putty_value(PUTTY_LOG[1]) {
-            PuttyValue::Text(file) if on && !file.trim().is_empty() => Some(file),
-            _ => None,
-        }
+    /// The log settings ntplink was given before NativeTerm wrote the log
+    /// itself (PuTTY's `LogType` 1 text, 2 every byte; appended, from the
+    /// connection on), as a session log set; `None` without them.
+    pub fn legacy_log(&self) -> Option<crate::session_log::LogSettings> {
+        let raw = match self.putty_value(PUTTY_LOG[0]) {
+            PuttyValue::Number(1) => false,
+            PuttyValue::Number(2) => true,
+            _ => return None,
+        };
+        let file = match self.putty_value(PUTTY_LOG[1]) {
+            PuttyValue::Text(file) => crate::session_log::from_putty_name(file.trim()),
+            _ => String::new(),
+        };
+        Some(crate::session_log::LogSettings { file, start: true, append: true, raw, ..Default::default() })
     }
 
     /// An option's value: the session's, or PuTTY's default.
@@ -531,6 +535,9 @@ impl PlinkSession {
         put("note", self.note.as_ref());
         put("onlogin", self.on_login.as_ref());
         put("source", self.source.as_ref());
+        for (key, value) in &self.log {
+            nt.insert(key.clone(), value.clone());
+        }
         if self.favorite {
             nt.insert("favorite".into(), "yes".into());
         }

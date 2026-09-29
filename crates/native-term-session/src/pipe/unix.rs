@@ -310,7 +310,7 @@ mod tests {
             let conn = listener.accept().unwrap();
             let pid = conn.client_pid().unwrap();
             let hello: ShimMessage = conn.recv(Duration::from_secs(5)).unwrap().unwrap();
-            conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+            conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None }).unwrap();
             conn.send(&AppMessage::SendText { text: "uptime".into(), enter: true }).unwrap();
             let exited: ShimMessage = conn.recv(Duration::from_secs(5)).unwrap().unwrap();
             (pid, hello, exited)
@@ -330,7 +330,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(),
-            Some(AppMessage::Welcome { protocol: 1 })
+            Some(AppMessage::Welcome { protocol: 1, data_dir: None })
         );
         assert_eq!(
             client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(),
@@ -364,7 +364,7 @@ mod tests {
         let mut listener = PipeListener::bind(&name).unwrap();
         let server = std::thread::spawn(move || {
             let conn = listener.accept().unwrap();
-            conn.send(&AppMessage::Welcome { protocol: 1 }).unwrap();
+            conn.send(&AppMessage::Welcome { protocol: 1, data_dir: None }).unwrap();
             conn.send(&AppMessage::Close).unwrap();
             drop(conn);
             listener
@@ -373,7 +373,7 @@ mod tests {
         let _listener = server.join().unwrap();
         assert_eq!(
             client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(),
-            Some(AppMessage::Welcome { protocol: 1 })
+            Some(AppMessage::Welcome { protocol: 1, data_dir: None })
         );
         assert_eq!(client.recv::<AppMessage>(Duration::from_secs(5)).unwrap(), Some(AppMessage::Close));
         assert_eq!(client.recv::<AppMessage>(Duration::from_secs(1)).unwrap_err().kind(), io::ErrorKind::UnexpectedEof);

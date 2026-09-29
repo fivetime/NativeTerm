@@ -561,6 +561,62 @@ impl Editor {
         self.set_folder_value(file, "NativeTermNoGroupSend", on.then_some("yes"))
     }
 
+    /// The session log settings of a host's own (`None`: its folder's,
+    /// every `NativeTermLog*` key taken out of its block).
+    pub fn set_host_log(
+        &self,
+        host: &HostEntry,
+        settings: Option<&crate::session_log::LogSettings>,
+    ) -> Result<(), EditError> {
+        not_plink(host)?;
+        let alias = host.alias().to_string();
+        self.ensure_ignore_unknown()?;
+        let directives = settings.map(crate::session_log::LogSettings::directives).unwrap_or_default();
+        edit_file(
+            &self.writer,
+            &host.file,
+            |doc| {
+                let Some(block) = doc.find_host_block(&alias) else { return };
+                write_log(doc, block, &directives);
+            },
+            || self.validate(&alias, host.hostname.as_deref()),
+        )?;
+        Ok(())
+    }
+
+    /// The session log settings a folder's sessions use unless they have
+    /// their own (`None` removes them).
+    pub fn set_folder_log(
+        &self,
+        file: &Path,
+        settings: Option<&crate::session_log::LogSettings>,
+    ) -> Result<(), EditError> {
+        if file == self.main_config() {
+            return Err(EditError::Invalid(t!("config-main-no-folder-options")));
+        }
+        let stem = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        self.ensure_ignore_unknown()?;
+        let directives = settings.map(crate::session_log::LogSettings::directives).unwrap_or_default();
+        edit_file(
+            &self.writer,
+            file,
+            |doc| {
+                let block = match doc.find_host_block(FOLDER_DEFAULTS_HOST) {
+                    Some(block) => block,
+                    None if directives.is_empty() => return,
+                    None => {
+                        prepend_folder_block(doc, &stem);
+                        let Some(block) = doc.find_host_block(FOLDER_DEFAULTS_HOST) else { return };
+                        block
+                    }
+                };
+                write_log(doc, block, &directives);
+            },
+            || self.validate(PARSE_CHECK_HOST, None),
+        )?;
+        Ok(())
+    }
+
     /// A `NativeTerm*` key in a folder file's `Host __nativeterm_folder__`
     /// block (made if needed); `None` removes it.
     fn set_folder_value(&self, file: &Path, keyword: &str, value: Option<&str>) -> Result<(), EditError> {
@@ -1239,6 +1295,17 @@ fn entries_for(draft: &HostDraft, alias: &str, id: Option<&str>) -> Vec<(&'stati
         entries.push(("NativeTermId", id.to_string()));
     }
     entries
+}
+
+/// A block's session log keys: every one taken out, then `directives`
+/// written (a set is whole, see `session_log`).
+fn write_log(doc: &mut Document, block: usize, directives: &[(&'static str, String)]) {
+    for name in crate::session_log::directive_names() {
+        doc.remove(block, name);
+    }
+    for (name, value) in directives {
+        doc.set(block, name, value);
+    }
 }
 
 fn set_or_remove(doc: &mut Document, block: usize, keyword: &str, value: Option<&str>) {

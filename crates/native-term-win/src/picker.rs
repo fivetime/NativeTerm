@@ -19,8 +19,9 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Shell::{
-    FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST,
-    FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+    FileOpenDialog, FileSaveDialog, IFileOpenDialog, IFileSaveDialog, IShellItem, SHCreateItemFromParsingName,
+    FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT, FOS_PICKFOLDERS,
+    SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GetCursorPos, SetForegroundWindow, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
@@ -109,6 +110,35 @@ pub fn pick_files(title: &str, start: Option<&Path>) -> Option<Vec<PathBuf>> {
 /// A folder, starting in `start`; `None` if cancelled.
 pub fn pick_folder(title: &str, start: Option<&Path>) -> Option<PathBuf> {
     pick(title, start, true).and_then(|mut v| v.pop())
+}
+
+/// A file to write, starting as `suggested` (its folder and name); `None`
+/// if cancelled. An existing file is not warned about: the caller may
+/// add to it.
+pub fn pick_save(title: &str, suggested: &Path) -> Option<PathBuf> {
+    let _com = Com::init()?;
+    let owner = Owner::new();
+    // SAFETY: as in `pick`: COM is initialized on this thread for the whole
+    // block, the owner is our own window or none, the HSTRINGs live
+    // through their calls.
+    unsafe {
+        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let options = (dialog.GetOptions().ok()? | FOS_FORCEFILESYSTEM) & !FOS_OVERWRITEPROMPT;
+        dialog.SetOptions(options).ok()?;
+        let _ = dialog.SetTitle(&HSTRING::from(title));
+        if let Some(folder) = suggested.parent().filter(|p| p.is_dir()) {
+            if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(folder.as_os_str()), None)
+            {
+                let _ = dialog.SetFolder(&item);
+            }
+        }
+        if let Some(name) = suggested.file_name() {
+            let _ = dialog.SetFileName(&HSTRING::from(name));
+        }
+        // cancelled: an error
+        dialog.Show(owner.as_ref().map(|o| o.0)).ok()?;
+        dialog.GetResult().ok().as_ref().and_then(item_path)
+    }
 }
 
 fn pick(title: &str, start: Option<&Path>, folders: bool) -> Option<Vec<PathBuf>> {

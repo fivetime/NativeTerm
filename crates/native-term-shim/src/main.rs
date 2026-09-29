@@ -37,6 +37,7 @@ mod preconnect;
 mod print;
 mod proxy;
 mod saved;
+mod session_log;
 mod ssh;
 #[cfg(windows)]
 mod sspi;
@@ -282,6 +283,7 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
     // the rest of this tab; the password given with it, for the next attempt
     let mut user: Option<String> = None;
     let mut preset: Option<(String, bool)> = None;
+    let tab_log = session_log::init(link);
     loop {
         attempt += 1;
         look::apply(alias);
@@ -340,6 +342,17 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
             }
         });
         let saved = saved.filter(|s| s.configure(&mut command, &mut arguments));
+        // the session log: settings read again, the pipe for the output,
+        // and ssh's own messages at the trace level asked for
+        let (log_settings, log_names) = session_log::for_alias(alias, &effective);
+        tab_log.configure(log_settings, log_names, charset.clone());
+        if let Some(level) = session_log::ssh_log_level(tab_log.prepare(&mut command)) {
+            let shown = effective.iter().find(|(k, _)| k == "loglevel").map_or("INFO", |(_, v)| v.as_str());
+            command.env(session_log::TRACE_ENV, shown.to_ascii_uppercase());
+            let at = arguments.iter().position(|a| a == "--").unwrap_or(arguments.len());
+            arguments.splice(at..at, ["-o".into(), format!("LogLevel={level}").into()]);
+        }
+        tab_log.connecting();
         let mut child = match command.args(&arguments).spawn() {
             Ok(child) => child,
             Err(e) => {
@@ -432,6 +445,9 @@ fn supervise(
     let process = console::child_handle(child);
     loop {
         if let Ok(Some(status)) = child.try_wait() {
+            if let Some(log) = session_log::tab() {
+                log.disconnected();
+            }
             return Supervised::Exited(status.code().unwrap_or(-1));
         }
         let mut handles = vec![process];
@@ -442,6 +458,9 @@ fn supervise(
             }
         }
         console::wait_any(&handles, None);
+        // the log's messages first: NativeTerm's welcome says where logs go
+        let messages: Vec<AppMessage> =
+            link.map(Link::drain).unwrap_or_default().into_iter().filter(|m| !session_log::handle(m)).collect();
         if let (false, Some(link), Some(auth)) = (reported, link, auth) {
             if auth.is_set() {
                 link.send(ShimMessage::Authenticated);
@@ -451,10 +470,14 @@ fn supervise(
                 }
             }
         }
-        for message in link.map(Link::drain).unwrap_or_default() {
+        for message in messages {
             match message {
                 AppMessage::Close => {
                     end(child);
+                    if let Some(log) = session_log::tab() {
+                        log.disconnected();
+                    }
+                    session_log::finish();
                     return Supervised::Close;
                 }
                 AppMessage::Disconnect => end(child),
@@ -535,16 +558,25 @@ fn after_exit(link: Option<&Link>) -> Next {
                 debug::log(format!("waiting: key {key:?}"));
                 match key {
                     'r' | 'R' | '\r' => return Next::Reconnect,
-                    'c' | 'C' => return Next::Close,
+                    'c' | 'C' => {
+                        session_log::finish();
+                        return Next::Close;
+                    }
                     _ => {}
                 }
             }
         }
         for message in link.map(Link::drain).unwrap_or_default() {
             debug::log(format!("waiting: {message:?}"));
+            if session_log::handle(&message) {
+                continue;
+            }
             match message {
                 AppMessage::Connect => return Next::Reconnect,
-                AppMessage::Close => return Next::Close,
+                AppMessage::Close => {
+                    session_log::finish();
+                    return Next::Close;
+                }
                 AppMessage::SendText { text, enter } => {
                     let _ = console::inject(&text, enter);
                 }

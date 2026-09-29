@@ -572,6 +572,7 @@ mod tests {
             last_position: None,
             quiet_since: None,
             specials: Vec::new(),
+            log_file: None,
         }
     }
 

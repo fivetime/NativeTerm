@@ -23,6 +23,10 @@ pub enum SessionCommand {
     Send,
     /// A serial line's Break, or Telnet's (non-SSH sessions run by ntplink).
     SendBreak,
+    /// Start the session log, or stop the one that is on.
+    ToggleLog,
+    /// Open the file the session log is being written to.
+    OpenLog,
 }
 
 impl SessionCommand {
@@ -39,6 +43,8 @@ impl SessionCommand {
             SessionCommand::Focus => s.location.is_some(),
             SessionCommand::Send => s.linked && s.state == State::Connected,
             SessionCommand::SendBreak => s.linked && s.state == State::Connected && s.can_break(),
+            SessionCommand::ToggleLog => open && s.linked,
+            SessionCommand::OpenLog => open && s.log_file.is_some(),
         }
     }
 
@@ -130,6 +136,8 @@ impl Core {
             SessionCommand::ClearScreen => self.clear_screen(id),
             SessionCommand::Focus => self.focus(id),
             SessionCommand::SendBreak => self.send_special(id, BREAK),
+            SessionCommand::ToggleLog => self.set_logging(id, s.log_file.is_none()),
+            SessionCommand::OpenLog => self.open_log(id),
             SessionCommand::Send => {}
         }
     }
@@ -191,6 +199,7 @@ pub(crate) mod tests {
             last_position: None,
             quiet_since: None,
             specials: Vec::new(),
+            log_file: None,
         }
     }
 

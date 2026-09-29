@@ -462,7 +462,7 @@ Therefore NativeTerm provides its own menus:
 | Connect SFTP / Open SecureFX | **Yes** | Built in: "Files (SFTP)…" on a host, see "File transfer (SFTP)" |
 | Send Commands to Active Session | Yes | See "Sending commands" |
 | Send Commands to This Group | **Yes** | Shim-based console input injection (the send line at the bottom of the sidebar: the active session or all, "No group send" hosts left out); `tmux send-keys` fallback for persistent sessions. See "Sending commands" |
-| Session logging (record all output) | **SSH: possible, not built** (client side); **other protocols: yes** | SSH output passes through NativeTerm's own ssh (the OpenSSH fork, which already scans it for ZMODEM), so it could be logged there; nothing does yet. Server-side logging for persistent sessions ("tmux, recorded on the server", see "Persistent remote sessions (tmux)"); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
+| Session logging (record all output) | **Yes**, every session type | NativeTerm's ssh and ntplink copy what they write to the terminal to the tab's shim, which writes the log with SecureCRT's options; started on connecting or from the session's menu ("Start Session Log"). See `SESSION-LOG.md`. Server-side logging for persistent sessions too ("tmux, recorded on the server", see "Persistent remote sessions (tmux)") |
 | Telnet / serial / raw / rlogin / SUPDUP | **Yes** | The shim runs `ntplink`, NativeTerm's own frontend over PuTTY's protocol code (PuTTY's `plink.exe` only where ntplink is missing); NativeTerm parses no protocol. See "ntplink: NativeTerm's own client" and "Other protocols via plink" |
 | Local shells / AI coding sessions | Not managed | The user opens them with `+`; NativeTerm only lists them in the tab switcher |
 | Per-session character set (e.g. GBK) | **Yes**, for every session type | Nothing converts along the way, so the shim sets the tab console's code pages: `NativeTermCharset` for SSH hosts (per host or folder), the session's `charset` for the others (verified both directions); see "Character sets" |
@@ -638,7 +638,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | Mapped Keys (per session) | Terminal key bindings are global (fragments can't bind keys); NativeTerm command buttons instead; "Backspace sends ^H / ^?" per non-SSH session (ntplink's `-nt-backspace`). For SSH, keyboard input passes through NativeTerm's ssh (which already holds back dropped paths), so a per-session mapping could be done there; not built | 🟡 |
 | Appearance / Window (font, colors, cursor, tab color) | Per-folder/host Terminal profile, `NativeTermColorScheme`, `NativeTermTabColor` | ✅ |
 | Keyword Highlighting | Not in Windows Terminal. NativeTerm's ssh could colour the output it passes on, but that alters what the server sent; not built | ❌ |
-| Log File | SSH: not client-side yet (possible in NativeTerm's ssh, see "Session logging" above), but on the server for persistent sessions (`tmux-log`: `pipe-pane`, read / copied / deleted from "Sessions on the Server"); other protocols: ntplink's session log; Terminal's "Export text" by hand | 🟡 |
+| Log File | The same page in the session options (a host, or a folder's default) and the non-SSH session dialog: file name with SecureCRT's substitutions, prompt for filename, start upon connect, raw, new log at midnight, overwrite / append, timestamp each line, trace level (ssh's debug levels, ntplink's Event Log), custom data upon connect / disconnect / each line, log only custom data (see `SESSION-LOG.md`). PuTTY's plink, the fallback for non-SSH sessions, can't be logged | ✅ |
 | Printing | Not in Windows Terminal | ❌ |
 | X/Y/Zmodem | ZMODEM (`rz` / `sz`) in every SSH tab through NativeTerm's OpenSSH fork, on Windows and Linux, and in ntplink sessions (Telnet, serial, raw); see `RZSZ.md`. X/YMODEM not supported | ✅/❌ |
 | **File Transfer**: FTP/SFTP | SFTP built in (see "File transfer (SFTP)"); FTP not planned | ✅/❌ |
@@ -1344,7 +1344,7 @@ build, and imports no `Reg*` functions either.
 | LocalEcho / LocalEdit | only once Telnet negotiates | from the start, every protocol |
 | Raw: server closes | half open (shim workaround: `CLOSE_WAIT` watch) | exits |
 | Break, Telnet commands | impossible | control pipe |
-| Session log | never written (PuTTY logs what its terminal shows) | `LogType` 1 (text) / 2 (every byte), `LogFileName`, appended |
+| Session log | never written (PuTTY logs what its terminal shows) | what it writes to the console goes to the shim's pipe (`NATIVETERM_LOG`), which writes the log (`SESSION-LOG.md`); PuTTY's `LogType` / `LogFileName` still work where given |
 | Exit codes | 0 / 1 / `INT_MAX` | 0 closed by the far end, 2 couldn't connect, 3 lost, 1 usage |
 
 The shim passes `[session.putty]` as `-set` (no registry write at all) and
@@ -1358,26 +1358,17 @@ Telnet). The session card gets a **Break** button and the tab menu
 `AppMessage::Special { name }` becomes `special <name>` on the pipe. If
 the pipe can't be made, the tab says so and the session runs without it.
 
-**Session log.** The dialog's "Session log" section (every protocol) sets
-`LogType` and `LogFileName` in `[session.putty]`; they reach ntplink as
-`-set` like the other options. ntplink logs what it writes to the console
-(and what it echoes locally): type 2 every byte, type 1 the text without
-escape sequences (CSI, OSC and the other strings, two-byte ones) and
-control characters other than CR, LF and Tab; bytes from 0x80 up are
-kept, in the session's charset. The file name takes PuTTY's codes (`&H`
-host or serial line, `&Y&M&D`, `&T`, `&P`); turning the log on fills in
-`<data dir>\logs\&H-&Y&M&D.log` (a file per host and day). An existing
-file is appended to: ntplink never asks, because PuTTY's question would
-read the session's keys. PuTTY doesn't create folders, so the shim
-creates the file's folder first (when it has no `&` codes). A log turned
-on without a file isn't kept. plink can't log: the shim says so in the
-tab and leaves the two options out of its temporary session. Limitation
-from PuTTY: the codes are expanded in the ANSI code page, so a name with
-characters outside it loses them (Chinese on a Chinese system is fine).
-Verified: a raw test server sending SGR, OSC and charset escapes, UTF-8
-text and a backspace, through the shim into a folder `logs 日志` it
-created: the text log had the lines without escapes, the raw log every
-byte, a second run appended, `&H` became `127.0.0.1`.
+**Session log.** Since 2026-09-29 the shim writes it, for every session
+type (`SESSION-LOG.md`): ntplink copies what it writes to the console
+(after the ZMODEM watch) to the shim's pipe named in `NATIVETERM_LOG`, as
+records (`O` output; `T` its Event Log where `NATIVETERM_LOG_TRACE` asks
+for a trace). The session dialog's "Session log" section is the same
+"Log File" page SSH hosts have, kept in the session's `log` table.
+PuTTY's `LogType` / `LogFileName`, which ntplink logged by before (type 1
+the text, 2 every byte, `&` codes, appended), are read as the session's
+own set and never passed on: the next save writes them as NativeTerm's.
+ntplink still logs by them where they are given on its command line.
+plink can't log: the shim says so in the tab when a log would start.
 
 Verified in the portable Terminal against local test servers: the window
 size at connect (120x30) and after resizes (59x14, 102x25); Ctrl+C sent as
@@ -4785,12 +4776,15 @@ program owns.
   - a server-side workaround (`luit`, or a UTF-8 locale).
 - **Client-side session logging**: see the feature table.
 - **Logon scripts with conditions** ("wait for this prompt, then send
-  that"): SecureCRT implements them by reading terminal output, which
-  NativeTerm never sees. Only fixed post-login commands are possible (see
-  "Command library"); persistent sessions can additionally script through
-  tmux on the server.
+  that"): SecureCRT implements them by reading terminal output. NativeTerm's
+  ssh sees it now (the session log reads it), so they could be built;
+  not decided (ROADMAP, "Possible now, undecided"). Today: fixed
+  post-login commands (see "Command library"); persistent sessions can
+  additionally script through tmux on the server.
 - **Keyword highlighting** (e.g. coloring `error` red): Windows Terminal
-  has no such feature, and NativeTerm doesn't render output.
+  has no such feature, and NativeTerm doesn't render output; its ssh
+  could colour what it passes on, which would alter what the server
+  sent. Not decided either.
 
 ## Crate layout
 
