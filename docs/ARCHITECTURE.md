@@ -1882,9 +1882,10 @@ The result is shown as a summary before anything is written.
     - **Wrong ssh.** From Git Bash, `ssh` on `PATH` is Git's MSYS
       build, which doesn't find the `C:/…` include, so every folder was
       rolled back. NativeTerm now uses `native_term_session::ssh_program()`
-      everywhere (checks and tabs): `NATIVETERM_SSH`, else the first
-      native `ssh.exe` on `PATH`, skipping MSYS/Cygwin builds, else
-      `System32\OpenSSH`.
+      everywhere (checks and tabs): `NATIVETERM_SSH`, else NativeTerm's
+      own OpenSSH fork (`openssh\` next to the program, added later),
+      else the first native `ssh.exe` on `PATH`, skipping MSYS/Cygwin
+      builds, else `System32\OpenSSH`.
     - **A console per check.** From the GUI, every `ssh -G` opened a
       console window (slow, and visible). Checks now run with
       `CREATE_NO_WINDOW`; the same applied to editing hosts before.
@@ -2793,9 +2794,11 @@ without sudo, or one who won't install lrzsz/trzsz, can still transfer
 files). Decided by the user: file transfer is built in, not only handed
 to an external tool.
 
-**Transport: `ssh -s <alias> sftp`, Windows' own OpenSSH.** The host's
-config, keys, ssh-agent, jump hosts and `known_hosts` work exactly as in
-its terminal tab; NativeTerm doesn't carry a second SSH implementation.
+**Transport: `ssh -s <alias> sftp`, the same ssh as the tabs'**
+(`native_term_session::ssh_program()`: NativeTerm's OpenSSH fork, else
+the system's). The host's config, keys, ssh-agent, jump hosts and
+`known_hosts` work exactly as in its terminal tab; no second SSH
+implementation for files.
 Options added: `RequestTTY=no`, `ClearAllForwardings=yes`,
 `PermitLocalCommand=no`, `RemoteCommand=none` (a host's own
 RemoteCommand next to `-s` makes ssh refuse), `ForwardAgent=no`,

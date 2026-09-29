@@ -2453,8 +2453,12 @@
 
 ## Explicitly not planned
 - Self-rendered terminal emulation of any kind
-- A bundled SSH implementation (always the system's own `ssh`; auth, keys,
-  and known_hosts stay where the OS keeps them)
+- An SSH implementation written from scratch. The SSH client is
+  NativeTerm's own fork of OpenSSH (`fivetime/openssh-portable`, branch
+  `nativeterm`, on PowerShell's Win32-OpenSSH; rz / sz, the server's
+  identification string and more, see `RZSZ.md`), shipped in `openssh\`
+  next to the program; the system's `ssh` only where that is missing.
+  Config, keys, the agent and known_hosts stay where OpenSSH keeps them
 - Moving a running tab to a new window from NativeTerm ("Send to New
   Window") — no `wt` command exists; dragging the tab out works and is
   re-claimed
