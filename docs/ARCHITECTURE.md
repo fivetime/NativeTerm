@@ -5144,8 +5144,12 @@ Terminal: its Campbell colours when dark and One Half Light when light,
 the tab strip and title bar in the same light or dark, the tabs in the
 title bar everywhere (`INTEGRATED_BUTTONS`, no desktop title bar), 12 pt
 text, padding in points. On Linux the window buttons are the desktop's,
-as Chrome has them through GTK: the layout it sets (`button-layout`,
-KWin's `ButtonsOn*`: which buttons, at which end) and its icon theme's
+as Chrome has them through GTK: the layout it sets (KWin's `ButtonsOn*`,
+else GTK's `gtk-decoration-layout` from where GTK reads it — XSETTINGS
+`Gtk/DecorationLayout` on X11, gsettings' `button-layout` on Wayland,
+then `settings.ini`, then GTK's own minimize, maximize, close; gsettings
+is not asked on X11, where without GNOME it answers its schema's
+`appmenu:close`: which buttons, at which end) and its icon theme's
 own symbols (`native_term_os::icons`: the theme named in XSETTINGS, else
 `kdeglobals`, GTK's `settings.ini`, gsettings; the freedesktop names
 `window-close-symbolic` …, looked up through the theme's inheritance),

@@ -259,6 +259,21 @@ pub(crate) mod parse {
         Some(format!("{}:{}", names(left.unwrap_or("M")), names(right.unwrap_or("IAX"))))
     }
 
+    /// The window buttons as GTK has them (`gtk-decoration-layout`), which
+    /// is what Chrome asks, on a Qt desktop too (its QtUi leaves the
+    /// buttons' order to the GTK one behind it): what the desktop `said`
+    /// (on X11 the XSETTINGS `Gtk/DecorationLayout`, on Wayland gsettings'
+    /// `button-layout`, which is where GTK reads it there), else GTK's
+    /// `settings.ini`, else GTK's own `menu:minimize,maximize,close`.
+    /// gsettings is not asked on X11: where no GNOME runs it answers its
+    /// schema's `appmenu:close` (LXQt: a window with a close button only,
+    /// GTK's own windows there with all three).
+    pub(super) fn gtk_layout(said: Option<&str>, settings_ini: Option<&str>) -> String {
+        said.and_then(gnome_layout)
+            .or_else(|| settings_ini.and_then(|v| gnome_layout(v.trim_matches('"'))))
+            .unwrap_or_else(|| ":minimize,maximize,close".to_string())
+    }
+
     /// `gsettings get org.gnome.desktop.wm.preferences button-layout`
     /// (`'appmenu:minimize,maximize,close'`) with close, minimize and
     /// maximize kept: `:minimize,maximize,close`.
@@ -561,22 +576,33 @@ mod imp {
             look
         });
         let kde = desktop.split(':').any(|d| d.eq_ignore_ascii_case("KDE"));
-        let button_layout = super::parse::kwin_layout(&config_file("kwinrc").unwrap_or_default(), kde).or_else(|| {
-            // gsettings answers with the desktop's own override (Pantheon's
-            // `close:maximize`) when XDG_CURRENT_DESKTOP names it
-            output("gsettings", &["get", "org.gnome.desktop.wm.preferences", "button-layout"])
-                .as_deref()
-                .and_then(super::parse::gnome_layout)
-        });
         // what GTK apps (Chrome too) use: XSETTINGS, which every
         // desktop's settings daemon publishes; then each desktop's own
         let gtk = || config_file("gtk-3.0/settings.ini").or_else(|| config_file("gtk-4.0/settings.ini"));
         // (Lingmo calls itself KDE but keeps its theme in settings.ini;
         // gsettings answers a bare `Adwaita` where nothing ever set it)
-        let [x_icons, x_gtk, x_font, x_double_click]: [Option<String>; 4] =
-            crate::icons::xsettings(&["Net/IconThemeName", "Net/ThemeName", "Gtk/FontName", "Gtk/TitlebarDoubleClick"])
-                .try_into()
-                .unwrap_or_default();
+        let [x_icons, x_gtk, x_font, x_double_click, x_layout]: [Option<String>; 5] = crate::icons::xsettings(&[
+            "Net/IconThemeName",
+            "Net/ThemeName",
+            "Gtk/FontName",
+            "Gtk/TitlebarDoubleClick",
+            "Gtk/DecorationLayout",
+        ])
+        .try_into()
+        .unwrap_or_default();
+        let button_layout = super::parse::kwin_layout(&config_file("kwinrc").unwrap_or_default(), kde).or_else(|| {
+            let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty());
+            // (gsettings answers with the desktop's own override, Pantheon's
+            // `close:maximize`, when XDG_CURRENT_DESKTOP names it)
+            let said = if wayland {
+                output("gsettings", &["get", "org.gnome.desktop.wm.preferences", "button-layout"])
+            } else {
+                x_layout
+            };
+            let ini = gtk();
+            let ini = ini.as_deref().and_then(|ini| super::parse::ini_value(ini, "Settings", "gtk-decoration-layout"));
+            Some(super::parse::gtk_layout(said.as_deref(), ini))
+        });
         // where GTK (Chrome's GtkUi, gtk-titlebar-double-click) takes it
         let titlebar_double_click = x_double_click
             .or_else(|| {
@@ -738,6 +764,12 @@ mod tests {
         assert_eq!(gnome_layout("'close:maximize'").as_deref(), Some("close:maximize"), "elementary");
         assert_eq!(gnome_layout("'appmenu:close'").as_deref(), Some(":close"));
         assert_eq!(gnome_layout(""), None);
+        // as GTK has them: what the desktop said, its settings.ini, its own
+        assert_eq!(gtk_layout(Some("'close:maximize'"), Some("menu:close")), "close:maximize");
+        assert_eq!(gtk_layout(Some("icon:minimize,maximize,close"), None), ":minimize,maximize,close", "XSETTINGS");
+        assert_eq!(gtk_layout(None, Some("\"close,minimize:menu\"")), "close,minimize:");
+        assert_eq!(gtk_layout(None, None), ":minimize,maximize,close", "LXQt: nothing says");
+        assert_eq!(gtk_layout(Some(""), None), ":minimize,maximize,close");
         assert_eq!(kde_icon_theme("[Icons]\nTheme=breeze-dark\n").as_deref(), Some("breeze-dark"));
         assert_eq!(kde_icon_theme("[General]\nName=x\n"), None, "not set: the next source");
         assert_eq!(gtk_icon_theme("[Settings]\ngtk-icon-theme-name=Crule\n").as_deref(), Some("Crule"));

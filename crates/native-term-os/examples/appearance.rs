@@ -9,6 +9,7 @@ fn main() {
     println!("monospace: {:?}", look.monospace);
     println!("source:    {:?}", look.source);
     println!("ui font:   {:?}", look.ui_font);
+    println!("buttons:   {:?}", look.button_layout);
     println!("icons:     {:?}", look.icon_theme);
     println!("gtk theme: {:?}", look.gtk_theme);
     println!("palette:   {:?}", look.palette);

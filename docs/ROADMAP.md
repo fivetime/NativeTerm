@@ -2167,10 +2167,15 @@
       drawing of a title bar for a window inside a window) is not taken:
       no window of the desktop has it, and it would take Kvantum's
       renderer. See ARCHITECTURE "LXQt's look"
-- [ ] LXQt: the window has a close button only (gsettings' GNOME key
-      answers its default `appmenu:close` where no GNOME runs; GTK, which
-      Chrome follows for the buttons on a Qt desktop too, has
-      `menu:minimize,maximize,close` there)
+- [x] LXQt: the window had a close button only (2026-09-29). gsettings'
+      GNOME key answers its schema's `appmenu:close` where no GNOME runs;
+      GTK, which Chrome follows for the buttons on a Qt desktop too
+      (QtUi leaves their order to the GtkUi behind it), has
+      `menu:minimize,maximize,close` there. The layout is now read where
+      GTK reads `gtk-decoration-layout`: XSETTINGS on X11, gsettings on
+      Wayland, then `settings.ini`, then GTK's own. Compared with GTK 3's
+      own answer in each session (deepin, LXQt, Zorin, Fedora,
+      elementary, EndeavourOS): the same buttons on all, LXQt's now three
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid
       (`6720542a6`, `ShowTabSwitcher`) of the window's tabs, each tile
