@@ -110,7 +110,7 @@ pub fn toolkit(xdg_current_desktop: &str, desktop_session: &str) -> Toolkit {
         }
     }
     match desktop_session {
-        "deepin" | "kde4" | "kde-plasma" | "kde" => Toolkit::Qt,
+        "deepin" | "kde4" | "kde-plasma" | "kde" | "ukui" => Toolkit::Qt,
         // anything else: Chrome's default, which is GTK too
         _ => Toolkit::Gtk,
     }
@@ -1089,6 +1089,9 @@ mod tests {
         assert_eq!(toolkit("Deepin", ""), Toolkit::Qt);
         assert_eq!(toolkit("DDE", ""), Toolkit::Gtk, "deepin 23 says DDE, which Chrome does not know");
         assert_eq!(toolkit("", "deepin"), Toolkit::Qt);
+        assert_eq!(toolkit("UKUI", ""), Toolkit::Qt);
+        assert_eq!(toolkit("", "ukui"), Toolkit::Qt);
+        assert_eq!(toolkit("LXQt", ""), Toolkit::Qt);
         assert_eq!(toolkit("", ""), Toolkit::Gtk, "Chrome's default");
     }
 

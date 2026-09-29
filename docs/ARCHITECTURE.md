@@ -4876,7 +4876,11 @@ program owns.
   macOS `defaults` (`AppleInterfaceStyle`, `AppleAccentColor`). A GNOME
   left at its defaults (Zorin OS 18) answers nothing at all — portal
   "no preference", gsettings `default`, no accent key before GNOME 47 —
-  and reads as light, which is what such a desktop shows
+  and reads as light, which is what such a desktop shows. One desktop
+  is singled out, because nothing else says anything of it: UKUI
+  (Ubuntu Kylin 26.04 answered no portal, no `kdeglobals`, gsettings'
+  GNOME keys at their defaults, the icon theme `Adwaita`), read from its
+  own settings (see "UKUI's look" under the WezTerm backend)
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
 - `native-term-app` — the `egui` GUI. Off Windows it builds against
@@ -4981,6 +4985,56 @@ profile and `disabledProfileSources`, `wt` command lines, UIA, the
 watchdog worker, the hooks and popup behind the menu. Each of those is
 Windows Terminal's business.
 
+### UKUI's look
+
+Chrome is not the model on UKUI (2026-09-29, measured on Ubuntu Kylin
+26.04, X11). It goes to Qt there and loads Qt 5 first (`PreferQt6` in
+`ui/qt/qt_ui.cc` is true on KDE 6 only); UKUI ships its theme for Qt 6
+alone (`libqt6-ukui-platformtheme.so`, `libqt6-style-ukui.so`; Qt 5 has
+`libqgtk3.so`), so what Chrome shows there is Qt's built-in Fusion:
+window `#efefef`, highlight `#308cc6`, a title bar of `#308eca`, whatever
+the desktop is set to. NativeTerm reads what UKUI's own programs follow
+(`native_term_os::ukui`), as their Qt 6 style reads it
+(`qt6-ukui-platformtheme`, `ukui-styles/readconfig.cpp`):
+
+- gsettings `org.ukui.style`, one `list-recursively`: `style-name`
+  (`ukui-dark` and `ukui-black` are dark, anything else light),
+  `widget-theme-name`, `theme-color`, `icon-theme-name`, `system-font`
+  with `system-font-size`. They decide on UKUI before the portal, GTK's
+  files and the rest (`source` is `ukui`).
+- The theme's design tokens,
+  `/usr/share/config/themeconfig/token/k<widget theme>-<light|dark>.css`
+  (package `ukui-themes`): a `--name: value;` a line, the value a colour
+  (`rgba(…)`), another name (`var(--KGray-2)`, looked up in lower case)
+  or layers over a colour (`linear-gradient(…), rgba(…)`), mixed in
+  Qt's own numbers (an opacity is a `float`, a channel is cut to a whole
+  number: black at 0.2 over 245 is 195 there, and here). Read by line
+  as UKUI does; a CSS parser (cssparser, lightningcss) would give the
+  declarations and none of these rules.
+- The highlight is the theme colour: a name (`daybreakBlue`,
+  `jamPurple`, `magenta`, `sunRed`, `sunsetOrange`, `dustGold`,
+  `polarGreen`: the table is in UKUI's code, not in a file, and is
+  copied) or a colour (`#3790FA`, `(125,125,125)`, `55,144,250,1`);
+  `default` leaves it to the tokens' `highlight-active`.
+- The tab strip is a UKUI tab bar: `window-active` (unfocused:
+  `window-inactive`), the window's colour (the pop-ups: hover card, tab
+  grid, palette; the active tab is the terminal's background as
+  everywhere) `base-active`, the text what is seen of `windowtext-*` and
+  `text-active` on them (they are black or white in part). Seen in a Qt 6
+  window of the desktop's own: tab bar `#f6f6f6`, active tab `#ffffff`,
+  its text `#262626`; the window manager's title bar is `#ffffff` too,
+  which would hide the active tab.
+- Without the schema: as any other Qt desktop. Without the token file:
+  light or dark, the theme colour, the icons and the font still, the
+  title bar GTK's.
+
+Verified there: light `#f6f6f6`, `#ffffff`, highlight `#3790fa`; dark with
+`sunsetOrange` `#2e2e2e`, `#1e1e1e`, `#f68c27`, each what Qt 6's palette
+said in the same session; four layered tokens what the style itself had
+made of them (its application properties); NativeTerm running followed
+the change to dark and back within its three seconds; the window buttons
+are `ukui-icon-theme-default`'s.
+
 ### The WezTerm backend
 
 `native-term-wezterm` drives WezTerm through `wezterm cli`, on any of
@@ -5062,7 +5116,10 @@ contexts of a GTK header bar and has GTK render each window button (at
 rest, hovered, unfocused) and answer the header bar's, window's and
 title's colours; the pictures go to `integrated_title_button_images`,
 the colours to the tab strip (header bar behind the tabs, the window's
-colour for the active one). The terminal area keeps NativeTerm's own
+colour for the active one). Where Chrome goes to Qt, the strip has the
+palette's colours and the icon theme's buttons: KDE's from `kdeglobals`
+(`titlebar::qt_colors`), UKUI's from its own settings (below). The
+terminal area keeps NativeTerm's own
 colours — the frame is the desktop's, the content NativeTerm's, as
 Chrome keeps pages its own. The families
 are `native_term_os::fonts::terminal_families`, only ones the system

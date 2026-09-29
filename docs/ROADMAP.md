@@ -2144,7 +2144,20 @@
         (every pcall fails quietly). Now the folder named last is
         remembered (`wezterm.dir` in the settings), `~/.local/bin` is
         looked at before PATH, and the log says which WezTerm was taken
-- [ ] Step 3 left: UKUI's and LXQt's own palettes (neither box to try on)
+- [x] Step 3, UKUI (2026-09-29, Ubuntu Kylin 26.04 on X11): UKUI's own
+      look, not Chrome's — Chrome loads Qt 5 there, which UKUI has no
+      theme for, and shows Qt's Fusion colours (window `#efefef`, title
+      bar `#308eca`). Read as UKUI's Qt 6 style reads it
+      (`native_term_os::ukui`): gsettings `org.ukui.style` (light or
+      dark, widget theme, theme colour, icon theme, font) and the theme's
+      design tokens (`/usr/share/config/themeconfig/token/*.css`), nothing
+      of it a colour of ours except UKUI's table of theme colour names.
+      Before: nothing read at all there (light or dark unknown, no
+      accent, icons `Adwaita`, GTK's title bar). Seen: strip `#f6f6f6`,
+      pop-ups `#ffffff`, accent `#3790fa`, the buttons UKUI's; dark with
+      `sunsetOrange` `#2e2e2e`, `#1e1e1e`, `#f68c27`, followed while
+      running. See ARCHITECTURE "UKUI's look"
+- [ ] Step 3 left: LXQt's own palette
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid
       (`6720542a6`, `ShowTabSwitcher`) of the window's tabs, each tile

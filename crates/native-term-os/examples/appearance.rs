@@ -8,4 +8,8 @@ fn main() {
     println!("accent:    {:?}", look.accent.map(|(r, g, b)| format!("#{r:02x}{g:02x}{b:02x}")));
     println!("monospace: {:?}", look.monospace);
     println!("source:    {:?}", look.source);
+    println!("ui font:   {:?}", look.ui_font);
+    println!("icons:     {:?}", look.icon_theme);
+    println!("gtk theme: {:?}", look.gtk_theme);
+    println!("palette:   {:?}", look.palette);
 }

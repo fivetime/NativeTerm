@@ -58,11 +58,12 @@ pub struct Appearance {
     /// `Gtk/FontName`, gsettings `font-name`, `settings.ini`) or KDE's
     /// `[General] font`, Linux only.
     pub ui_font: Option<UiFont>,
-    /// A Qt desktop's palette as the tab strip takes it (see
-    /// `titlebar::qt_colors`), so a change of colour scheme is a change.
+    /// A Qt desktop's palette as the tab strip takes it (KDE's: see
+    /// `titlebar::qt_colors`; UKUI's: see `ukui`), so a change of colour
+    /// scheme is a change.
     pub palette: Option<crate::titlebar::Titlebar>,
     /// Where `dark` came from (`portal`, `gtk`, `kdeglobals`,
-    /// `gsettings`, `registry`, `defaults`), or empty.
+    /// `gsettings`, `ukui`, `registry`, `defaults`), or empty.
     pub source: &'static str,
 }
 
@@ -523,6 +524,18 @@ mod imp {
             }
         }
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        let session = std::env::var("DESKTOP_SESSION").unwrap_or_default();
+        // UKUI's own settings, whatever the others say of it: they are
+        // what its programs follow (see `ukui`)
+        let ukui = crate::ukui::is_desktop(&desktop, &session)
+            .then(|| output("gsettings", &["list-recursively", "org.ukui.style"]))
+            .flatten()
+            .and_then(|listing| crate::ukui::look(&listing, std::path::Path::new(crate::ukui::TOKENS)));
+        if let Some(ukui) = &ukui {
+            dark = Some(ukui.dark);
+            source = "ukui";
+            accent = ukui.accent.or(accent);
+        }
         let kde = desktop.split(':').any(|d| d.eq_ignore_ascii_case("KDE"));
         let button_layout = super::parse::kwin_layout(&config_file("kwinrc").unwrap_or_default(), kde).or_else(|| {
             // gsettings answers with the desktop's own override (Pantheon's
@@ -555,7 +568,10 @@ mod imp {
             .as_deref()
             .and_then(super::parse::titlebar_action);
         let kdeglobals = config_file("kdeglobals").unwrap_or_default();
-        let icon_theme = x_icons
+        let icon_theme = ukui
+            .as_ref()
+            .and_then(|ukui| ukui.icon_theme.clone())
+            .or(x_icons)
             .or_else(|| super::parse::kde_icon_theme(&config_file("kdeglobals").unwrap_or_default()))
             .or_else(|| gtk().as_deref().and_then(super::parse::gtk_icon_theme))
             .or_else(|| {
@@ -572,7 +588,6 @@ mod imp {
             })
             .or_else(|| gtk().as_deref().and_then(super::parse::gtk_theme));
         // the interface font as the toolkit Chrome would take it from
-        let session = std::env::var("DESKTOP_SESSION").unwrap_or_default();
         let qt = crate::titlebar::toolkit(&desktop, &session) == crate::titlebar::Toolkit::Qt;
         let kde_font = || super::parse::ini_value(&kdeglobals, "General", "font").and_then(super::parse::qt_font);
         let gtk_font = || {
@@ -591,7 +606,12 @@ mod imp {
                     })
                 })
         };
-        let ui_font = if qt { kde_font().or_else(gtk_font) } else { gtk_font().or_else(kde_font) };
+        let ukui_font = ukui.as_ref().and_then(|ukui| ukui.font.clone());
+        let ui_font = match ukui_font {
+            Some(font) => Some(font),
+            None if qt => kde_font().or_else(gtk_font),
+            None => gtk_font().or_else(kde_font),
+        };
         // the family the toolkit ends up drawing with: a font the settings
         // name but that is not installed (Lingmo's GTK default Cantarell)
         // is fontconfig's substitute there too
@@ -605,7 +625,11 @@ mod imp {
             }
             font
         });
-        let palette = if qt { crate::titlebar::qt_colors(&kdeglobals) } else { None };
+        let palette = match ukui.and_then(|ukui| ukui.palette) {
+            Some(palette) => Some(palette),
+            None if qt => crate::titlebar::qt_colors(&kdeglobals),
+            None => None,
+        };
         Appearance {
             dark,
             accent,

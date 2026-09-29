@@ -33,6 +33,7 @@ pub mod ssh;
 pub mod time;
 pub mod titlebar;
 pub mod tones;
+pub mod ukui;
 pub mod watch;
 #[cfg(all(unix, not(target_os = "macos")))]
 pub mod x11_activate;
