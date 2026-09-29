@@ -516,8 +516,9 @@ impl TabLog {
     pub fn new(link: Option<&crate::link::Link>) -> TabLog {
         // NativeTerm says where its data folder is when it welcomes the
         // shim; until then (or without it), the usual place
-        let data_dir =
-            native_term_os::home::app_data().map(|d| d.join("NativeTerm")).unwrap_or_else(|| PathBuf::from("."));
+        let data_dir = welcomed_dir().unwrap_or_else(|| {
+            native_term_os::home::app_data().map(|d| d.join("NativeTerm")).unwrap_or_else(|| PathBuf::from("."))
+        });
         let log: Shared = Arc::new(Mutex::new(Log::new(data_dir, native_term_os::home::home_dir())));
         let feed = match Feed::open(Arc::clone(&log)) {
             Ok(feed) => Some(feed),
@@ -594,6 +595,7 @@ impl TabLog {
     /// Start now: in the settings' file, or the one the person names
     /// (asked in NativeTerm's window, while the output waits).
     fn start(&self) {
+        self.await_data_dir();
         let (prompt, planned) = {
             let log = lock(&self.log);
             (log.settings().prompt, log.planned_file(&now()))
@@ -630,6 +632,27 @@ impl TabLog {
         self.report();
     }
 
+    /// NativeTerm's data folder, where it will say it: its welcome comes
+    /// on the link's own thread, maybe just after the client starts (a log
+    /// that starts on connecting starts right then), so it is waited for a
+    /// moment; without it, the usual place.
+    fn await_data_dir(&self) {
+        if self.link.is_none() {
+            return;
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1500);
+        loop {
+            if let Some(dir) = welcomed_dir() {
+                lock(&self.log).set_data_dir(dir);
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
     fn report(&self) {
         if let Some(link) = &self.link {
             let file = lock(&self.log).file().map(|f| f.display().to_string());
@@ -641,6 +664,25 @@ impl TabLog {
 use native_term_session::protocol::{AppMessage, Role, ShimMessage};
 
 static TAB: std::sync::OnceLock<TabLog> = std::sync::OnceLock::new();
+
+/// NativeTerm's data folder, as its welcome said (set on the link's
+/// thread as soon as the welcome arrives).
+static WELCOMED: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// The link heard NativeTerm's welcome, with its data folder.
+pub fn welcomed(dir: &str) {
+    if dir.is_empty() {
+        return;
+    }
+    *WELCOMED.lock().unwrap_or_else(|e| e.into_inner()) = Some(PathBuf::from(dir));
+    if let Some(tab) = tab() {
+        tab.set_data_dir(dir);
+    }
+}
+
+fn welcomed_dir() -> Option<PathBuf> {
+    WELCOMED.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
 
 /// The tab's log, made on first use (one tab per shim).
 pub fn init(link: Option<&crate::link::Link>) -> &'static TabLog {

@@ -1175,3 +1175,4 @@ log-subst-date = %Y year   %y 2-digit year   %M month   %D day
 log-subst-time = %h hour   %m minute   %s seconds   %t milliseconds
 log-subst-other = %% percent sign   %NAME% environment variable
 log-default-note = Without a file name: { $file }. A relative name goes into the logs folder of NativeTerm's data folder.
+options-log-note = The session log is NativeTerm's own: NativeTermLog* keys in the host's block (or the folder's defaults), which ssh ignores. It applies from the next connection; a log that is on goes on as started.

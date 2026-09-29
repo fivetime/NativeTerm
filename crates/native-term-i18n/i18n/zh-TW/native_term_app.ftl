@@ -1132,3 +1132,4 @@ log-subst-date = %Y 年   %y 兩位數年   %M 月   %D 日
 log-subst-time = %h 時   %m 分   %s 秒   %t 毫秒
 log-subst-other = %% 百分號   %名稱% 環境變數
 log-default-note = 不填檔名時：{ $file }。相對路徑放在 NativeTerm 資料夾的 logs 裡。
+options-log-note = 工作階段記錄是 NativeTerm 自己的設定：NativeTermLog* 鍵寫在主機區塊（或資料夾的預設區塊）裡，ssh 不讀取。從下次連線起生效；正在記錄的記錄依開始時的設定繼續。

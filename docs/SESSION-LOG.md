@@ -87,8 +87,11 @@ A level set while a session runs applies from its next connection.
   `%NAME%` an environment variable); host, session and folder made safe
   in a file name. Empty: `<data folder>/logs/%H-%Y%M%D.log`; a relative
   name goes into `<data folder>/logs`, `~` is the home folder. The data
-  folder comes in NativeTerm's welcome (`AppMessage::Welcome`); without
-  it the usual one. Folders are made. "Overwrite" replaces the file when
+  folder comes in NativeTerm's welcome (`AppMessage::Welcome`), taken on
+  the link's own thread as it arrives; a log starting before it (on
+  connecting, right after the tab opened) waits for it up to 1.5 s; with
+  no NativeTerm, the usual folder (`~/.local/share/NativeTerm`,
+  `%APPDATA%\NativeTerm`). Folders are made. "Overwrite" replaces the file when
   a log starts, "Append" adds to it. "Start new log at midnight" opens
   the next day's file (added to) where the name has `%D`.
 - **Text** (not raw): escape sequences left out (`vte`'s parser),
@@ -132,6 +135,13 @@ them as their own set, and the next save writes them as NativeTerm's.
 - ntplink: a raw session to port 22, the server's identification string
   logged, the folder's settings used (`%F-%S-%P.log`); with a trace level
   its Event Log.
+- Linux (deepin, X11, WezTerm), through NativeTerm: the "Log File" page
+  saved the host's set; connecting logged into the data folder (at first
+  into the usual folder: the welcome came after the log had started, now
+  waited for); WezTerm's tab menu had "Stop Session Log" and "Open Log
+  File", stopping wrote the unfinished prompt line and turned the item
+  into "Start Session Log"; a typed command's coloured output was plain
+  text in the log.
 - The shim test `the_session_log_starts_and_stops_from_nativeterm`:
   started from NativeTerm in the data folder its welcome names, fed,
   stopped, nothing written after.

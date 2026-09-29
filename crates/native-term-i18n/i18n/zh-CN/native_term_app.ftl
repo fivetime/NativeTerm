@@ -1132,3 +1132,4 @@ log-subst-date = %Y 年   %y 两位年   %M 月   %D 日
 log-subst-time = %h 时   %m 分   %s 秒   %t 毫秒
 log-subst-other = %% 百分号   %名称% 环境变量
 log-default-note = 不填文件名时：{ $file }。相对路径放在 NativeTerm 数据文件夹的 logs 里。
+options-log-note = 会话日志是 NativeTerm 自己的设置：NativeTermLog* 键写在主机块（或文件夹的默认块）里，ssh 不读取。从下次连接起生效；正在记录的日志按开始时的设置继续。

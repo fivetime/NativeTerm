@@ -476,7 +476,7 @@ impl OptionsDialog {
                         ui.set_width(500.0);
                         ui.set_min_height(300.0);
                         if let (true, Some(page)) = (self.log_shown, self.log.as_mut()) {
-                            egui::ScrollArea::vertical().id_salt("log-page").max_height(420.0).show(ui, |ui| {
+                            egui::ScrollArea::vertical().id_salt("log-page").max_height(560.0).show(ui, |ui| {
                                 page.ui(ui);
                             });
                             return;
@@ -510,7 +510,8 @@ impl OptionsDialog {
                     });
                 });
                 ui.separator();
-                ui.weak(note);
+                // the log page's settings are NativeTerm's, not ssh's
+                ui.weak(if self.log_shown { t!("options-log-note") } else { note });
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
                 }

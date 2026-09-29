@@ -132,6 +132,11 @@ impl Link {
             loop {
                 match conn.recv::<AppMessage>(wait) {
                     Ok(Some(m)) => {
+                        // the data folder at once: a session log may be
+                        // starting before the main loop reads this
+                        if let AppMessage::Welcome { data_dir: Some(dir), .. } = &m {
+                            crate::session_log::welcomed(dir);
+                        }
                         if incoming.send(m).is_err() {
                             return;
                         }

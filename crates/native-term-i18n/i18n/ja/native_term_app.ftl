@@ -1148,3 +1148,4 @@ log-subst-date = %Y 年   %y 2 桁の年   %M 月   %D 日
 log-subst-time = %h 時   %m 分   %s 秒   %t ミリ秒
 log-subst-other = %% パーセント記号   %名前% 環境変数
 log-default-note = ファイル名がないとき: { $file }。相対パスは NativeTerm のデータフォルダーの logs に置きます。
+options-log-note = セッションログは NativeTerm 自身の設定です: NativeTermLog* キーをホストのブロック（またはフォルダーの既定）に書き、ssh は読みません。次の接続から有効で、記録中のログは開始時の設定のまま続きます。
