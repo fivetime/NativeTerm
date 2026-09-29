@@ -1386,8 +1386,10 @@ observed: the virtual COM driver doesn't pass Break on (not even from
 - **No login signal:** there is no `LocalCommand`, so "logged in" isn't
   known. Commands after connecting are sent after a configurable delay.
 - **No saved-password autofill:** the login prompt is ordinary terminal
-  output, which NativeTerm never sees. Blind, delayed password sending
-  is not offered.
+  output. ntplink hands its output to the shim now, but only for the
+  session log (`SESSION-LOG.md`): nothing matches prompts in it (that
+  would be the logon actions, ROADMAP "Possible now, undecided"). Blind,
+  delayed password sending is not offered.
 - **Disconnect detection:**
   - *Telnet:* plink exits with **0** as soon as the server closes, so
     for Telnet a 0 means "disconnected" (keep the tab, offer reconnect),
