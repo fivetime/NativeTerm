@@ -456,14 +456,14 @@ Therefore NativeTerm provides its own menus:
 | Clone Session | Yes | New tab with the same host and a unique title; port forwards cleared |
 | Connect in Tabs in New Window / Clone in New Window | **Yes** | `wt -w new` (unnamed window), batches of ~100 tabs; see "Opening sessions in a new window" |
 | Connect in Tabs in New Tab Group | As a new window | Windows Terminal has no tab groups |
-| Send to New Window (move a running tab) | Manual | No `wt` command; the user drags the tab out and NativeTerm re-claims it |
+| Send to New Window (move a running tab) | Windows: manual; WezTerm: possible, not built | Windows Terminal has no `wt` command for it: the user drags the tab out and NativeTerm re-claims it. WezTerm (Linux, macOS) has `wezterm cli move-pane-to-new-tab --new-window`; NativeTerm does not offer it yet |
 | Save Session | Yes | Writes a `Host` block into `~/.ssh/config.d/<folder>.conf` |
 | Font | Indirect | Windows Terminal profile, selected per folder/host |
 | Connect SFTP / Open SecureFX | **Yes** | Built in: "Files (SFTP)…" on a host, see "File transfer (SFTP)" |
 | Send Commands to Active Session | Yes | See "Sending commands" |
-| Send Commands to This Group | **Yes** (source-confirmed) | Shim-based console input injection, confirmed against both the console host and Windows OpenSSH sources; an end-to-end prototype remains. `tmux send-keys` fallback for persistent sessions |
-| Session logging (record all output) | **SSH: no** (client side); **other protocols: yes** | SSH output goes straight into the terminal; NativeTerm never sees it. Server-side logging for persistent sessions ("tmux, recorded on the server", see "Persistent remote sessions (tmux)"); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
-| Telnet / serial / raw / rlogin / SUPDUP | **Yes** | The shim runs PuTTY's console client `plink.exe`; NativeTerm parses no protocol. See "Other protocols via plink" |
+| Send Commands to This Group | **Yes** | Shim-based console input injection (the send line at the bottom of the sidebar: the active session or all, "No group send" hosts left out); `tmux send-keys` fallback for persistent sessions. See "Sending commands" |
+| Session logging (record all output) | **SSH: possible, not built** (client side); **other protocols: yes** | SSH output passes through NativeTerm's own ssh (the OpenSSH fork, which already scans it for ZMODEM), so it could be logged there; nothing does yet. Server-side logging for persistent sessions ("tmux, recorded on the server", see "Persistent remote sessions (tmux)"); Windows Terminal's own "Export text" saves a tab's buffer manually. Telnet / serial / raw / rlogin / SUPDUP sessions are logged by ntplink (see "ntplink: NativeTerm's own client") |
+| Telnet / serial / raw / rlogin / SUPDUP | **Yes** | The shim runs `ntplink`, NativeTerm's own frontend over PuTTY's protocol code (PuTTY's `plink.exe` only where ntplink is missing); NativeTerm parses no protocol. See "ntplink: NativeTerm's own client" and "Other protocols via plink" |
 | Local shells / AI coding sessions | Not managed | The user opens them with `+`; NativeTerm only lists them in the tab switcher |
 | Per-session character set (e.g. GBK) | **Yes**, for every session type | Nothing converts along the way, so the shim sets the tab console's code pages: `NativeTermCharset` for SSH hosts (per host or folder), the session's `charset` for the others (verified both directions); see "Character sets" |
 | Port forwarding | Via ssh config | `LocalForward` etc. in the host block; edited in the session options dialog |
@@ -609,20 +609,20 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | SecureCRT | NativeTerm | |
 |---|---|---|
 | **Connection**: Name | `NativeTermLabel` | ✅ |
-| Protocol SSH2 / Telnet / Serial / … | SSH via OpenSSH; others via plink | ✅ |
+| Protocol SSH2 / Telnet / Serial / … | SSH via NativeTerm's OpenSSH fork; others via ntplink (plink as the fallback) | ✅ |
 | File transfer / "SFTP session" | Built-in files window over `ssh -s sftp` (browse, up/download, drag in, edit in place, any file name encoding) | ✅ |
 | Local shell command: Pre-connect | `NativeTermPreConnect` (shim runs it before `ssh`); plink: `-preconnectcommand` | ✅ |
 | Description | one line in `NativeTermNote`; multi-line in `state.db` | ✅ |
-| **Logon Actions**: Automate logon (Expect/Send table) | Not in general: NativeTerm never reads output. Covered cases: passwords and keyboard-interactive via askpass (SSH); commands after login via the `LocalCommand` signal (SSH) or a delay (plink); a password for `su`/`sudo` after login as delayed, hidden injection | 🟡 |
+| **Logon Actions**: Automate logon (Expect/Send table) | Not in general, not built: an SSH session's output passes through NativeTerm's own ssh, so a table could be matched there, but nothing does yet. Covered cases: passwords and keyboard-interactive via askpass (SSH); commands after login via the `LocalCommand` signal (SSH) or a delay (plink); a password for `su`/`sudo` after login as delayed, hidden injection | 🟡 |
 | Send initial carriage return | Injected Enter after login | ✅ |
-| Logon script (VBScript/Python) | No scripting API over terminal output | ❌ |
+| Logon script (VBScript/Python) | No scripting API over terminal output (not built; the output is reachable in NativeTerm's ssh) | ❌ |
 | Remote command | `-o RemoteCommand` | ✅ |
 | Display logon prompts in terminal window | Default behavior | ✅ |
 | **SSH2**: Hostname, Port, Username (IPv6 too) | `HostName`, `Port`, `User` | ✅ |
 | Prompt for hostname | Quick connect | ✅ |
 | Firewall (jump host, SOCKS/HTTP proxy) | `ProxyJump`; a `ProxyCommand` running the shim as the helper (see "Proxies") | ✅ |
 | Credentials (shared sets) | `NativeTermCredential` | ✅ |
-| Authentication methods and order | `PreferredAuthentications`; GSSAPI depends on the Windows OpenSSH build | ✅/🟡 |
+| Authentication methods and order | `PreferredAuthentications`; GSSAPI (Kerberos through SSPI) is built into NativeTerm's OpenSSH fork on Windows (`GSSAPI` in `config.h.vs`); the Unix builds not checked | ✅ |
 | Key exchange list and order | `KexAlgorithms` | ✅ |
 | Minimum group exchange prime size | No OpenSSH client option | ❌ |
 | **SSH2 Advanced**: Cipher, MAC lists and order | `Ciphers`, `MACs` (legacy ones re-enabled with `+`) | ✅ |
@@ -635,12 +635,12 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | **Terminal / Emulation**: type, scrollback | `SetEnv TERM=`; profile `historySize` | ✅ |
 | Modes | Handled by Windows Terminal | — |
 | Emacs (Alt as Meta) | Windows Terminal sends Alt as an ESC prefix | ✅ |
-| Mapped Keys (per session) | Terminal key bindings are global (fragments can't bind keys); NativeTerm command buttons instead; "Backspace sends ^H / ^?" per non-SSH session (ntplink's `-nt-backspace`) | 🟡 |
+| Mapped Keys (per session) | Terminal key bindings are global (fragments can't bind keys); NativeTerm command buttons instead; "Backspace sends ^H / ^?" per non-SSH session (ntplink's `-nt-backspace`). For SSH, keyboard input passes through NativeTerm's ssh (which already holds back dropped paths), so a per-session mapping could be done there; not built | 🟡 |
 | Appearance / Window (font, colors, cursor, tab color) | Per-folder/host Terminal profile, `NativeTermColorScheme`, `NativeTermTabColor` | ✅ |
-| Keyword Highlighting | Not in Windows Terminal | ❌ |
-| Log File | SSH: not client-side (OpenSSH), but on the server for persistent sessions (`tmux-log`: `pipe-pane`, read / copied / deleted from "Sessions on the Server"); other protocols: ntplink's session log; Terminal's "Export text" by hand | 🟡 |
+| Keyword Highlighting | Not in Windows Terminal. NativeTerm's ssh could colour the output it passes on, but that alters what the server sent; not built | ❌ |
+| Log File | SSH: not client-side yet (possible in NativeTerm's ssh, see "Session logging" above), but on the server for persistent sessions (`tmux-log`: `pipe-pane`, read / copied / deleted from "Sessions on the Server"); other protocols: ntplink's session log; Terminal's "Export text" by hand | 🟡 |
 | Printing | Not in Windows Terminal | ❌ |
-| X/Y/Zmodem | Not in Windows Terminal; optional `NativeTermTrzsz` | 🟡 |
+| X/Y/Zmodem | ZMODEM (`rz` / `sz`) in every SSH tab through NativeTerm's OpenSSH fork, on Windows and Linux, and in ntplink sessions (Telnet, serial, raw); see `RZSZ.md`. X/YMODEM not supported | ✅/❌ |
 | **File Transfer**: FTP/SFTP | SFTP built in (see "File transfer (SFTP)"); FTP not planned | ✅/❌ |
 | **PuTTY-only pages** (plink sessions) | See "Other protocols via plink" | |
 

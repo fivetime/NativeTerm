@@ -2451,6 +2451,23 @@
   - [ ] `rustup component add … -q` is not an option; the box's
         toolchain got its components from `rust-toolchain.toml` anyway
 
+## Possible now, undecided
+
+Once "not planned" because they looked impossible; whether to build them
+is the person's decision (2026-09-29). The first four needed an SSH
+session's output or input, which NativeTerm never saw: every SSH tab now
+runs NativeTerm's OpenSSH fork, which already reads the output (ZMODEM)
+and holds back input (dropped files). The last one needed a terminal
+that can move a tab, which WezTerm can.
+
+- [ ] Client-side session logging for SSH sessions
+- [ ] Conditional logon actions ("wait for X, send Y", SecureCRT's
+      Expect/Send table) and logon scripts
+- [ ] Per-session key mapping for SSH sessions
+- [ ] Keyword highlighting (it would alter what the server sent)
+- [ ] "Send to New Window" on WezTerm (`wezterm cli
+      move-pane-to-new-tab --new-window`)
+
 ## Explicitly not planned
 - Self-rendered terminal emulation of any kind
 - An SSH implementation written from scratch. The SSH client is
@@ -2460,22 +2477,17 @@
   next to the program; the system's `ssh` only where that is missing.
   Config, keys, the agent and known_hosts stay where OpenSSH keeps them
 - Moving a running tab to a new window from NativeTerm ("Send to New
-  Window") — no `wt` command exists; dragging the tab out works and is
-  re-claimed
+  Window") on Windows Terminal — no `wt` command exists; dragging the
+  tab out works and is re-claimed (WezTerm has a command for it: see
+  "Possible now, undecided" above)
 - Managing the user's own tabs (local shells, AI coding sessions): they
   are listed in the tab switcher, nothing more
 - Live thumbnails of background tabs (the terminal doesn't render them)
-- Client-side session logging (output never passes through NativeTerm)
 - Importing SecureCRT's stored passwords
 - Bundling or silently installing rclone
 - Syncing saved passwords
 - A double-tap-Shift trigger (needs a global low-level keyboard hook;
   conflicts with Chinese IMEs and JetBrains IDEs)
-- Per-session character sets for OpenSSH sessions (Windows OpenSSH works
-  in UTF-8; plink sessions do get them)
-- Conditional logon scripts ("wait for X, send Y"), SecureCRT-style
-  logon scripts, and keyword highlighting — all require reading terminal
-  output
 - Windows Terminal's own tab menu on NativeTerm tabs (blocked on purpose)
 - Telemetry of any kind
 - Multiple sessions per tab via panes (for now; would need its own design)
