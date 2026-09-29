@@ -31,7 +31,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::appearance::UiFont;
+use crate::appearance::{DesktopLook as Look, UiFont};
 use crate::titlebar::{Rgb, Titlebar};
 
 /// Whether the desktop is UKUI, as Chromium tells
@@ -107,18 +107,8 @@ impl Style {
     }
 }
 
-/// UKUI's look: what the settings say, and the palette where the theme's
-/// tokens were found.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Look {
-    pub dark: bool,
-    pub accent: Option<Rgb>,
-    pub icon_theme: Option<String>,
-    pub font: Option<UiFont>,
-    pub palette: Option<Titlebar>,
-}
-
-/// The look from the settings' listing (see [`Style::parse`]) and the
+/// UKUI's look (what the settings say, and the palette where the theme's
+/// tokens were found) from the settings' listing (see [`Style::parse`]) and the
 /// token files under `dir`.
 pub fn look(listing: &str, dir: &Path) -> Option<Look> {
     let style = Style::parse(listing)?;

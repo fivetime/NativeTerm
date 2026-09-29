@@ -24,6 +24,7 @@ pub mod icons;
 #[cfg(all(unix, not(target_os = "macos")))]
 pub mod kwin;
 pub mod layered;
+pub mod lxqt;
 pub mod picker;
 pub mod process;
 pub mod serial;

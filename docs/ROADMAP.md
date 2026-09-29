@@ -2157,7 +2157,20 @@
       pop-ups `#ffffff`, accent `#3790fa`, the buttons UKUI's; dark with
       `sunsetOrange` `#2e2e2e`, `#1e1e1e`, `#f68c27`, followed while
       running. See ARCHITECTURE "UKUI's look"
-- [ ] Step 3 left: LXQt's own palette
+- [x] Step 3, LXQt (2026-09-29, Lubuntu 26.04 on X11): the palette, icon
+      theme and font of `lxqt/lxqt.conf`, as LXQt's Qt platform theme
+      gives them to every Qt program (`native_term_os::lxqt`; the
+      person's file, then the system's in `XDG_CONFIG_DIRS`). Before: the
+      portal's light and accent, GTK's title bar (theme `Breeze`). Seen:
+      strip `#f5f6f7`, pop-ups `#ffffff`, accent `#5294e2`, what Qt's
+      palette says there. Chrome's strip there (`#d0d0d2`, Kvantum's
+      drawing of a title bar for a window inside a window) is not taken:
+      no window of the desktop has it, and it would take Kvantum's
+      renderer. See ARCHITECTURE "LXQt's look"
+- [ ] LXQt: the window has a close button only (gsettings' GNOME key
+      answers its default `appmenu:close` where no GNOME runs; GTK, which
+      Chrome follows for the buttons on a Qt desktop too, has
+      `menu:minimize,maximize,close` there)
 - [x] The Ctrl+Tab grid on WezTerm (2026-09-24), as on Windows: with
       the switcher setting on, Ctrl+Tab brings up the fork's grid
       (`6720542a6`, `ShowTabSwitcher`) of the window's tabs, each tile

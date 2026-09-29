@@ -4876,11 +4876,13 @@ program owns.
   macOS `defaults` (`AppleInterfaceStyle`, `AppleAccentColor`). A GNOME
   left at its defaults (Zorin OS 18) answers nothing at all — portal
   "no preference", gsettings `default`, no accent key before GNOME 47 —
-  and reads as light, which is what such a desktop shows. One desktop
-  is singled out, because nothing else says anything of it: UKUI
-  (Ubuntu Kylin 26.04 answered no portal, no `kdeglobals`, gsettings'
-  GNOME keys at their defaults, the icon theme `Adwaita`), read from its
-  own settings (see "UKUI's look" under the WezTerm backend)
+  and reads as light, which is what such a desktop shows. Two desktops
+  are singled out, UKUI and LXQt, each read from its own settings, which
+  count there before all of the above (`DesktopLook`; see "UKUI's look"
+  and "LXQt's look" under the WezTerm backend): nothing else said
+  anything of UKUI (Ubuntu Kylin 26.04 answered no portal, no
+  `kdeglobals`, gsettings' GNOME keys at their defaults, the icon theme
+  `Adwaita`), and LXQt's palette is in no other place
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
 - `native-term-app` — the `egui` GUI. Off Windows it builds against
@@ -5035,6 +5037,48 @@ made of them (its application properties); NativeTerm running followed
 the change to dark and back within its three seconds; the window buttons
 are `ukui-icon-theme-default`'s.
 
+### LXQt's look
+
+LXQt's palette is LXQt's own (2026-09-29, measured on Lubuntu 26.04,
+X11, Openbox): its Qt platform theme (`lxqt-qtplugin`,
+`lxqtplatformtheme.cpp`) gives every Qt program the colours, icon theme
+and font of `lxqt/lxqt.conf`, over the widget style's (Kvantum there).
+NativeTerm reads the same file the same way (`native_term_os::lxqt`):
+
+- `[Palette] window_color` (`#efefef` without one), of which Qt makes a
+  whole palette (a white base and black text where the colour's
+  brightest channel is above 128, black and white otherwise: measured
+  with `QPalette(QColor)`), then `base_color`, `text_color`,
+  `window_text_color`, `highlight_color` (LXQt's `#3c8ce6` without one)
+  over it; `[General] icon_theme`; `[Qt] font`. Dark is a dark window
+  colour.
+- A key the person's file has not comes from the system's, as QSettings
+  looks: `lxqt/lxqt.conf` and `lxqt.conf` in `XDG_CONFIG_HOME`, then in
+  each of `XDG_CONFIG_DIRS` (Lubuntu's defaults are in
+  `/etc/xdg/xdg-Lubuntu`).
+- Colours as `QColor::fromString` takes them, `#rrggbb`, `#rgb`,
+  `#aarrggbb`; one written by name is not read (LXQt's settings write
+  none).
+
+Verified there: window `#f5f6f7`, base `#ffffff`, highlight `#5294e2`,
+the font Ubuntu 11, the icons Papirus, each what Qt's palette said in the
+same session (Qt 5 and Qt 6); the strip of a window opened with
+NativeTerm's configuration `#f5f6f7`.
+
+Not Chrome's strip, knowingly. Chrome has the Qt style draw a title bar
+(`CC_TitleBar`, 32 by 32, averaged), and Kvantum draws the title bar of
+a window inside a window: `titlebar-focused` of the theme's SVG, in
+Lubuntu's theme a gradient from `#d6d6d8` to `#ccccce`, `#d0d0d2` on
+average, the same with and without the focus. No window of the desktop
+has that colour (Openbox's title bars are `#2f343f` with the same
+theme, Qt's windows `#f5f6f7`), and to have it NativeTerm would need
+Kvantum's drawing: where it finds a theme (six places, a dark variant,
+what a theme inherits), and an SVG renderer for its elements (`use`,
+transforms, gradients); any other style (Fusion, Breeze) would need its
+own. So the strip is an LXQt tab bar, the window's colour, as on UKUI.
+Kvantum's softer text (`text.color=#000000c8`, seen as `#3a3a3a`) is not
+taken either: the text is the palette's.
+
 ### The WezTerm backend
 
 `native-term-wezterm` drives WezTerm through `wezterm cli`, on any of
@@ -5118,8 +5162,8 @@ title's colours; the pictures go to `integrated_title_button_images`,
 the colours to the tab strip (header bar behind the tabs, the window's
 colour for the active one). Where Chrome goes to Qt, the strip has the
 palette's colours and the icon theme's buttons: KDE's from `kdeglobals`
-(`titlebar::qt_colors`), UKUI's from its own settings (below). The
-terminal area keeps NativeTerm's own
+(`titlebar::qt_colors`), UKUI's and LXQt's from their own settings
+(below). The terminal area keeps NativeTerm's own
 colours — the frame is the desktop's, the content NativeTerm's, as
 Chrome keeps pages its own. The families
 are `native_term_os::fonts::terminal_families`, only ones the system

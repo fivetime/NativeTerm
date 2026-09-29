@@ -59,12 +59,25 @@ pub struct Appearance {
     /// `[General] font`, Linux only.
     pub ui_font: Option<UiFont>,
     /// A Qt desktop's palette as the tab strip takes it (KDE's: see
-    /// `titlebar::qt_colors`; UKUI's: see `ukui`), so a change of colour
-    /// scheme is a change.
+    /// `titlebar::qt_colors`; UKUI's and LXQt's: see `ukui`, `lxqt`), so
+    /// a change of colour scheme is a change.
     pub palette: Option<crate::titlebar::Titlebar>,
     /// Where `dark` came from (`portal`, `gtk`, `kdeglobals`,
-    /// `gsettings`, `ukui`, `registry`, `defaults`), or empty.
+    /// `gsettings`, `ukui`, `lxqt`, `registry`, `defaults`), or empty.
     pub source: &'static str,
+}
+
+/// The look of a desktop that keeps one of its own, from its own
+/// settings (UKUI: `ukui`; LXQt: `lxqt`): there it is what counts, before
+/// what the portal, GTK's files and the others say.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DesktopLook {
+    pub dark: bool,
+    pub accent: Option<(u8, u8, u8)>,
+    pub icon_theme: Option<String>,
+    pub font: Option<UiFont>,
+    /// The tab strip's colours, where the settings have them.
+    pub palette: Option<crate::titlebar::Titlebar>,
 }
 
 /// A font family and its size.
@@ -142,7 +155,7 @@ pub(crate) mod parse {
     }
 
     /// Whether a colour is dark (the perceived brightness below half).
-    pub(super) fn is_dark((r, g, b): (u8, u8, u8)) -> bool {
+    pub(crate) fn is_dark((r, g, b): (u8, u8, u8)) -> bool {
         (u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) / 1000 < 128
     }
 
@@ -304,7 +317,7 @@ pub(crate) mod parse {
 
     /// Qt's font string, KDE's `[General] font=` (`Noto Sans,10,-1,5,50,…`):
     /// the family and its point size (none when given in pixels, -1).
-    pub(super) fn qt_font(value: &str) -> Option<super::UiFont> {
+    pub(crate) fn qt_font(value: &str) -> Option<super::UiFont> {
         let mut parts = value.split(',');
         let family = parts.next()?.trim().to_string();
         let size: f32 = parts.next()?.trim().parse().ok()?;
@@ -525,17 +538,28 @@ mod imp {
         }
         let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
         let session = std::env::var("DESKTOP_SESSION").unwrap_or_default();
-        // UKUI's own settings, whatever the others say of it: they are
-        // what its programs follow (see `ukui`)
-        let ukui = crate::ukui::is_desktop(&desktop, &session)
-            .then(|| output("gsettings", &["list-recursively", "org.ukui.style"]))
-            .flatten()
-            .and_then(|listing| crate::ukui::look(&listing, std::path::Path::new(crate::ukui::TOKENS)));
-        if let Some(ukui) = &ukui {
-            dark = Some(ukui.dark);
-            source = "ukui";
-            accent = ukui.accent.or(accent);
-        }
+        // a desktop's own settings, whatever the others say of it: they
+        // are what its programs follow (see `ukui`, `lxqt`)
+        let own = if crate::ukui::is_desktop(&desktop, &session) {
+            output("gsettings", &["list-recursively", "org.ukui.style"])
+                .and_then(|listing| crate::ukui::look(&listing, std::path::Path::new(crate::ukui::TOKENS)))
+                .map(|look| (look, "ukui"))
+        } else if crate::lxqt::is_desktop(&desktop) {
+            let dirs = std::env::var("XDG_CONFIG_DIRS").unwrap_or_default();
+            let settings: Vec<String> = crate::lxqt::files(config_home(), &dirs)
+                .iter()
+                .filter_map(|file| std::fs::read_to_string(file).ok())
+                .collect();
+            crate::lxqt::look(&settings).map(|look| (look, "lxqt"))
+        } else {
+            None
+        };
+        let own = own.map(|(look, from)| {
+            dark = Some(look.dark);
+            source = from;
+            accent = look.accent.or(accent);
+            look
+        });
         let kde = desktop.split(':').any(|d| d.eq_ignore_ascii_case("KDE"));
         let button_layout = super::parse::kwin_layout(&config_file("kwinrc").unwrap_or_default(), kde).or_else(|| {
             // gsettings answers with the desktop's own override (Pantheon's
@@ -568,9 +592,9 @@ mod imp {
             .as_deref()
             .and_then(super::parse::titlebar_action);
         let kdeglobals = config_file("kdeglobals").unwrap_or_default();
-        let icon_theme = ukui
+        let icon_theme = own
             .as_ref()
-            .and_then(|ukui| ukui.icon_theme.clone())
+            .and_then(|own| own.icon_theme.clone())
             .or(x_icons)
             .or_else(|| super::parse::kde_icon_theme(&config_file("kdeglobals").unwrap_or_default()))
             .or_else(|| gtk().as_deref().and_then(super::parse::gtk_icon_theme))
@@ -606,8 +630,8 @@ mod imp {
                     })
                 })
         };
-        let ukui_font = ukui.as_ref().and_then(|ukui| ukui.font.clone());
-        let ui_font = match ukui_font {
+        let own_font = own.as_ref().and_then(|own| own.font.clone());
+        let ui_font = match own_font {
             Some(font) => Some(font),
             None if qt => kde_font().or_else(gtk_font),
             None => gtk_font().or_else(kde_font),
@@ -625,7 +649,7 @@ mod imp {
             }
             font
         });
-        let palette = match ukui.and_then(|ukui| ukui.palette) {
+        let palette = match own.and_then(|own| own.palette) {
             Some(palette) => Some(palette),
             None if qt => crate::titlebar::qt_colors(&kdeglobals),
             None => None,
