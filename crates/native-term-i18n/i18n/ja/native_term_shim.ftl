@@ -100,3 +100,4 @@ preconnect-not-started = 接続前のコマンドを起動できませんでし�
 connecting-as = [NativeTerm] { $user } で接続し直しています…
 log-not-started = [NativeTerm] セッションログを開始できませんでした: { $error }
 log-not-started-file = [NativeTerm] セッションログを開始できませんでした ({ $file }): { $error }
+hostkey-not-removed = [NativeTerm] known_hosts からホストキーを削除できませんでした: { $error }

@@ -20,6 +20,7 @@ mod args;
 mod askpass;
 mod debug;
 mod drop;
+mod hostkey;
 mod i18n;
 mod keys;
 mod link;
@@ -385,6 +386,8 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
             Supervised::Close => return 0,
         };
         drop(modes);
+        // host keys trusted for this connection only go now
+        hostkey::forget_once(&effective);
         let authenticated = auth.as_ref().is_some_and(|e| e.is_set());
         let end = classify_exit(code, authenticated);
         // only a direct connection shows whether the server was reached

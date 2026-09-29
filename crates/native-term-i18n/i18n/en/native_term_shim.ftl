@@ -100,3 +100,4 @@ preconnect-not-started = The pre-connect command could not be started: { $error 
 connecting-as = [NativeTerm] Connecting again as { $user }…
 log-not-started = [NativeTerm] The session log did not start: { $error }
 log-not-started-file = [NativeTerm] The session log did not start ({ $file }): { $error }
+hostkey-not-removed = [NativeTerm] The host key could not be taken out of known_hosts: { $error }

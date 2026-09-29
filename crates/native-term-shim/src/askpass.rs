@@ -8,8 +8,9 @@
 //!   this user (and SYSTEM) may open it; the name is random.
 //! - Only password prompts are answered (`user@host's password:`, a
 //!   keyboard-interactive `Password:`). Anything else ssh asks through the
-//!   helper — a new host key, a key passphrase, a one-time code — the
-//!   helper asks in the console, like ssh would.
+//!   helper — a key passphrase, a one-time code — the helper asks in the
+//!   console, like ssh would. (A session tab's shim decides host keys in
+//!   NativeTerm's window: `saved.rs`, `hostkey.rs`.)
 
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Write};

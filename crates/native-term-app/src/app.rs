@@ -1251,6 +1251,10 @@ impl App {
             crate::password_window::open(ticket, question);
             return;
         }
+        if let MenuRequest::HostKey { ticket, question } = request {
+            crate::host_key_window::open(ticket, question);
+            return;
+        }
         if self.dialog.is_some() {
             self.notices.push(t!("notice-dialog-open"));
             return;
@@ -1284,6 +1288,7 @@ impl App {
             | MenuRequest::PasteQuotation(_)
             | MenuRequest::TabTitle { .. }
             | MenuRequest::Password { .. }
+            | MenuRequest::HostKey { .. }
             | MenuRequest::SetUser { .. }
             | MenuRequest::Find(_) => {}
             MenuRequest::ConfirmClose(ids) => {

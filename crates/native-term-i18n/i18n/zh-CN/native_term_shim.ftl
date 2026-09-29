@@ -98,3 +98,4 @@ preconnect-not-started = 连接前命令无法启动：{ $error }
 connecting-as = [NativeTerm] 正在以 { $user } 重新连接…
 log-not-started = [NativeTerm] 会话日志未能开始：{ $error }
 log-not-started-file = [NativeTerm] 会话日志未能开始（{ $file }）：{ $error }
+hostkey-not-removed = [NativeTerm] 无法从 known_hosts 删除主机密钥：{ $error }

@@ -11,6 +11,7 @@ pub mod data_lock;
 pub mod diag;
 pub mod find;
 pub mod fuzzy;
+pub mod host_key_ask;
 pub mod i18n;
 pub mod import;
 pub mod notes;
@@ -916,9 +917,10 @@ impl Core {
                     }
                 }
             }
-            // a password asked meanwhile stays in front of it
+            // a password or host key asked meanwhile stays in front of it
             if let Some(ask) = lock(&shared.ask).clone() {
                 password_ask::raise(&*ask);
+                host_key_ask::raise(&*ask);
             }
         });
         ids
@@ -1894,6 +1896,24 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             let _ = conn.send(&AppMessage::Password { answer });
             return;
         }
+        if let Ok(Some(ShimMessage::AskHostKey { host, ip, key_type, fingerprint, old })) = &asked {
+            // asked in a window of the main program's; this connection
+            // has a thread of its own to wait on
+            let question = host_key_ask::Question {
+                label: found
+                    .as_ref()
+                    .and_then(|(_, id)| lock(&shared.sessions).iter().find(|s| s.id == *id).map(|s| s.label.clone())),
+                host: host.clone(),
+                ip: ip.clone(),
+                key_type: key_type.clone(),
+                fingerprint: fingerprint.clone(),
+                old: old.clone(),
+            };
+            if let Some(answer) = host_key_ask::ask(ask.as_deref(), question) {
+                let _ = conn.send(&AppMessage::HostKey { answer });
+            }
+            return;
+        }
         if let Ok(Some(ShimMessage::AskLogFile { suggested })) = &asked {
             // the desktop's own dialog, on this connection's thread; a
             // desktop without one: the file the settings name
@@ -2315,6 +2335,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::TabAction { .. }
             | ShimMessage::Logging { .. }
             | ShimMessage::AskLogFile { .. }
+            | ShimMessage::AskHostKey { .. }
     ) {
         s.quiet_since = None;
     }
@@ -2331,7 +2352,8 @@ fn apply(s: &mut Session, message: &ShimMessage) {
         | ShimMessage::PasteQuotation
         | ShimMessage::Find { .. }
         | ShimMessage::TabAction { .. }
-        | ShimMessage::AskLogFile { .. } => {}
+        | ShimMessage::AskLogFile { .. }
+        | ShimMessage::AskHostKey { .. } => {}
         ShimMessage::Logging { file } => s.log_file = file.clone(),
         ShimMessage::Waiting => s.state = State::Waiting,
         ShimMessage::Connecting { attempt } => {

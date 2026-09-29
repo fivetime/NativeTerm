@@ -630,7 +630,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | Compression level | Removed from OpenSSH | ❌ |
 | OpenSSH agent forwarding | `ForwardAgent`, with the risk notice | ✅ |
 | Force session channel to close on disconnect | OpenSSH default behavior | ✅ |
-| **Host Key** | `HostKeyAlgorithms`, `StrictHostKeyChecking`, `known_hosts` | ✅ |
+| **Host Key** | `HostKeyAlgorithms`, `StrictHostKeyChecking`, `known_hosts`; a new or changed host key is decided in NativeTerm's window (accept & save, accept once, replace the old key), see "Host keys in NativeTerm's window" | ✅ |
 | **Port Forwarding** / Remote / X11 | `LocalForward`, `RemoteForward`, `DynamicForward`; `ForwardX11` needs a user-installed X server | ✅/🟡 |
 | **Terminal / Emulation**: type, scrollback | `SetEnv TERM=`; profile `historySize` | ✅ |
 | Modes | Handled by Windows Terminal | — |
@@ -2273,10 +2273,11 @@ Rules:
   never from the prompt text. The *kind* of prompt is decided as follows:
   only OpenSSH's own password prompt format (`<user>@<host>'s password: `)
   for the session's own user and host is answered from Credential
-  Manager. Every other prompt — host keys, passphrases, 2FA, custom
-  keyboard-interactive text — is shown by the helper itself in the same
-  console tab (it is attached to it), so the user answers it exactly as
-  without askpass. Echo can't be decided from `SSH_ASKPASS_PROMPT` alone:
+  Manager. A host key question goes to NativeTerm's window (see "Host
+  keys in NativeTerm's window"). Every other prompt — passphrases, 2FA,
+  custom keyboard-interactive text — is shown by the helper itself in the
+  same console tab (it is attached to it), so the user answers it exactly
+  as without askpass. Echo can't be decided from `SSH_ASKPASS_PROMPT` alone:
   the host-key question arrives **without** `confirm` (verified), so the
   helper turns echo on for prompts ending in a `(yes/no…)?` question and
   off otherwise.
@@ -2375,9 +2376,9 @@ Cancel and Skip.
   `Request` connection: `ShimMessage::AskPassword`, answered by
   `AppMessage::Password` with `PasswordAnswer::Given { secret, save }`,
   `Skip` or `Cancel`). Only ssh's own prompt for this account, from the
-  ssh this shim started, reaches the window; a host key, a passphrase,
-  a code, a jump host's prompt is asked in the tab as ssh would (seen:
-  the host key question in the tab, answered there, then the window).
+  ssh this shim started, reaches the window; a passphrase, a code, a
+  jump host's password is asked in the tab as ssh would. A host key has a
+  window of its own (see "Host keys in NativeTerm's window").
 - **OK**: the password goes to ssh. With "Save password" it is kept in
   the shim's memory until the login worked (`LocalCommand`), and only
   then written to the store (`Attempt::logged_in`): a wrong one is never
@@ -3147,6 +3148,48 @@ name and its alias (as `[name]:port` when the port isn't 22) with
 `known_hosts.old`. The dialog lists the names first and explains when to
 do it (a reinstalled host).
 
+### Host keys in NativeTerm's window
+
+A host key is decided in a window of NativeTerm's own, as SecureCRT asks
+("New Host Key", "Host Key Changed"), not by typing yes in the tab
+(2026-09-29). Both questions reach the shim through the askpass helper
+it forces on ssh (the same one as for passwords; `hostkey.rs`), the
+shim asks NativeTerm (`ShimMessage::AskHostKey`, answered by
+`AppMessage::HostKey` with `HostKeyAnswer::Save`, `Once` or `Cancel`),
+and the window (`host_key_window.rs`) is above the others, activated as
+Chromium activates its X11 windows (`native_term_os::x11_activate`: with
+the X server's time; KWin's focus stealing prevention put a window asked
+for right after a click below the clicked, docked main window).
+
+- **A new host**: ssh's own question ("The authenticity of host … can't
+  be established", its fingerprint line, from OpenSSH's older and newer
+  wordings) for our ssh or a jump host's (an ssh ours started). The
+  window shows the name, the key type and the fingerprint (selectable),
+  and how to compare it on the server. "Accept & Save" answers yes (ssh
+  keeps it); "Accept Once" answers yes and the shim takes the key out of
+  the first `UserKnownHostsFile` again when the session ends; "Cancel"
+  answers no. Without NativeTerm the tab asks as before.
+- **A changed key**: OpenSSH refuses outright and prints what to edit;
+  NativeTerm's ssh (`nativeterm/nt_hostkey.c`, with `NATIVETERM_HOSTKEY`
+  set by the shim) asks first, through the same helper, with a prompt of
+  its own: `NATIVETERM-HOSTKEY-CHANGED`, then host, address, type, the new
+  and the old fingerprint, the file and line of the old key. The window
+  warns in red (a reinstalled server, or someone in the middle), shows
+  both fingerprints and where the old key is. "Remove the Old Key and
+  Connect" (never Enter: Enter and Esc cancel there) has the shim take
+  the old key out (`ssh-keygen -R`, the name and the address, in that
+  file); ssh then keeps the new one as a new host's and goes on; "Cancel"
+  leaves it refused as OpenSSH does, the old key untouched. Without
+  NativeTerm it is refused as before. OpenSSH's own warning lines stay in
+  the tab, followed by "The host key of … was replaced in NativeTerm."
+- Verified on deepin (X11, KWin, WezTerm) with `::1`: a new host's
+  fingerprint matched `ssh-keygen -lf` on the server, Save kept it and
+  logged in; a planted wrong key showed both fingerprints and
+  `known_hosts:4`, replacing it logged in with the real key saved; Once
+  kept the key during the session and none after; Cancel left the wrong
+  key and the connection refused; three rounds from the docked main
+  window, the window on top and active each time.
+
 ### Changes made outside NativeTerm
 
 `~/.ssh` is watched with `FindFirstChangeNotificationW` (a thread that
@@ -3435,10 +3478,11 @@ system-wide low-level keyboard hook (`WH_KEYBOARD_LL`), which:
   non-ASCII bytes of system messages, so on a Chinese system "could not
   resolve hostname" is followed by `\262\273\326…` (the GBK text in
   octal). This is `ssh`'s own output; NativeTerm's lines are unaffected.
-- **Changed host keys**: after a server is rebuilt, `ssh` refuses to
-  connect. NativeTerm can't read the terminal output to detect this, so it
-  offers "Remove this host's old key" (`ssh-keygen -R <host>`, confirmed by
-  the user) on sessions that failed to connect.
+- **Changed host keys** with an ssh that isn't NativeTerm's: after a
+  server is rebuilt, `ssh` refuses to connect and says so in the tab;
+  "Remove this host's old key" (`ssh-keygen -R <host>`, confirmed) is
+  there for it. NativeTerm's own ssh asks in a window instead (see "Host
+  keys in NativeTerm's window").
 - **Panes**: Windows Terminal can split a tab into panes, but NativeTerm's
   model is one session per tab. Panes the user creates are treated like
   the user's own tabs. Verified (1.24): a split tab's UIA name is the

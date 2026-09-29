@@ -748,6 +748,7 @@ impl Runner {
                     pane.window.set_minimized(false);
                 }
                 pane.window.focus_window();
+                activate_x11(&pane.window);
                 continue;
             }
             let n = self.next_extra;
@@ -779,6 +780,7 @@ impl Runner {
                         pane.window.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
                     }
                     pane.window.focus_window();
+                    activate_x11(&pane.window);
                     self.extras.push((n, request.key, pane));
                     if let Some(left) = request.left {
                         self.kept.push((n, Kept { left, shown: Instant::now(), moved: false }));
@@ -1441,6 +1443,29 @@ fn activation_source<T>(event_loop: &winit::event_loop::EventLoop<T>, proxy: Eve
     #[cfg(not(all(unix, not(target_os = "macos"))))]
     {
         let _ = (event_loop, proxy);
+    }
+}
+
+/// On X11, activated as Chromium activates its windows
+/// (`native_term_os::x11_activate`: with the X server's time): KWin's focus
+/// stealing prevention put a window asked for a moment after a click
+/// below the window clicked (NativeTerm's docked main window, which stays
+/// above the others), where winit's request alone was not honoured.
+fn activate_x11(window: &winit::window::Window) {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let id = match window.window_handle().map(|h| h.as_raw()) {
+            Ok(RawWindowHandle::Xlib(h)) => h.window as u32,
+            Ok(RawWindowHandle::Xcb(h)) => h.window.get(),
+            _ => return,
+        };
+        // (round trips to the X server: not on the event loop's thread)
+        std::thread::spawn(move || native_term_os::x11_activate::activate(id));
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = window;
     }
 }
 

@@ -5,9 +5,10 @@
 //!
 //! - The helper asks this shim over its private pipe, for ssh's own
 //!   password prompt for this account only (`Target::answers`), and only
-//!   when the helper's parent is the ssh this shim started. Every other
-//!   prompt (host key, passphrase, codes, a jump host) the helper asks in
-//!   the console, as ssh would.
+//!   when the helper's parent is the ssh this shim started. A host key
+//!   question (ours or a jump host's) goes to NativeTerm's window
+//!   (`hostkey.rs`). Every other prompt (passphrase, codes, a jump host's
+//!   password) the helper asks in the console, as ssh would.
 //! - A saved password is read from the system's store when asked, never
 //!   kept, and tried once (`NumberOfPasswordPrompts=1`): a login that
 //!   fails after it was given marks it refused, no retries into a
@@ -84,8 +85,16 @@ fn answer(state: &Mutex<Armed>, served: &AtomicU32, prompt: &str, helper: u32) -
         let mut armed = armed(state);
         let Some(target) = armed.target.clone() else { return Reply::Ask };
         // the helper of our own ssh only, for this account's own prompt
-        let ours =
-            native_term_os::process::parent_pid(helper).is_some_and(|p| armed.ssh_pid != 0 && p == armed.ssh_pid);
+        let parent = native_term_os::process::parent_pid(helper);
+        let ours = parent.is_some_and(|p| armed.ssh_pid != 0 && p == armed.ssh_pid);
+        // a host key is asked in NativeTerm's window, for our ssh or a
+        // jump host's (an ssh our ssh started)
+        if let Some(question) = crate::hostkey::parse(prompt) {
+            let ssh = armed.ssh_pid;
+            drop(armed);
+            let jump = parent.and_then(native_term_os::process::parent_pid).is_some_and(|g| ssh != 0 && g == ssh);
+            return if ours || jump { crate::hostkey::ask(&question) } else { Reply::Ask };
+        }
         if !ours || !target.answers(prompt) || armed.skipped {
             return Reply::Ask;
         }
@@ -222,6 +231,8 @@ impl Attempt {
         let Some(server) = server() else { return false };
         let Ok(shim) = std::env::current_exe() else { return false };
         ssh.env("SSH_ASKPASS", shim).env("SSH_ASKPASS_REQUIRE", "force").env(crate::askpass::PIPE_VAR, &server.pipe);
+        // NativeTerm's ssh asks about a changed host key too (`hostkey`)
+        ssh.env(crate::hostkey::ENV, "1");
         if self.stored {
             let at = arguments.iter().position(|a| a == "--").unwrap_or(arguments.len());
             arguments.splice(at..at, ["-o".into(), "NumberOfPasswordPrompts=1".into()]);

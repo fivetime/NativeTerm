@@ -2453,6 +2453,18 @@
   - [ ] `rustup component add … -q` is not an option; the box's
         toolchain got its components from `rust-toolchain.toml` anyway
 
+- [x] Host keys in NativeTerm's window, as SecureCRT (2026-09-29, the
+      person: the tab still asked "Are you sure you want to continue
+      connecting (yes/no)?"): a new host's key with Accept & Save, Accept
+      Once (taken out when the session ends), Cancel; a changed key (the
+      OpenSSH fork asks instead of refusing, `nt_hostkey.c`) with both
+      fingerprints and where the old one is, "Remove the Old Key and
+      Connect" only by a click. The window is activated as Chromium does
+      on X11 (the server's time), which KWin honours over a docked main
+      window. Verified on deepin with `::1` (save, replace, once, cancel,
+      three rounds on top). See ARCHITECTURE "Host keys in NativeTerm's
+      window"
+
 ## Possible now, undecided
 
 Once "not planned" because they looked impossible; whether to build them

@@ -139,6 +139,41 @@ pub enum ShimMessage {
     /// to ask for the file; `suggested` is the one they name. Answered by
     /// `AppMessage::LogFile`.
     AskLogFile { suggested: String },
+    /// From a `Request` helper (the shim serving ssh's askpass): the host
+    /// key of `host` isn't known (`old` none), or differs from the one
+    /// known (`old`: its type and fingerprint, where it is kept).
+    /// Answered by `AppMessage::HostKey`.
+    AskHostKey {
+        host: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        ip: String,
+        key_type: String,
+        fingerprint: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        old: Option<OldHostKey>,
+    },
+}
+
+/// The host key known before, where a server now shows another.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OldHostKey {
+    pub key_type: String,
+    pub fingerprint: String,
+    /// The `known_hosts` file it is in, and its line.
+    pub file: String,
+    pub line: u64,
+}
+
+/// What the person said about a host key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostKeyAnswer {
+    /// Trust it and keep it (a changed one: the old one taken out).
+    Save,
+    /// Trust it for this connection only (a new host).
+    Once,
+    /// Don't connect.
+    Cancel,
 }
 
 /// What a find came to: the match shown, counted from the first (0: none,
@@ -277,6 +312,8 @@ pub enum AppMessage {
     /// between `chars` (`between`) or after them; `paste` false: the
     /// person said no, nothing is pasted.
     Quotation { chars: String, between: bool, paste: bool },
+    /// The answer to `ShimMessage::AskHostKey`.
+    HostKey { answer: HostKeyAnswer },
     /// Start (`on`) or stop the tab's session log, from the session's menu.
     Log { on: bool },
     /// The answer to `ShimMessage::AskLogFile`: the file, or none (the

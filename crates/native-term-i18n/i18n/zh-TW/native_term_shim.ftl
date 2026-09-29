@@ -98,3 +98,4 @@ preconnect-not-started = 連線前命令無法啟動：{ $error }
 connecting-as = [NativeTerm] 正在以 { $user } 重新連線…
 log-not-started = [NativeTerm] 工作階段記錄未能開始：{ $error }
 log-not-started-file = [NativeTerm] 工作階段記錄未能開始（{ $file }）：{ $error }
+hostkey-not-removed = [NativeTerm] 無法從 known_hosts 刪除主機金鑰：{ $error }

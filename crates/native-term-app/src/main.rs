@@ -24,6 +24,7 @@ mod fab;
 mod files_sync;
 mod files_window;
 mod find_window;
+mod host_key_window;
 mod icons;
 mod import_dialog;
 mod key_dialog;

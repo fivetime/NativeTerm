@@ -49,6 +49,8 @@ pub enum MenuRequest {
     /// ssh asks for a password none is saved for: the answer goes to
     /// `password_ask::answer` with this ticket.
     Password { ticket: u64, question: crate::password_ask::Question },
+    /// A host key to decide on (`host_key_ask::answer` with this ticket).
+    HostKey { ticket: u64, question: crate::host_key_ask::Question },
     /// The host `alias` was logged in to as `user` (given in the password
     /// window, to be kept): its `User` in the ssh config becomes that.
     SetUser { alias: String, user: String },
