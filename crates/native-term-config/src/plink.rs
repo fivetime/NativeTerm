@@ -222,6 +222,10 @@ pub struct PlinkSession {
     /// without the `NativeTerm` prefix; none: the folder's.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub log: BTreeMap<String, String>,
+    /// The logon actions (`logon`), as lowercase keys without the
+    /// `NativeTerm` prefix; none: the folder's.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub logon: BTreeMap<String, String>,
     /// PuTTY options that plink only takes from a saved session; the shim
     /// writes them to a temporary one (`-load`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -535,7 +539,7 @@ impl PlinkSession {
         put("note", self.note.as_ref());
         put("onlogin", self.on_login.as_ref());
         put("source", self.source.as_ref());
-        for (key, value) in &self.log {
+        for (key, value) in self.log.iter().chain(&self.logon) {
             nt.insert(key.clone(), value.clone());
         }
         if self.favorite {

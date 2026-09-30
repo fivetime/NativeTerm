@@ -29,6 +29,7 @@ pub mod i18n;
 pub mod include;
 pub mod keys;
 pub mod known_hosts;
+pub mod logon;
 pub mod ops;
 pub mod options;
 pub mod password;

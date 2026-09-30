@@ -617,6 +617,57 @@ impl Editor {
         Ok(())
     }
 
+    /// A host's own logon actions (`None`: none, its folder's apply).
+    pub fn set_host_logon(
+        &self,
+        host: &HostEntry,
+        actions: Option<&crate::logon::LogonActions>,
+    ) -> Result<(), EditError> {
+        not_plink(host)?;
+        let alias = host.alias().to_string();
+        self.ensure_ignore_unknown()?;
+        let directives = actions.map(crate::logon::LogonActions::directives).unwrap_or_default();
+        edit_file(
+            &self.writer,
+            &host.file,
+            |doc| {
+                let Some(block) = doc.find_host_block(&alias) else { return };
+                write_logon(doc, block, &directives);
+            },
+            || self.validate(&alias, host.hostname.as_deref()),
+        )?;
+        Ok(())
+    }
+
+    /// The logon actions a folder's sessions use unless they have their own
+    /// (`None` removes them).
+    pub fn set_folder_logon(&self, file: &Path, actions: Option<&crate::logon::LogonActions>) -> Result<(), EditError> {
+        if file == self.main_config() {
+            return Err(EditError::Invalid(t!("config-main-no-folder-options")));
+        }
+        let stem = file.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        self.ensure_ignore_unknown()?;
+        let directives = actions.map(crate::logon::LogonActions::directives).unwrap_or_default();
+        edit_file(
+            &self.writer,
+            file,
+            |doc| {
+                let block = match doc.find_host_block(FOLDER_DEFAULTS_HOST) {
+                    Some(block) => block,
+                    None if directives.is_empty() => return,
+                    None => {
+                        prepend_folder_block(doc, &stem);
+                        let Some(block) = doc.find_host_block(FOLDER_DEFAULTS_HOST) else { return };
+                        block
+                    }
+                };
+                write_logon(doc, block, &directives);
+            },
+            || self.validate(PARSE_CHECK_HOST, None),
+        )?;
+        Ok(())
+    }
+
     /// A `NativeTerm*` key in a folder file's `Host __nativeterm_folder__`
     /// block (made if needed); `None` removes it.
     fn set_folder_value(&self, file: &Path, keyword: &str, value: Option<&str>) -> Result<(), EditError> {
@@ -1308,6 +1359,24 @@ fn write_log(doc: &mut Document, block: usize, directives: &[(&'static str, Stri
     }
 }
 
+/// Every logon key of the block goes (rows past the new last one too),
+/// then the set is written.
+fn write_logon(doc: &mut Document, block: usize, directives: &[(String, String)]) {
+    let b = doc.blocks().swap_remove(block);
+    let old: Vec<String> = doc
+        .directives(&b)
+        .map(|(_, d)| d.keyword.clone())
+        .filter(|k| k.len() > "NativeTerm".len() && k[.."NativeTerm".len()].eq_ignore_ascii_case("NativeTerm"))
+        .filter(|k| crate::logon::is_logon_key(&k["NativeTerm".len()..]))
+        .collect();
+    for keyword in old {
+        doc.remove(block, &keyword);
+    }
+    for (name, value) in directives {
+        doc.set(block, name, value);
+    }
+}
+
 fn set_or_remove(doc: &mut Document, block: usize, keyword: &str, value: Option<&str>) {
     match value {
         Some(v) => doc.set(block, keyword, v),
@@ -1708,6 +1777,56 @@ mod tests {
         assert!(editor.set_folder_credential(&lab, Some("a/b")).is_err());
         editor.set_folder_credential(&lab, None).unwrap();
         assert!(!std::fs::read_to_string(&lab).unwrap().contains("机房-A"));
+    }
+
+    /// Logon actions: a folder's set reaches its hosts, a host's own set
+    /// wins whole, a shorter table leaves no rows of the longer one behind,
+    /// and ssh accepts the file (quotes, backslashes and a `#` included).
+    #[test]
+    fn logon_actions_per_folder_and_host() {
+        use crate::logon::{LogonActions, Step};
+        let Some((_home, editor)) = setup() else { return };
+        let lab = editor.create_folder("switches").unwrap();
+        editor.create_host(&tree(&editor), &lab, &draft("sw1", "10.0.0.1")).unwrap();
+        editor.create_host(&tree(&editor), &lab, &draft("sw2", "10.0.0.2")).unwrap();
+        let actions = |alias: &str| {
+            let t = tree(&editor);
+            let (folder, host) = t.find(alias).unwrap();
+            LogonActions::for_host(folder, host)
+        };
+        let step = |expect: &str, send: &str| Step {
+            expect: expect.into(),
+            send: send.into(),
+            enter: true,
+            ..Step::default()
+        };
+        let folder_set = LogonActions {
+            automate: true,
+            initial_cr: true,
+            steps: vec![step("Username:", r"\s"), step("#", "en \"q\" # x"), step("", "terminal length 0")],
+        };
+        editor.set_folder_logon(&lab, Some(&folder_set)).unwrap();
+        assert_eq!(actions("sw1"), folder_set);
+        assert!(editor.effective("sw1").is_ok(), "ssh takes the file");
+
+        let sw2 = tree(&editor).find("sw2").unwrap().1.clone();
+        let own = LogonActions { automate: true, steps: vec![step(">", "enable")], ..LogonActions::default() };
+        editor.set_host_logon(&sw2, Some(&own)).unwrap();
+        assert_eq!(actions("sw2"), own, "its own, whole");
+        assert_eq!(actions("sw1"), folder_set);
+
+        let shorter = LogonActions { automate: true, steps: vec![step("#", "exit")], ..LogonActions::default() };
+        editor.set_folder_logon(&lab, Some(&shorter)).unwrap();
+        assert_eq!(actions("sw1"), shorter);
+        let text = std::fs::read_to_string(&lab).unwrap();
+        assert!(!text.contains("LogonExpect2") && !text.contains("LogonSend3"), "{text}");
+
+        let sw2 = tree(&editor).find("sw2").unwrap().1.clone();
+        editor.set_host_logon(&sw2, None).unwrap();
+        assert_eq!(actions("sw2"), shorter, "the folder's again");
+        editor.set_folder_logon(&lab, None).unwrap();
+        assert_eq!(actions("sw1"), LogonActions::default());
+        assert!(editor.effective("sw1").is_ok());
     }
 
     /// `NativeTermPersistent`: a folder default reaches its hosts, a host's
