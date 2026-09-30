@@ -52,6 +52,8 @@ pub struct PlinkDialog {
     options: PlinkSession,
     /// The session log's page (see `log_page`).
     log: crate::log_page::LogPage,
+    /// The logon actions' page (see `logon_page`).
+    logon: crate::logon_page::LogonPage,
     pub error: Option<String>,
 }
 
@@ -101,6 +103,7 @@ impl PlinkDialog {
             ports,
             options: s.clone(),
             log: crate::log_page::LogPage::for_session(None, None, Path::new("")),
+            logon: crate::logon_page::LogonPage::for_session(None, None, Vec::new()),
             error: None,
         }
     }
@@ -115,6 +118,23 @@ impl PlinkDialog {
     ) -> PlinkDialog {
         self.log = crate::log_page::LogPage::for_session(own, folder, data_dir);
         self
+    }
+
+    /// The logon actions: the session's own (`None`: its folder's), the
+    /// folder's, and the credential sets there are.
+    pub fn with_logon(
+        mut self,
+        own: Option<native_term_config::logon::LogonActions>,
+        folder: Option<native_term_config::logon::LogonActions>,
+        sets: Vec<String>,
+    ) -> PlinkDialog {
+        self.logon = crate::logon_page::LogonPage::for_session(own, folder, sets);
+        self
+    }
+
+    /// The password store's changes that go with the logon actions.
+    pub fn logon_secrets(&self) -> crate::logon_page::Secrets {
+        self.logon.secrets()
     }
 
     /// What was written about this session (`notes.rs`).
@@ -133,6 +153,14 @@ impl PlinkDialog {
             tags: native_term_app::registry::Note::tags_from(&self.tags),
             updated_at: native_term_app::registry::now(),
         }
+    }
+
+    /// The logon actions (SecureCRT's page, see `logon_page`).
+    fn logon_ui(&mut self, ui: &mut egui::Ui) {
+        let on = self.logon.result().is_some_and(|l| l.active());
+        egui::CollapsingHeader::new(t!("plink-logon")).id_salt("plink-logon").default_open(on).show(ui, |ui| {
+            self.logon.ui(ui);
+        });
     }
 
     /// The session log (SecureCRT's page, see `log_page`).
@@ -232,6 +260,10 @@ impl PlinkDialog {
             session.putty.remove(option.key());
         }
         session.log = self.log.result().map(|l| l.to_keys()).unwrap_or_default();
+        if let Some(error) = self.logon.error() {
+            return Err(error);
+        }
+        session.logon = self.logon.result().map(|l| l.to_keys()).unwrap_or_default();
         session.check()?;
         Ok(session)
     }
@@ -390,6 +422,7 @@ impl PlinkDialog {
                 });
                 self.putty_ui(ui);
                 self.log_ui(ui);
+                self.logon_ui(ui);
                 ui.weak(t!("plink-note"));
                 if let Some(alias) = &self.alias {
                     ui.weak(t!("plink-alias-kept", alias = alias.as_str()));

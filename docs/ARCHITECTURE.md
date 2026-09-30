@@ -613,7 +613,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | File transfer / "SFTP session" | Built-in files window over `ssh -s sftp` (browse, up/download, drag in, edit in place, any file name encoding) | ✅ |
 | Local shell command: Pre-connect | `NativeTermPreConnect` (shim runs it before `ssh`); plink: `-preconnectcommand` | ✅ |
 | Description | one line in `NativeTermNote`; multi-line in `state.db` | ✅ |
-| **Logon Actions**: Automate logon (Expect/Send table) | The table is worked through by the shim for every kind of session (see "Logon actions"); the page to edit it is not built yet. Also: passwords and keyboard-interactive via askpass (SSH); commands after login via the `LocalCommand` signal (SSH) or a delay (plink) | 🟡 |
+| **Logon Actions**: Automate logon (Expect/Send table) | Built: SecureCRT's page in the session options, a folder's and the non-SSH dialog, worked through by the shim for every kind of session (see "Logon actions"). Remote command is ssh's `RemoteCommand` (Connection). Not: logon scripts (no script engine) | ✅ |
 | Send initial carriage return | Injected Enter after login | ✅ |
 | Logon script (VBScript/Python) | No scripting API over terminal output (not built; the output is reachable in NativeTerm's ssh) | ❌ |
 | Remote command | `-o RemoteCommand` | ✅ |
@@ -3189,6 +3189,20 @@ credentials), 2026-10-01.
   its own saved password. Secrets are read from the store when typed and
   written nowhere (typed text is not output, so not in the session log).
   Anything else after a backslash is typed as it is.
+- **The page** (`logon_page.rs`), as SecureCRT's: "Automate logon",
+  "Send initial carriage return", the table (Expect, Send, Hide, CR,
+  Credentials; a hidden Send shown as dots) with ▲ ▼, Add…, Edit…,
+  Delete, and the row's editor below it with the escapes listed, as its
+  "Expect/Send Properties" dialog. In a host's session options, a
+  folder's (its sessions' default), and the non-SSH session dialog; a
+  session uses its folder's set or a whole one of its own. A hidden
+  Send's text is never read back into the page: editing such a row keeps
+  it unless something new is typed. Saving stores new hidden Sends first,
+  then writes the configuration, then removes the entries no row names
+  any more; a session taking over its folder's set gets copies of the
+  folder's hidden Sends under ids of its own. The options dialog sizes
+  NativeTerm's pages to the window's height (a 640-pixel window cut off
+  the title and the buttons before).
 - **Left out, said**: a hidden Send not stored here, no password or user
   for `\w`/`\s`, an empty clipboard: the piece is skipped, the rest of
   the row and the rows after go on, and NativeTerm shows a notice
@@ -3200,6 +3214,11 @@ credentials), 2026-10-01.
   and `exit` typed in that order, a missing hidden Send skipped with a
   notice); live on deepin (NativeTerm's ssh to 127.0.0.1, WezTerm): `$`
   → `echo one-\s` typed as `echo one-deepin`, the next `$` → `echo two`.
+  Through the page on deepin: two rows added (one hidden), saved (the
+  configuration names the hidden one as `secret:<id>`, its text in the
+  desktop's Secret Service), connected: `echo hi-deepin`, then the
+  hidden `echo hidden-ok` typed; set back to the folder's: the keys and
+  the store's entry gone.
 
 ### Host keys in NativeTerm's window
 

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use native_term_app::actions::{CloseSet, Closing, SessionCommand};
 use native_term_app::tab_menu::MenuRequest;
 use native_term_app::{t, Core, SessionView, State};
+use native_term_config::logon::LogonActions;
 use native_term_config::ops::{Editor, HostDraft};
 use native_term_config::session_log::LogSettings;
 use native_term_config::write::Writer;
@@ -756,7 +757,10 @@ impl App {
             TreeAction::NewPlink(file) => {
                 let label = self.folder_label(&file);
                 let folder_log = self.tree.folders().find(|f| f.file == file).and_then(LogSettings::of_folder);
-                let dialog = PlinkDialog::new_session(file, &label).with_log(None, folder_log, &self.data_dir);
+                let folder_logon = self.tree.folders().find(|f| f.file == file).and_then(LogonActions::of_folder);
+                let dialog = PlinkDialog::new_session(file, &label)
+                    .with_log(None, folder_log, &self.data_dir)
+                    .with_logon(None, folder_logon, crate::credential_sets::names());
                 self.dialog = Some(Dialog::Plink(Box::new(dialog)));
             }
             TreeAction::Edit(alias) => {
@@ -765,6 +769,11 @@ impl App {
                         Some(session) => Dialog::Plink(Box::new(
                             PlinkDialog::edit(session)
                                 .with_log(LogSettings::own(host), LogSettings::of_folder(tree_folder), &self.data_dir)
+                                .with_logon(
+                                    LogonActions::own(host),
+                                    LogonActions::of_folder(tree_folder),
+                                    crate::credential_sets::names(),
+                                )
                                 .with_note(self.note_of(host)),
                         )),
                         None => {
@@ -801,9 +810,15 @@ impl App {
                                 LogSettings::of_folder(folder),
                                 &self.data_dir,
                             );
+                            let logon = crate::logon_page::LogonPage::for_session(
+                                LogonActions::own(host),
+                                LogonActions::of_folder(folder),
+                                crate::credential_sets::names(),
+                            );
                             let dialog =
                                 OptionsDialog::new(target, host.label(), &values, effective, self.editor.ssh())
-                                    .with_log(log);
+                                    .with_log(log)
+                                    .with_logon(logon);
                             self.dialog = Some(Dialog::Options(Box::new(dialog)));
                         }
                         Err(e) => self.notices.push(e.to_string()),
@@ -829,9 +844,14 @@ impl App {
                             self.tree.folders().find(|f| f.file == file).and_then(LogSettings::of_folder),
                             &self.data_dir,
                         );
+                        let logon = crate::logon_page::LogonPage::for_folder(
+                            self.tree.folders().find(|f| f.file == file).and_then(LogonActions::of_folder),
+                            crate::credential_sets::names(),
+                        );
                         let target = OptionsTarget::Folder(file);
-                        let dialog =
-                            OptionsDialog::new(target, &label, &values, effective, self.editor.ssh()).with_log(log);
+                        let dialog = OptionsDialog::new(target, &label, &values, effective, self.editor.ssh())
+                            .with_log(log)
+                            .with_logon(logon);
                         self.dialog = Some(Dialog::Options(Box::new(dialog)));
                     }
                     Err(e) => self.notices.push(e.to_string()),
@@ -1559,34 +1579,45 @@ impl App {
                 Outcome::Cancel => true,
                 Outcome::Submit(()) => {
                     let note = d.note_now();
-                    let result = match (d.alias.clone(), d.file.clone()) {
-                        (Some(alias), _) => match self.tree.find(&alias) {
-                            Some((_, host)) => d.session(&alias).and_then(|s| {
-                                self.editor
-                                    .update_plink(host, &s)
-                                    .map(|()| Some(alias.clone()))
-                                    .map_err(|e| e.to_string())
-                            }),
-                            None => Err(t!("error-host-gone", alias = alias.as_str())),
-                        },
-                        (None, Some(file)) => {
-                            let folder = self
-                                .tree
-                                .folders()
-                                .find(|f| f.file == file)
-                                .map(|f| f.name.clone())
-                                .unwrap_or_default();
-                            let name =
-                                native_term_config::alias::unique(&d.name_base(), &folder, &self.tree.taken_aliases());
-                            d.session(&name).and_then(|mut s| {
-                                s.id = Some(native_term_config::new_id());
-                                self.editor.add_plink(&file, &s).map(|()| Some(name)).map_err(|e| e.to_string())
-                            })
+                    let secrets = d.logon_secrets();
+                    let stored = crate::logon_page::store_secrets(&secrets)
+                        .map_err(|e| t!("logon-secret-failed", error = e.to_string()));
+                    let result = if let Err(e) = stored {
+                        Err(e)
+                    } else {
+                        match (d.alias.clone(), d.file.clone()) {
+                            (Some(alias), _) => match self.tree.find(&alias) {
+                                Some((_, host)) => d.session(&alias).and_then(|s| {
+                                    self.editor
+                                        .update_plink(host, &s)
+                                        .map(|()| Some(alias.clone()))
+                                        .map_err(|e| e.to_string())
+                                }),
+                                None => Err(t!("error-host-gone", alias = alias.as_str())),
+                            },
+                            (None, Some(file)) => {
+                                let folder = self
+                                    .tree
+                                    .folders()
+                                    .find(|f| f.file == file)
+                                    .map(|f| f.name.clone())
+                                    .unwrap_or_default();
+                                let name = native_term_config::alias::unique(
+                                    &d.name_base(),
+                                    &folder,
+                                    &self.tree.taken_aliases(),
+                                );
+                                d.session(&name).and_then(|mut s| {
+                                    s.id = Some(native_term_config::new_id());
+                                    self.editor.add_plink(&file, &s).map(|()| Some(name)).map_err(|e| e.to_string())
+                                })
+                            }
+                            (None, None) => Ok(None),
                         }
-                        (None, None) => Ok(None),
                     };
                     match result {
                         Ok(alias) => {
+                            crate::logon_page::remove_secrets(&secrets);
                             if let Some(alias) = alias {
                                 self.reload();
                                 self.save_note(&alias, note);
@@ -1684,35 +1715,54 @@ impl App {
                 Outcome::Cancel => true,
                 Outcome::Submit(values) => {
                     let log = d.log_result();
-                    let result = match &d.target {
-                        OptionsTarget::Host(alias) => match self.tree.find(alias) {
-                            Some((_, host)) => self
-                                .editor
-                                .set_host_options(host, &values)
-                                .and_then(|()| match &log {
-                                    Some(log) => self.editor.set_host_log(host, log.as_ref()),
-                                    None => Ok(()),
-                                })
-                                .map_err(|e| e.to_string()),
-                            None => Err(t!("error-host-gone", alias = alias.as_str())),
-                        },
-                        OptionsTarget::Folder(file) => match self.editor.set_folder_options(file, &values) {
-                            Ok(own) => {
-                                if !own.is_empty() {
-                                    self.notices.push(t!("folder-options-own-tag", hosts = own.join(", ")));
-                                }
-                                match &log {
-                                    Some(log) => {
-                                        self.editor.set_folder_log(file, log.as_ref()).map_err(|e| e.to_string())
+                    let logon = d.logon_result();
+                    let secrets = d.logon_secrets().unwrap_or_default();
+                    let stored = crate::logon_page::store_secrets(&secrets)
+                        .map_err(|e| t!("logon-secret-failed", error = e.to_string()));
+                    let result = if let Err(e) = stored {
+                        Err(e)
+                    } else {
+                        match &d.target {
+                            OptionsTarget::Host(alias) => match self.tree.find(alias) {
+                                Some((_, host)) => self
+                                    .editor
+                                    .set_host_options(host, &values)
+                                    .and_then(|()| match &log {
+                                        Some(log) => self.editor.set_host_log(host, log.as_ref()),
+                                        None => Ok(()),
+                                    })
+                                    .and_then(|()| match &logon {
+                                        Some(logon) => self.editor.set_host_logon(host, logon.as_ref()),
+                                        None => Ok(()),
+                                    })
+                                    .map_err(|e| e.to_string()),
+                                None => Err(t!("error-host-gone", alias = alias.as_str())),
+                            },
+                            OptionsTarget::Folder(file) => match self.editor.set_folder_options(file, &values) {
+                                Ok(own) => {
+                                    if !own.is_empty() {
+                                        self.notices.push(t!("folder-options-own-tag", hosts = own.join(", ")));
                                     }
-                                    None => Ok(()),
+                                    let written = match &log {
+                                        Some(log) => self.editor.set_folder_log(file, log.as_ref()),
+                                        None => Ok(()),
+                                    };
+                                    written
+                                        .and_then(|()| match &logon {
+                                            Some(logon) => self.editor.set_folder_logon(file, logon.as_ref()),
+                                            None => Ok(()),
+                                        })
+                                        .map_err(|e| e.to_string())
                                 }
-                            }
-                            Err(e) => Err(e.to_string()),
-                        },
+                                Err(e) => Err(e.to_string()),
+                            },
+                        }
                     };
                     match result {
-                        Ok(()) => true,
+                        Ok(()) => {
+                            crate::logon_page::remove_secrets(&secrets);
+                            true
+                        }
                         Err(e) => {
                             d.error = Some(e);
                             false

@@ -2541,10 +2541,12 @@ one needed a terminal that can move a tab, which WezTerm can.
   - [x] Worked through by the shim for SSH, Telnet and serial sessions:
         Expect in the output, Send typed, SecureCRT's escapes, credential
         sets for `\s`/`\w` (see ARCHITECTURE "Logon actions")
-  - [ ] The page in the session options and the non-SSH dialog
+  - [x] The page in the session options (a host's, a folder's) and the
+        non-SSH dialog, as SecureCRT's, with the row editor and its
+        escapes; tried on deepin from adding rows to typing them
   - [ ] Credential sets with a user name
   - [ ] SecureCRT's own tables imported
-  - [ ] Remote command (ssh's `RemoteCommand`) on the page
+  - [x] Remote command: ssh's `RemoteCommand`, already under Connection
 - [ ] Per-session key mapping for SSH sessions
 - [ ] Keyword highlighting (it would alter what the server sent)
 - [ ] "Send to New Window" on WezTerm (`wezterm cli

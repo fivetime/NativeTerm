@@ -13,6 +13,7 @@ use native_term_os::credentials::{self, Saved};
 
 use crate::dialogs::Outcome;
 use crate::log_page::LogPage;
+use crate::logon_page::LogonPage;
 
 /// What the options are for.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,6 +57,14 @@ impl ProxySecret {
     }
 }
 
+/// Which NativeTerm page is shown instead of ssh's categories.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Extra {
+    None,
+    Log,
+    Logon,
+}
+
 pub struct OptionsDialog {
     pub target: OptionsTarget,
     proxy: ProxyChoice,
@@ -78,7 +87,9 @@ pub struct OptionsDialog {
     /// The session log's page (NativeTerm's own settings, not ssh's).
     log: Option<LogPage>,
     /// That page is the one shown.
-    log_shown: bool,
+    logon: Option<LogonPage>,
+    /// A NativeTerm page shown instead of ssh's categories.
+    shown: Extra,
     pub error: Option<String>,
 }
 
@@ -195,7 +206,8 @@ impl OptionsDialog {
             names: HashMap::new(),
             ssh: ssh.to_path_buf(),
             log: None,
-            log_shown: false,
+            logon: None,
+            shown: Extra::None,
             error: None,
         }
     }
@@ -204,6 +216,23 @@ impl OptionsDialog {
     pub fn with_log(mut self, page: LogPage) -> OptionsDialog {
         self.log = Some(page);
         self
+    }
+
+    /// With the logon actions' page.
+    pub fn with_logon(mut self, page: LogonPage) -> OptionsDialog {
+        self.logon = Some(page);
+        self
+    }
+
+    /// The logon actions to write: `None` without that page; `Some(None)`
+    /// for none of the host's (folder's) own.
+    pub fn logon_result(&self) -> Option<Option<native_term_config::logon::LogonActions>> {
+        self.logon.as_ref().map(LogonPage::result)
+    }
+
+    /// The password store's changes that go with the logon actions.
+    pub fn logon_secrets(&self) -> Option<crate::logon_page::Secrets> {
+        self.logon.as_ref().map(LogonPage::secrets)
     }
 
     /// The session log's settings to write: `None` without that page;
@@ -451,6 +480,9 @@ impl OptionsDialog {
             }
         };
         let folder = matches!(self.target, OptionsTarget::Folder(_));
+        // (NativeTerm's own pages are long: what the window has room for,
+        // the title, the note and the buttons kept in sight)
+        let room = (ctx.content_rect().height() - 190.0).clamp(160.0, 560.0);
         egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
@@ -461,22 +493,35 @@ impl OptionsDialog {
                     ui.vertical(|ui| {
                         ui.set_width(120.0);
                         for category in Category::ALL {
-                            let chosen = self.category == category && !self.log_shown;
+                            let chosen = self.category == category && self.shown == Extra::None;
                             if ui.selectable_label(chosen, category_name(category)).clicked() {
                                 self.category = category;
-                                self.log_shown = false;
+                                self.shown = Extra::None;
                             }
                         }
-                        if self.log.is_some() && ui.selectable_label(self.log_shown, t!("options-log")).clicked() {
-                            self.log_shown = true;
+                        if self.log.is_some()
+                            && ui.selectable_label(self.shown == Extra::Log, t!("options-log")).clicked()
+                        {
+                            self.shown = Extra::Log;
+                        }
+                        if self.logon.is_some()
+                            && ui.selectable_label(self.shown == Extra::Logon, t!("options-logon")).clicked()
+                        {
+                            self.shown = Extra::Logon;
                         }
                     });
                     ui.add_space(12.0);
                     ui.vertical(|ui| {
                         ui.set_width(500.0);
-                        ui.set_min_height(300.0);
-                        if let (true, Some(page)) = (self.log_shown, self.log.as_mut()) {
-                            egui::ScrollArea::vertical().id_salt("log-page").max_height(560.0).show(ui, |ui| {
+                        ui.set_min_height(300.0_f32.min(room));
+                        if let (Extra::Logon, Some(page)) = (self.shown, self.logon.as_mut()) {
+                            egui::ScrollArea::vertical().id_salt("logon-page").max_height(room).show(ui, |ui| {
+                                page.ui(ui);
+                            });
+                            return;
+                        }
+                        if let (Extra::Log, Some(page)) = (self.shown, self.log.as_mut()) {
+                            egui::ScrollArea::vertical().id_salt("log-page").max_height(room).show(ui, |ui| {
                                 page.ui(ui);
                             });
                             return;
@@ -511,13 +556,17 @@ impl OptionsDialog {
                 });
                 ui.separator();
                 // the log page's settings are NativeTerm's, not ssh's
-                ui.weak(if self.log_shown { t!("options-log-note") } else { note });
+                ui.weak(match self.shown {
+                    Extra::Log => t!("options-log-note"),
+                    Extra::Logon => t!("options-logon-note"),
+                    Extra::None => note,
+                });
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
                 }
                 ui.horizontal(|ui| {
                     if ui.button(t!("button-save")).clicked() {
-                        match self.proxy_error() {
+                        match self.proxy_error().or_else(|| self.logon.as_ref().and_then(LogonPage::error)) {
                             Some(error) => self.error = Some(error),
                             None => outcome = Outcome::Submit(self.values()),
                         }
