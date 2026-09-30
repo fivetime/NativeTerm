@@ -2544,7 +2544,9 @@ one needed a terminal that can move a tab, which WezTerm can.
   - [x] The page in the session options (a host's, a folder's) and the
         non-SSH dialog, as SecureCRT's, with the row editor and its
         escapes; tried on deepin from adding rows to typing them
-  - [ ] Credential sets with a user name
+  - [x] Credential sets with a user name (optional; `\s` types it, the
+        ssh login's user stays the ssh config's; a password saved from
+        the password window keeps it)
   - [ ] SecureCRT's own tables imported
   - [x] Remote command: ssh's `RemoteCommand`, already under Connection
 - [ ] Per-session key mapping for SSH sessions

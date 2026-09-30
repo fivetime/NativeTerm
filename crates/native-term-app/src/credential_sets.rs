@@ -3,7 +3,9 @@
 //! that names the set, or whose folder does. This dialog adds sets,
 //! changes and removes their passwords, and says how many hosts use each;
 //! hosts and folders pick a set in the host dialog and the folder menu.
-//! A set holds a password only: the user is the ssh config's.
+//! A set holds a password and, if given, a user name, as SecureCRT's saved
+//! credentials: the logon actions' `\s` types it (`\w` the password).
+//! The ssh login's user is still the ssh config's.
 
 use std::collections::HashMap;
 
@@ -37,10 +39,10 @@ pub fn usage(tree: &SessionTree) -> HashMap<String, usize> {
     used
 }
 
-/// Stores a set's password (a new set, or a new password: the refused mark
-/// goes with the old one).
-fn save(name: &str, secret: String) -> std::io::Result<()> {
-    let saved = Saved { user: String::new(), secret, comment: String::new() };
+/// Stores a set's password and user name (a new set, or a new password:
+/// the refused mark goes with the old one).
+fn save(name: &str, user: &str, secret: String) -> std::io::Result<()> {
+    let saved = Saved { user: user.trim().to_string(), secret, comment: String::new() };
     let result = credentials::write(&password::set_entry(name), &saved);
     drop(saved);
     result
@@ -50,6 +52,14 @@ struct Row {
     name: String,
     refused: bool,
     typed: String,
+    /// The user name as it is being edited, and as it is kept.
+    user: String,
+    kept_user: String,
+}
+
+/// A set's user name changed alone: its password and note stay.
+fn save_user(name: &str, user: &str) -> std::io::Result<bool> {
+    credentials::update(&password::set_entry(name), |saved| saved.user = user.trim().to_string())
 }
 
 pub struct CredentialSetsDialog {
@@ -58,6 +68,7 @@ pub struct CredentialSetsDialog {
     /// Sets named in the ssh config but not in Credential Manager.
     missing: Vec<String>,
     new_name: String,
+    new_user: String,
     new_password: String,
     /// The set whose removal waits for a second click.
     removing: Option<String>,
@@ -71,6 +82,7 @@ impl CredentialSetsDialog {
             used: usage(tree),
             missing: Vec::new(),
             new_name: String::new(),
+            new_user: String::new(),
             new_password: String::new(),
             removing: None,
             message: None,
@@ -83,9 +95,10 @@ impl CredentialSetsDialog {
         self.rows = names()
             .into_iter()
             .map(|name| {
-                let refused =
-                    credentials::read(&password::set_entry(&name)).ok().flatten().is_some_and(|s| s.comment == REFUSED);
-                Row { name, refused, typed: String::new() }
+                let saved = credentials::read(&password::set_entry(&name)).ok().flatten();
+                let refused = saved.as_ref().is_some_and(|s| s.comment == REFUSED);
+                let user = saved.map(|s| s.user).unwrap_or_default();
+                Row { name, refused, typed: String::new(), kept_user: user.clone(), user }
             })
             .collect();
         let mut missing: Vec<String> =
@@ -110,7 +123,7 @@ impl CredentialSetsDialog {
                     ui.weak(t!("cred-sets-none"));
                 }
                 let mut changed = false;
-                egui::Grid::new("cred-sets").num_columns(4).spacing([10.0, 6.0]).show(ui, |ui| {
+                egui::Grid::new("cred-sets").num_columns(5).spacing([10.0, 6.0]).show(ui, |ui| {
                     for row in &mut self.rows {
                         ui.strong(row.name.as_str());
                         let used = self.used.get(&row.name).copied().unwrap_or(0);
@@ -119,6 +132,10 @@ impl CredentialSetsDialog {
                         } else {
                             ui.weak(t!("cred-sets-used", count = used));
                         }
+                        ui.add_sized(
+                            [120.0, 22.0],
+                            egui::TextEdit::singleline(&mut row.user).hint_text(t!("cred-sets-user-hint")),
+                        );
                         // a set size: in a grid cell the desired width isn't kept
                         let field = ui.add_sized(
                             [180.0, 22.0],
@@ -128,8 +145,14 @@ impl CredentialSetsDialog {
                         );
                         no_ime(&field);
                         ui.horizontal(|ui| {
-                            if ui.add_enabled(!row.typed.is_empty(), egui::Button::new(t!("password-save"))).clicked() {
-                                self.message = Some(match save(&row.name, std::mem::take(&mut row.typed)) {
+                            let user_changed = row.user.trim() != row.kept_user;
+                            let ready = !row.typed.is_empty() || user_changed;
+                            if ui.add_enabled(ready, egui::Button::new(t!("password-save"))).clicked() {
+                                let saved = match row.typed.is_empty() {
+                                    true => save_user(&row.name, &row.user).map(|_| ()),
+                                    false => save(&row.name, &row.user, std::mem::take(&mut row.typed)),
+                                };
+                                self.message = Some(match saved {
                                     Ok(()) => (t!("cred-sets-saved", name = row.name.as_str()), false),
                                     Err(e) => (e.to_string(), true),
                                 });
@@ -173,6 +196,11 @@ impl CredentialSetsDialog {
                             .hint_text(t!("cred-sets-name-hint"))
                             .desired_width(140.0),
                     );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_user)
+                            .hint_text(t!("cred-sets-user-hint"))
+                            .desired_width(120.0),
+                    );
                     let field = ui.add(
                         egui::TextEdit::singleline(&mut self.new_password)
                             .password(true)
@@ -188,9 +216,10 @@ impl CredentialSetsDialog {
                         } else if self.rows.iter().any(|r| r.name == name) {
                             (t!("cred-sets-exists", name = name.as_str()), true)
                         } else {
-                            match save(&name, std::mem::take(&mut self.new_password)) {
+                            match save(&name, &self.new_user, std::mem::take(&mut self.new_password)) {
                                 Ok(()) => {
                                     self.new_name.clear();
+                                    self.new_user.clear();
                                     changed = true;
                                     (t!("cred-sets-added", name = name.as_str()), false)
                                 }

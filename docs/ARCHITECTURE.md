@@ -2426,9 +2426,12 @@ rack, every device behind a jump host). A credential set is one saved
 password that several hosts use, like SecureCRT's "Credentials":
 
 - **Entry**: `NativeTerm/cred/<name>` in Credential Manager, next to the
-  per-account entries; a set holds a password only. The user is the ssh
-  config's, as always (a folder sets it for its hosts with `User` in the
-  folder options), so there is no second source for the account.
+  per-account entries: a password and, if given, a user name (2026-10-01,
+  as SecureCRT's credentials). The ssh login's user is the ssh config's,
+  as always (a folder sets it for its hosts with `User` in the folder
+  options), so there is no second source for the account; the set's user
+  name is what logon actions type for `\s`. A password given in the
+  password window with "Save" keeps the set's user name as it is.
 - **Which hosts**: `NativeTermCredential <name>` on a host, or on a
   folder for its hosts; `none` on a host keeps its folder's set from it.
   A set wins over the account's own saved password. A name is 1–64
@@ -2449,8 +2452,10 @@ password that several hosts use, like SecureCRT's "Credentials":
   "Credential Set" sets the folder's default. "Credential Sets…" (in the
   settings and the folder menu) lists the sets (names only are read to
   list them: `CredEnumerateW` with the prefix), how many hosts use each,
-  a refused mark, a new password field, Remove (asked twice, with the
-  count), a new set, and sets the ssh config names that have no entry.
+  a refused mark, the user name (optional; saved alone, the password
+  kept), a new password field, Remove (asked twice, with the count), a
+  new set (name, user name, password), and sets the ssh config names
+  that have no entry.
 - Verified: unit tests (entry names, which set a host uses: its own,
   its folder's, `none`; name rules; `ops` writes and refuses bad names;
   listing by prefix); a shim test with the fake ssh (a folder's set is

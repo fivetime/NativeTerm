@@ -265,7 +265,13 @@ impl Attempt {
     pub fn logged_in(&self) {
         let Some(server) = server() else { return };
         let Some(secret) = armed(&server.armed).keep.take() else { return };
-        let saved = credentials::Saved { user: self.target.user.clone(), secret, comment: String::new() };
+        // (a credential set keeps its own user name: the logon actions'
+        // `\s`, not this login's)
+        let user = match &self.target.set {
+            Some(_) => credentials::read(&self.target.name).ok().flatten().map(|s| s.user).unwrap_or_default(),
+            None => self.target.user.clone(),
+        };
+        let saved = credentials::Saved { user, secret, comment: String::new() };
         if let Err(e) = credentials::write(&self.target.name, &saved) {
             println!("\r\n{}", crate::t!("saved-password-not-kept", error = e.to_string()));
         }
