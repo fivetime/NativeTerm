@@ -3193,12 +3193,16 @@ for right after a click below the clicked, docked main window).
   `::1`: the new host's fingerprint was the server's ED25519 key, Save
   logged in with it saved, a planted key showed both fingerprints and
   `known_hosts:1` and was replaced, Once left no key after the session,
-  Cancel refused. On top in every round (8 of 8); the keyboard focus in 6
-  of 8. ukwm is a mutter fork: a newly shown window without
-  `_NET_WM_USER_TIME` takes the focus, and so does the terminal's tab
-  window that NativeTerm opens at the same moment. Whichever is shown last
-  keeps it, and in the other two rounds that was the new tab or the main
-  window. The window's buttons work without the focus.
+  Cancel refused. On top in every round; the keyboard focus at first in
+  6 of 8. The requests on the root window showed why: every question (and
+  every raise after the terminal came forward) also brought NativeTerm's
+  main window out (`shell::ask` did so for all but a few requests), its
+  request without a time, handled last. The password and host key
+  questions, which have windows of their own, and the silent "set user"
+  now leave the main window where it is: 16 of 16 rounds with the focus
+  on the question, the main window asked for in none. (The terminal's
+  window still takes the focus once as it comes forward; the raise that
+  follows gives it back.)
 
 ### Changes made outside NativeTerm
 

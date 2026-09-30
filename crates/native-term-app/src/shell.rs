@@ -15,10 +15,19 @@ static REQUESTS: Mutex<Vec<MenuRequest>> = Mutex::new(Vec::new());
 
 /// What the tab menu asked for (its dialogs live in the main window).
 pub fn ask(request: MenuRequest) {
-    // (what is asked in a window of its own leaves the main window where
-    // it is)
-    let own_window =
-        matches!(request, MenuRequest::PasteQuotation(_) | MenuRequest::Find(_) | MenuRequest::TabTitle { .. });
+    // (what is asked in a window of its own, or not asked at all, leaves
+    // the main window where it is: brought out with a password or host key
+    // window, it took the focus from it, the main window's request coming
+    // last — seen on UKUI, 2026-09-30)
+    let own_window = matches!(
+        request,
+        MenuRequest::PasteQuotation(_)
+            | MenuRequest::Find(_)
+            | MenuRequest::TabTitle { .. }
+            | MenuRequest::Password { .. }
+            | MenuRequest::HostKey { .. }
+            | MenuRequest::SetUser { .. }
+    );
     REQUESTS.lock().unwrap_or_else(|e| e.into_inner()).push(request);
     if !own_window {
         show_main();
