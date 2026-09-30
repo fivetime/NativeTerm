@@ -2167,6 +2167,15 @@
       drawing of a title bar for a window inside a window) is not taken:
       no window of the desktop has it, and it would take Kvantum's
       renderer. See ARCHITECTURE "LXQt's look"
+- [ ] UKUI (ukwm, a mutter fork): the host key window is always on top
+      but had the keyboard focus in 6 of 8 rounds (2026-09-30). A new
+      session's terminal window is shown at the same moment, and ukwm gives
+      the focus to whichever new window comes last. Enter and Esc then go
+      to that window until the dialog is clicked; its buttons work. Measured
+      on the way: ukwm honours our `_NET_ACTIVE_WINDOW` (application, the
+      server's time) once the window is shown; its idle screensaver takes
+      the focus from everything after a minute
+      (`org.ukui.session idle-delay`), which spoils such measurements
 - [x] LXQt: the window had a close button only (2026-09-29). gsettings'
       GNOME key answers its schema's `appmenu:close` where no GNOME runs;
       GTK, which Chrome follows for the buttons on a Qt desktop too

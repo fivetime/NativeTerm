@@ -3189,6 +3189,16 @@ for right after a click below the clicked, docked main window).
   kept the key during the session and none after; Cancel left the wrong
   key and the connection refused; three rounds from the docked main
   window, the window on top and active each time.
+- Verified on UKUI (Ubuntu Kylin 26.04, X11, ukwm, 2026-09-30) with
+  `::1`: the new host's fingerprint was the server's ED25519 key, Save
+  logged in with it saved, a planted key showed both fingerprints and
+  `known_hosts:1` and was replaced, Once left no key after the session,
+  Cancel refused. On top in every round (8 of 8); the keyboard focus in 6
+  of 8. ukwm is a mutter fork: a newly shown window without
+  `_NET_WM_USER_TIME` takes the focus, and so does the terminal's tab
+  window that NativeTerm opens at the same moment. Whichever is shown last
+  keeps it, and in the other two rounds that was the new tab or the main
+  window. The window's buttons work without the focus.
 
 ### Changes made outside NativeTerm
 
