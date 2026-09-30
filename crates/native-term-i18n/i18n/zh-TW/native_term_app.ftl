@@ -495,6 +495,7 @@ host-persistent-log = 記錄在 ~/.nativeterm/logs
 menu-folder-persistent = 在伺服器上保持工作階段
 host-persistent = 工作階段保持在伺服器上（{ $program }）
 notice-password-refused = { $label }：伺服器拒絕了儲存的密碼。在你儲存新密碼之前不會再使用它（編輯該主機；如果用的是認證集，到「認證集…」裡更新）。
+notice-logon = { $label }：{ $text }
 password-title = 儲存的密碼（可選）
 password-none = 沒有儲存密碼：ssh 會在分頁中詢問。
 password-saved = 已儲存在 Windows 認證管理員（{ $target }）；每次連線時回答 ssh 對此帳戶的密碼提示一次。

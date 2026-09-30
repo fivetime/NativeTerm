@@ -27,7 +27,10 @@
 //!   after the first connection.
 //! - `FAKE_SSH_FEED=<text>`: while it runs, writes `<text>` and a line end
 //!   every 100 ms into the session log's pipe (`NATIVETERM_LOG`), as an
-//!   output record, like NativeTerm's ssh.
+//!   output record, like NativeTerm's ssh. Parts split by `|` are written
+//!   one after the other, 300 ms apart and without a line end (a prompt),
+//!   then the last one again. With `FAKE_SSH_ECHO=1` it feeds while it
+//!   logs what is typed.
 
 #[cfg(windows)]
 mod on_windows {
@@ -138,7 +141,12 @@ mod on_windows {
                 .unwrap_or(-1);
             std::process::exit(code);
         }
-        if std::env::var("FAKE_SSH_ECHO").as_deref() == Ok("1") {
+        let ms = env_num("FAKE_SSH_MS", 200) as u64;
+        let echo = std::env::var("FAKE_SSH_ECHO").as_deref() == Ok("1");
+        if let (true, Ok(text), Ok(handle)) = (echo, std::env::var("FAKE_SSH_FEED"), std::env::var("NATIVETERM_LOG")) {
+            std::thread::spawn(move || feed(&text, &handle, Duration::from_millis(ms)));
+        }
+        if echo {
             // like Windows OpenSSH: key records straight from the console input
             // buffer, a line per Enter, until "exit"
             for text in console_lines() {
@@ -152,9 +160,9 @@ mod on_windows {
                 }
             }
         }
-        let ms = env_num("FAKE_SSH_MS", 200) as u64;
-        match (std::env::var("FAKE_SSH_FEED"), std::env::var("NATIVETERM_LOG")) {
-            (Ok(text), Ok(handle)) => feed(&text, &handle, Duration::from_millis(ms)),
+        match (echo, std::env::var("FAKE_SSH_FEED"), std::env::var("NATIVETERM_LOG")) {
+            (true, _, _) => {}
+            (false, Ok(text), Ok(handle)) => feed(&text, &handle, Duration::from_millis(ms)),
             _ => std::thread::sleep(Duration::from_millis(ms)),
         }
         std::process::exit(env_num("FAKE_SSH_CODE", 0) as i32);
@@ -167,15 +175,24 @@ mod on_windows {
         // SAFETY: the handle is the pipe's write end this process
         // inherited, open for its whole life and used only here.
         let mut pipe = unsafe { std::fs::File::from_raw_handle(raw as *mut std::ffi::c_void) };
-        let body = format!("{text}\r\n");
-        let mut record = vec![b'O'];
-        record.extend_from_slice(&(body.len() as u32).to_le_bytes());
-        record.extend_from_slice(body.as_bytes());
+        let record = |body: &str| {
+            let mut record = vec![b'O'];
+            record.extend_from_slice(&(body.len() as u32).to_le_bytes());
+            record.extend_from_slice(body.as_bytes());
+            record
+        };
+        let parts: Vec<&str> = text.split('|').collect();
+        let (bodies, pause) = match parts.len() {
+            1 => (vec![format!("{text}\r\n")], Duration::from_millis(100)),
+            _ => (parts.iter().map(|p| p.to_string()).collect(), Duration::from_millis(300)),
+        };
         let until = std::time::Instant::now() + how_long;
         let mut result = Ok(());
+        let mut next = 0;
         while std::time::Instant::now() < until {
-            result = result.and(pipe.write_all(&record));
-            std::thread::sleep(Duration::from_millis(100));
+            result = result.and(pipe.write_all(&record(&bodies[next])));
+            next = (next + 1).min(bodies.len() - 1);
+            std::thread::sleep(pause);
         }
         if let Ok(log) = std::env::var("FAKE_SSH_LOG") {
             if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) {

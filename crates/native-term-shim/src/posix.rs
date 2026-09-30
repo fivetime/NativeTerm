@@ -309,9 +309,36 @@ pub fn read_line(prompt: &str, echo: bool) -> io::Result<String> {
     Ok(line)
 }
 
-/// Typing into the session is the terminal backend's on this system.
-pub fn inject(_text: &str, _enter: bool) -> io::Result<()> {
-    Err(io::Error::new(io::ErrorKind::Unsupported, "no console input to write to"))
+/// Type `text` into this tab (then Enter if asked). ssh shares the
+/// terminal with the shim here, so the terminal types it: WezTerm's
+/// `send-text --no-paste` into this pane (`WEZTERM_PANE`, the `wezterm`
+/// beside the GUI that started the pane), the text on its standard input,
+/// never in its arguments (a password would show in the process list).
+pub fn inject(text: &str, enter: bool) -> io::Result<()> {
+    use std::process::{Command, Stdio};
+    let pane = std::env::var("WEZTERM_PANE")
+        .map_err(|_| io::Error::new(io::ErrorKind::Unsupported, "not in a WezTerm pane"))?;
+    let beside = std::env::var_os("WEZTERM_EXECUTABLE_DIR").map(|dir| std::path::PathBuf::from(dir).join("wezterm"));
+    let program = beside.filter(|p| p.is_file()).unwrap_or_else(|| "wezterm".into());
+    let mut child = Command::new(program)
+        .args(["cli", "--no-auto-start", "send-text", "--no-paste", "--pane-id", &pane])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut bytes = text.as_bytes().to_vec();
+    if enter {
+        bytes.push(b'\r');
+    }
+    let written = child.stdin.take().map(|mut stdin| stdin.write_all(&bytes));
+    bytes.fill(0);
+    written.unwrap_or(Ok(()))?;
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("wezterm send-text: {status}")))
+    }
 }
 
 /// Reads single key presses from the terminal (only while ssh isn't

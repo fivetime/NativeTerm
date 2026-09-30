@@ -99,3 +99,7 @@ connecting-as = [NativeTerm] 正在以 { $user } 重新连接…
 log-not-started = [NativeTerm] 会话日志未能开始：{ $error }
 log-not-started-file = [NativeTerm] 会话日志未能开始（{ $file }）：{ $error }
 hostkey-not-removed = [NativeTerm] 无法从 known_hosts 删除主机密钥：{ $error }
+logon-hidden-missing = 登录动作 { $row }：隐藏的发送内容没有保存在这台电脑上，已跳过。
+logon-no-user = 登录动作 { $row }：没有可用于 \s 的用户名，已跳过。
+logon-no-password = 登录动作 { $row }：没有保存可用于 \w 的密码，已跳过。
+logon-no-clipboard = 登录动作 { $row }：剪贴板里没有可用于 \v 的文字，已跳过。

@@ -67,6 +67,9 @@ pub enum ShimMessage {
     /// Sent just before `Exited`: the account's saved password was given
     /// and the login failed; it is marked refused and no longer used.
     PasswordRefused,
+    /// A logon action left something out (a hidden Send not stored on this
+    /// computer, no password saved for `\w`), said in the shim's words.
+    LogonNote { text: String },
     /// Logged in as another user than the host's (given in the password
     /// window, "Save password" ticked): the host's `User` is to be this.
     UserChanged { user: String },

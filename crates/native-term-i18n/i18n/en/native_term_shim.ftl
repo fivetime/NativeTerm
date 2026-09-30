@@ -101,3 +101,7 @@ connecting-as = [NativeTerm] Connecting again as { $user }…
 log-not-started = [NativeTerm] The session log did not start: { $error }
 log-not-started-file = [NativeTerm] The session log did not start ({ $file }): { $error }
 hostkey-not-removed = [NativeTerm] The host key could not be taken out of known_hosts: { $error }
+logon-hidden-missing = Logon action { $row }: its hidden Send is not saved on this computer; left out.
+logon-no-user = Logon action { $row }: no user name for \s; left out.
+logon-no-password = Logon action { $row }: no saved password for \w; left out.
+logon-no-clipboard = Logon action { $row }: the clipboard holds no text for \v; left out.

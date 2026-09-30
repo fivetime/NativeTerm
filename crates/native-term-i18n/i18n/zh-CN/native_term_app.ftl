@@ -495,6 +495,7 @@ host-persistent-log = 记录在 ~/.nativeterm/logs
 menu-folder-persistent = 在服务器上保持会话
 host-persistent = 会话保持在服务器上（{ $program }）
 notice-password-refused = { $label }：服务器拒绝了保存的密码。在你保存新密码之前不会再使用它（编辑该主机；如果用的是凭据集，到“凭据集…”里更新）。
+notice-logon = { $label }：{ $text }
 password-title = 保存的密码（可选）
 password-none = 没有保存密码：ssh 会在标签页中询问。
 password-saved = 已保存在 Windows 凭据管理器（{ $target }）；每次连接时回答 ssh 对此账户的密码提示一次。

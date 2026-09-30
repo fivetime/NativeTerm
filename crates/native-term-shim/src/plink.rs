@@ -124,6 +124,25 @@ enum Attempt {
     Close,
 }
 
+/// What a non-SSH session's logon actions need: its user, and the saved
+/// password of that account (kept as an SSH account's would be).
+fn logon_context(session: &PlinkSession) -> crate::logon::Context {
+    let mut effective = Vec::new();
+    if let (Some(user), Some(host)) = (&session.user, &session.host) {
+        effective.push(("user".to_string(), user.clone()));
+        effective.push(("hostname".to_string(), host.clone()));
+        if let Some(port) = session.port.or(session.protocol.default_port()) {
+            effective.push(("port".to_string(), port.to_string()));
+        }
+    }
+    crate::logon::Context {
+        user: session.user.clone().filter(|u| !u.is_empty()),
+        password_entry: native_term_config::password::target(&effective, None).map(|t| t.name),
+        ssh: false,
+        charset: session.charset.clone(),
+    }
+}
+
 pub fn run(alias: &str, link: Option<&Link>, flags: crate::args::Flags) -> i32 {
     let send = |m: ShimMessage| {
         if let Some(link) = link {
@@ -133,6 +152,7 @@ pub fn run(alias: &str, link: Option<&Link>, flags: crate::args::Flags) -> i32 {
     let pid = std::process::id();
     let auth = win::AuthEvent::create(pid).ok();
     crate::session_log::init(link);
+    crate::logon::init(link);
     if flags.wait {
         send(ShimMessage::Waiting);
         println!("{}", t!("restored", alias = alias));
@@ -258,8 +278,12 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
     if ntplink {
         tab_log.connecting();
     }
+    let logon_actions = crate::logon::for_alias(alias);
     let mut child = match command.spawn() {
-        Ok(child) => child,
+        Ok(child) => {
+            crate::logon::start(&logon_actions, logon_context(&session));
+            child
+        }
         Err(e) => {
             let path = client.path().display().to_string();
             println!("{}", t!("plink-not-started", client = client.name(), path = path, error = e.to_string()));
@@ -283,6 +307,7 @@ fn attempt_once(alias: &str, attempt: u32, link: Option<&Link>, auth: Option<&wi
     });
     let watch = Watch::start(child.id(), session.protocol, !ntplink, link.map(Link::sender));
     let supervised = supervise(&mut child, link, auth, control.as_ref(), None);
+    crate::logon::stop();
     watch.stop();
     drop(temporary.lock().map(|mut t| t.take()));
     let code = match supervised {

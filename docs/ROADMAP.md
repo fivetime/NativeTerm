@@ -2534,8 +2534,17 @@ one needed a terminal that can move a tab, which WezTerm can.
       the SecureCRT and PuTTY importers take the log pages over. Tried
       on Windows against the deepin box (fork alone, shim with the fork,
       ntplink raw to port 22, a shim test from NativeTerm's menu)
-- [ ] Conditional logon actions ("wait for X, send Y", SecureCRT's
-      Expect/Send table) and logon scripts
+- [ ] Logon actions, as SecureCRT's page (2026-10-01; logon scripts are
+      not planned: no script engine in NativeTerm)
+  - [x] The table, kept per host or folder, hidden Sends in the password
+        store (`native_term_config::logon`)
+  - [x] Worked through by the shim for SSH, Telnet and serial sessions:
+        Expect in the output, Send typed, SecureCRT's escapes, credential
+        sets for `\s`/`\w` (see ARCHITECTURE "Logon actions")
+  - [ ] The page in the session options and the non-SSH dialog
+  - [ ] Credential sets with a user name
+  - [ ] SecureCRT's own tables imported
+  - [ ] Remote command (ssh's `RemoteCommand`) on the page
 - [ ] Per-session key mapping for SSH sessions
 - [ ] Keyword highlighting (it would alter what the server sent)
 - [ ] "Send to New Window" on WezTerm (`wezterm cli

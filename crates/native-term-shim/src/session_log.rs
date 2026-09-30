@@ -144,7 +144,7 @@ impl Text {
 
 /// The encoding a session's charset names (`gbk`, `big5`, a code page
 /// number); `None` for UTF-8 and anything unknown.
-fn encoding(charset: &str) -> Option<&'static encoding_rs::Encoding> {
+pub(crate) fn encoding(charset: &str) -> Option<&'static encoding_rs::Encoding> {
     let charset = charset.trim();
     let found = match charset.parse::<u16>() {
         Ok(page) => codepage::to_encoding(page),
@@ -492,6 +492,10 @@ fn read_records(mut reader: io::PipeReader, log: &Shared) {
         let mut body = vec![0u8; len];
         if reader.read_exact(&mut body).is_err() {
             return;
+        }
+        // (the logon actions look at the output first: they are waited for)
+        if head[0] == b'O' {
+            crate::logon::output(&body);
         }
         let at = now();
         let mut log = lock(log);

@@ -101,3 +101,7 @@ connecting-as = [NativeTerm] { $user } で接続し直しています…
 log-not-started = [NativeTerm] セッションログを開始できませんでした: { $error }
 log-not-started-file = [NativeTerm] セッションログを開始できませんでした ({ $file }): { $error }
 hostkey-not-removed = [NativeTerm] known_hosts からホストキーを削除できませんでした: { $error }
+logon-hidden-missing = ログオン操作 { $row }: 非表示の送信内容がこのコンピューターに保存されていないため、省略しました。
+logon-no-user = ログオン操作 { $row }: \s に使うユーザー名がないため、省略しました。
+logon-no-password = ログオン操作 { $row }: \w に使う保存済みパスワードがないため、省略しました。
+logon-no-clipboard = ログオン操作 { $row }: \v に使うテキストがクリップボードにないため、省略しました。

@@ -1312,3 +1312,80 @@ fn the_session_log_starts_and_stops_from_nativeterm() {
     conn.send(&AppMessage::Close).unwrap();
     assert_eq!(wait_exit(&mut shim), 0);
 }
+
+/// Logon actions end to end (a console of its own for the shim: typing
+/// needs one, the window shows briefly). The fake ssh "server" says
+/// `login:`, `Password:` and a prompt, one after the other; the table
+/// answers with the credential set's user, a hidden Send from the
+/// password store and the set's password, skips a hidden Send this
+/// computer doesn't have (telling NativeTerm), and types `exit`.
+#[test]
+fn logon_actions_answer_the_servers_prompts() {
+    use native_term_win::credentials::{self, Saved};
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    let prefix = format!("NativeTerm-Tests-logon-{}", std::process::id());
+    let set = format!("{prefix}/cred/lab");
+    let hidden = format!("{prefix}/logon/t1");
+    credentials::write(&set, &Saved { user: "labuser".into(), secret: "labpw".into(), comment: String::new() })
+        .unwrap();
+    credentials::write(&hidden, &Saved { user: String::new(), secret: "h1dden".into(), comment: String::new() })
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ssh_dir = dir.path().join(".ssh");
+    std::fs::create_dir_all(&ssh_dir).unwrap();
+    std::fs::write(
+        ssh_dir.join("config"),
+        "IgnoreUnknown NativeTerm*\nHost web01\n    HostName web01\n    NativeTermLogon yes\n    \
+         NativeTermLogonExpect1 login:\n    NativeTermLogonSend1 BSs\n    NativeTermLogonFlags1 cred=lab\n    \
+         NativeTermLogonExpect2 Password:\n    NativeTermLogonSend2 secret:t1\n    NativeTermLogonFlags2 hide\n    \
+         NativeTermLogonExpect3 $\n    NativeTermLogonSend3 BSw\n    NativeTermLogonFlags3 cred=lab\n    \
+         NativeTermLogonSend4 secret:gone\n    NativeTermLogonFlags4 hide\n    \
+         NativeTermLogonSend5 exit\n"
+            .replace("BS", "\\")
+            .as_str(),
+    )
+    .unwrap();
+    let log = dir.path().join("ssh.log");
+    let name = pipe_name("logon");
+    let mut listener = PipeListener::bind(&name).unwrap();
+    let mut shim = Command::new(shim_exe())
+        .arg("web01")
+        .env("NATIVETERM_PIPE", &name)
+        .env("NATIVETERM_SSH", fake_ssh())
+        .env("WT_SESSION", "6e7a0000-0000-4000-8000-00000000c0de")
+        .env("NATIVETERM_START_APP", "0")
+        .env("NATIVETERM_LANG", "en")
+        .env("NATIVETERM_SSH_DIR", &ssh_dir)
+        .env("NATIVETERM_CRED_PREFIX", &prefix)
+        .env("FAKE_SSH_G", "user tester;hostname web01;port 22")
+        .env("FAKE_SSH_LOGIN", "1")
+        .env("FAKE_SSH_ECHO", "1")
+        .env("FAKE_SSH_FEED", "Welcome to web01\r\n|login: |Password: |web01$ ")
+        .env("FAKE_SSH_MS", "8000")
+        .env("FAKE_SSH_LOG", &log)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .spawn()
+        .unwrap();
+    let conn = listener.accept().unwrap();
+    assert!(matches!(expect(&conn), ShimMessage::Hello { .. }));
+    let mut notes = Vec::new();
+    loop {
+        match expect_skipping_login(&conn) {
+            ShimMessage::Exited { .. } => break,
+            ShimMessage::LogonNote { text } => notes.push(text),
+            _ => {}
+        }
+    }
+    conn.send(&AppMessage::Close).unwrap();
+    let _ = wait_exit(&mut shim);
+    let _ = credentials::delete(&set);
+    let _ = credentials::delete(&hidden);
+    let text = std::fs::read_to_string(&log).unwrap_or_default();
+    let typed: Vec<&str> = text.lines().filter_map(|l| l.strip_prefix("input: ")).collect();
+    assert_eq!(typed, ["labuser", "h1dden", "labpw", "exit"], "{text}");
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("Logon action 4"), "{notes:?}");
+}

@@ -509,6 +509,7 @@ host-persistent-log = ~/.nativeterm/logs に記録
 menu-folder-persistent = セッションをサーバー上で維持する
 host-persistent = サーバー上で維持（{ $program }）
 notice-password-refused = { $label }: サーバーが保存済みのパスワードを拒否しました。新しいパスワードを保存するまで再送しません（ホストを編集、認証セットの場合は「認証セット…」から）。
+notice-logon = { $label }: { $text }
 password-title = 保存するパスワード（任意）
 password-none = パスワードは保存されていません: ssh がタブで尋ねます。
 password-saved = Windows の資格情報マネージャーに保存済み（{ $target }）。このアカウント用に、接続ごとに 1 回だけ ssh のパスワード入力へ渡します。

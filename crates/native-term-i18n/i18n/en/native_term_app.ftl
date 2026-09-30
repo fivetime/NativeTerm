@@ -514,6 +514,7 @@ host-persistent-log = recorded in ~/.nativeterm/logs
 menu-folder-persistent = Keep sessions on the server
 host-persistent = Kept on the server ({ $program })
 notice-password-refused = { $label }: the server refused the saved password. It is not used again until you save a new one (Edit the host; for a credential set, Credential Sets…).
+notice-logon = { $label }: { $text }
 password-title = Saved password (optional)
 password-none = No password saved: ssh asks in the tab.
 password-saved = Saved in Windows Credential Manager ({ $target }); given to ssh's own password prompt for this account, once per connect.

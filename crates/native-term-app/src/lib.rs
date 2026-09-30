@@ -2147,6 +2147,10 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                     let label = shared.update(&id, |s| s.label.clone()).unwrap_or_default();
                     shared.notice(t!("notice-password-refused", label = label.as_str()));
                 }
+                if let ShimMessage::LogonNote { text } = &message {
+                    let label = shared.update(&id, |s| s.label.clone()).unwrap_or_default();
+                    shared.notice(t!("notice-logon", label = label.as_str(), text = text.as_str()));
+                }
                 if let ShimMessage::Closing = &message {
                     match window.flatten() {
                         Some(window) => check_window_closed(shared, &id, window),
@@ -2325,6 +2329,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             | ShimMessage::Specials { .. }
             | ShimMessage::Unreachable
             | ShimMessage::PasswordRefused
+            | ShimMessage::LogonNote { .. }
             | ShimMessage::OpenFiles
             | ShimMessage::TabMenu { .. }
             | ShimMessage::TabTitle { .. }
@@ -2385,7 +2390,7 @@ fn apply(s: &mut Session, message: &ShimMessage) {
             s.screen = Some(Screen { columns: *columns, lines: lines.clone(), at: SystemTime::now(), asked });
         }
         ShimMessage::Unreachable => s.unreachable = true,
-        ShimMessage::PasswordRefused => {}
+        ShimMessage::PasswordRefused | ShimMessage::LogonNote { .. } => {}
         // Hello is the connection's start
         ShimMessage::Heard | ShimMessage::Hello { .. } => {}
     }

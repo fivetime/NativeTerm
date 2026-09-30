@@ -99,3 +99,7 @@ connecting-as = [NativeTerm] 正在以 { $user } 重新連線…
 log-not-started = [NativeTerm] 工作階段記錄未能開始：{ $error }
 log-not-started-file = [NativeTerm] 工作階段記錄未能開始（{ $file }）：{ $error }
 hostkey-not-removed = [NativeTerm] 無法從 known_hosts 刪除主機金鑰：{ $error }
+logon-hidden-missing = 登入動作 { $row }：隱藏的傳送內容沒有儲存在這台電腦上，已略過。
+logon-no-user = 登入動作 { $row }：沒有可用於 \s 的使用者名稱，已略過。
+logon-no-password = 登入動作 { $row }：沒有儲存可用於 \w 的密碼，已略過。
+logon-no-clipboard = 登入動作 { $row }：剪貼簿裡沒有可用於 \v 的文字，已略過。

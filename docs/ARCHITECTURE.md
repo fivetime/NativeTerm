@@ -613,7 +613,7 @@ Legend: ✅ supported, 🟡 partly, ❌ not possible, — not applicable.
 | File transfer / "SFTP session" | Built-in files window over `ssh -s sftp` (browse, up/download, drag in, edit in place, any file name encoding) | ✅ |
 | Local shell command: Pre-connect | `NativeTermPreConnect` (shim runs it before `ssh`); plink: `-preconnectcommand` | ✅ |
 | Description | one line in `NativeTermNote`; multi-line in `state.db` | ✅ |
-| **Logon Actions**: Automate logon (Expect/Send table) | Not in general, not built: an SSH session's output passes through NativeTerm's own ssh, so a table could be matched there, but nothing does yet. Covered cases: passwords and keyboard-interactive via askpass (SSH); commands after login via the `LocalCommand` signal (SSH) or a delay (plink); a password for `su`/`sudo` after login as delayed, hidden injection | 🟡 |
+| **Logon Actions**: Automate logon (Expect/Send table) | The table is worked through by the shim for every kind of session (see "Logon actions"); the page to edit it is not built yet. Also: passwords and keyboard-interactive via askpass (SSH); commands after login via the `LocalCommand` signal (SSH) or a delay (plink) | 🟡 |
 | Send initial carriage return | Injected Enter after login | ✅ |
 | Logon script (VBScript/Python) | No scripting API over terminal output (not built; the output is reachable in NativeTerm's ssh) | ❌ |
 | Remote command | `-o RemoteCommand` | ✅ |
@@ -3147,6 +3147,59 @@ name and its alias (as `[name]:port` when the port isn't 22) with
 `ssh-keygen -R`, which also finds hashed entries and keeps
 `known_hosts.old`. The dialog lists the names first and explains when to
 do it (a reinstalled host).
+
+### Logon actions
+
+SecureCRT's Logon Actions page ("Automate logon", "Send initial carriage
+return", the Expect/Send table with Hide, trailing carriage return and
+credentials), 2026-10-01.
+
+- **Kept** (`native_term_config::logon`): `NativeTermLogon`,
+  `NativeTermLogonInitialCR`, and per row `NativeTermLogonExpect<n>`,
+  `NativeTermLogonSend<n>`, `NativeTermLogonFlags<n>` (`hide`, `nocr`,
+  `cred=<set>`), in a host's block or a folder's defaults block; a
+  non-SSH session's `logon` table. As with the session log, a session
+  with any logon key of its own uses its own set, whole. A hidden Send
+  is not written into the configuration: it is kept in the system's
+  password store (`NativeTerm/logon/<id>`), the configuration says
+  `secret:<id>`. SecureCRT keeps it encrypted; plain text in the ssh
+  config (often synced) would be worse. On another computer the entry is
+  missing: that row is left out and NativeTerm says so.
+- **Done by the shim** (`logon.rs`), read again before every connection:
+  the output reaches it through the session log's pipe (NativeTerm's ssh,
+  ntplink; the pipe is given whether or not a log is on), read as the log
+  reads it (escape sequences out, Backspace applied, the session's
+  charset). Each row waits for its Expect in what came after the row
+  before; a row without an Expect goes right after it. An SSH session
+  starts at the server's first output, which is after the login (ssh's
+  own prompts never pass through the pipe), so nothing is typed into a
+  password or host key question; a Telnet or serial session starts with
+  the client, where the table is what answers the server's login prompt.
+- **Typing**: one thread types, row after row (a `\p` pause holds up
+  neither the log nor the order); a connection that ends drops what was
+  still to be typed for it. On Windows into the console, as sent commands
+  are; elsewhere WezTerm's `cli send-text --no-paste` into the shim's own
+  pane (`WEZTERM_PANE`, the `wezterm` in `WEZTERM_EXECUTABLE_DIR`), the
+  text on standard input so that a password never shows in the process
+  list.
+- **Send**: SecureCRT's escapes, `\r \n \b \e \t \`, `\p` a second's pause,
+  `\v` the clipboard (read by the shim, `arboard`), `\s` and `\w` the
+  user and password of the row's credential set (the set's user if it
+  has one, else the session's), or without a set the session's user and
+  its own saved password. Secrets are read from the store when typed and
+  written nowhere (typed text is not output, so not in the session log).
+  Anything else after a backslash is typed as it is.
+- **Left out, said**: a hidden Send not stored here, no password or user
+  for `\w`/`\s`, an empty clipboard: the piece is skipped, the rest of
+  the row and the rows after go on, and NativeTerm shows a notice
+  (`ShimMessage::LogonNote`, the shim's words).
+- Verified: config round trip through the editor with OpenSSH accepting
+  it (quotes, backslashes, `#`); shim test `logon_actions_answer_the_
+  servers_prompts` (fake ssh saying `login:`, `Password:`, a prompt: the
+  set's user, a hidden Send from Credential Manager, the set's password
+  and `exit` typed in that order, a missing hidden Send skipped with a
+  notice); live on deepin (NativeTerm's ssh to 127.0.0.1, WezTerm): `$`
+  → `echo one-\s` typed as `echo one-deepin`, the next `$` → `echo two`.
 
 ### Host keys in NativeTerm's window
 

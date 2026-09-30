@@ -24,6 +24,7 @@ mod hostkey;
 mod i18n;
 mod keys;
 mod link;
+mod logon;
 mod look;
 mod menu;
 mod persistent;
@@ -285,6 +286,7 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
     let mut user: Option<String> = None;
     let mut preset: Option<(String, bool)> = None;
     let tab_log = session_log::init(link);
+    logon::init(link);
     loop {
         attempt += 1;
         look::apply(alias);
@@ -354,8 +356,12 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
             arguments.splice(at..at, ["-o".into(), format!("LogLevel={level}").into()]);
         }
         tab_log.connecting();
+        let logon_actions = logon::for_alias(alias);
         let mut child = match command.args(&arguments).spawn() {
-            Ok(child) => child,
+            Ok(child) => {
+                logon::start(&logon_actions, logon::ssh_context(&effective, charset.clone()));
+                child
+            }
             Err(e) => {
                 println!("{}", t!("ssh-not-started", path = ssh_path.display().to_string(), error = e.to_string()));
                 send(ShimMessage::Exited { code: -1 });
@@ -381,7 +387,9 @@ fn run_host(alias: &str, session: Option<&str>, link: Option<&Link>, flags: args
                 }
             }
         };
-        let code = match supervise(&mut child, link, auth.as_ref(), None, Some(&logged_in)) {
+        let supervised = supervise(&mut child, link, auth.as_ref(), None, Some(&logged_in));
+        logon::stop();
+        let code = match supervised {
             Supervised::Exited(code) => code,
             Supervised::Close => return 0,
         };
