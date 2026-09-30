@@ -1,6 +1,8 @@
 #![cfg(windows)]
 //! Sending commands end to end: shims started directly, each with its own
-//! console (injection needs one; the console windows show briefly), and a
+//! console (injection needs one; without a window: one with a window
+//! becomes a tab of the person's own Windows Terminal and gets their
+//! keystrokes), and a
 //! fake ssh that logs what is typed. Needs no other NativeTerm running and
 //! a portable Terminal folder for the core's setup.
 //!
@@ -19,7 +21,7 @@ use native_term_app::{Core, State};
 use native_term_platform::windows_terminal::install::Install;
 use native_term_platform::windows_terminal::WindowsTerminal;
 
-const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 fn target_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().join("target").join("debug")
@@ -52,7 +54,7 @@ fn spawn_shim_with(session: &str, guid: &str, log: &Path, login: bool, envs: &[(
         .env("FAKE_SSH_LOG", log)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(CREATE_NEW_CONSOLE);
+        .creation_flags(CREATE_NO_WINDOW);
     if login {
         command.env("FAKE_SSH_LOGIN", "1");
     }

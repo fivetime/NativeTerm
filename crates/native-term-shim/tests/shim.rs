@@ -1314,7 +1314,7 @@ fn the_session_log_starts_and_stops_from_nativeterm() {
 }
 
 /// Logon actions end to end (a console of its own for the shim: typing
-/// needs one, the window shows briefly). The fake ssh "server" says
+/// needs one; without a window, see `CREATE_NO_WINDOW` below). The fake ssh "server" says
 /// `login:`, `Password:` and a prompt, one after the other; the table
 /// answers with the credential set's user, a hidden Send from the
 /// password store and the set's password, skips a hidden Send this
@@ -1323,7 +1323,12 @@ fn the_session_log_starts_and_stops_from_nativeterm() {
 fn logon_actions_answer_the_servers_prompts() {
     use native_term_win::credentials::{self, Saved};
     use std::os::windows::process::CommandExt;
-    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+    // a console of its own that has no window: a new console with one
+    // becomes a tab of the default terminal (Windows 11: the person's own
+    // Windows Terminal), takes the keyboard focus, and whatever the person
+    // types meanwhile goes into this test (seen: two Backspaces before
+    // the user name)
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     let prefix = format!("NativeTerm-Tests-logon-{}", std::process::id());
     let set = format!("{prefix}/cred/lab");
     let hidden = format!("{prefix}/logon/t1");
@@ -1366,7 +1371,7 @@ fn logon_actions_answer_the_servers_prompts() {
         .env("FAKE_SSH_LOG", &log)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .creation_flags(CREATE_NEW_CONSOLE)
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .unwrap();
     let conn = listener.accept().unwrap();

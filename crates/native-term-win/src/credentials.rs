@@ -23,8 +23,14 @@ pub struct Saved {
     pub comment: String,
 }
 
-/// The credential named `target`, if there is one.
+/// The credential named `target`, if there is one (in turn with
+/// NativeTerm's other readers and writers, see [`StoreLock`]).
 pub fn read(target: &str) -> io::Result<Option<Saved>> {
+    let _turn = StoreLock::take();
+    read_locked(target)
+}
+
+fn read_locked(target: &str) -> io::Result<Option<Saved>> {
     let mut found: *mut CREDENTIALW = std::ptr::null_mut();
     let name = HSTRING::from(target);
     if let Err(e) = unsafe { CredReadW(&name, CRED_TYPE_GENERIC, None, &mut found) } {
@@ -63,14 +69,19 @@ fn blob_text(blob: &[u8]) -> String {
     }
 }
 
-/// Held while this session's NativeTerm processes change Credential
-/// Manager. Credential Manager can lose an entry written a moment
-/// before when another process writes at the same time — even another
-/// entry: the fresh entry, or the change to it, is gone for good
-/// (measured: about one write in a hundred with six processes writing
-/// at once, `examples/cred_race.rs`). NativeTerm's own writers (the app,
-/// every tab's shim) therefore take turns. Waiting is bounded: a holder
-/// that hung doesn't stop a save, it only loses the protection.
+/// Held while this session's NativeTerm processes use Credential
+/// Manager. Credential Manager can lose an entry written a moment before
+/// when another process writes at the same time — even another entry:
+/// the fresh entry, or the change to it, is gone for good (measured:
+/// about one write in a hundred with six processes writing at once,
+/// `examples/cred_race.rs`). A process that only reads does the same
+/// harm (2026-10-01, `examples/cred_read_race.rs`: with one process
+/// reading other entries, 6 of 240 fresh entries gone and a change lost;
+/// with six, a change lost in most rounds; with the lock taken for reads
+/// too, none). NativeTerm's own readers and writers (the app, every tab's
+/// shim) therefore take turns. Waiting is bounded: a holder that hung
+/// doesn't stop a save, it only loses the protection. Other programs'
+/// use of the store is not covered.
 struct StoreLock(Option<HANDLE>);
 
 impl StoreLock {
@@ -132,6 +143,7 @@ fn write_locked(target: &str, saved: &Saved) -> io::Result<()> {
 /// The names of this user's generic credentials that start with `prefix`
 /// (names only: no secret is read), sorted.
 pub fn list(prefix: &str) -> io::Result<Vec<String>> {
+    let _turn = StoreLock::take();
     let filter = HSTRING::from(format!("{prefix}*"));
     let mut count = 0u32;
     let mut found: *mut *mut CREDENTIALW = std::ptr::null_mut();
@@ -166,7 +178,7 @@ pub fn list(prefix: &str) -> io::Result<Vec<String>> {
 /// is none.
 pub fn update(target: &str, change: impl FnOnce(&mut Saved)) -> io::Result<bool> {
     let _turn = StoreLock::take();
-    let Some(mut saved) = read(target)? else { return Ok(false) };
+    let Some(mut saved) = read_locked(target)? else { return Ok(false) };
     change(&mut saved);
     write_locked(target, &saved)?;
     Ok(true)
