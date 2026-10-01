@@ -455,21 +455,22 @@ fn base64(data: &[u8]) -> String {
     out
 }
 
-/// ssh's stdin to the connection, the connection to ssh's stdout.
+/// ssh's stdin to the connection, the connection to ssh's stdout. Both
+/// ways go through the one socket (`&TcpStream` reads and writes): a
+/// `try_clone` copy (WSADuplicateSocket) now and then refused the
+/// half-close with WSAENOTCONN, so the proxy never saw ssh's end and both
+/// sides waited forever (measured in `proxy_login_from_credential_manager`).
 fn relay(stream: TcpStream) -> i32 {
-    let mut up = match stream.try_clone() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[NativeTerm] {}", io_error(e));
-            return 1;
-        }
-    };
+    let stream = std::sync::Arc::new(stream);
+    let up = std::sync::Arc::clone(&stream);
     std::thread::spawn(move || {
-        let _ = io::copy(&mut io::stdin().lock(), &mut up);
+        let _ = io::copy(&mut io::stdin().lock(), &mut &*up);
         // ssh is done sending; the server may still answer
-        let _ = up.shutdown(Shutdown::Write);
+        if let Err(e) = up.shutdown(Shutdown::Write) {
+            crate::debug::log(format!("proxy: half-close failed: {e}"));
+        }
     });
-    let mut down = stream;
+    let mut down = &*stream;
     let mut out = io::stdout().lock();
     let mut buf = vec![0u8; 64 * 1024];
     loop {

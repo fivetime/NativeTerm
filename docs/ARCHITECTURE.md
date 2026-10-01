@@ -567,6 +567,13 @@ shim `proxy.rs`).
   in red. End-to-end test: a local SOCKS5 proxy with a login, the real
   shim and a test Credential Manager entry (accepted, refused and
   marked, not sent a third time).
+- **The relay uses one socket both ways** (2026-10-01): `&TcpStream`
+  reads and writes, shared through an `Arc`. With a `try_clone` copy
+  (WSADuplicateSocket) for the stdin side, the half-close after ssh's
+  last byte now and then failed with WSAENOTCONN (10057): the proxy never
+  saw the end and both sides waited forever. Measured with the shim's
+  debug log in a loop of the test binary: hung at runs 6 and 50 before,
+  80 of 80 clean after.
 - Verified live: a host whose name (`inner.lab`) only resolves inside
   the test container, reached through an `ssh -D` SOCKS5 proxy and
   through tinyproxy (HTTP): plain `ssh` ran commands (`SSH_CONNECTION`
