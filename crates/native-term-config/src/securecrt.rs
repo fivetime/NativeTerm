@@ -302,6 +302,8 @@ pub struct CrtLogonRow {
     pub send: Option<String>,
     /// "Send trailing carriage return".
     pub enter: bool,
+    /// The saved credential `\s` and `\w` take from, by its title.
+    pub credential: Option<String>,
 }
 
 /// One of SecureCRT's saved credentials (`Config\Credentials\<title>.ini`,
@@ -371,8 +373,26 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
     };
     let mut forwards = Vec::new();
     let mut bad_forwards = 0;
-    for (key, reverse) in [("Port Forward Table V2", false), ("Reverse Forward Table V2", true)] {
+    // newer SecureCRT: `Enabled|` and then a V2 row (seen in SecureCRT 9's
+    // own save of a forward added in its dialog); a disabled one isn't
+    // opened by SecureCRT either
+    let tables = [
+        ("Port Forward Table V2", false, false),
+        ("Reverse Forward Table V2", true, false),
+        ("Port Forward Table V3", false, true),
+        ("Reverse Forward Table V3", true, true),
+    ];
+    for (key, reverse, v3) in tables {
         for line in ini.list(key).iter().filter(|l| !l.trim().is_empty()) {
+            let line = match line.split_once('|') {
+                Some((enabled, rest)) if v3 => {
+                    if enabled.trim() != "1" {
+                        continue;
+                    }
+                    rest
+                }
+                _ => line.as_str(),
+            };
             match parse_forward(line, reverse) {
                 Some(f) => forwards.push(f),
                 None => bad_forwards += 1,
@@ -428,10 +448,9 @@ fn logon_values(text: &str) -> Option<Vec<&str>> {
 }
 
 /// A row's fields: the text is six fields joined by `0x1F`, Hide (`1`),
-/// the Expect, the Send, a field always seen empty, the trailing carriage
-/// return (`1`), and another always empty. Hide is known from a row
-/// turned hidden in SecureCRT; the carriage return from every row seen
-/// having it, as SecureCRT's dialog does by default.
+/// the Expect, the Send, the saved credential's title (empty: none), the
+/// trailing carriage return (`1`), and one always seen empty. Each known
+/// from a row changed in SecureCRT 9's own dialog and saved.
 fn logon_fields(value: &str, passphrase: &str) -> Result<Vec<String>, crate::securecrt_crypt::CryptError> {
     let text = crate::securecrt_crypt::decrypt(value, passphrase)?;
     let fields: Vec<String> = text.split('\u{1f}').map(str::to_string).collect();
@@ -462,6 +481,7 @@ fn read_logon(text: &str, ini: &Ini) -> Option<CrtLogon> {
             expect: fields[1].clone(),
             send: (fields[0].trim() != "1").then(|| fields[2].clone()),
             enter: fields.get(4).is_none_or(|f| f.trim() != "0"),
+            credential: fields.get(3).map(|t| t.trim().to_string()).filter(|t| !t.is_empty()),
         });
     }
     let on = |key: &str| ini.num(key).is_some_and(|n| n != 0);
@@ -920,7 +940,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
         };
         if let Some(kind) = plink_protocol {
             let label = folder_label(&s.folder, origin);
-            match plink_session(s, kind, origin, &mut taken, &mut notes, &mut logon_secrets) {
+            match plink_session(s, kind, origin, &mut taken, &mut notes, &mut logon_secrets, &credentials) {
                 Some(session) => {
                     let fi = *folder_index.entry(label.to_lowercase()).or_insert_with(|| {
                         folders.push(PlannedFolder {
@@ -973,7 +993,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             }
             Firewall::Named(name) => notes.named_firewalls.entry(name.clone()).or_default().push(s.path.clone()),
         }
-        let logon = logon_of(s, &mut notes, &mut logon_secrets);
+        let logon = logon_of(s, &mut notes, &mut logon_secrets, &credentials);
         if s.saved_password {
             notes.saved_passwords += 1;
         }
@@ -1050,7 +1070,12 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
 /// rows as SecureCRT has them, Sends in plain text as the user left them;
 /// a hidden row's Send goes to the password store (`secrets`) and the row
 /// says `secret:<id>`, as NativeTerm keeps its own hidden rows.
-fn logon_of(s: &CrtSession, notes: &mut Notes, secrets: &mut Vec<LogonSecret>) -> Option<crate::logon::LogonActions> {
+fn logon_of(
+    s: &CrtSession,
+    notes: &mut Notes,
+    secrets: &mut Vec<LogonSecret>,
+    credentials: &[PlannedCredential],
+) -> Option<crate::logon::LogonActions> {
     use crate::logon::{LogonActions, Step};
     if !s.logon_actions {
         return None;
@@ -1073,7 +1098,15 @@ fn logon_of(s: &CrtSession, notes: &mut Notes, secrets: &mut Vec<LogonSecret>) -
                 secrets.push(LogonSecret { id: id.clone(), file: s.file.clone(), row, session: s.path.clone() });
                 format!("secret:{id}")
             });
-            Step { expect: r.expect.clone(), send, hide: r.send.is_none(), enter: r.enter, credential: None }
+            // a row's saved credential, as the set it becomes
+            let credential = r.credential.as_ref().and_then(|title| {
+                let set = credentials.iter().find(|c| c.title.eq_ignore_ascii_case(title)).map(|c| c.set.clone());
+                if set.is_none() {
+                    notes.missing_credentials.push((s.path.clone(), title.clone()));
+                }
+                set
+            });
+            Step { expect: r.expect.clone(), send, hide: r.send.is_none(), enter: r.enter, credential }
         })
         .collect();
     Some(LogonActions { automate: page.automate, initial_cr: page.initial_cr, steps })
@@ -1088,6 +1121,7 @@ fn plink_session(
     taken: &mut HashSet<String>,
     notes: &mut Notes,
     secrets: &mut Vec<LogonSecret>,
+    credentials: &[PlannedCredential],
 ) -> Option<crate::plink::PlinkSession> {
     use crate::plink::{PlinkSession, Protocol};
     let plain = |v: &Option<String>| {
@@ -1140,7 +1174,7 @@ fn plink_session(
     }
     let mut session = session;
     let mut found = Vec::new();
-    session.logon = logon_of(s, notes, &mut found).map(|l| l.to_keys()).unwrap_or_default();
+    session.logon = logon_of(s, notes, &mut found, credentials).map(|l| l.to_keys()).unwrap_or_default();
     secrets.extend(found);
     Some(session)
 }
@@ -1286,13 +1320,59 @@ mod tests {
                     Some(_) => "in the password store".to_string(),
                     None => format!("{} characters", step.send.chars().count()),
                 };
-                println!("  expect {:?}, send {send}, hide {}, enter {}", step.expect, step.hide, step.enter);
+                println!(
+                    "  expect {:?}, send {send}, hide {}, enter {}, credential {:?}",
+                    step.expect, step.hide, step.enter, step.credential
+                );
             }
+        }
+        for host in plan.folders.iter().flat_map(|f| &f.hosts).filter(|h| !h.forwards.is_empty()) {
+            println!("{}: {:?}", host.source, host.forwards.iter().map(Forward::directive).collect::<Vec<_>>());
         }
         for secret in &plan.logon_secrets {
             let read = read_logon_send(&secret.file, secret.row, "").map(|s| s.map(|s| s.chars().count()));
             println!("hidden {} row {}: {read:?} characters", secret.session, secret.row + 1);
         }
+    }
+
+    /// A newer SecureCRT's forward tables (as SecureCRT 9 saved forwards
+    /// added in its dialog): `Enabled|` then a V2 row; a disabled one is
+    /// left out. A logon row's saved credential becomes its set, and a row
+    /// without the trailing carriage return keeps that.
+    #[test]
+    fn newer_forward_tables_and_a_rows_credential() {
+        const ROW: &str = "03:56ac29e979681afc6bfff13fd1445cc7911147848726c4b16e08e7a8d6830b6868304dc1ff04aec2b7a7ae7362c32c9284c08c70bd0b34adad4ffc93d3b89ea82a93f22cc4838d1061037cee2d5af199ef7f9df2995eaaf95151321bc9316d31";
+        let dir = tempfile::tempdir().unwrap();
+        let s = dir.path().join("Sessions");
+        write(
+            &s,
+            "jump.ini",
+            &[
+                "S:\"Hostname\"=10.0.0.5",
+                "Z:\"Login Script V4\"=00000001",
+                &format!(" {ROW}"),
+                "D:\"Use Login Script\"=00000001",
+                "Z:\"Port Forward Table V3\"=00000002",
+                " 1|nt-local|18080|1|10.1.2.3|80||",
+                " 0|off|18081|1|10.1.2.3|81||",
+                "Z:\"Reverse Forward Table V3\"=00000001",
+                " 1|nt-remote|19000|1|10.4.5.6|9001||",
+            ],
+        );
+        write(&dir.path().join("Credentials"), "login.ini", &["S:\"Username\"=root"]);
+        let scan = scan(dir.path()).unwrap();
+        let plan = plan(&scan, &SessionTree::default());
+        let host = &plan.folders[0].hosts[0];
+        let forwards: Vec<_> = host.forwards.iter().map(Forward::directive).collect();
+        assert_eq!(
+            forwards,
+            [("LocalForward", "18080 10.1.2.3:80".to_string()), ("RemoteForward", "19000 10.4.5.6:9001".to_string())]
+        );
+        let step = &host.logon.as_ref().unwrap().steps[0];
+        assert_eq!((step.expect.as_str(), step.send.as_str()), ("#", "show version"));
+        assert_eq!(step.credential.as_deref(), Some("login"));
+        assert!(!step.enter && !step.hide);
+        assert!(plan.notes.missing_credentials.is_empty());
     }
 
     fn fixture() -> tempfile::TempDir {

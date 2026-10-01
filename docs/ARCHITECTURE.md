@@ -1876,12 +1876,12 @@ The result is shown as a summary before anything is written.
   every session by default, so a session takes the page only when
   "Automate logon" is on or it has rows), the table `Z:"Login Script V4"`,
   a `03:` value a row whose text is six fields joined by `0x1F`: Hide
-  (`1`), the Expect, the Send, a field always seen empty, the trailing
-  carriage return (`1`), and another always empty. Hide was found by a row
-  turned hidden in SecureCRT (the author's own session, with their
-  consent; values shown as lengths only); the carriage return by every row
-  seen having it, as the dialog does by default; the empty fields (one is
-  likely the row's saved credential) are not imported. A shown row's Send
+  (`1`), the Expect, the Send, the saved credential's title (empty: none;
+  it becomes the row's `cred=<set>`), the trailing carriage return (`1`),
+  and one always seen empty. Each field was found by changing a row in
+  SecureCRT 9's own dialog and saving (the author's own session, with
+  their consent, the dialog driven by UI Automation; Sends shown as
+  lengths only). A shown row's Send
   is written into the configuration as SecureCRT kept it (the user chose
   not to hide it); a hidden row's goes into the system's password store
   as NativeTerm keeps its own hidden rows (`secret:<id>`): the scan keeps
@@ -1912,7 +1912,11 @@ The result is shown as a summary before anything is written.
   `LocalForward`, `RemoteForward`, or `DynamicForward` (target
   `socks,`). A target that isn't "different from the SSH server" is
   `localhost` as seen from the server. Forwards take two arguments, so
-  they are written unquoted, argument by argument.
+  they are written unquoted, argument by argument. Newer SecureCRT
+  writes `Port Forward Table V3` / `Reverse Forward Table V3`: the
+  "Enabled" box (`1`/`0`), then a V2 row (found by adding a local and a
+  remote forward in SecureCRT 9's dialog and saving, 2026-10-01); a
+  disabled forward is left out.
 - **Keys:** `Identity Filename V2` is used only when the session doesn't
   use the global key (`Use Global Public Key` = 0); `::…` options and a
   `.pub` suffix are dropped. The key must be in OpenSSH format (the

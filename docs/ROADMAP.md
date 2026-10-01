@@ -2557,11 +2557,11 @@ one needed a terminal that can move a tab, which WezTerm can.
         SSH and non-SSH sessions: rows as SecureCRT has them, hidden Sends
         into the system's password store (checked on a jump session made in
         the author's SecureCRT 9)
-  - [ ] A logon row's own credential (one of the two fields always seen
-        empty): needs a row that uses one
-  - [ ] Port forwards of newer SecureCRT (`Port Forward Table V3`): the
-        importer reads `V2` only; the key is in real configurations, but
-        every table seen is empty, so a row's format is not known yet
+  - [x] A logon row's own saved credential, as its credential set
+  - [x] Port forwards of newer SecureCRT (`Port Forward Table V3`,
+        `Reverse Forward Table V3`): `Enabled|` then a V2 row, as
+        SecureCRT 9 saved forwards added in its dialog; disabled ones are
+        left out
   - [x] Remote command: ssh's `RemoteCommand`, already under Connection
 - [ ] Per-session key mapping for SSH sessions
 - [ ] Keyword highlighting (it would alter what the server sent)
