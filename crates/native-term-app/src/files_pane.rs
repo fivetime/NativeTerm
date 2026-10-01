@@ -21,6 +21,8 @@ pub(super) enum Asked {
     Delete,
     Edit,
     Sync,
+    /// What may be done with the files chosen (the server's side).
+    Chmod,
     CopyPath,
     Names(Names),
     Bookmark(files_bookmarks::Picked),
@@ -281,6 +283,10 @@ impl FilesWindow {
                     .clicked()
                 {
                     asked.push(Asked::Sync);
+                }
+                let chmod = format!("{} {}", icons::SHIELD, t!("files-chmod"));
+                if ui.add_enabled(connected && chosen, egui::Button::new(chmod)).clicked() {
+                    asked.push(Asked::Chmod);
                 }
                 ui.separator();
                 ui.menu_button(t!("files-encoding"), |ui| {

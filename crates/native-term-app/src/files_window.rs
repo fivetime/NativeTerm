@@ -169,6 +169,8 @@ enum Action {
     Rename,
     CopyPath,
     Delete,
+    /// What may be done with it (the server's side).
+    Permissions,
 }
 
 /// A question from ssh (password, passphrase, new host key, code), for
@@ -443,10 +445,13 @@ enum FilesPart {
     NewFolder,
     /// Deleting, or closing with transfers going on.
     Confirm,
+    /// What may be done with files on the server.
+    Chmod,
 }
 
 impl FilesPart {
-    const ALL: [FilesPart; 4] = [FilesPart::Sync, FilesPart::Question, FilesPart::NewFolder, FilesPart::Confirm];
+    const ALL: [FilesPart; 5] =
+        [FilesPart::Sync, FilesPart::Question, FilesPart::NewFolder, FilesPart::Confirm, FilesPart::Chmod];
 
     fn window(self) -> crate::part_window::PartWindow {
         let key = match self {
@@ -454,6 +459,7 @@ impl FilesPart {
             FilesPart::Question => "files-question",
             FilesPart::NewFolder => "files-new-folder",
             FilesPart::Confirm => "files-confirm",
+            FilesPart::Chmod => "files-chmod",
         };
         let sync = self == FilesPart::Sync;
         let owner = crate::window::Owner::Window(KEY.into());
@@ -471,6 +477,7 @@ impl crate::part_window::Parts for FilesWindow {
             FilesPart::Question => self.question_dialog(ctx),
             FilesPart::NewFolder => self.new_folder_dialog(ctx),
             FilesPart::Confirm => self.confirm_dialog(ctx),
+            FilesPart::Chmod => self.chmod_dialog(ctx),
         }
         // what it did shows in the files window
         self.ctx.request_repaint();
@@ -482,6 +489,7 @@ impl crate::part_window::Parts for FilesWindow {
             FilesPart::Question => self.question.is_some(),
             FilesPart::NewFolder => self.new_folder.is_some(),
             FilesPart::Confirm => self.confirm.is_some(),
+            FilesPart::Chmod => self.chmod.is_some(),
         }
     }
 }
@@ -521,6 +529,8 @@ struct FilesWindow {
     dock: files_dock::Dock,
     /// Folders kept to go back to.
     bookmarks: files_bookmarks::Bookmarks,
+    /// What may be done with files on the server: being asked.
+    chmod: Option<files_chmod::Chmod>,
 }
 
 impl FilesWindow {
@@ -556,6 +566,7 @@ impl FilesWindow {
             sync: None,
             dock: files_dock::Dock::default(),
             bookmarks: files_bookmarks::Bookmarks::default(),
+            chmod: None,
         }
     }
 
@@ -1606,7 +1617,7 @@ impl FilesWindow {
                 ui.ctx().copy_text(text.join("\n"));
             }
             Some((_, Action::Delete)) => self.ask_recycle(id),
-            Some((_, Action::Edit)) | None => {}
+            Some((_, Action::Edit | Action::Permissions)) | None => {}
         }
     }
 
@@ -1680,6 +1691,7 @@ impl FilesWindow {
                 }
             }
             Asked::Sync => self.open_sync(id),
+            Asked::Chmod => self.ask_chmod(id),
             Asked::CopyPath => {
                 let tab = &self.tabs[self.active];
                 let text: Vec<String> =
@@ -1875,6 +1887,7 @@ impl FilesWindow {
                 ui.ctx().copy_text(text.join("\n"));
             }
             Some((_, Action::Delete)) => self.ask_delete_remote(id),
+            Some((_, Action::Permissions)) => self.ask_chmod(id),
             None => {}
         }
     }
@@ -2205,6 +2218,8 @@ struct Listed {
 
 #[path = "files_bookmarks.rs"]
 mod files_bookmarks;
+#[path = "files_chmod.rs"]
+mod files_chmod;
 #[path = "files_dock.rs"]
 mod files_dock;
 #[path = "files_list.rs"]

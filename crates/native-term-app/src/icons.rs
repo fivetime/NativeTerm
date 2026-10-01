@@ -70,6 +70,7 @@ pub const TERMINAL: char = glyph(Icon::Terminal);
 pub const LAPTOP: char = glyph(Icon::Laptop);
 pub const BOOKMARK: char = glyph(Icon::Bookmark);
 pub const SPEED: char = glyph(Icon::Speed);
+pub const SHIELD: char = glyph(Icon::Shield);
 pub const SERVER: char = glyph(Icon::Server);
 pub const MORE: char = glyph(Icon::More);
 pub const ARROW_RIGHT: char = glyph(Icon::ArrowRight);

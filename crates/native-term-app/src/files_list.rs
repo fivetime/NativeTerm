@@ -427,6 +427,9 @@ fn menu(ui: &mut egui::Ui, i: usize, line: &Line, remote: bool, many: bool, out:
         item(ui, format!("{} {}", icons::RENAME, t!("files-rename")), Action::Rename);
     }
     item(ui, t!("files-copy-path"), Action::CopyPath);
+    if remote {
+        item(ui, format!("{} {}", icons::SHIELD, t!("files-chmod")), Action::Permissions);
+    }
     ui.separator();
     if ui.button(egui::RichText::new(format!("{} {}", icons::DELETE, t!("files-delete"))).color(RED)).clicked() {
         out.action = Some((i, Action::Delete));

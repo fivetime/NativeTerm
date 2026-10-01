@@ -763,6 +763,12 @@
         latency in the status line, the shortest round trip of the last
         8 requests the window makes anyway (nothing sent for it). Tried
         on Lingmo connected to itself
+  - [x] Permissions (chmod) of files on the server, from the menu of a
+        file or the bar's: a dialog of its own (modal) with read / write
+        / run for the owner, the group and the others and the octal
+        number, each changing the other, from the first file's mode
+        (set-id and sticky bits kept); SETSTAT with the mode on each.
+        Tried on Lingmo: 644 to 755, `stat` says 755
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above
