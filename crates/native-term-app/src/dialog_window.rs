@@ -71,8 +71,9 @@ pub fn owned_by(attributes: WindowAttributes, owner: Option<(&Window, bool)>) ->
 pub fn dialog_of(window: &Window, owner: &Window, modal: bool) {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        if let (Some(window), Some(owner)) = (x11_id(window), x11_id(owner)) {
-            native_term_os::x11_activate::make_dialog(window, owner, modal);
+        if let (Some(id), Some(owner_id)) = (x11_id(window), x11_id(owner)) {
+            made_on_server(window);
+            native_term_os::x11_activate::make_dialog(id, owner_id, modal);
         }
     }
     #[cfg(not(all(unix, not(target_os = "macos"))))]
@@ -87,10 +88,27 @@ pub fn dialog_of(window: &Window, owner: &Window, modal: bool) {
 pub fn never_focus(window: &Window) {
     #[cfg(all(unix, not(target_os = "macos")))]
     if let Some(id) = x11_id(window) {
-        native_term_os::x11_activate::never_focus(id);
+        made_on_server(window);
+        // (it waits for the server: not on the event loop's thread)
+        std::thread::spawn(move || {
+            if !native_term_os::x11_activate::never_focus(id) {
+                eprintln!("window {id:#x}: the input hint could not be set");
+            }
+        });
     }
     #[cfg(not(all(unix, not(target_os = "macos"))))]
     let _ = window;
+}
+
+/// The X server has made `window`: winit asks for it on a connection of
+/// its own and the request may still wait there, unsent; what is then
+/// said of the window on another connection (its hints, whose dialog it
+/// is) is refused as about no window (seen: the docking strip's input
+/// hint missing now and then, and the strip then taking the keyboard).
+/// A question winit has to wait for the answer to sends what waits.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn made_on_server(window: &Window) {
+    let _ = window.outer_position();
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]

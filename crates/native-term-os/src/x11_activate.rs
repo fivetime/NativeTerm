@@ -59,13 +59,31 @@ pub fn make_dialog(window: u32, parent: u32, modal: bool) -> bool {
 /// floating button that is only clicked, so that showing it takes the
 /// keyboard from no one (a dialog that just opened, above all). The
 /// other hints winit set are kept.
+///
+/// Set and read back, again until it holds (for two seconds at most):
+/// set once right after the window was made it was missing now and then
+/// (measured on Lingmo, two cold starts in six), and the window then took
+/// the keyboard from a dialog that had just opened. A blocking call: not
+/// on the event loop's thread.
 pub fn never_focus(window: u32) -> bool {
     use x11rb::properties::WmHints;
     let Ok((conn, _)) = x11rb::connect(None) else { return false };
-    let hints = WmHints::get(&conn, window).ok().and_then(|cookie| cookie.reply().ok()).flatten();
-    let mut hints = hints.unwrap_or_default();
-    hints.input = Some(false);
-    hints.set(&conn, window).is_ok() && conn.flush().is_ok()
+    let read = |conn: &x11rb::rust_connection::RustConnection| {
+        WmHints::get(conn, window).ok().and_then(|cookie| cookie.reply().ok()).flatten()
+    };
+    for _ in 0..40 {
+        // (the window there, as this connection sees it)
+        if conn.get_window_attributes(window).ok().and_then(|c| c.reply().ok()).is_some() {
+            let mut hints = read(&conn).unwrap_or_default();
+            hints.input = Some(false);
+            let set = hints.set(&conn, window).is_ok() && conn.flush().is_ok();
+            if set && read(&conn).is_some_and(|h| h.input == Some(false)) {
+                return true;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    false
 }
 
 /// The X server's current time: a property changed on a window of this

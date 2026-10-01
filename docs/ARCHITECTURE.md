@@ -4577,7 +4577,10 @@ maximize and close at the right), the title bar the main window's height
   the files window (its question, new folder, sync, confirmations) use
   it. Closing a window closes its dialogs first. The floating button and
   the docking strip are made never to take the keyboard on X11 (the
-  input hint), so that showing them takes it from no dialog.
+  input hint), so that showing them takes it from no dialog; the hint is
+  set and read back until it holds (set once, it was missing now and
+  then), and what is said of a dialog's window waits until winit's
+  request to make it has reached the server (`made_on_server`).
 - The `App` is shared (`Rc<RefCell<App>>`, `app_host.rs`) with the
   dialogs' windows: each draws its part of the `App` (`settings_window`,
   `show_wizard`, `show_dialog`) with its own context, so the code that

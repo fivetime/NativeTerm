@@ -677,9 +677,13 @@
   - [x] The floating button and the docking strip never take the
         keyboard on X11 (ICCCM input hint false): shown when the docked
         window went, they took it from a dialog that had just opened
-  - [ ] Seen once in four on Lingmo: a dialog of the files window
-        opened while the docked main window was sliding away, and the
-        main window ended up active; to find what activates it
+  - [x] A dialog of the files window opened while the docked main
+        window slid away lost the keyboard to the docking strip or the
+        floating button (3 of 5 runs on Lingmo): their input hint, set
+        once right after they were made, was missing now and then (2 cold
+        starts in 6). Now set and read back until it holds, off the event
+        loop's thread: 8 cold starts in 8 with it, 9 runs in 9 with the
+        dialog keeping the keyboard
   - [ ] Wayland: the dialog's parent (`xdg_toplevel.set_parent`, the
         modal hint) in the winit fork
   - [x] egui 0.36, the CPU renderer our fork (`fivetime/egui-render`,
