@@ -249,6 +249,13 @@ pub struct App {
     /// Keyboard shortcuts: in the window and global.
     keys: crate::shortcut_ui::ShortcutUi,
     dialog: Option<Dialog>,
+    /// The `App` itself, shared with its dialogs' windows (`app_host`).
+    pub(crate) me: std::rc::Weak<std::cell::RefCell<App>>,
+    /// The main window's context: repainted after a dialog's window did
+    /// something, and its size the room a dialog may take.
+    main_ctx: egui::Context,
+    /// Dialogs' windows asked for and not open yet.
+    parts_asked: Vec<crate::app_host::Part>,
     profile: ProfileSetup,
     show_settings: bool,
     notices: Vec<String>,
@@ -440,6 +447,9 @@ impl App {
             sync_roots: native_term_os::cloud::sync_roots(),
             putty_sessions: putty_has_sessions(),
             wizard: first_run.then(|| crate::wizard::Wizard::new(ctx)),
+            me: std::rc::Weak::new(),
+            main_ctx: ctx.clone(),
+            parts_asked: Vec::new(),
             securecrt: native_term_app::import::securecrt_config_path(),
         }
     }
@@ -1328,12 +1338,69 @@ impl App {
         }
     }
 
+    /// Draw `part` in its own window's context (see `app_host`).
+    pub(crate) fn show_part(&mut self, part: crate::app_host::Part, ctx: &egui::Context) {
+        use crate::app_host::Part;
+        native_term_skin::set_room(ctx, self.main_ctx.content_rect());
+        match part {
+            Part::Settings => self.settings_window(ctx),
+            Part::Wizard => self.show_wizard(ctx),
+            Part::Dialog => self.show_dialog(ctx),
+        }
+        // what it did shows in the main window
+        self.main_ctx.request_repaint();
+    }
+
+    /// Whether `part` is there to be shown.
+    pub(crate) fn part_open(&self, part: crate::app_host::Part) -> bool {
+        use crate::app_host::Part;
+        match part {
+            Part::Settings => self.show_settings,
+            Part::Wizard => self.wizard.is_some(),
+            Part::Dialog => self.dialog.is_some(),
+        }
+    }
+
+    /// Each part that is there has its window, a modal dialog of the
+    /// window it was opened from (a dialog the settings or the guide
+    /// opened is theirs); a part done with has its window closed.
+    fn sync_parts(&mut self) {
+        use crate::app_host::{DialogHost, Part};
+        use crate::window::Owner;
+        for part in Part::ALL {
+            let open = crate::window::is_open(part.key());
+            if open || !self.part_open(part) {
+                self.parts_asked.retain(|p| *p != part);
+            }
+            if open && !self.part_open(part) {
+                crate::window::close(part.key());
+            }
+            if open || !self.part_open(part) || self.parts_asked.contains(&part) {
+                continue;
+            }
+            let owner = match part {
+                Part::Dialog if self.show_settings => Owner::Window(Part::Settings.key().into()),
+                Part::Dialog if self.wizard.is_some() => Owner::Window(Part::Wizard.key().into()),
+                _ => Owner::Main,
+            };
+            let viewport = native_term_skin::undecorated(
+                egui::ViewportBuilder::default()
+                    .with_title("NativeTerm")
+                    .with_inner_size([480.0, 360.0])
+                    .with_resizable(false),
+            );
+            let app = self.me.clone();
+            crate::window::open_dialog(part.key(), viewport, owner, true, move |_| {
+                Box::new(DialogHost::new(app, part))
+            });
+            self.parts_asked.push(part);
+        }
+    }
+
     fn show_wizard(&mut self, ctx: &egui::Context) {
         use crate::wizard::WizardAction;
-        // a dialog the wizard opened comes first; the wizard waits behind it
-        if self.dialog.is_some() {
-            return;
-        }
+        // (a dialog the wizard opened is a modal window over it: the
+        // wizard takes no input meanwhile)
         let Some(wizard) = self.wizard.as_mut() else { return };
         let folders_dir = self.editor.folders_dir();
         let core = self.core.as_ref();
@@ -2253,7 +2320,7 @@ impl App {
         }
         let tones = crate::looks::tones(&ctx.global_style().visuals);
         // as large as the main window leaves it, in its middle
-        let around = ctx.content_rect();
+        let around = native_term_skin::room(ctx);
         let size =
             egui::vec2((around.width() - 64.0).clamp(320.0, 720.0), (around.height() - 120.0).clamp(240.0, 520.0));
         const PAGES: f32 = 168.0;
@@ -3097,10 +3164,9 @@ impl crate::window::Ui for App {
                 self.open_files(alias, session.as_ref().filter(|_| i == 0));
             }
         }
-        self.settings_window(ctx);
         self.window_frame(ui);
-        self.show_dialog(ctx);
-        self.show_wizard(ctx);
+        // the settings, the dialog, the guide: each a window of its own
+        self.sync_parts();
         // over everything else, in the corner
         self.toasts.show(ctx, native_term_os::desktop::animations());
     }

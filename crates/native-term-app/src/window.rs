@@ -32,6 +32,7 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
+use crate::dialog_window::{dialog_of, owned_by};
 use crate::dock::{self, Edge, Slide};
 use crate::shell;
 
@@ -61,6 +62,19 @@ struct Request {
     factory: Factory,
     place: Option<Place>,
     left: Option<LeftAt>,
+    owner: Option<Owner>,
+    modal: bool,
+}
+
+/// The window a dialog belongs to: kept above it and with it by the
+/// window system (Windows' owner window, X11's `WM_TRANSIENT_FOR`, a
+/// child window on macOS), and, for a modal one, kept from input while
+/// the dialog is open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Owner {
+    Main,
+    /// Another window from `open`, by its key.
+    Window(String),
 }
 
 /// Told where a window was when it closed, its top left corner in the
@@ -91,6 +105,10 @@ pub enum Place {
 
 thread_local! {
     static REQUESTS: RefCell<Vec<Request>> = const { RefCell::new(Vec::new()) };
+    /// The keys of the windows from `open` that are open (see `is_open`).
+    static OPEN_KEYS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// Windows asked to close (see `close`).
+    static CLOSING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Opens another window, or brings the one with the same `key` to the
@@ -102,8 +120,52 @@ pub fn open(
     viewport: egui::ViewportBuilder,
     factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
 ) {
-    let request = Request { key: key.into(), viewport, factory: Box::new(factory), place: None, left: None };
+    let request = Request {
+        key: key.into(),
+        viewport,
+        factory: Box::new(factory),
+        place: None,
+        left: None,
+        owner: None,
+        modal: false,
+    };
     REQUESTS.with(|r| r.borrow_mut().push(request));
+}
+
+/// Opens a dialog of `owner`'s, in the middle of it: a window of its own
+/// that the window system keeps above its owner. A `modal` one keeps the
+/// owner from input until it is closed (a click on the owner brings the
+/// dialog forward), as Windows' `DialogBox` and the desktops' modal
+/// dialogs do; it gives the owner the keyboard back when it closes.
+pub fn open_dialog(
+    key: impl Into<String>,
+    viewport: egui::ViewportBuilder,
+    owner: Owner,
+    modal: bool,
+    factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
+) {
+    let request = Request {
+        key: key.into(),
+        viewport,
+        factory: Box::new(factory),
+        place: None,
+        left: None,
+        owner: Some(owner),
+        modal,
+    };
+    REQUESTS.with(|r| r.borrow_mut().push(request));
+}
+
+/// Whether a window from `open` with this key is open (its `Ui` may say it
+/// wants to close: it is gone once the frame is done).
+pub fn is_open(key: &str) -> bool {
+    OPEN_KEYS.with(|k| k.borrow().iter().any(|open| open == key))
+}
+
+/// Closes the window from `open` with this key, once the current frame is
+/// done (a dialog its owner is done with).
+pub fn close(key: &str) {
+    CLOSING.with(|c| c.borrow_mut().push(key.to_string()));
 }
 
 /// The same, the window at `place` (`None`: where the window system puts
@@ -119,7 +181,15 @@ pub fn open_at(
     left: impl Fn(i32, i32) + 'static,
     factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
 ) {
-    let request = Request { key: key.into(), viewport, factory: Box::new(factory), place, left: Some(Box::new(left)) };
+    let request = Request {
+        key: key.into(),
+        viewport,
+        factory: Box::new(factory),
+        place,
+        left: Some(Box::new(left)),
+        owner: None,
+        modal: false,
+    };
     REQUESTS.with(|r| r.borrow_mut().push(request));
 }
 
@@ -137,7 +207,15 @@ pub fn open_at_pointer(
     viewport: egui::ViewportBuilder,
     factory: impl FnOnce(&egui::Context) -> Box<dyn Ui> + 'static,
 ) {
-    let request = Request { key: key.into(), viewport, factory: Box::new(factory), place: pointer(), left: None };
+    let request = Request {
+        key: key.into(),
+        viewport,
+        factory: Box::new(factory),
+        place: pointer(),
+        left: None,
+        owner: None,
+        modal: false,
+    };
     REQUESTS.with(|r| r.borrow_mut().push(request));
 }
 
@@ -235,6 +313,15 @@ struct Docking {
     top_after_restore: bool,
 }
 
+/// How a window is made: an ordinary one, one shown with its own
+/// transparency (the floating button), or a dialog of another window's
+/// (modal or not).
+enum Made<'a> {
+    Plain,
+    Layered,
+    Owned(&'a Window, bool),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Which {
     Main,
@@ -301,9 +388,14 @@ impl Pane {
         which: Which,
         viewport: &egui::ViewportBuilder,
         factory: Factory,
-        layered: bool,
+        made: Made<'_>,
         before_show: impl FnOnce(&Window),
     ) -> Result<Pane, String> {
+        let (layered, owner) = match made {
+            Made::Plain => (false, None),
+            Made::Layered => (true, None),
+            Made::Owned(owner, modal) => (false, Some((owner, modal))),
+        };
         let ctx = egui::Context::default();
         let repaint_proxy = proxy.clone();
         ctx.set_request_repaint_callback(move |info| {
@@ -314,7 +406,13 @@ impl Pane {
             });
         });
         crate::install_fonts(&ctx);
-        let window = Rc::new(egui_winit::create_window(&ctx, event_loop, viewport).map_err(|e| e.to_string())?);
+        let attributes = owned_by(egui_winit::create_winit_window_attributes(&ctx, viewport.clone()), owner);
+        let window = event_loop.create_window(attributes).map_err(|e| e.to_string())?;
+        egui_winit::apply_viewport_builder_to_window(&ctx, &window, viewport);
+        if let Some((owner, modal)) = owner {
+            dialog_of(&window, owner, modal);
+        }
+        let window = Rc::new(window);
         let hwnd = window_handle(&window).ok_or("no window handle")?;
         before_show(&window);
         let context = softbuffer::Context::new(Rc::clone(&window)).map_err(|e| e.to_string())?;
@@ -560,6 +658,8 @@ struct Runner {
     next_extra: u64,
     /// Those of them whose place is kept, by number.
     kept: Vec<(u64, Kept)>,
+    /// Dialogs and the window they belong to, by number: whether modal.
+    owned: Vec<(u64, Which, bool)>,
     /// The strip along the edge that stands for the docked window while
     /// it is hidden outright (see `set_hidden`): plain, painted by the
     /// server, brings the window back when the pointer touches it.
@@ -614,6 +714,7 @@ pub fn run(
         extras: Vec::new(),
         next_extra: 1,
         kept: Vec::new(),
+        owned: Vec::new(),
         #[cfg(not(windows))]
         strip: None,
         #[cfg(not(windows))]
@@ -632,22 +733,23 @@ impl Runner {
     fn start(&mut self, event_loop: &ActiveEventLoop) -> Result<(), String> {
         let factory = self.factory.take().ok_or("the window was already started")?;
         let placement = self.placement;
-        let main = Pane::create(event_loop, &self.proxy, Which::Main, &self.viewport, factory, false, |window| {
-            // without the system's title bar (`main.rs`) the window
-            // would be without its shadow too
-            #[cfg(windows)]
-            {
-                use winit::platform::windows::WindowExtWindows;
-                window.set_undecorated_shadow(true);
-            }
-            if let Some(p) = placement {
-                // only if it is still on a monitor
-                if win::on_a_monitor(p.x + p.width as i32 / 2, p.y + 16) {
-                    let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(p.width, p.height));
-                    window.set_outer_position(winit::dpi::PhysicalPosition::new(p.x, p.y));
+        let main =
+            Pane::create(event_loop, &self.proxy, Which::Main, &self.viewport, factory, Made::Plain, |window| {
+                // without the system's title bar (`main.rs`) the window
+                // would be without its shadow too
+                #[cfg(windows)]
+                {
+                    use winit::platform::windows::WindowExtWindows;
+                    window.set_undecorated_shadow(true);
                 }
-            }
-        })?;
+                if let Some(p) = placement {
+                    // only if it is still on a monitor
+                    if win::on_a_monitor(p.x + p.width as i32 / 2, p.y + 16) {
+                        let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(p.width, p.height));
+                        window.set_outer_position(winit::dpi::PhysicalPosition::new(p.x, p.y));
+                    }
+                }
+            })?;
         MAIN_HANDLE.store(main.hwnd, std::sync::atomic::Ordering::Relaxed);
         self.main = Some(main);
         // Wayland lets no client place or find windows: nothing docks, so
@@ -689,8 +791,14 @@ impl Runner {
         if let Some(spec) = self.button_spec.take() {
             let viewport = spec.viewport.with_visible(false);
             let position = spec.position;
-            let button =
-                Pane::create(event_loop, &self.proxy, Which::Button, &viewport, spec.factory, true, |window| {
+            let button = Pane::create(
+                event_loop,
+                &self.proxy,
+                Which::Button,
+                &viewport,
+                spec.factory,
+                Made::Layered,
+                |window| {
                     match position.filter(|(x, y)| win::on_a_monitor(*x, *y)) {
                         Some((x, y)) => window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y)),
                         None => {
@@ -706,7 +814,8 @@ impl Runner {
                             }
                         }
                     }
-                });
+                },
+            );
             match button {
                 Ok(mut pane) => {
                     // painted once, hidden, so it can appear without a flash
@@ -767,12 +876,61 @@ impl Runner {
                 let points = |pixels: i32| (f64::from(pixels) / scale) as f32;
                 viewport = viewport.with_position([points(x), points(y)]);
             }
-            match Pane::create(event_loop, &self.proxy, Which::Extra(n), &viewport, request.factory, false, |_| {}) {
+            // a dialog: over its owner's middle, the window system told
+            // whose it is
+            let owner = request.owner.as_ref().and_then(|owner| self.owner_of(owner));
+            if let Some(owner) = owner.and_then(|which| self.pane_of(which)) {
+                let scale = owner.window.scale_factor();
+                let size = viewport.inner_size.unwrap_or(egui::vec2(480.0, 320.0));
+                let pixels = ((f64::from(size.x) * scale) as u32, (f64::from(size.y) * scale) as u32);
+                if let Ok(at) = owner.window.outer_position() {
+                    let (x, y) = crate::dialog_window::centered((at.x, at.y), owner.window.outer_size().into(), pixels);
+                    viewport = viewport.with_position([(f64::from(x) / scale) as f32, (f64::from(y) / scale) as f32]);
+                }
+            }
+            let owner_window = owner.and_then(|which| self.pane_of(which)).map(|pane| (&*pane.window, request.modal));
+            let made = Pane::create(
+                event_loop,
+                &self.proxy,
+                Which::Extra(n),
+                &viewport,
+                request.factory,
+                owner_window.map_or(Made::Plain, |(owner, modal)| Made::Owned(owner, modal)),
+                |_| {},
+            );
+            match made {
                 Ok(mut pane) => {
-                    // painted at once: a hidden window gets no redraw
-                    if let Err(e) = pane.paint(self.frame_log.as_ref(), true) {
+                    // painted at once: a hidden window gets no redraw. A
+                    // dialog is painted twice first, hidden: it takes the
+                    // size of what it has (see the skin's dialogs), then is
+                    // put over its owner's middle and shown
+                    let log = self.frame_log.as_ref();
+                    let painted = match owner {
+                        None => pane.paint(log, true),
+                        Some(_) => pane.paint(log, false).and_then(|_| pane.paint(log, false)),
+                    };
+                    if let Err(e) = painted {
                         eprintln!("window {}: {e}", request.key);
                         continue;
+                    }
+                    if let Some(owner) = owner {
+                        if let Some(owner_pane) = self.pane_of(owner) {
+                            if let Ok(at) = owner_pane.window.outer_position() {
+                                let size = pane.window.outer_size();
+                                let (x, y) = crate::dialog_window::centered(
+                                    (at.x, at.y),
+                                    owner_pane.window.outer_size().into(),
+                                    (size.width, size.height),
+                                );
+                                pane.window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y));
+                            }
+                            // a modal one: the owner takes no input until it closes
+                            if request.modal {
+                                win::enable_window(owner_pane.hwnd, false);
+                            }
+                        }
+                        pane.window.set_visible(true);
+                        self.owned.push((n, owner, request.modal));
                     }
                     // (above the others once it is shown: X11's window
                     // managers take no such state from a window not shown yet)
@@ -781,6 +939,7 @@ impl Runner {
                     }
                     pane.window.focus_window();
                     activate_x11(&pane.window);
+                    OPEN_KEYS.with(|k| k.borrow_mut().push(request.key.clone()));
                     self.extras.push((n, request.key, pane));
                     if let Some(left) = request.left {
                         self.kept.push((n, Kept { left, shown: Instant::now(), moved: false }));
@@ -800,8 +959,46 @@ impl Runner {
                 (kept.left)(frame.left, frame.top);
             }
         }
+        // a dialog's owner takes input again, and the keyboard, before the
+        // dialog goes (else the window system gives the keyboard to
+        // another program's window)
+        if let Some(at) = self.owned.iter().position(|(m, _, _)| *m == n) {
+            let (_, owner, modal) = self.owned.remove(at);
+            let still = self.owned.iter().any(|(_, o, m)| *o == owner && *m);
+            if let Some(pane) = self.pane_of(owner) {
+                if modal && !still {
+                    win::enable_window(pane.hwnd, true);
+                }
+                pane.window.focus_window();
+            }
+        }
+        if let Some((_, key, _)) = self.extras.iter().find(|(m, _, _)| *m == n) {
+            let key = key.clone();
+            OPEN_KEYS.with(|k| k.borrow_mut().retain(|open| *open != key));
+        }
         // dropping the pane drops its Ui (which ends its connections)
         self.extras.retain(|(m, _, _)| *m != n);
+    }
+
+    /// The window `owner` names, if it is open.
+    fn owner_of(&self, owner: &Owner) -> Option<Which> {
+        match owner {
+            Owner::Main => self.main.is_some().then_some(Which::Main),
+            Owner::Window(key) => self.extras.iter().find(|(_, k, _)| k == key).map(|(n, _, _)| Which::Extra(*n)),
+        }
+    }
+
+    fn pane_of(&self, which: Which) -> Option<&Pane> {
+        match which {
+            Which::Main => self.main.as_ref(),
+            Which::Button => self.button.as_ref(),
+            Which::Extra(n) => self.extras.iter().find(|(m, _, _)| *m == n).map(|(_, _, pane)| pane),
+        }
+    }
+
+    /// The modal dialog over `which`, if one is open (the latest).
+    fn modal_over(&self, which: Which) -> Option<u64> {
+        self.owned.iter().rev().find(|(_, owner, modal)| *owner == which && *modal).map(|(n, _, _)| *n)
     }
 
     fn hwnd(&self) -> Option<isize> {
@@ -1061,7 +1258,12 @@ impl Runner {
                 if (self.docking.cursor_in_client && !moving) || dock::pinned() {
                     // no polling: leaving the client area is reported, and
                     // unpinning takes a click inside
-                } else if inside || moving || win::mouse_button_down() || typing {
+                } else if inside
+                    || moving
+                    || win::mouse_button_down()
+                    || typing
+                    || self.owned.iter().any(|(_, owner, _)| *owner == Which::Main)
+                {
                     // keep watching while the pointer is over the frame or a
                     // button is held
                     self.docking.leave_check = Some(now + dock::LEAVE_DELAY);
@@ -1252,6 +1454,19 @@ impl ApplicationHandler<UserEvent> for Runner {
             }
             return;
         }
+        if let Some(which) = self.pane(id).map(|(which, _)| which) {
+            if let Some(dialog) = self.modal_over(which) {
+                if crate::dialog_window::is_input(&event) {
+                    if crate::dialog_window::is_press(&event) {
+                        if let Some(pane) = self.pane_of(Which::Extra(dialog)) {
+                            pane.window.focus_window();
+                            activate_x11(&pane.window);
+                        }
+                    }
+                    return;
+                }
+            }
+        }
         let Some((which, pane)) = self.pane(id) else { return };
         match event {
             WindowEvent::RedrawRequested => {
@@ -1337,6 +1552,11 @@ impl ApplicationHandler<UserEvent> for Runner {
             return;
         }
         self.open_requested(event_loop);
+        for key in CLOSING.with(|c| std::mem::take(&mut *c.borrow_mut())) {
+            if let Some(n) = self.extras.iter().find(|(_, k, _)| *k == key).map(|(n, _, _)| *n) {
+                self.close_extra(n);
+            }
+        }
         let now = Instant::now();
         if shell::take_show_main() {
             self.show_main();
@@ -1370,6 +1590,12 @@ impl ApplicationHandler<UserEvent> for Runner {
 /// button and the Terminal windows are all about, or the X window id,
 /// which docking asks the X server about. Elsewhere there is nothing of
 /// that, and `0` stands for a handle nothing asks after.
+/// A window's handle (Windows' `HWND`): a dialog's owner.
+#[cfg(windows)]
+pub(crate) fn handle_of(window: &Window) -> Option<isize> {
+    window_handle(window)
+}
+
 fn window_handle(window: &Window) -> Option<isize> {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match window.window_handle().ok()?.as_raw() {

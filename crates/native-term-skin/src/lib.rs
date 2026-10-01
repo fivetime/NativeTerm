@@ -26,7 +26,7 @@ mod title;
 pub use caption::{caption_buttons, caption_dots, Buttons, Caption};
 pub use dialog::{body, button, footer, Choice, Message, MessageShown, Notice, Order, Role};
 pub use frame::{edges, frame_cursor, frame_hit, FRAME_BAND, FRAME_CORNER};
-pub use modal::{Modal, ModalShown};
+pub use modal::{as_window, close_asked, room, set_room, Modal, ModalShown};
 pub use title::{TitleBar, TitleShown};
 
 /// The title bar's height unless a window says otherwise: the main

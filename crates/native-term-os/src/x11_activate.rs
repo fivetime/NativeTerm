@@ -15,6 +15,7 @@ use x11rb::protocol::xproto::{
     WindowClass,
 };
 use x11rb::protocol::Event;
+use x11rb::wrapper::ConnectionExt as _;
 
 /// Ask the window manager to activate `window` (an X11 window id). False
 /// where there is no X server to ask, or it didn't answer.
@@ -27,6 +28,30 @@ pub fn activate(window: u32) -> bool {
     let event = ClientMessageEvent::new(32, window, atom.atom, [1, time, 0, 0, 0]);
     let sent = conn.send_event(false, root, EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY, event);
     sent.is_ok() && conn.flush().is_ok()
+}
+
+/// Make `window` (an X11 window id, not mapped yet) `parent`'s dialog,
+/// as GTK and Qt make theirs: `WM_TRANSIENT_FOR` the parent (the window
+/// manager keeps it above the parent and with it), the window type
+/// `_NET_WM_WINDOW_TYPE_DIALOG`, and with `modal` the state
+/// `_NET_WM_STATE_MODAL`. False where there is no X server to ask.
+pub fn make_dialog(window: u32, parent: u32, modal: bool) -> bool {
+    let Ok((conn, _)) = x11rb::connect(None) else { return false };
+    let atom = |name: &[u8]| conn.intern_atom(false, name).ok()?.reply().ok().map(|a| a.atom);
+    let set = || -> Option<()> {
+        conn.change_property32(PropMode::REPLACE, window, AtomEnum::WM_TRANSIENT_FOR, AtomEnum::WINDOW, &[parent])
+            .ok()?;
+        let kind = atom(b"_NET_WM_WINDOW_TYPE")?;
+        let dialog = atom(b"_NET_WM_WINDOW_TYPE_DIALOG")?;
+        conn.change_property32(PropMode::REPLACE, window, kind, AtomEnum::ATOM, &[dialog]).ok()?;
+        if modal {
+            let state = atom(b"_NET_WM_STATE")?;
+            let modal = atom(b"_NET_WM_STATE_MODAL")?;
+            conn.change_property32(PropMode::REPLACE, window, state, AtomEnum::ATOM, &[modal]).ok()?;
+        }
+        conn.flush().ok()
+    };
+    set().is_some()
 }
 
 /// The X server's current time: a property changed on a window of this

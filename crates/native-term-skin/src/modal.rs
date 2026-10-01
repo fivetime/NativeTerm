@@ -12,12 +12,57 @@
 //! As wide as what it has (at least `min_width`), or a width it is
 //! given; with [`Modal::resizable`] the person makes it larger or smaller
 //! by its corner.
+//!
+//! In a window of its own ([`as_window`]: the program made the dialog a
+//! window, owned by the one it belongs to, modal or not) the same dialog
+//! is the whole window: the title bar moves the window, the window is as
+//! large as the dialog (or, resizable, the dialog as large as the window),
+//! the close button, Escape and the window system's close all give it up.
 
 use crate::title::TitleBar;
 use crate::Skin;
 
 /// How round a dialog's corners are (`rounded-xl`, the design's cards).
 const ROUND: u8 = 10;
+
+fn window_id() -> egui::Id {
+    egui::Id::new("skin-dialog-window")
+}
+
+fn close_id() -> egui::Id {
+    egui::Id::new("skin-dialog-close-asked")
+}
+
+/// The dialogs shown with `ctx` are each a window of its own (the
+/// program's dialog windows say so for theirs).
+pub fn as_window(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(window_id(), true));
+}
+
+fn room_id() -> egui::Id {
+    egui::Id::new("skin-dialog-room")
+}
+
+/// A dialog in a window of its own is sized by what it has: what it may
+/// take is its owner's room, given here (the owner's size).
+pub fn set_room(ctx: &egui::Context, room: egui::Rect) {
+    ctx.data_mut(|d| d.insert_temp(room_id(), room));
+}
+
+/// The room a dialog shown with `ctx` may take: its owner's (see
+/// `set_room`), else the window's.
+#[must_use]
+pub fn room(ctx: &egui::Context) -> egui::Rect {
+    ctx.data(|d| d.get_temp::<egui::Rect>(room_id())).unwrap_or_else(|| ctx.content_rect())
+}
+
+/// The window system asked to close a dialog's window (Alt+F4, the
+/// taskbar): the dialog shown in it next is given up, as by its close
+/// button.
+pub fn close_asked(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(close_id(), true));
+    ctx.request_repaint();
+}
 
 /// What a dialog in a window is.
 pub struct Modal<'a> {
@@ -111,6 +156,18 @@ impl<'a> Modal<'a> {
             .corner_radius(ROUND)
             .shadow(ctx.global_style().visuals.popup_shadow);
         let pad = 2.0 * f32::from(padding);
+        // the first dialog shown in a frame is the window; one it shows
+        // over itself (a session's log over the sessions) is in it
+        let frame_nr = ctx.cumulative_frame_nr();
+        let taken = ctx.data(|d| d.get_temp::<u64>(window_id().with("taken"))) == Some(frame_nr);
+        let own_window = !taken && ctx.data(|d| d.get_temp::<bool>(window_id())).unwrap_or(false);
+        if own_window {
+            ctx.data_mut(|d| d.insert_temp(window_id().with("taken"), frame_nr));
+        }
+        // a window of its own, resizable: the dialog fills it
+        let fill = (own_window && resize.is_some()).then(|| ctx.content_rect().size());
+        let round = if own_window { 0 } else { ROUND };
+        let title_height = bar.bar_height();
         let inside = |ui: &mut egui::Ui| {
             // the title bar's place first; it is drawn once it is known
             // how wide what is under it is
@@ -122,6 +179,10 @@ impl<'a> Modal<'a> {
                     match width {
                         Some(width) => ui.set_width(width - pad),
                         None => ui.set_min_width(min_width - pad),
+                    }
+                    if let Some(fill) = fill {
+                        ui.set_min_size(fill - egui::vec2(pad, pad + bar.bar_height()));
+                        return content(ui);
                     }
                     match resize {
                         Some(size) => egui::Resize::default()
@@ -135,9 +196,36 @@ impl<'a> Modal<'a> {
                 .inner;
             let wide = ui.min_rect().width();
             let rect = egui::Rect::from_min_size(top, egui::vec2(wide, bar.bar_height()));
-            let title = bar.show_at(ui, skin, rect, ROUND);
+            let title = bar.show_at(ui, skin, rect, round, own_window);
             (title, inner)
         };
+        if own_window {
+            let page = egui::Frame::NONE.fill(p.page);
+            let shown = egui::Area::new(id)
+                .order(egui::Order::Background)
+                .fixed_pos(egui::Pos2::ZERO)
+                .constrain(false)
+                .show(ctx, |ui| page.show(ui, inside).inner);
+            let (title, inner) = shown.inner;
+            // the window as large as the dialog; one the person makes
+            // larger or smaller: as large as it is at first
+            let size = shown.response.rect.size();
+            let sized = ctx.data(|d| d.get_temp::<bool>(id.with("sized"))).unwrap_or(false);
+            let now = ctx.content_rect().size();
+            if (resize.is_none() || !sized) && (size - now).length() > 0.5 {
+                let want = match resize {
+                    Some(first) => first + egui::vec2(pad, pad + title_height),
+                    None => size,
+                };
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(want));
+            }
+            ctx.data_mut(|d| d.insert_temp(id.with("sized"), true));
+            crate::edges(ctx, skin, resize.is_some());
+            let asked = ctx.data_mut(|d| d.remove_temp::<bool>(close_id())).unwrap_or(false);
+            let escape = !egui::Popup::is_any_open(ctx)
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            return ModalShown { inner, closed: title.closed() || escape || asked };
+        }
         if modeless {
             let shown = egui::Area::new(id)
                 .order(egui::Order::Middle)

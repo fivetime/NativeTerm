@@ -13,9 +13,14 @@
 
 #[cfg(windows)]
 pub use native_term_win::dock::{
-    cursor, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, round_corners, set_topmost,
-    window_bounds, work_area, work_area_at, Bounds,
+    cursor, enable_window, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, round_corners,
+    set_topmost, window_bounds, work_area, work_area_at, Bounds,
 };
+
+/// Let a window take input or not (a modal dialog's owner): Windows'
+/// `EnableWindow`; elsewhere the program keeps the input from it itself.
+#[cfg(not(windows))]
+pub fn enable_window(_handle: isize, _on: bool) {}
 
 /// Keep a floating window of ours in sight over another application's
 /// full-screen window. Only macOS needs telling: a full-screen window

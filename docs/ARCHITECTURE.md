@@ -4555,6 +4555,33 @@ maximize and close at the right), the title bar the main window's height
   the buttons don't widen a dialog. A modeless one (`Modal::modeless`:
   no backdrop, moved by dragging it) is for what is looked at beside the
   rest (a session's log); `Modal::resizable` gives one a corner.
+- **Dialogs are windows of their own** (2026-10-01, the person's
+  rule: a window does one thing; a modal one is above its owner, keeps
+  it from input and returns its answer). `window::open_dialog` makes a
+  window owned by another (`dialog_window.rs`): Windows' owner window
+  plus `EnableWindow(owner, FALSE)` while modal, as `DialogBox` does;
+  X11's `WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG` and
+  `_NET_WM_STATE_MODAL` (what GTK and Qt set); a child window on macOS;
+  Wayland has no parent for a toplevel in winit yet. Elsewhere than
+  Windows the event loop keeps the input from the owner itself, a press
+  on it bringing the dialog forward. A dialog is painted twice hidden,
+  takes its content's size, is put over its owner's middle and shown;
+  closed, it gives the owner the keyboard back. The docked main window
+  stays out while it has a dialog.
+- The `App` is shared (`Rc<RefCell<App>>`, `app_host.rs`) with the
+  dialogs' windows: each draws its part of the `App` (`settings_window`,
+  `show_wizard`, `show_dialog`) with its own context, so the code that
+  does what a dialog answered is the `App`'s as before; all windows are
+  drawn on one thread, one after another. `App::sync_parts` opens and
+  closes the windows as the parts come and go; a dialog opened from the
+  settings or the guide is theirs, the rest the main window's. The
+  skin's `Modal` is the whole window there (`as_window`): its title bar
+  moves the window, Escape, its close button and the window system's
+  close give it up; a dialog shown over another in the same window (a
+  session's log over the sessions) stays inside it. Seen on Lingmo
+  (X11): the dialog's properties, moved off its owner, a click on the
+  owner leaving the dialog active, Cancel closing it.
+- The main window's dialogs are a file each (`dialogs/`).
 - Done: every window and dialog NativeTerm draws (no `egui::Window`
   left): the main window, its windows of their own, the dialogs inside
   the main window and the files window. Rows of buttons inside a page's

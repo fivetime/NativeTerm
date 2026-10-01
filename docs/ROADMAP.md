@@ -661,6 +661,16 @@
         order, the main one coloured; Enter never sends to several hosts
         nor takes anything away); no `egui::Window` left. Seen off the
         screen and on Lingmo (settings, host, import)
+  - [x] Dialogs are windows of their own: owned by the window they
+        belong to, modal (the owner kept from input, the answer back to
+        it), moved anywhere, as large as what they have (the settings,
+        the guide and every dialog of the main window's); the dialogs a
+        file each
+  - [ ] The files window's dialogs as windows of their own too (its
+        question, new folder, sync, its confirmations), and the
+        sessions' log beside the sessions rather than inside them
+  - [ ] Wayland: the dialog's parent (`xdg_toplevel.set_parent`, the
+        modal hint) in the winit fork
   - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
         settled
 - [x] The main window's new design (2026-09-28), after a design the

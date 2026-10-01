@@ -15,9 +15,11 @@
 
 mod agent;
 mod app;
+mod app_host;
 mod cleanup;
 mod commands_import;
 mod credential_sets;
+mod dialog_window;
 mod dialogs;
 mod dock;
 mod fab;
@@ -474,7 +476,12 @@ fn main() {
     });
     let button = floating_button(settings_core.clone());
     let result = window::run(viewport, placement, save, Some(button), move |ctx| match setup {
-        Ok(setup) => Box::new(App::new(ctx, setup)),
+        Ok(setup) => {
+            // shared with the dialogs' windows (see app_host)
+            let app = std::rc::Rc::new(std::cell::RefCell::new(App::new(ctx, setup)));
+            app.borrow_mut().me = std::rc::Rc::downgrade(&app);
+            Box::new(app_host::AppHost(app))
+        }
         Err(e) => Box::new(Fatal(e)),
     });
     if let Err(e) = result {

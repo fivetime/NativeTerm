@@ -482,7 +482,7 @@ impl OptionsDialog {
         let folder = matches!(self.target, OptionsTarget::Folder(_));
         // (NativeTerm's own pages are long: what the window has room for,
         // the title, the note and the buttons kept in sight)
-        let room = (ctx.content_rect().height() - 190.0).clamp(160.0, 560.0);
+        let room = (native_term_skin::room(ctx).height() - 190.0).clamp(160.0, 560.0);
         let dialog_title = title;
         let skin = crate::looks::skin(&ctx.global_style().visuals);
         let dialog_shown = native_term_skin::Modal::new("options_dialog-0", &dialog_title)

@@ -145,7 +145,23 @@ impl<'a> TitleBar<'a> {
     /// `rect` (its place, kept before what is under it was laid out: as
     /// wide as that turned out), its top corners as round as `round`. It
     /// moves nothing.
-    pub(crate) fn show_at(self, ui: &mut egui::Ui, skin: &Skin, rect: egui::Rect, round: u8) -> TitleShown {
+    /// With `movable`, the window is moved by it (a dialog that is a window
+    /// of its own).
+    pub(crate) fn show_at(
+        self,
+        ui: &mut egui::Ui,
+        skin: &Skin,
+        rect: egui::Rect,
+        round: u8,
+        movable: bool,
+    ) -> TitleShown {
+        if movable {
+            // (before what is put into it: that is over this)
+            let taken = ui.interact(rect, ui.id().with("dialog-title"), egui::Sense::drag());
+            if taken.drag_started_by(egui::PointerButton::Primary) {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+            }
+        }
         let corners = egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 };
         ui.painter().rect_filled(rect, corners, skin.palette.bar);
         ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0_f32, skin.palette.line));

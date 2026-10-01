@@ -11,7 +11,7 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::{
     GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST, MONITOR_DEFAULTTONULL,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, GetAsyncKeyState, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetCursorPos, GetWindowRect, SetWindowPos, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
     SWP_NOZORDER,
@@ -124,6 +124,15 @@ pub fn set_topmost(handle: isize, on: bool) {
     let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
     unsafe {
         let _ = SetWindowPos(hwnd(handle), Some(after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
+/// Let the window take input or not: a window with a modal dialog over it
+/// is disabled while the dialog is open, as `DialogBox` does to its owner
+/// (a click on it then brings the dialog forward, Windows' own way).
+pub fn enable_window(handle: isize, on: bool) {
+    unsafe {
+        let _ = EnableWindow(hwnd(handle), on);
     }
 }
 
