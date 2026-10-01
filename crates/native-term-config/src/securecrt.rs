@@ -270,6 +270,22 @@ pub struct CrtSession {
     /// The session log's settings, where the session logs (see
     /// `log_from`).
     pub log: Option<crate::session_log::LogSettings>,
+    /// The saved credential it logs in with ("Credential Title"), by its
+    /// title.
+    pub credential: Option<String>,
+}
+
+/// One of SecureCRT's saved credentials (`Config\Credentials\<title>.ini`,
+/// Session Options → Saved Credentials): its title, user name, and
+/// whether a password is stored. The password itself is not read here:
+/// [`read_credential_password`] reads it from `file` when it is written
+/// where NativeTerm keeps passwords.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CrtCredential {
+    pub title: String,
+    pub username: Option<String>,
+    pub file: PathBuf,
+    pub has_password: bool,
 }
 
 /// SecureCRT's Log File page (the same options and substitutions as
@@ -367,6 +383,7 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
         serial: ini.str("Com Port").filter(|_| protocol_is(ini, "serial")).map(|line| serial_from(ini, line)),
         putty: BTreeMap::new(),
         log: log_from(ini),
+        credential: ini.str("Credential Title").map(|t| t.trim().to_string()),
     }
 }
 
@@ -437,6 +454,8 @@ pub struct Scan {
     pub not_utf8: Vec<String>,
     /// Host keys from SecureCRT's `KnownHosts` folder.
     pub host_keys: crate::known_hosts::KeyScan,
+    /// Saved credentials from its `Credentials` folder.
+    pub credentials: Vec<CrtCredential>,
 }
 
 /// Read every session under `<config>\Sessions`. `config` is SecureCRT's
@@ -452,10 +471,72 @@ pub fn scan(config: &Path) -> io::Result<Scan> {
     // next to `Sessions`
     if let Some(config) = root.parent() {
         out.host_keys = crate::known_hosts::scan_securecrt(config).unwrap_or_default();
+        out.credentials = scan_credentials(&config.join("Credentials"));
     }
     out.sessions.sort_by_key(|s| s.path.to_lowercase());
     out.folders.sort_by_key(|f| f.to_lowercase());
     Ok(out)
+}
+
+/// The saved credentials in `dir` (none if there is no such folder).
+fn scan_credentials(dir: &Path) -> Vec<CrtCredential> {
+    let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
+    let mut found: Vec<CrtCredential> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let title = name.strip_suffix(".ini").or_else(|| name.strip_suffix(".INI"))?.to_string();
+            let text = fs::read(entry.path()).ok()?;
+            let text = String::from_utf8_lossy(&text);
+            let ini = parse_ini(text.strip_prefix('\u{feff}').unwrap_or(&text));
+            Some(CrtCredential {
+                title,
+                username: ini.str("Username").map(|u| u.trim().to_string()),
+                file: entry.path(),
+                has_password: ini.secrets.get("Password V2").copied().unwrap_or(false),
+            })
+        })
+        .collect();
+    found.sort_by_key(|c| c.title.to_lowercase());
+    found
+}
+
+/// The password of a saved credential or session file (`S:"Password V2"`),
+/// read from the file now and decrypted with SecureCRT's configuration
+/// passphrase (empty unless one was set): `Ok(None)` when it has none.
+/// For writing it where NativeTerm keeps passwords, nowhere else.
+pub fn read_credential_password(
+    file: &Path,
+    passphrase: &str,
+) -> Result<Option<String>, crate::securecrt_crypt::CryptError> {
+    let bytes = fs::read(file).map_err(|_| crate::securecrt_crypt::CryptError::Format)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let value = text
+        .lines()
+        .find_map(|l| l.trim_start_matches('\u{feff}').strip_prefix("S:\"Password V2\"="))
+        .map(str::trim)
+        .filter(|v| !v.is_empty());
+    match value {
+        Some(value) => crate::securecrt_crypt::decrypt(value, passphrase).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// A credential title as a NativeTerm credential set name (see
+/// `password::valid_set_name`): spaces and the characters a set name can't
+/// have become `-`, at most 64 characters; `none` and nothing left become
+/// `securecrt` (with what was there).
+pub fn credential_set_name(title: &str) -> String {
+    let mut name: String = title
+        .trim()
+        .chars()
+        .map(|c| if c.is_whitespace() || c.is_control() || "\"'/\\:*?".contains(c) { '-' } else { c })
+        .take(64)
+        .collect();
+    if name.trim_matches('-').is_empty() || name.eq_ignore_ascii_case("none") {
+        name = format!("securecrt-{}", name.trim_matches('-')).trim_end_matches('-').chars().take(64).collect();
+    }
+    name
 }
 
 fn walk(dir: &Path, folder: &mut Vec<String>, out: &mut Scan) -> io::Result<()> {
@@ -599,6 +680,22 @@ pub struct Notes {
     pub joined_descriptions: usize,
     /// PuTTY keys (`.ppk`) that need converting: path → key file.
     pub ppk_keys: Vec<(String, String)>,
+    /// Sessions naming a saved credential that isn't there: path → title.
+    pub missing_credentials: Vec<(String, String)>,
+}
+
+/// A saved credential to keep as a credential set: the set's name, the
+/// user name, and the file its password is read from when written (see
+/// [`read_credential_password`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlannedCredential {
+    pub set: String,
+    pub title: String,
+    pub user: Option<String>,
+    pub file: PathBuf,
+    pub has_password: bool,
+    /// How many of the imported sessions use it.
+    pub sessions: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -609,6 +706,9 @@ pub struct Plan {
     /// Host keys to add to `known_hosts` (all found; the writer skips the
     /// ones already there).
     pub host_keys: Vec<crate::known_hosts::HostKey>,
+    /// Saved credentials, as credential sets; written to the password store
+    /// by the app (`Editor::import` writes the configuration only).
+    pub credentials: Vec<PlannedCredential>,
 }
 
 impl Plan {
@@ -634,6 +734,25 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
     let mut taken = tree.taken_aliases();
     let mut notes = Notes::default();
     let mut skipped = Vec::new();
+    // saved credentials as credential sets, one name each
+    let mut credentials: Vec<PlannedCredential> = Vec::new();
+    for c in &scan.credentials {
+        let base = credential_set_name(&c.title);
+        let mut set = base.clone();
+        let mut n = 2;
+        while credentials.iter().any(|p| p.set.eq_ignore_ascii_case(&set)) {
+            set = format!("{base}-{n}");
+            n += 1;
+        }
+        credentials.push(PlannedCredential {
+            set,
+            title: c.title.clone(),
+            user: c.username.clone(),
+            file: c.file.clone(),
+            has_password: c.has_password,
+            sessions: 0,
+        });
+    }
 
     // sessions imported earlier from the same program: source path → alias
     let origin = scan.origin;
@@ -752,6 +871,22 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             .push(s.path.clone());
 
         let note = Some(s.description.join(" · ")).filter(|n| !n.is_empty());
+        // its saved credential, as the set it becomes
+        let mut options: Vec<(&'static str, String)> = s
+            .options
+            .iter()
+            .cloned()
+            .chain(s.log.iter().flat_map(crate::session_log::LogSettings::directives))
+            .collect();
+        if let Some(title) = &s.credential {
+            match credentials.iter_mut().find(|c| c.title.eq_ignore_ascii_case(title)) {
+                Some(credential) => {
+                    credential.sessions += 1;
+                    options.push(("NativeTermCredential", credential.set.clone()));
+                }
+                None => notes.missing_credentials.push((s.path.clone(), title.clone())),
+            }
+        }
         folders[fi].hosts.push(PlannedHost {
             source_prefix: origin.source_prefix(),
             source: s.path.clone(),
@@ -763,12 +898,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             proxy_jump,
             identity_file: s.identity_file.clone(),
             forwards: s.forwards.clone(),
-            options: s
-                .options
-                .iter()
-                .cloned()
-                .chain(s.log.iter().flat_map(crate::session_log::LogSettings::directives))
-                .collect(),
+            options,
             note,
         });
     }
@@ -784,7 +914,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
     let mut duplicates: Vec<Vec<String>> = seen.into_values().filter(|paths| paths.len() > 1).collect();
     duplicates.sort();
     notes.duplicates = duplicates;
-    Plan { folders, skipped, notes, host_keys: scan.host_keys.keys.clone() }
+    Plan { folders, skipped, notes, host_keys: scan.host_keys.keys.clone(), credentials }
 }
 
 /// A Telnet / serial / raw / rlogin / SUPDUP session to import, or `None`
@@ -895,6 +1025,79 @@ mod tests {
         let path = root.join(rel);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, session_file(lines)).unwrap();
+    }
+
+    /// Saved credentials: read as sets (title, user, a password there),
+    /// a session naming one gets it, a title nobody has is noted, and the
+    /// password is read from the file only when asked (a value made with
+    /// the public decoder: `03:`, empty configuration passphrase, "s3cret").
+    #[test]
+    fn saved_credentials_become_credential_sets() {
+        const S3CRET: &str = "03:ee37ed18fd80d738b04abd10e247b4a90a83c120f1c2bce15411fec48149add6596d7f7a7a7e94a29d1bee9e229c11744d879c4becb1e7c1b9aa1c3140b08e03e3a08a9246d892ea30affc8a9f600b1f";
+        let dir = tempfile::tempdir().unwrap();
+        let s = dir.path().join("Sessions");
+        write(
+            &dir.path().join("Credentials"),
+            "login.ini",
+            &["S:\"Username\"=root", &format!("S:\"Password V2\"={S3CRET}")],
+        );
+        write(&dir.path().join("Credentials"), "lab admin.ini", &["S:\"Username\"=admin", "S:\"Password V2\"="]);
+        write(&s, "web.ini", &["S:\"Hostname\"=10.0.0.1", "S:\"Credential Title\"=login"]);
+        write(&s, "db.ini", &["S:\"Hostname\"=10.0.0.2", "S:\"Credential Title\"=gone"]);
+        write(&s, "plain.ini", &["S:\"Hostname\"=10.0.0.3", "S:\"Credential Title\"="]);
+        let scan = scan(dir.path()).unwrap();
+        assert_eq!(scan.credentials.len(), 2);
+        let dump = format!("{:?}", scan);
+        assert!(!dump.contains("ee37ed18"), "the password stays in its file: {dump}");
+        let plan = plan(&scan, &SessionTree::default());
+        let sets: Vec<(&str, Option<&str>, bool, usize)> =
+            plan.credentials.iter().map(|c| (c.set.as_str(), c.user.as_deref(), c.has_password, c.sessions)).collect();
+        assert_eq!(sets, [("lab-admin", Some("admin"), false, 0), ("login", Some("root"), true, 1)]);
+        let host = |name: &str| plan.folders.iter().flat_map(|f| &f.hosts).find(|h| h.label == name).unwrap().clone();
+        assert!(host("web").options.contains(&("NativeTermCredential", "login".to_string())));
+        assert!(!host("db").options.iter().any(|(k, _)| *k == "NativeTermCredential"));
+        assert!(!host("plain").options.iter().any(|(k, _)| *k == "NativeTermCredential"));
+        assert_eq!(plan.notes.missing_credentials, [("db".to_string(), "gone".to_string())]);
+        let login = plan.credentials.iter().find(|c| c.set == "login").unwrap();
+        assert_eq!(read_credential_password(&login.file, "").unwrap().as_deref(), Some("s3cret"));
+        assert!(read_credential_password(&login.file, "another passphrase").is_err());
+        let admin = plan.credentials.iter().find(|c| c.set == "lab-admin").unwrap();
+        assert_eq!(read_credential_password(&admin.file, "").unwrap(), None, "none stored");
+    }
+
+    #[test]
+    fn credential_titles_as_set_names() {
+        assert_eq!(credential_set_name("login"), "login");
+        assert_eq!(credential_set_name("Lab Admin"), "Lab-Admin");
+        assert_eq!(credential_set_name("a/b:c*d?"), "a-b-c-d-");
+        assert_eq!(credential_set_name("机房 root"), "机房-root");
+        assert_eq!(credential_set_name("none"), "securecrt-none");
+        assert_eq!(credential_set_name("  "), "securecrt");
+        assert_eq!(credential_set_name(&"x".repeat(80)).chars().count(), 64);
+        for name in ["login", "Lab Admin", "a/b", "none", " ", "机房 root"] {
+            assert!(crate::password::valid_set_name(&credential_set_name(name)), "{name}");
+        }
+    }
+
+    /// A real SecureCRT configuration (`NATIVETERM_SECURECRT_CONFIG`): its
+    /// saved credentials as they would be imported, the passwords checked
+    /// and shown as lengths only.
+    #[test]
+    #[ignore]
+    fn this_machines_securecrt_credentials() {
+        let config = std::env::var("NATIVETERM_SECURECRT_CONFIG").expect("NATIVETERM_SECURECRT_CONFIG");
+        let scan = scan(Path::new(&config)).unwrap();
+        let plan = plan(&scan, &SessionTree::default());
+        println!("{} sessions, {} credentials", scan.sessions.len(), plan.credentials.len());
+        for c in &plan.credentials {
+            let password = match read_credential_password(&c.file, "") {
+                Ok(Some(p)) => format!("password read, {} characters", p.chars().count()),
+                Ok(None) => "no password".to_string(),
+                Err(e) => format!("password not read: {e:?}"),
+            };
+            println!("set {:?} (title {:?}), user {:?}, {} sessions, {password}", c.set, c.title, c.user, c.sessions);
+        }
+        println!("missing: {:?}", plan.notes.missing_credentials);
     }
 
     fn fixture() -> tempfile::TempDir {

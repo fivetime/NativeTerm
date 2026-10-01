@@ -2547,7 +2547,14 @@ one needed a terminal that can move a tab, which WezTerm can.
   - [x] Credential sets with a user name (optional; `\s` types it, the
         ssh login's user stays the ssh config's; a password saved from
         the password window keeps it)
-  - [ ] SecureCRT's own tables imported
+  - [x] SecureCRT's saved credentials imported as credential sets (the
+        passwords decrypted into the system's password store; checked
+        against a real SecureCRT 9 configuration), sessions linked to them
+  - [ ] SecureCRT's own logon action tables (`Login Script V4`) imported:
+        needs a configuration that has one (the author's 769 sessions have
+        none)
+  - [ ] Port forwards of newer SecureCRT (`Port Forward Table V3`): the
+        importer reads `V2` only; seen in a real configuration
   - [x] Remote command: ssh's `RemoteCommand`, already under Connection
 - [ ] Per-session key mapping for SSH sessions
 - [ ] Keyword highlighting (it would alter what the server sent)

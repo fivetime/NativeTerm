@@ -1829,6 +1829,27 @@ The result is shown as a summary before anything is written.
   no such value survives parsing. During development only public
   samples and synthetic files were read, not the author's own session
   files.
+- **Saved credentials** (2026-10-01): `Config\Credentials\<title>.ini`
+  (SecureCRT's "Saved Credentials": title, `Username`, `Password V2`)
+  become NativeTerm credential sets (the title made a set name: spaces
+  and `/ \ : * ? " '` as `-`), and a session's `Credential Title` its
+  `NativeTermCredential`. The scan keeps the title, the user and whether
+  a password is there; after the configuration is written the app reads
+  each password from its file and writes it straight into the system's
+  password store (`import::store_credentials`), never into the model,
+  the preview or the report. A set of that name already there is left as
+  it is. SecureCRT's "Password V2" is decrypted as public decoders read
+  it (`securecrt_crypt.rs`: `02:` AES-256-CBC with the SHA-256 of the
+  configuration passphrase; `03:` a salt and OpenSSH's bcrypt_pbkdf, 16
+  rounds; a length and a SHA-256 inside, so a wrong passphrase fails
+  instead of giving a wrong password), with an empty configuration
+  passphrase (SecureCRT's default); with one set, the report says the
+  password could not be read and no set is made. Checked against the
+  author's own SecureCRT 9 configuration with their consent (769
+  sessions, one saved credential: read, the checksum held; only names
+  and lengths printed) and against values made by HyperSine's
+  `securecrt_cipher.py`. Logon action tables (`Login Script V4`) are not
+  imported yet: no configuration with one has been seen.
 - **Folders:** SecureCRT's nested folders become flat NativeTerm folders
   labeled with the whole path (`生产 / 控制节点`); sessions directly
   under `Sessions` go to a folder "SecureCRT". A folder whose label

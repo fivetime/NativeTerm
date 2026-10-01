@@ -35,7 +35,7 @@ enum Step {
         commands: Vec<crate::commands_import::Imported>,
     },
     Running {
-        rx: Receiver<(Result<ImportOutcome, String>, Option<String>)>,
+        rx: Receiver<(Result<ImportOutcome, String>, Vec<String>)>,
         done: Arc<AtomicUsize>,
         total: usize,
     },
@@ -136,6 +136,11 @@ impl ImportDialog {
                     repaint.request_repaint();
                 })
                 .map_err(|e| e.to_string());
+            // the saved credentials the written hosts name, into the store
+            let mut commands: Vec<String> = commands.into_iter().collect();
+            if result.is_ok() {
+                commands.extend(import::store_credentials(&plan.credentials));
+            }
             let _ = tx.send((result, commands));
             ctx.request_repaint();
         });

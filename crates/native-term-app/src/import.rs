@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use native_term_config::securecrt::{Origin, Plan, Scan, Skip};
+use native_term_config::securecrt::{Origin, Plan, PlannedCredential, Scan, Skip};
 
 use crate::t;
 
@@ -26,6 +26,46 @@ pub fn securecrt_config_path() -> Option<PathBuf> {
     {
         None
     }
+}
+
+/// SecureCRT's saved credentials kept as credential sets, after the
+/// configuration was written (its hosts name them): the password read from
+/// SecureCRT's file and written straight into the system's password store,
+/// the user name with it. A set of that name that is there already is left
+/// as it is. What happened, a line each.
+pub fn store_credentials(credentials: &[PlannedCredential]) -> Vec<String> {
+    use native_term_config::password;
+    use native_term_os::credentials::{self, Saved};
+    let mut out = Vec::new();
+    let mut added = 0;
+    for c in credentials {
+        let entry = password::set_entry(&c.set);
+        if credentials::read(&entry).ok().flatten().is_some() {
+            out.push(t!("import-credential-kept", set = c.set.as_str()));
+            continue;
+        }
+        let secret = match native_term_config::securecrt::read_credential_password(&c.file, "") {
+            Ok(Some(secret)) => secret,
+            Ok(None) => {
+                out.push(t!("import-credential-no-password", title = c.title.as_str()));
+                continue;
+            }
+            Err(_) => {
+                out.push(t!("import-credential-unread", title = c.title.as_str()));
+                continue;
+            }
+        };
+        let saved = Saved { user: c.user.clone().unwrap_or_default(), secret, comment: String::new() };
+        match credentials::write(&entry, &saved) {
+            Ok(()) => added += 1,
+            Err(e) => out.push(t!("import-credential-failed", set = c.set.as_str(), error = e.to_string())),
+        }
+        drop(saved);
+    }
+    if added > 0 {
+        out.insert(0, t!("import-credentials-added", count = added));
+    }
+    out
 }
 
 /// One line of the summary; `detail` lines list session paths.
@@ -98,6 +138,26 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
     }
     if n.saved_passwords > 0 {
         out.push(line(t!("summary-saved-passwords", count = n.saved_passwords), true, Vec::new()));
+    }
+    if !plan.credentials.is_empty() {
+        out.push(line(
+            t!("summary-credentials", count = plan.credentials.len()),
+            false,
+            plan.credentials
+                .iter()
+                .map(|c| {
+                    let user = c.user.as_deref().unwrap_or("-");
+                    t!("summary-credential", set = c.set.as_str(), user = user, sessions = c.sessions)
+                })
+                .collect(),
+        ));
+    }
+    if !n.missing_credentials.is_empty() {
+        out.push(line(
+            t!("summary-missing-credentials", count = n.missing_credentials.len()),
+            true,
+            n.missing_credentials.iter().map(|(p, t)| format!("{p}  ({t})")).collect(),
+        ));
     }
     if !n.encodings.is_empty() {
         out.push(line(

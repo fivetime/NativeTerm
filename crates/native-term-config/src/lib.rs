@@ -41,6 +41,7 @@ pub mod proxy;
 pub mod putty;
 pub mod repair;
 pub mod securecrt;
+pub mod securecrt_crypt;
 pub mod session_log;
 pub mod system;
 pub mod traces;

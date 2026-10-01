@@ -196,6 +196,7 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
         serial: v.str("SerialLine").filter(|_| serial).map(|line| serial_from(v, line)),
         putty: if ssh { BTreeMap::new() } else { putty_options(v) },
         log: log_from(v),
+        credential: None,
     }
 }
 
