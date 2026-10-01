@@ -769,6 +769,13 @@
         number, each changing the other, from the first file's mode
         (set-id and sticky bits kept); SETSTAT with the mode on each.
         Tried on Lingmo: 644 to 755, `stat` says 755
+  - [x] Diff: one file chosen on each side, the rail's compare button
+        copies the server's aside and opens both in the diff program
+        the computer has (WinMerge, Beyond Compare, Meld, VS Code on
+        Windows; Meld, KDiff3, Kompare, VS Code; FileMerge on macOS),
+        found where they install; without one the errors say which to
+        install. Tried on Lingmo: without Meld the error, with it Meld
+        started on the two files
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

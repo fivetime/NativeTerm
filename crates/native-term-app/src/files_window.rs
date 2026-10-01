@@ -2220,6 +2220,8 @@ struct Listed {
 mod files_bookmarks;
 #[path = "files_chmod.rs"]
 mod files_chmod;
+#[path = "files_diff.rs"]
+mod files_diff;
 #[path = "files_dock.rs"]
 mod files_dock;
 #[path = "files_list.rs"]

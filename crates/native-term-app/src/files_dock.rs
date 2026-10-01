@@ -80,7 +80,8 @@ impl FilesWindow {
         let connected = tab.remote.up();
         let (local_chosen, remote_chosen) = (!tab.local.selected.is_empty(), !tab.remote.selected.is_empty());
         let local_folder = tab.local.path.is_some();
-        let (mut upload, mut download, mut sync) = (false, false, false);
+        let pair = self.diff_pair().is_some();
+        let (mut upload, mut download, mut sync, mut diff) = (false, false, false, false);
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.add_space((ui.available_height() / 2.0 - 70.0).max(8.0));
@@ -93,6 +94,12 @@ impl FilesWindow {
             download = download_button.enabled(connected && remote_chosen).show(ui, &palette).clicked();
             let (line, _) = ui.allocate_exact_size(egui::vec2(16.0, 1.0), egui::Sense::hover());
             ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, palette.line));
+            let glyph = icons::COMPARE.to_string();
+            diff = IconButton::new(glyph, t!("files-diff-hint"))
+                .round(look.local)
+                .enabled(connected && pair)
+                .show(ui, &palette)
+                .clicked();
             let glyph = icons::SYNC.to_string();
             let sync_button = IconButton::new(&glyph, t!("files-sync-hint")).round(look.local);
             sync = sync_button.enabled(connected && local_folder).show(ui, &palette).clicked();
@@ -107,6 +114,9 @@ impl FilesWindow {
         }
         if sync {
             self.open_sync(id);
+        }
+        if diff {
+            self.diff(id);
         }
     }
 
