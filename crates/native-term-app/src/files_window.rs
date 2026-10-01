@@ -95,9 +95,7 @@ pub fn open(spec: Spec) {
     if let Some(ctx) = WINDOW.with(|w| w.borrow().clone()) {
         ctx.request_repaint();
     }
-    let viewport = egui::ViewportBuilder::default()
-        .with_title(t!("files-window-title"))
-        .with_inner_size([1200.0, 760.0])
+    let viewport = crate::skinned::viewport(&t!("files-window-title"), 1200.0, 760.0)
         .with_min_inner_size([760.0, 420.0])
         .with_drag_and_drop(true);
     crate::window::open("files", viewport, |ctx| Box::new(FilesWindow::new(ctx)));
@@ -2628,11 +2626,7 @@ fn click(
 
 impl crate::window::Ui for FilesWindow {
     fn ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(theme) = *crate::app::THEME.lock().unwrap_or_else(|e| e.into_inner()) {
-            if ui.ctx().options(|o| o.theme_preference) != theme {
-                ui.ctx().set_theme(theme);
-            }
-        }
+        let skin = crate::skinned::chrome_resizable(ui, &t!("files-window-title"), crate::icons::FOLDER);
         self.take_pending();
         while let Ok(event) = self.rx.try_recv() {
             self.handle(event);
@@ -2661,7 +2655,7 @@ impl crate::window::Ui for FilesWindow {
             .show_inside(ui, |ui| self.activity(ui));
         let half = ui.available_width() / 2.0;
         // the same margins on both sides, so their rows line up
-        let frame = egui::Frame::NONE.inner_margin(8.0_f32).fill(ui.visuals().panel_fill);
+        let frame = egui::Frame::NONE.inner_margin(8.0_f32).fill(skin.palette.page);
         egui::Panel::left("files-local")
             .resizable(true)
             .default_size(half)

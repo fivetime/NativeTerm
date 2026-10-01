@@ -134,18 +134,20 @@ pub fn button(ui: &mut egui::Ui, skin: &Skin, text: &str, role: Role, enabled: b
 }
 
 /// A button of the row: its text, what it is for, whether it can be
-/// pressed now.
+/// pressed now, whether Enter presses it, what it says under the pointer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Choice {
     pub text: String,
     pub role: Role,
     pub enabled: bool,
+    pub default: bool,
+    pub hint: Option<String>,
 }
 
 impl Choice {
     #[must_use]
     pub fn new(text: impl Into<String>, role: Role) -> Choice {
-        Choice { text: text.into(), role, enabled: true }
+        Choice { text: text.into(), role, enabled: true, default: false, hint: None }
     }
 
     #[must_use]
@@ -153,13 +155,29 @@ impl Choice {
         self.enabled = enabled;
         self
     }
+
+    /// Enter presses this one rather than the primary one (Cancel where
+    /// what the dialog is for must not be done by a key press).
+    #[must_use]
+    pub fn default(mut self) -> Choice {
+        self.default = true;
+        self
+    }
+
+    #[must_use]
+    pub fn hint(mut self, hint: impl Into<String>) -> Choice {
+        self.hint = Some(hint.into());
+        self
+    }
 }
 
 /// The row of buttons at a dialog's bottom: `left` at its left (a check
 /// box, a button that is not one of the answers), `choices` at its right
 /// in the platform's order (`choices` as written: the primary one first).
-/// Which one was pressed, by its place in `choices`; Enter is the primary
-/// one where it can be pressed and nothing else wants Enter.
+/// Which one was pressed, by its place in `choices`; Enter is the one
+/// marked default, else the primary one (never the one that takes
+/// something away, unless marked), where it can be pressed and no field
+/// has the keyboard.
 pub fn footer(ui: &mut egui::Ui, skin: &Skin, left: impl FnOnce(&mut egui::Ui), choices: &[Choice]) -> Option<usize> {
     let mut pressed = None;
     ui.horizontal(|ui| {
@@ -174,7 +192,11 @@ pub fn footer(ui: &mut egui::Ui, skin: &Skin, left: impl FnOnce(&mut egui::Ui), 
             }
             for i in order {
                 let c = &choices[i];
-                if button(ui, skin, &c.text, c.role, c.enabled).clicked() {
+                let mut response = button(ui, skin, &c.text, c.role, c.enabled);
+                if let Some(hint) = &c.hint {
+                    response = response.on_hover_text(hint);
+                }
+                if response.clicked() {
                     pressed = Some(i);
                 }
             }
@@ -182,7 +204,9 @@ pub fn footer(ui: &mut egui::Ui, skin: &Skin, left: impl FnOnce(&mut egui::Ui), 
     });
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter)) && ui.memory(|m| m.focused().is_none());
     if pressed.is_none() && enter {
-        pressed = choices.iter().position(|c| c.enabled && matches!(c.role, Role::Primary | Role::Danger));
+        let default = choices.iter().position(|c| c.default);
+        pressed =
+            default.or_else(|| choices.iter().position(|c| c.role == Role::Primary)).filter(|i| choices[*i].enabled);
     }
     pressed
 }

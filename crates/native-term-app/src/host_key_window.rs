@@ -12,19 +12,21 @@ use native_term_app::t;
 pub fn open(ticket: u64, question: Question) {
     let changed = question.old.is_some();
     let title = if changed { t!("hostkey-changed-title") } else { t!("hostkey-new-title") };
-    let viewport = egui::ViewportBuilder::default()
-        .with_title(title)
-        .with_inner_size([560.0, if changed { 350.0 } else { 245.0 }])
+    let viewport = crate::skinned::viewport(&title, 560.0, if changed { 350.0 } else { 245.0 })
         .with_resizable(false)
-        .with_minimize_button(false)
-        .with_maximize_button(false)
         .with_always_on_top()
         .with_active(true);
     let window = HostKeyWindow { ticket, question, shown: false, answered: false };
     crate::window::open_at_pointer(format!("hostkey-{ticket}"), viewport, move |_| Box::new(window));
 }
 
-struct HostKeyWindow {
+/// The window for a picture of it (`snapshots.rs`), answering nothing.
+#[cfg(test)]
+pub(crate) fn for_snapshot(question: Question) -> HostKeyWindow {
+    HostKeyWindow { ticket: u64::MAX, question, shown: false, answered: true }
+}
+
+pub(crate) struct HostKeyWindow {
     ticket: u64,
     question: Question,
     /// It was shown (one made again only to bring it forward is dropped
@@ -60,38 +62,49 @@ fn fingerprint(ui: &mut egui::Ui, text: &str) {
 impl crate::window::Ui for HostKeyWindow {
     fn ui(&mut self, ui: &mut egui::Ui) {
         self.shown = true;
-        if let Some(theme) = *crate::app::THEME.lock().unwrap_or_else(|e| e.into_inner()) {
-            if ui.ctx().options(|o| o.theme_preference) != theme {
-                ui.ctx().set_theme(theme);
-            }
-        }
+        use native_term_skin::{Choice, Notice, Role};
         let changed = self.question.old.is_some();
+        let title = if changed { t!("hostkey-changed-title") } else { t!("hostkey-new-title") };
+        let skin = crate::skinned::chrome(ui, &title, crate::icons::LOCK);
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(ui.visuals().panel_fill);
-        egui::Panel::bottom("hostkey-buttons").frame(frame).show_separator_line(false).show_inside(ui, |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // a changed key is never trusted by a key press
-                if ui.button(t!("button-cancel")).clicked() || escape || (enter && changed) {
-                    self.answer(HostKeyAnswer::Cancel);
-                }
-                if changed {
-                    let red = egui::Color32::from_rgb(0xc0, 0x39, 0x2b);
-                    let replace = egui::Button::new(egui::RichText::new(t!("hostkey-replace")).color(red));
-                    if ui.add(replace).clicked() {
-                        self.answer(HostKeyAnswer::Save);
-                    }
-                } else {
-                    if ui.button(t!("hostkey-once")).on_hover_text(t!("hostkey-once-hint")).clicked() {
-                        self.answer(HostKeyAnswer::Once);
-                    }
-                    if ui.button(t!("hostkey-save")).on_hover_text(t!("hostkey-save-hint")).clicked() || enter {
-                        self.answer(HostKeyAnswer::Save);
-                    }
-                }
-            });
+        // a changed key is never trusted by a key press: Enter cancels
+        let choices = if changed {
+            vec![
+                Choice::new(t!("hostkey-replace"), Role::Danger),
+                Choice::new(t!("button-cancel"), Role::Plain).default(),
+            ]
+        } else {
+            vec![
+                Choice::new(t!("hostkey-save"), Role::Primary).hint(t!("hostkey-save-hint")),
+                Choice::new(t!("hostkey-once"), Role::Plain).hint(t!("hostkey-once-hint")),
+                Choice::new(t!("button-cancel"), Role::Plain),
+            ]
+        };
+        let pressed = crate::skinned::buttons(ui, &skin, "hostkey-buttons", |_| {}, &choices);
+        let cancel = choices.len() - 1;
+        if pressed == Some(cancel) || escape || (enter && changed) {
+            self.answer(HostKeyAnswer::Cancel);
+        } else if pressed == Some(0) || enter {
+            self.answer(HostKeyAnswer::Save);
+        } else if pressed == Some(1) {
+            self.answer(HostKeyAnswer::Once);
+        }
+        let notice = if changed { Notice::Error } else { Notice::Question };
+        egui::CentralPanel::default().frame(crate::skinned::page(&skin)).show_inside(ui, |ui| {
+            native_term_skin::body(ui, Some(notice), |ui| self.text(ui, &skin));
         });
-        let frame = frame.inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(14) });
-        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+    }
+
+    fn wants_close(&self) -> bool {
+        self.answered
+    }
+}
+
+impl HostKeyWindow {
+    /// What is said: the host, the key's fingerprint, for a changed one
+    /// both and where the old one is.
+    fn text(&self, ui: &mut egui::Ui, skin: &native_term_skin::Skin) {
+        {
             ui.spacing_mut().item_spacing.y = 8.0;
             let q = &self.question;
             let host = match &q.label {
@@ -107,7 +120,7 @@ impl crate::window::Ui for HostKeyWindow {
                     ui.weak(t!("hostkey-new-note"));
                 }
                 Some(old) => {
-                    let red = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
+                    let red = skin.palette.danger;
                     ui.colored_label(red, egui::RichText::new(t!("hostkey-changed-warning")).strong());
                     ui.label(t!("hostkey-changed-text", host = format!("{host}{shown_ip}")));
                     ui.label(t!("hostkey-changed-old", key_type = old.key_type.as_str()));
@@ -118,10 +131,6 @@ impl crate::window::Ui for HostKeyWindow {
                     ui.weak(t!("hostkey-changed-note", place = place.as_str()));
                 }
             }
-        });
-    }
-
-    fn wants_close(&self) -> bool {
-        self.answered
+        }
     }
 }

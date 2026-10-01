@@ -6,18 +6,19 @@ use native_term_app::{t, tab_title};
 
 /// Asks for the question `ticket` names (see `tab_title::answer`).
 pub fn open(ticket: u64, current: String) {
-    let viewport = egui::ViewportBuilder::default()
-        .with_title(t!("tab-title-title"))
-        .with_inner_size([440.0, 170.0])
-        .with_resizable(false)
-        .with_minimize_button(false)
-        .with_maximize_button(false)
-        .with_always_on_top();
+    let viewport =
+        crate::skinned::viewport(&t!("tab-title-title"), 440.0, 170.0).with_resizable(false).with_always_on_top();
     let window = TitleWindow { ticket, title: current, focused: false, answered: false };
     crate::window::open_at_pointer("tab-title", viewport, move |_| Box::new(window));
 }
 
-struct TitleWindow {
+/// The window for a picture of it (`snapshots.rs`), answering nothing.
+#[cfg(test)]
+pub(crate) fn for_snapshot(title: &str) -> TitleWindow {
+    TitleWindow { ticket: u64::MAX, title: title.into(), focused: true, answered: true }
+}
+
+pub(crate) struct TitleWindow {
     ticket: u64,
     title: String,
     /// The field gets the keyboard when the window opens.
@@ -45,26 +46,17 @@ impl Drop for TitleWindow {
 
 impl crate::window::Ui for TitleWindow {
     fn ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(theme) = *crate::app::THEME.lock().unwrap_or_else(|e| e.into_inner()) {
-            if ui.ctx().options(|o| o.theme_preference) != theme {
-                ui.ctx().set_theme(theme);
-            }
-        }
+        let skin = crate::skinned::chrome(ui, &t!("tab-title-title"), crate::icons::RENAME);
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(ui.visuals().panel_fill);
-        // the buttons first, at the bottom: there whatever room the window
-        // system leaves the rest
-        egui::Panel::bottom("tab-title-buttons").frame(frame).show_separator_line(false).show_inside(ui, |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(t!("button-cancel")).clicked() || escape {
-                    self.answer(false);
-                }
-                if ui.button(t!("button-ok")).clicked() || enter {
-                    self.answer(true);
-                }
-            });
-        });
-        let frame = frame.inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(14) });
+        use native_term_skin::{Choice, Role};
+        let choices = [Choice::new(t!("button-ok"), Role::Primary), Choice::new(t!("button-cancel"), Role::Plain)];
+        let pressed = crate::skinned::buttons(ui, &skin, "tab-title-buttons", |_| {}, &choices);
+        if pressed == Some(1) || escape {
+            self.answer(false);
+        } else if pressed == Some(0) || enter {
+            self.answer(true);
+        }
+        let frame = crate::skinned::page(&skin);
         egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.label(t!("tab-title-name"));

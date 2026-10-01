@@ -4542,8 +4542,15 @@ maximize and close at the right), the title bar the main window's height
   draws windows with the software renderer into PNGs (dark and light),
   `NATIVETERM_SNAPSHOTS=<folder> cargo test -p native-term-app --bin
   nativeterm snapshots -- --ignored`.
-- Done so far: the main window's header and edges, the password window,
-  the delete confirmation. The other windows follow (ROADMAP).
+- `skinned.rs` is NativeTerm's side of it for windows of their own:
+  their viewport (no system title bar, the content's height plus the
+  title bar's), the theme the main window chose, the title bar and
+  edges (`chrome`, or `chrome_resizable` with all three buttons), the
+  page, the row of buttons. A `Choice` marked `default` is what Enter
+  presses (Cancel for a changed host key: never trusted by a key press).
+- Done so far: the main window, every window of its own (password, host
+  key, files, find, quotation, tab title), the delete confirmation. The
+  dialogs inside the main window follow (ROADMAP).
 
 ### Terminal tabs
 Rendering belongs to Windows Terminal, but each tab can be opened with:

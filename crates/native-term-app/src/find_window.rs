@@ -36,13 +36,8 @@ pub fn asked(question: Question, core: Core) {
         None if question.result.is_some() => find::answer(question.ticket, None),
         None => {
             ASKED.with(|a| a.borrow_mut().push(question));
-            let viewport = egui::ViewportBuilder::default()
-                .with_title(t!("find-title"))
-                .with_inner_size([520.0, 190.0])
-                .with_resizable(false)
-                .with_minimize_button(false)
-                .with_maximize_button(false)
-                .with_always_on_top();
+            let viewport =
+                crate::skinned::viewport(&t!("find-title"), 520.0, 190.0).with_resizable(false).with_always_on_top();
             // where the person left it (it stays up while they find, and
             // where the pointer is it is over what is found, as often as
             // not); the first time where the pointer is: in the terminal's
@@ -126,11 +121,7 @@ impl Drop for FindWindow {
 
 impl crate::window::Ui for FindWindow {
     fn ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(theme) = *crate::app::THEME.lock().unwrap_or_else(|e| e.into_inner()) {
-            if ui.ctx().options(|o| o.theme_preference) != theme {
-                ui.ctx().set_theme(theme);
-            }
-        }
+        let skin = crate::skinned::chrome(ui, &t!("find-title"), crate::icons::SEARCH);
         self.take_asked();
         if let Some(since) = self.finding {
             if since.elapsed() > ANSWER {
@@ -142,19 +133,28 @@ impl crate::window::Ui for FindWindow {
         }
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
         let can_find = self.ticket.is_some() && !self.find.text.is_empty();
-        let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(ui.visuals().panel_fill);
+        let frame = egui::Frame::NONE.inner_margin(crate::skinned::PADDING).fill(skin.palette.page);
         // the buttons in a column of their own at the right, as SecureCRT's
         egui::Panel::right("find-buttons").frame(frame).show_separator_line(false).resizable(false).show_inside(
             ui,
             |ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
-                let size = egui::vec2(110.0, 26.0);
-                if ui.add_enabled(can_find, egui::Button::new(t!("find-next")).min_size(size)).clicked()
-                    || (enter && can_find)
-                {
+                use native_term_skin::Role;
+                // (the column's buttons as wide as each other)
+                ui.set_width(110.0);
+                let (next, cancel) = ui
+                    .with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
+                        let next = native_term_skin::button(ui, &skin, &t!("find-next"), Role::Primary, can_find);
+                        (
+                            next.clicked(),
+                            native_term_skin::button(ui, &skin, &t!("button-cancel"), Role::Plain, true).clicked(),
+                        )
+                    })
+                    .inner;
+                if next || (enter && can_find) {
                     self.find_next();
                 }
-                if ui.add(egui::Button::new(t!("button-cancel")).min_size(size)).clicked() || escape {
+                if cancel || escape {
                     self.close();
                 }
             },

@@ -57,6 +57,31 @@ fn snapshots() {
         let size = egui::vec2(460.0, 280.0 + native_term_skin::TITLE_BAR);
         save(&format!("password-{theme}"), picture(size, dark, |ui| window.ui(ui)));
 
+        for changed in [false, true] {
+            use native_term_app::host_key_ask::{OldHostKey, Question};
+            let old = changed.then(|| OldHostKey {
+                key_type: "ssh-ed25519".into(),
+                fingerprint: "SHA256:Q2xKb3F3cE1wZ0xUa2l2eFZ1bXh1SGxqd3JmS2Rh".into(),
+                file: "~/.ssh/known_hosts".into(),
+                line: 42,
+            });
+            let question = Question {
+                label: Some("web01".into()),
+                host: "10.0.0.9".into(),
+                ip: "10.0.0.9".into(),
+                key_type: "ssh-ed25519".into(),
+                fingerprint: "SHA256:bm90IGEgcmVhbCBrZXksIGEgcGljdHVyZSdzIG9uZQ".into(),
+                old,
+            };
+            let mut window = crate::host_key_window::for_snapshot(question);
+            let height = if changed { 350.0 } else { 245.0 } + native_term_skin::TITLE_BAR;
+            let name = if changed { "hostkey-changed" } else { "hostkey-new" };
+            save(&format!("{name}-{theme}"), picture(egui::vec2(560.0, height), dark, |ui| window.ui(ui)));
+        }
+        let mut window = crate::tab_title_window::for_snapshot("web01 — build");
+        let size = egui::vec2(440.0, 170.0 + native_term_skin::TITLE_BAR);
+        save(&format!("tab-title-{theme}"), picture(size, dark, |ui| window.ui(ui)));
+
         let mut delete = crate::dialogs::ConfirmDelete::new("web01", "Web server 01");
         save(
             &format!("delete-{theme}"),

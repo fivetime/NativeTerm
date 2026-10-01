@@ -644,8 +644,12 @@
   - [x] The skin, the main window's header and edges on it, a window's
         own close button closes it, the password window and the delete
         confirmation moved to it; pictures drawn off the screen
-  - [ ] The other windows of their own (host key, files, find,
-        quotation, tab title)
+  - [x] The other windows of their own (host key, files, find,
+        quotation, tab title): `skinned.rs` puts the theme, the title bar,
+        the edges and the row of buttons on each; the host key window
+        with the dialogs' sign (a question for a new key, an error for a
+        changed one, where Enter is Cancel); seen on Lingmo (the files
+        window: all three buttons, its edges)
   - [ ] The dialogs inside the main window (options, import, credential
         sets, keys, send, wizard, cleanup, server sessions, the
         confirmations), then the files window's

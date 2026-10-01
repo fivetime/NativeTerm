@@ -9,14 +9,9 @@ use native_term_app::t;
 
 /// Asks the question `ticket` names (see `password_ask::answer`).
 pub fn open(ticket: u64, question: Question) {
-    // (the skin's title bar is in the window: as much higher)
-    let height = if question.can_save { 280.0 } else { 240.0 } + native_term_skin::TITLE_BAR;
-    let viewport = egui::ViewportBuilder::default()
-        .with_title(t!("password-ask-title"))
-        .with_inner_size([460.0, height])
+    let height = if question.can_save { 280.0 } else { 240.0 };
+    let viewport = crate::skinned::viewport(&t!("password-ask-title"), 460.0, height)
         .with_resizable(false)
-        .with_minimize_button(false)
-        .with_maximize_button(false)
         .with_always_on_top()
         .with_active(true);
     let window = PasswordWindow {
@@ -29,7 +24,6 @@ pub fn open(ticket: u64, question: Question) {
         shown: false,
         answered: false,
     };
-    let viewport = native_term_skin::undecorated(viewport);
     crate::window::open_at_pointer(format!("password-{ticket}"), viewport, move |_| Box::new(window));
 }
 
@@ -103,17 +97,8 @@ impl Drop for PasswordWindow {
 impl crate::window::Ui for PasswordWindow {
     fn ui(&mut self, ui: &mut egui::Ui) {
         self.shown = true;
-        if let Some(theme) = *crate::app::THEME.lock().unwrap_or_else(|e| e.into_inner()) {
-            if ui.ctx().options(|o| o.theme_preference) != theme {
-                ui.ctx().set_theme(theme);
-            }
-        }
-        // the skin's title bar and edges (its close button gives up, as
-        // the system's did: see `Drop`)
-        let skin = crate::looks::skin(ui.visuals());
-        let title = t!("password-ask-title");
-        native_term_skin::TitleBar::new(&title).icon(crate::icons::KEY).show_window(ui, &skin);
-        native_term_skin::edges(ui.ctx(), &skin, false);
+        // (its close button gives up, as the system's did: see `Drop`)
+        let skin = crate::skinned::chrome(ui, &t!("password-ask-title"), crate::icons::KEY);
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
         let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(skin.palette.page);
         egui::Panel::bottom("password-buttons").frame(frame).show_separator_line(false).show_inside(ui, |ui| {

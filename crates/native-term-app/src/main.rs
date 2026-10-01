@@ -43,6 +43,7 @@ mod send_line;
 mod server_sessions;
 mod shell;
 mod shortcut_ui;
+mod skinned;
 #[cfg(test)]
 mod snapshots;
 mod storage;

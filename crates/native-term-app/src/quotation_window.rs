@@ -12,13 +12,8 @@ const PLACEHOLDER: &str = "<text>";
 
 /// Asks for the question `ticket` names (see `quotation::answer`).
 pub fn open(ticket: u64, core: Core) {
-    let viewport = egui::ViewportBuilder::default()
-        .with_title(t!("quote-title"))
-        .with_inner_size([460.0, 240.0])
-        .with_resizable(false)
-        .with_minimize_button(false)
-        .with_maximize_button(false)
-        .with_always_on_top();
+    let viewport =
+        crate::skinned::viewport(&t!("quote-title"), 460.0, 240.0).with_resizable(false).with_always_on_top();
     // where the pointer is: in the terminal's window, on the menu's item
     crate::window::open_at_pointer("paste-quotation", viewport, move |_| Box::new(QuotationWindow::new(ticket, core)));
 }
@@ -66,27 +61,17 @@ impl Drop for QuotationWindow {
 
 impl crate::window::Ui for QuotationWindow {
     fn ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(theme) = *crate::app::THEME.lock().unwrap_or_else(|e| e.into_inner()) {
-            if ui.ctx().options(|o| o.theme_preference) != theme {
-                ui.ctx().set_theme(theme);
-            }
-        }
+        let skin = crate::skinned::chrome(ui, &t!("quote-title"), crate::icons::EDIT);
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(ui.visuals().panel_fill);
-        // the buttons first, at the bottom: there whatever room the window
-        // system leaves the rest (its title bar is taken from the window's
-        // height on some)
-        egui::Panel::bottom("quote-buttons").frame(frame).show_separator_line(false).show_inside(ui, |ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(t!("button-cancel")).clicked() || escape {
-                    self.answer(false);
-                }
-                if ui.button(t!("button-ok")).clicked() || enter {
-                    self.answer(true);
-                }
-            });
-        });
-        let frame = frame.inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(14) });
+        use native_term_skin::{Choice, Role};
+        let choices = [Choice::new(t!("button-ok"), Role::Primary), Choice::new(t!("button-cancel"), Role::Plain)];
+        let pressed = crate::skinned::buttons(ui, &skin, "quote-buttons", |_| {}, &choices);
+        if pressed == Some(1) || escape {
+            self.answer(false);
+        } else if pressed == Some(0) || enter {
+            self.answer(true);
+        }
+        let frame = crate::skinned::page(&skin);
         egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.horizontal(|ui| {
