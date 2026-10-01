@@ -18,6 +18,24 @@
 use winit::event::WindowEvent;
 use winit::window::{Window, WindowAttributes};
 
+/// `attributes` for a window whose frame is the skin's (all but the
+/// floating button, which is a shape of its own): on Windows 11 round
+/// corners and the system's shadow, asked for and not left to the
+/// system's default, which gives them only to a window that can be made
+/// larger or smaller (so a dialog had square corners beside its rounded
+/// owner). Elsewhere the window manager's.
+pub fn skinned(attributes: WindowAttributes) -> WindowAttributes {
+    #[cfg(windows)]
+    {
+        use winit::platform::windows::{CornerPreference, WindowAttributesExtWindows};
+        attributes.with_undecorated_shadow(true).with_corner_preference(CornerPreference::Round)
+    }
+    #[cfg(not(windows))]
+    {
+        attributes
+    }
+}
+
 /// `attributes` for a window that is `owner`'s dialog (`None`: a window
 /// of its own).
 pub fn owned_by(attributes: WindowAttributes, owner: Option<(&Window, bool)>) -> WindowAttributes {

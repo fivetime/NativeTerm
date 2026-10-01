@@ -406,7 +406,10 @@ impl Pane {
             });
         });
         crate::install_fonts(&ctx);
-        let attributes = owned_by(egui_winit::create_winit_window_attributes(&ctx, viewport.clone()), owner);
+        let attributes = egui_winit::create_winit_window_attributes(&ctx, viewport.clone());
+        // every window with the skin's frame the same (round, shadowed)
+        let attributes = if layered { attributes } else { crate::dialog_window::skinned(attributes) };
+        let attributes = owned_by(attributes, owner);
         let window = event_loop.create_window(attributes).map_err(|e| e.to_string())?;
         egui_winit::apply_viewport_builder_to_window(&ctx, &window, viewport);
         if let Some((owner, modal)) = owner {

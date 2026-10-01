@@ -4591,6 +4591,11 @@ maximize and close at the right), the title bar the main window's height
   session's log over the sessions) stays inside it. Seen on Lingmo
   (X11): the dialog's properties, moved off its owner, a click on the
   owner leaving the dialog active, Cancel closing it.
+- Every window with the skin's frame asks Windows 11 for round corners
+  and the system's shadow when it is made (`dialog_window::skinned`, in
+  `Pane::create`): left to the system, only a window that can be made
+  larger or smaller got them, so a dialog had square corners beside its
+  rounded owner. The floating button (a shape of its own) is left out.
 - The main window's dialogs are a file each (`dialogs/`).
 - Done: every window and dialog NativeTerm draws (no `egui::Window`
   left): the main window, its windows of their own, the dialogs inside
