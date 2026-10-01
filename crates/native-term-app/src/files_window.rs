@@ -98,7 +98,12 @@ pub fn open(spec: Spec) {
     let viewport = crate::skinned::viewport(&t!("files-window-title"), 1200.0, 760.0)
         .with_min_inner_size([760.0, 420.0])
         .with_drag_and_drop(true);
-    crate::window::open("files", viewport, |ctx| Box::new(FilesWindow::new(ctx)));
+    crate::window::open(KEY, viewport, |ctx| {
+        // shared with its dialogs' windows (see part_window)
+        let files = std::rc::Rc::new(std::cell::RefCell::new(FilesWindow::new(ctx)));
+        files.borrow_mut().me = std::rc::Rc::downgrade(&files);
+        Box::new(crate::part_window::Shared(files))
+    });
 }
 
 /// Uploads `files` to `alias`'s current folder, once its side of the
@@ -395,7 +400,68 @@ enum Confirm {
     CloseWindow,
 }
 
+/// The files window's key (see `window::open`): its dialogs belong to it.
+const KEY: &str = "files";
+
+/// The files window's dialogs, each a window of its own that belongs to
+/// it (see `part_window`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilesPart {
+    /// Comparing and syncing two folders (modeless, made larger or smaller).
+    Sync,
+    /// A question of the server's.
+    Question,
+    NewFolder,
+    /// Deleting, or closing with transfers going on.
+    Confirm,
+}
+
+impl FilesPart {
+    const ALL: [FilesPart; 4] = [FilesPart::Sync, FilesPart::Question, FilesPart::NewFolder, FilesPart::Confirm];
+
+    fn window(self) -> crate::part_window::PartWindow {
+        let key = match self {
+            FilesPart::Sync => "files-sync",
+            FilesPart::Question => "files-question",
+            FilesPart::NewFolder => "files-new-folder",
+            FilesPart::Confirm => "files-confirm",
+        };
+        let sync = self == FilesPart::Sync;
+        let owner = crate::window::Owner::Window(KEY.into());
+        crate::part_window::PartWindow { key, owner, modal: !sync, resizable: sync }
+    }
+}
+
+impl crate::part_window::Parts for FilesWindow {
+    type Part = FilesPart;
+
+    fn show_part(&mut self, part: FilesPart, ctx: &egui::Context) {
+        native_term_skin::set_room(ctx, self.ctx.content_rect());
+        match part {
+            FilesPart::Sync => self.sync_dialog(ctx),
+            FilesPart::Question => self.question_dialog(ctx),
+            FilesPart::NewFolder => self.new_folder_dialog(ctx),
+            FilesPart::Confirm => self.confirm_dialog(ctx),
+        }
+        // what it did shows in the files window
+        self.ctx.request_repaint();
+    }
+
+    fn part_open(&self, part: FilesPart) -> bool {
+        match part {
+            FilesPart::Sync => self.sync.is_some(),
+            FilesPart::Question => self.question.is_some(),
+            FilesPart::NewFolder => self.new_folder.is_some(),
+            FilesPart::Confirm => self.confirm.is_some(),
+        }
+    }
+}
+
 struct FilesWindow {
+    /// The window itself, shared with its dialogs' windows.
+    me: std::rc::Weak<std::cell::RefCell<FilesWindow>>,
+    /// Dialogs' windows asked for and not open yet.
+    parts_asked: Vec<FilesPart>,
     ctx: egui::Context,
     tx: Sender<Event>,
     rx: Receiver<Event>,
@@ -426,6 +492,8 @@ impl FilesWindow {
         WINDOW.with(|w| *w.borrow_mut() = Some(ctx.clone()));
         let (tx, rx) = mpsc::channel();
         FilesWindow {
+            me: std::rc::Weak::new(),
+            parts_asked: Vec::new(),
             ctx: ctx.clone(),
             tx,
             rx,
@@ -2046,7 +2114,8 @@ impl FilesWindow {
         }
     }
 
-    fn dialogs(&mut self, ctx: &egui::Context) {
+    /// The sync's dialog (modeless: the window stays in use).
+    fn sync_dialog(&mut self, ctx: &egui::Context) {
         if let Some(d) = &mut self.sync {
             use crate::files_sync::Asked;
             let tab = d.tab;
@@ -2060,6 +2129,10 @@ impl FilesWindow {
                 None => {}
             }
         }
+    }
+
+    /// A question of the server's (a password, a passphrase).
+    fn question_dialog(&mut self, ctx: &egui::Context) {
         if let Some((tab, question, typed)) = &mut self.question {
             let host = self.tabs.iter().find(|t| t.id == *tab).map(|t| t.spec.alias.clone()).unwrap_or_default();
             let mut done = None;
@@ -2093,6 +2166,10 @@ impl FilesWindow {
                 }
             }
         }
+    }
+
+    /// A new folder's name.
+    fn new_folder_dialog(&mut self, ctx: &egui::Context) {
         if let Some((tab, remote, name)) = &mut self.new_folder {
             let (tab, remote) = (*tab, *remote);
             let mut done = None;
@@ -2113,6 +2190,10 @@ impl FilesWindow {
                 }
             }
         }
+    }
+
+    /// Deleting, or closing while transfers or edits are going on: asked first.
+    fn confirm_dialog(&mut self, ctx: &egui::Context) {
         let Some(confirm) = &self.confirm else { return };
         let (title, text, warning, button) = match confirm {
             Confirm::DeleteRemote { what, folders, .. } => (
@@ -2667,7 +2748,12 @@ impl crate::window::Ui for FilesWindow {
             .frame(frame)
             .show_inside(ui, |ui| self.local_side(ui));
         egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| self.remote_side(ui));
-        self.dialogs(&ctx);
+        // its dialogs: each a window of its own
+        let parts = FilesPart::ALL.map(|part| (part, part.window()));
+        let me = self.me.clone();
+        let mut asked = std::mem::take(&mut self.parts_asked);
+        crate::part_window::sync(&me, self, &mut asked, &parts);
+        self.parts_asked = asked;
         // progress bars and edit states move by themselves
         if self.running(None) > 0 {
             ctx.request_repaint_after(Duration::from_millis(250));

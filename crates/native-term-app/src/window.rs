@@ -779,6 +779,8 @@ impl Runner {
                 .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
                 .with_inner_size(winit::dpi::PhysicalSize::new(200u32, dock::STRIP as u32));
             if let Ok(strip) = event_loop.create_window(attributes) {
+                // (only touched by the pointer: it takes the keyboard from no one)
+                crate::dialog_window::never_focus(&strip);
                 let colour = native_term_os::desktop::accent().unwrap_or((0x80, 0x80, 0x80));
                 if let Some(handle) = window_handle(&strip) {
                     win::fill(handle, colour);
@@ -799,6 +801,9 @@ impl Runner {
                 spec.factory,
                 Made::Layered,
                 |window| {
+                    // shown when the docked window goes: it takes the
+                    // keyboard from no one (a dialog that just opened)
+                    crate::dialog_window::never_focus(window);
                     match position.filter(|(x, y)| win::on_a_monitor(*x, *y)) {
                         Some((x, y)) => window.set_outer_position(winit::dpi::PhysicalPosition::new(x, y)),
                         None => {
@@ -951,6 +956,13 @@ impl Runner {
     }
 
     fn close_extra(&mut self, n: u64) {
+        // its own dialogs first (a dialog is never left without the
+        // window it belongs to; Windows would destroy it with it)
+        let children: Vec<u64> =
+            self.owned.iter().filter(|(_, owner, _)| *owner == Which::Extra(n)).map(|(m, _, _)| *m).collect();
+        for child in children {
+            self.close_extra(child);
+        }
         // where the person left it, for the next time
         if let Some(at) = self.kept.iter().position(|(m, _)| *m == n) {
             let (_, kept) = self.kept.remove(at);

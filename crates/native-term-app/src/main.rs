@@ -36,6 +36,7 @@ mod logon_page;
 mod logos;
 mod looks;
 mod options_dialog;
+mod part_window;
 mod password_window;
 mod plink_dialog;
 mod properties;
@@ -480,7 +481,7 @@ fn main() {
             // shared with the dialogs' windows (see app_host)
             let app = std::rc::Rc::new(std::cell::RefCell::new(App::new(ctx, setup)));
             app.borrow_mut().me = std::rc::Rc::downgrade(&app);
-            Box::new(app_host::AppHost(app))
+            Box::new(part_window::Shared(app))
         }
         Err(e) => Box::new(Fatal(e)),
     });

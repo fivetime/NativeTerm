@@ -1346,6 +1346,11 @@ impl App {
             Part::Settings => self.settings_window(ctx),
             Part::Wizard => self.show_wizard(ctx),
             Part::Dialog => self.show_dialog(ctx),
+            Part::ServerLog => {
+                if let Some(Dialog::ServerSessions(d)) = self.dialog.as_mut() {
+                    d.show_log(ctx);
+                }
+            }
         }
         // what it did shows in the main window
         self.main_ctx.request_repaint();
@@ -1358,43 +1363,18 @@ impl App {
             Part::Settings => self.show_settings,
             Part::Wizard => self.wizard.is_some(),
             Part::Dialog => self.dialog.is_some(),
+            Part::ServerLog => matches!(&self.dialog, Some(Dialog::ServerSessions(d)) if d.has_log()),
         }
     }
 
     /// Each part that is there has its window, a modal dialog of the
-    /// window it was opened from (a dialog the settings or the guide
-    /// opened is theirs); a part done with has its window closed.
+    /// window it was opened from; a part done with has its window closed.
     fn sync_parts(&mut self) {
-        use crate::app_host::{DialogHost, Part};
-        use crate::window::Owner;
-        for part in Part::ALL {
-            let open = crate::window::is_open(part.key());
-            if open || !self.part_open(part) {
-                self.parts_asked.retain(|p| *p != part);
-            }
-            if open && !self.part_open(part) {
-                crate::window::close(part.key());
-            }
-            if open || !self.part_open(part) || self.parts_asked.contains(&part) {
-                continue;
-            }
-            let owner = match part {
-                Part::Dialog if self.show_settings => Owner::Window(Part::Settings.key().into()),
-                Part::Dialog if self.wizard.is_some() => Owner::Window(Part::Wizard.key().into()),
-                _ => Owner::Main,
-            };
-            let viewport = native_term_skin::undecorated(
-                egui::ViewportBuilder::default()
-                    .with_title("NativeTerm")
-                    .with_inner_size([480.0, 360.0])
-                    .with_resizable(false),
-            );
-            let app = self.me.clone();
-            crate::window::open_dialog(part.key(), viewport, owner, true, move |_| {
-                Box::new(DialogHost::new(app, part))
-            });
-            self.parts_asked.push(part);
-        }
+        let parts = crate::app_host::windows(self.show_settings, self.wizard.is_some());
+        let me = self.me.clone();
+        let mut asked = std::mem::take(&mut self.parts_asked);
+        crate::part_window::sync(&me, self, &mut asked, &parts);
+        self.parts_asked = asked;
     }
 
     fn show_wizard(&mut self, ctx: &egui::Context) {

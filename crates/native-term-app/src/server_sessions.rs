@@ -60,6 +60,9 @@ pub struct ServerSessionsDialog {
     /// Copies of logs go to `<data dir>\logs\server\<alias>`.
     data_dir: PathBuf,
     log: Option<LogView>,
+    /// The sessions' window, repainted when what a log asked for arrives
+    /// (the log is a window of its own, see `show_log`).
+    list_ctx: Option<egui::Context>,
     /// A log's text, or a copy's result, from the background.
     log_arriving: Arc<Mutex<Option<LogText>>>,
     copy_arriving: Arc<Mutex<Option<String>>>,
@@ -88,6 +91,7 @@ impl ServerSessionsDialog {
             config,
             data_dir,
             log: None,
+            list_ctx: None,
             log_arriving: Arc::default(),
             copy_arriving: Arc::default(),
             arriving: Arc::default(),
@@ -209,6 +213,27 @@ impl ServerSessionsDialog {
         }
     }
 
+    /// Whether a log is shown (a window of its own beside the sessions).
+    #[must_use]
+    pub fn has_log(&self) -> bool {
+        self.log.is_some()
+    }
+
+    /// The log shown, in its own window (`ctx`): copied here, or deleted
+    /// on the server (the sessions asked again after).
+    pub fn show_log(&mut self, ctx: &egui::Context) {
+        let (mut delete, mut copy) = (None, None);
+        self.log_window(ctx, &mut delete, &mut copy);
+        let list = self.list_ctx.clone().unwrap_or_else(|| ctx.clone());
+        if let Some(named) = copy {
+            self.copy_log(&list, named);
+        }
+        if let Some((alias, name)) = delete {
+            self.note = None;
+            self.ask(&list, vec![alias.clone()], Some((alias, Change::DeleteLog(name))));
+        }
+    }
+
     /// List the sessions of `aliases` in the background, `AT_ONCE` hosts at
     /// a time; `change` is made first on its host.
     fn ask(&mut self, ctx: &egui::Context, aliases: Vec<String>, change: Option<(String, Change)>) {
@@ -266,7 +291,6 @@ impl ServerSessionsDialog {
         let mut refresh = false;
         let mut read = None;
         let mut reopen = Vec::new();
-        let (mut delete, mut copy) = (None, None);
         let busy = self.hosts.iter().any(|h| !self.answers.contains_key(&h.alias));
         let tabs = core.sessions();
         let several = self.hosts.len() > 1;
@@ -347,15 +371,9 @@ impl ServerSessionsDialog {
         if let Some(named) = read {
             self.read_log(ctx, named);
         }
-        self.log_window(ctx, &mut delete, &mut copy);
-        if let Some(named) = copy {
-            self.copy_log(ctx, named);
-        }
+        self.list_ctx = Some(ctx.clone());
         if !reopen.is_empty() {
             self.reopen(core, &reopen);
-        }
-        if let Some((alias, name)) = delete {
-            change = Some((alias, Change::DeleteLog(name)));
         }
         if let Some((alias, what)) = change {
             self.note = None;

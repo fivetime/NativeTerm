@@ -54,6 +54,20 @@ pub fn make_dialog(window: u32, parent: u32, modal: bool) -> bool {
     set().is_some()
 }
 
+/// Tell the window manager never to give `window` (an X11 window id, not
+/// mapped yet) the keyboard (ICCCM's `WM_HINTS` input hint false): a
+/// floating button that is only clicked, so that showing it takes the
+/// keyboard from no one (a dialog that just opened, above all). The
+/// other hints winit set are kept.
+pub fn never_focus(window: u32) -> bool {
+    use x11rb::properties::WmHints;
+    let Ok((conn, _)) = x11rb::connect(None) else { return false };
+    let hints = WmHints::get(&conn, window).ok().and_then(|cookie| cookie.reply().ok()).flatten();
+    let mut hints = hints.unwrap_or_default();
+    hints.input = Some(false);
+    hints.set(&conn, window).is_ok() && conn.flush().is_ok()
+}
+
 /// The X server's current time: a property changed on a window of this
 /// connection's own, and the time of the PropertyNotify that says so.
 fn server_time(conn: &impl Connection, root: u32) -> Option<u32> {

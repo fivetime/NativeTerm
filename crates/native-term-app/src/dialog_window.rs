@@ -63,6 +63,18 @@ pub fn dialog_of(window: &Window, owner: &Window, modal: bool) {
     }
 }
 
+/// A window that never takes the keyboard (the floating button: only
+/// clicked), so that showing it takes it from no one. X11: the input hint
+/// (Windows and macOS: the button is made not to activate already).
+pub fn never_focus(window: &Window) {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if let Some(id) = x11_id(window) {
+        native_term_os::x11_activate::never_focus(id);
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    let _ = window;
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 fn x11_id(window: &Window) -> Option<u32> {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};

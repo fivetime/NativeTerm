@@ -4568,6 +4568,16 @@ maximize and close at the right), the title bar the main window's height
   takes its content's size, is put over its owner's middle and shown;
   closed, it gives the owner the keyboard back. The docked main window
   stays out while it has a dialog.
+- `part_window.rs` is the mechanism, for any window with dialogs: it is
+  shared (`Shared`, an `Rc<RefCell<…>>`) with its parts' windows
+  (`PartHost`), says its parts (`Parts`: show one with a context,
+  whether one is there) and how their windows are made (`PartWindow`:
+  key, owner, modal, resizable); `sync` opens and closes them. The
+  `App` (`app_host.rs`: settings, guide, dialog, a session's log) and
+  the files window (its question, new folder, sync, confirmations) use
+  it. Closing a window closes its dialogs first. The floating button and
+  the docking strip are made never to take the keyboard on X11 (the
+  input hint), so that showing them takes it from no dialog.
 - The `App` is shared (`Rc<RefCell<App>>`, `app_host.rs`) with the
   dialogs' windows: each draws its part of the `App` (`settings_window`,
   `show_wizard`, `show_dialog`) with its own context, so the code that

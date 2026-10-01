@@ -666,9 +666,20 @@
         it), moved anywhere, as large as what they have (the settings,
         the guide and every dialog of the main window's); the dialogs a
         file each
-  - [ ] The files window's dialogs as windows of their own too (its
-        question, new folder, sync, its confirmations), and the
-        sessions' log beside the sessions rather than inside them
+  - [x] The files window's dialogs as windows of their own too (its
+        question, new folder, sync, its confirmations: theirs, the sync
+        modeless and resizable), and the sessions' log a window of its
+        own beside the sessions (modeless, resizable). One mechanism for
+        both (`part_window.rs`: a window shares itself with its parts'
+        windows); a window's dialogs close before it. Seen on Lingmo
+        (X11): the new folder dialog the files window's, modal, centred
+        on it, Escape closing it
+  - [x] The floating button and the docking strip never take the
+        keyboard on X11 (ICCCM input hint false): shown when the docked
+        window went, they took it from a dialog that had just opened
+  - [ ] Seen once in four on Lingmo: a dialog of the files window
+        opened while the docked main window was sliding away, and the
+        main window ended up active; to find what activates it
   - [ ] Wayland: the dialog's parent (`xdg_toplevel.set_parent`, the
         modal hint) in the winit fork
   - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
