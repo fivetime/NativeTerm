@@ -4582,6 +4582,13 @@ maximize and close at the right), the title bar the main window's height
   come in. egui has collapsing headers, no tree. (`show_rows` places its
   rows by its ui's spacing: the views zero it before, not inside, or
   their rows drift from where it thinks they are, seen on Lingmo.)
+- **The files window's server facts** (2026-10-02): free space from
+  `statvfs@openssh.com` (`Session::space`; an SFTP v3 extension OpenSSH
+  has, absent elsewhere: then nothing is shown), latency as the
+  shortest of the last 8 round trips of `call` (listings, stats,
+  renames: the transfers' pipelined reads and writes are not timed), no
+  request sent to measure it, as no command is ever run on a server for
+  a picture of it.
 - **Bars** (2026-10-02, the files window's): `TabStrip` is a strip of
   tabs across a pane's top as a browser's (a number, an icon, a name,
   what is under it once chosen, a dot for its state, a close button; the

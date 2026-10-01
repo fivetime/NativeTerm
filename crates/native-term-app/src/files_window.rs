@@ -191,6 +191,11 @@ enum What {
         path: Option<PathBuf>,
         result: Result<Vec<LocalRow>, String>,
     },
+    /// The size and what is free where a side's folder is (bytes).
+    Space {
+        remote: bool,
+        space: Option<(u64, u64)>,
+    },
     JobDone {
         job: u64,
         result: Result<(), native_term_sftp::Error>,
@@ -335,6 +340,8 @@ struct Remote {
     view: files_list::View,
     /// Only the names with this in them (any case).
     filter: String,
+    /// The folder's file system: its size, what is free (bytes).
+    space: Option<(u64, u64)>,
     renaming: Option<(Vec<u8>, String)>,
     names: Names,
     /// Drawn as connected without a connection: the pictures drawn off
@@ -359,6 +366,7 @@ struct Local {
     sort: Sort,
     view: files_list::View,
     filter: String,
+    space: Option<(u64, u64)>,
     renaming: Option<(Vec<u8>, String)>,
 }
 
@@ -511,6 +519,8 @@ struct FilesWindow {
     sync: Option<crate::files_sync::SyncDialog>,
     /// What the panel below the sides shows.
     dock: files_dock::Dock,
+    /// Folders kept to go back to.
+    bookmarks: files_bookmarks::Bookmarks,
 }
 
 impl FilesWindow {
@@ -545,6 +555,7 @@ impl FilesWindow {
                 .collect(),
             sync: None,
             dock: files_dock::Dock::default(),
+            bookmarks: files_bookmarks::Bookmarks::default(),
         }
     }
 
@@ -658,6 +669,7 @@ impl FilesWindow {
                     sort: NAME_SORT,
                     view: files_list::View::Details,
                     filter: String::new(),
+                    space: None,
                     renaming: None,
                     names,
                     pictured: false,
@@ -671,6 +683,7 @@ impl FilesWindow {
                     sort: NAME_SORT,
                     view: files_list::View::Details,
                     filter: String::new(),
+                    space: None,
                     renaming: None,
                 },
                 remote_tree: Tree::default(),
@@ -904,6 +917,13 @@ impl FilesWindow {
                 if let Some(path) = expand {
                     self.remember(id, Some(path.clone()), None);
                     self.expand_remote(id, &path);
+                    // what is free there (where the server says)
+                    if let Some(sftp) = self.tab(id).and_then(|t| t.remote.sftp.clone()) {
+                        self.spawn(id, move || {
+                            let space = sftp.space(&path).ok().flatten().map(|s| (s.total, s.available));
+                            What::Space { remote: true, space }
+                        });
+                    }
                 }
             }
             What::LocalListed { path, result } => {
@@ -927,6 +947,21 @@ impl FilesWindow {
                 if let Some(path) = expand {
                     self.remember(id, None, Some(path.clone()));
                     self.expand_local(id, &path);
+                    // (off this thread: a network drive may take its time)
+                    let at = path.clone();
+                    self.spawn(id, move || What::Space {
+                        remote: false,
+                        space: native_term_os::shell::disk_space(&at),
+                    });
+                }
+            }
+            What::Space { remote, space } => {
+                if let Some(tab) = self.tab(id) {
+                    if remote {
+                        tab.remote.space = space;
+                    } else {
+                        tab.local.space = space;
+                    }
                 }
             }
             What::JobDone { job, result } => {
@@ -1597,6 +1632,7 @@ impl FilesWindow {
                 let files = self.local_selection(id);
                 self.upload(id, files);
             }
+            Asked::Bookmark(picked) => self.bookmark_picked(false, picked),
             Asked::NewFolder if path.is_some() => self.new_folder = Some((id, false, String::new())),
             Asked::Delete if path.is_some() => self.ask_recycle(id),
             Asked::CopyPath => {
@@ -1628,6 +1664,7 @@ impl FilesWindow {
                 let items = self.remote_selection(id);
                 self.download(id, items);
             }
+            Asked::Bookmark(picked) => self.bookmark_picked(true, picked),
             Asked::NewFolder => self.new_folder = Some((id, true, String::new())),
             Asked::Delete => self.ask_delete_remote(id),
             Asked::Edit => {
@@ -1998,6 +2035,17 @@ impl FilesWindow {
         {
             return;
         }
+        // Ctrl+D keeps the folder shown, Ctrl+B shows the side's bookmarks
+        let (keep, bookmarks) = ctx.input(|i| {
+            let k = |key| i.events.iter().any(|e| matches!(e, egui::Event::Key { key: k, pressed: true, modifiers, .. } if *k == key && modifiers.command));
+            (k(egui::Key::D), k(egui::Key::B))
+        });
+        if keep {
+            self.bookmark_picked(self.remote_focus, files_bookmarks::Picked::Toggle);
+        }
+        if bookmarks {
+            egui::Popup::toggle_id(ctx, files_bookmarks::menu_id(self.remote_focus));
+        }
         // (Enter, the arrows, typing: the list's own, see `files_list`)
         let (f5, back, delete, f2) = ctx.input(|i| {
             let k = |key| i.key_pressed(key);
@@ -2155,6 +2203,8 @@ struct Listed {
     dropped: Option<Arc<Dragged>>,
 }
 
+#[path = "files_bookmarks.rs"]
+mod files_bookmarks;
 #[path = "files_dock.rs"]
 mod files_dock;
 #[path = "files_list.rs"]
@@ -2329,6 +2379,7 @@ fn empty_local() -> Local {
         sort: NAME_SORT,
         view: files_list::View::Details,
         filter: String::new(),
+        space: None,
         renaming: None,
     }
 }

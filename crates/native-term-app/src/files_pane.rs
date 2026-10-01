@@ -23,6 +23,7 @@ pub(super) enum Asked {
     Sync,
     CopyPath,
     Names(Names),
+    Bookmark(files_bookmarks::Picked),
 }
 
 /// A local path's crumbs: its root (`C:`, `/`) and each folder in it;
@@ -190,7 +191,7 @@ impl FilesWindow {
         // what is at the end: the path takes what is left, the filter
         // gives some of its room first
         let filter_width = (ui.available_width() * 0.2).clamp(90.0, 140.0);
-        let ends = filter_width + 8.0 + 9.0 + 8.0 + 76.0 + 26.0 * if remote { 4.0 } else { 3.0 } + 12.0;
+        let ends = filter_width + 8.0 + 26.0 + 9.0 + 8.0 + 76.0 + 26.0 * if remote { 4.0 } else { 3.0 } + 12.0;
         let width = (ui.available_width() - ends).max(120.0);
         let edit = ui.input(|i| i.key_pressed(egui::Key::F4))
             && self.remote_focus == remote
@@ -212,6 +213,9 @@ impl FilesWindow {
             &t!("files-filter"),
             filter_width,
         );
+        if let Some(picked) = self.bookmark_button(ui, remote) {
+            asked.push(Asked::Bookmark(picked));
+        }
         ui.add_space(4.0);
         let (sep, _) = ui.allocate_exact_size(egui::vec2(9.0, 16.0), egui::Sense::hover());
         ui.painter().vline(sep.center().x, sep.y_range(), egui::Stroke::new(1.0, palette.line));
@@ -306,6 +310,7 @@ impl FilesWindow {
     pub(super) fn foot(&mut self, ui: &mut egui::Ui, remote: bool) {
         let palette = crate::looks::skin(ui.visuals()).palette;
         let Some(tab) = self.tabs.get(self.active) else { return };
+        let space = if remote { tab.remote.space } else { tab.local.space };
         let (folders, files, count, bytes, view) = if remote {
             let r = &tab.remote;
             let chosen = r.rows.iter().filter(|x| r.selected.contains(&x.entry.name));
@@ -346,6 +351,22 @@ impl FilesWindow {
         line.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 1.0;
             asked = files_list::view_switch(ui, &palette, view);
+            // what is free there, and a bar of what is used
+            if let Some((total, available)) = space.filter(|(t, _)| *t > 0) {
+                ui.add_space(12.0);
+                let (bar, _) = ui.allocate_exact_size(egui::vec2(64.0, 4.0), egui::Sense::hover());
+                ui.painter().rect_filled(bar, 2.0, palette.card);
+                let used = 1.0 - (available as f32 / total as f32).clamp(0.0, 1.0);
+                let fill = egui::Rect::from_min_size(bar.min, egui::vec2(bar.width() * used, bar.height()));
+                ui.painter().rect_filled(fill, 2.0, palette.weak);
+                ui.add_space(8.0);
+                let text = t!("files-free", size = size_text(available));
+                ui.label(egui::RichText::new(text).size(11.0).color(palette.weak)).on_hover_text(t!(
+                    "files-free-of",
+                    free = size_text(available),
+                    total = size_text(total)
+                ));
+            }
         });
         if let (Some(view), Some(tab)) = (asked, self.tabs.get_mut(self.active)) {
             if remote {

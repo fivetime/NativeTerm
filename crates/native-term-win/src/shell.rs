@@ -14,6 +14,17 @@ use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::{FOLDERID_Downloads, SHGetKnownFolderPath, ShellExecuteW, KF_FLAG_DEFAULT};
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
+/// The volume `path` is on: its size and what is free to this user, in
+/// bytes.
+pub fn disk_space(path: &std::path::Path) -> Option<(u64, u64)> {
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let dir = HSTRING::from(path.as_os_str());
+    let (mut free, mut total) = (0u64, 0u64);
+    // SAFETY: the string lives through the call; the out pointers are ours.
+    unsafe { GetDiskFreeSpaceExW(&dir, Some(&mut free), Some(&mut total), None) }.ok()?;
+    Some((total, free))
+}
+
 /// Opens a file with its program; one without a program gets Windows'
 /// "How do you want to open this file?".
 pub fn open_file(path: &std::path::Path) -> std::io::Result<()> {

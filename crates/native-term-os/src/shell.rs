@@ -4,7 +4,7 @@
 use std::path::Path;
 
 #[cfg(windows)]
-pub use native_term_win::shell::{downloads_folder, drives, open_file, recycle, user_folders};
+pub use native_term_win::shell::{disk_space, downloads_folder, drives, open_file, recycle, user_folders};
 
 /// Show a folder in the desktop's file manager.
 pub fn open_folder(dir: &Path) -> std::io::Result<()> {
@@ -102,10 +102,25 @@ mod unix {
             .filter_map(|(xdg, name)| user_folder(xdg, name))
             .collect()
     }
+
+    /// The file system `path` is on: its size and what is free to this
+    /// user, in bytes.
+    pub fn disk_space(path: &Path) -> Option<(u64, u64)> {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        // SAFETY: `c` is a valid C string and `st` ours, both alive
+        // through the call.
+        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+            return None;
+        }
+        let unit = st.f_frsize as u64;
+        Some((st.f_blocks as u64 * unit, st.f_bavail as u64 * unit))
+    }
 }
 
 #[cfg(unix)]
-pub use unix::{downloads_folder, drives, open_file, recycle, user_folders};
+pub use unix::{disk_space, downloads_folder, drives, open_file, recycle, user_folders};
 
 #[cfg(test)]
 mod tests {

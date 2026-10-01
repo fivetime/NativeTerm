@@ -752,6 +752,17 @@
         middle. Columns that don't fit go (mode or type, date, size).
         Tried on Lingmo connected to itself: path typed, upload and
         download from the rail, the log
+  - [x] Bookmarks: this computer's folders for every session, a
+        server's for its host and some for every host (`state.db`);
+        Ctrl+D keeps or lets go the folder shown (the button's star
+        filled in the folders' colour), Ctrl+B or the button opens the
+        side's menu (go there, let one go)
+  - [x] Free space at each side's foot (a bar of what is used): here
+        `GetDiskFreeSpaceExW` / `statvfs`, on the server OpenSSH's
+        `statvfs@openssh.com` (nothing shown where it is missing); the
+        latency in the status line, the shortest round trip of the last
+        8 requests the window makes anyway (nothing sent for it). Tried
+        on Lingmo connected to itself
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

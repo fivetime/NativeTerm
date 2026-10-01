@@ -85,8 +85,8 @@ enum Reply {
     Data(Vec<u8>),
     Name(Vec<Entry>),
     Attrs(Attrs),
-    /// An extension's own reply (none used yet).
-    Extended,
+    /// An extension's own reply: what follows the request's id.
+    Extended(Vec<u8>),
 }
 
 /// A directory entry (or `realpath`'s answer).
@@ -235,7 +235,20 @@ pub struct Session {
     child: Mutex<Option<Child>>,
     /// Extensions the server named in its VERSION packet.
     pub extensions: Vec<(String, Vec<u8>)>,
+    /// How long the last few requests took there and back (microseconds),
+    /// the transfers' reads and writes not among them.
+    trips: Mutex<std::collections::VecDeque<u32>>,
 }
+
+/// A file system's size and what is free to the user, in bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Space {
+    pub total: u64,
+    pub available: u64,
+}
+
+/// Requests' round trips kept to tell the latency by.
+const TRIPS: usize = 8;
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -392,6 +405,7 @@ impl Session {
             shared,
             child: Mutex::new(None),
             extensions,
+            trips: Mutex::new(std::collections::VecDeque::with_capacity(TRIPS)),
         })
     }
 
@@ -439,7 +453,44 @@ impl Session {
     }
 
     fn call(&self, kind: u8, body: Body) -> Result<Reply> {
-        wait(self.send(kind, body))
+        let started = std::time::Instant::now();
+        let reply = wait(self.send(kind, body));
+        // the time there and back of a request the window makes anyway (a
+        // listing, a stat): what the latency is told by, nothing sent for it
+        if reply.is_ok() {
+            let mut trips = lock(&self.trips);
+            if trips.len() == TRIPS {
+                trips.pop_front();
+            }
+            trips.push_back(u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX));
+        }
+        reply
+    }
+
+    /// The latency: the shortest of the last few requests' round trips
+    /// (a request behind a transfer's data waits longer; the shortest is
+    /// the line's own). `None` before any request.
+    pub fn latency(&self) -> Option<std::time::Duration> {
+        lock(&self.trips).iter().min().map(|&us| std::time::Duration::from_micros(u64::from(us)))
+    }
+
+    /// The size of the file system `path` is on and what is free there
+    /// (OpenSSH's `statvfs@openssh.com`); `None` where the server hasn't
+    /// the extension.
+    pub fn space(&self, path: &[u8]) -> Result<Option<Space>> {
+        const STATVFS: &str = "statvfs@openssh.com";
+        if !self.has_extension(STATVFS) {
+            return Ok(None);
+        }
+        match self.call(wire::EXTENDED, Body::default().string(STATVFS.as_bytes()).string(path))? {
+            Reply::Extended(body) => {
+                // f_bsize, f_frsize, f_blocks, f_bfree, f_bavail, …
+                let mut f = Fields::new(&body);
+                let (_bsize, frsize, blocks, _bfree, avail) = (f.u64()?, f.u64()?, f.u64()?, f.u64()?, f.u64()?);
+                Ok(Some(Space { total: blocks.saturating_mul(frsize), available: avail.saturating_mul(frsize) }))
+            }
+            other => Err(unexpected(other)),
+        }
     }
 
     fn ok(&self, kind: u8, body: Body) -> Result<()> {
@@ -773,7 +824,7 @@ fn parse_reply(kind: u8, body: &[u8]) -> io::Result<(u32, Reply)> {
             Reply::Name(names)
         }
         wire::ATTRS => Reply::Attrs(f.attrs()?),
-        wire::EXTENDED_REPLY => Reply::Extended,
+        wire::EXTENDED_REPLY => Reply::Extended(f.rest().to_vec()),
         other => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("packet type {other}"))),
     };
     Ok((id, reply))

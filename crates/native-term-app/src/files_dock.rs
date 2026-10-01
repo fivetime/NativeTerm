@@ -322,6 +322,16 @@ impl FilesWindow {
         line.add_space(10.0);
         line.label(egui::RichText::new(icons::NETWORK.to_string()).size(12.0).color(palette.weak));
         line.label(egui::RichText::new(alias).font(mono.clone()).color(palette.weak));
+        // the latency, from the requests the window makes anyway
+        if let Some(latency) = tab.remote.sftp.as_ref().and_then(|s| s.latency()) {
+            line.add_space(10.0);
+            line.label(egui::RichText::new(icons::SPEED.to_string()).size(12.0).color(palette.weak));
+            let ms = latency.as_secs_f64() * 1000.0;
+            let text = if ms < 10.0 { format!("{ms:.1} ms") } else { format!("{ms:.0} ms") };
+            line.label(egui::RichText::new(t!("files-latency")).font(small.clone()).color(palette.weak));
+            line.label(egui::RichText::new(text).font(mono.clone()).color(palette.weak))
+                .on_hover_text(t!("files-latency-hint"));
+        }
         let mut chosen = None;
         line.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
