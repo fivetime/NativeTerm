@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use native_term_config::securecrt::{Origin, Plan, PlannedCredential, Scan, Skip};
+use native_term_config::securecrt::{LogonSecret, Origin, Plan, PlannedCredential, Scan, Skip};
 
 use crate::t;
 
@@ -64,6 +64,40 @@ pub fn store_credentials(credentials: &[PlannedCredential]) -> Vec<String> {
     }
     if added > 0 {
         out.insert(0, t!("import-credentials-added", count = added));
+    }
+    out
+}
+
+/// Hidden logon action Sends, after the configuration was written (its
+/// rows say `secret:<id>`): each read from its SecureCRT session file and
+/// written straight into the system's password store, as the Logon Actions
+/// page keeps a hidden row's. What went wrong, a line each, after how many
+/// were kept.
+pub fn store_logon_secrets(secrets: &[LogonSecret]) -> Vec<String> {
+    use native_term_config::logon;
+    use native_term_os::credentials::{self, Saved};
+    let mut out = Vec::new();
+    let mut added = 0;
+    for s in secrets {
+        let row = s.row + 1;
+        let secret = match native_term_config::securecrt::read_logon_send(&s.file, s.row, "") {
+            Ok(Some(secret)) => secret,
+            Ok(None) | Err(_) => {
+                out.push(t!("import-logon-unread", session = s.session.as_str(), row = row));
+                continue;
+            }
+        };
+        let saved = Saved { user: String::new(), secret, comment: String::new() };
+        match credentials::write(&logon::secret_entry(&s.id), &saved) {
+            Ok(()) => added += 1,
+            Err(e) => {
+                out.push(t!("import-logon-failed", session = s.session.as_str(), row = row, error = e.to_string()))
+            }
+        }
+        drop(saved);
+    }
+    if added > 0 {
+        out.insert(0, t!("import-logon-added", count = added));
     }
     out
 }
@@ -187,7 +221,13 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         ));
     }
     if !n.logon_actions.is_empty() {
-        out.push(line(t!("summary-logon-actions", count = n.logon_actions.len()), true, n.logon_actions.clone()));
+        out.push(line(t!("summary-logon-actions", count = n.logon_actions.len()), false, n.logon_actions.clone()));
+    }
+    if !plan.logon_secrets.is_empty() {
+        out.push(line(t!("summary-logon-hidden", count = plan.logon_secrets.len()), false, Vec::new()));
+    }
+    if !n.logon_unread.is_empty() {
+        out.push(line(t!("summary-logon-unread", count = n.logon_unread.len()), true, n.logon_unread.clone()));
     }
     let with_password = plan.folders.iter().flat_map(|f| &f.hosts).filter(|h| h.password_file.is_some()).count();
     if with_password > 0 {

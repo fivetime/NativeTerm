@@ -141,6 +141,7 @@ impl ImportDialog {
             if result.is_ok() {
                 commands.extend(import::store_credentials(&plan.credentials));
                 commands.extend(import::store_session_passwords(&editor, &plan));
+                commands.extend(import::store_logon_secrets(&plan.logon_secrets));
             }
             let _ = tx.send((result, commands));
             ctx.request_repaint();

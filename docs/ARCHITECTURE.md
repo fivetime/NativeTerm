@@ -1850,8 +1850,7 @@ The result is shown as a summary before anything is written.
   author's own SecureCRT 9 configuration with their consent (769
   sessions, one saved credential: read, the checksum held; only names
   and lengths printed) and against values made by HyperSine's
-  `securecrt_cipher.py`. Logon action tables (`Login Script V4`) are not
-  imported yet: no configuration with one has been seen.
+  `securecrt_cipher.py`. Logon action tables are imported too (below).
 - **Sessions' own saved passwords** (2026-10-01): an SSH session with a
   `Password V2` (and no saved credential, which wins) keeps it as its
   account's saved password: after the configuration is written the app
@@ -1863,12 +1862,28 @@ The result is shown as a summary before anything is written.
   already there is left. Non-SSH sessions' passwords are still not
   imported. On the author's configuration: 766 sessions with a saved
   password, all `03:`, all read with the checksum holding (counts only).
-- **Public samples of `Login Script V4`** (GitHub, a Cisco lab's SecureCRT
-  9 sessions) show a row per list item, each a `03:` value whose text is
-  six fields joined by `0x1F`: something, the Expect, the Send, something,
-  `1`, something. Every public row has the same flags, so which field is
-  Hide, the trailing carriage return or the credential is not known yet;
-  the importer waits for a configuration whose rows differ.
+- **Logon actions** (2026-10-01): the Logon Actions page becomes
+  NativeTerm's (`NativeTermLogon*` keys in the host's block, or a non-SSH
+  session's `logon` table): "Automate logon" is `D:"Use Login Script"`,
+  "Send initial carriage return" `D:"Send Initial Carriage Return"` (on in
+  every session by default, so a session takes the page only when
+  "Automate logon" is on or it has rows), the table `Z:"Login Script V4"`,
+  a `03:` value a row whose text is six fields joined by `0x1F`: Hide
+  (`1`), the Expect, the Send, a field always seen empty, the trailing
+  carriage return (`1`), and another always empty. Hide was found by a row
+  turned hidden in SecureCRT (the author's own session, with their
+  consent; values shown as lengths only); the carriage return by every row
+  seen having it, as the dialog does by default; the empty fields (one is
+  likely the row's saved credential) are not imported. A shown row's Send
+  is written into the configuration as SecureCRT kept it (the user chose
+  not to hide it); a hidden row's goes into the system's password store
+  as NativeTerm keeps its own hidden rows (`secret:<id>`): the scan keeps
+  no hidden Send, and `import::store_logon_secrets` reads it from the
+  session file after the configuration is written
+  (`securecrt::read_logon_send`). A table that doesn't decrypt, or one of
+  an older SecureCRT (`Login Script V3`, never seen), is listed as not
+  imported. `D:` numbers are read even where the key says "login script":
+  a number is a setting, never a secret.
 - **Folders:** SecureCRT's nested folders become flat NativeTerm folders
   labeled with the whole path (`生产 / 控制节点`); sessions directly
   under `Sessions` go to a folder "SecureCRT". A folder whose label

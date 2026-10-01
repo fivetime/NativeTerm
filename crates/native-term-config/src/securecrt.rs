@@ -104,10 +104,9 @@ fn parse_ini(text: &str) -> Ini {
                 }
             }
             "D" => {
+                // a number is a setting, never a secret ("Use Login Script")
                 if let Ok(n) = u32::from_str_radix(value.trim(), 16) {
-                    if !secret {
-                        ini.values.insert(key.to_string(), Value::Num(n));
-                    }
+                    ini.values.insert(key.to_string(), Value::Num(n));
                 }
             }
             "Z" => {
@@ -257,7 +256,12 @@ pub struct CrtSession {
     /// "Output Transformer Name" when it isn't UTF-8/default.
     pub encoding: Option<String>,
     pub com_port: Option<String>,
+    /// The Logon Actions page is used: "Automate logon", or a table.
     pub logon_actions: bool,
+    /// The page as read (see [`read_logon`]); `None` where there is a
+    /// table that can't be read (one of an older SecureCRT, or one that
+    /// doesn't decrypt).
+    pub logon: Option<CrtLogon>,
     pub saved_password: bool,
     /// A PuTTY-format key (`.ppk`), which OpenSSH can't use.
     pub ppk_key: Option<String>,
@@ -276,6 +280,28 @@ pub struct CrtSession {
     /// The session's file (its saved password is read from it when the
     /// import writes it, see [`read_credential_password`]).
     pub file: PathBuf,
+}
+
+/// SecureCRT's Logon Actions page: "Automate logon" (`Use Login Script`),
+/// "Send initial carriage return" (`Send Initial Carriage Return`), and the
+/// table (`Login Script V4`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CrtLogon {
+    pub automate: bool,
+    pub initial_cr: bool,
+    pub rows: Vec<CrtLogonRow>,
+}
+
+/// A row of the table, in the file's order. A hidden row's Send is not
+/// kept here: [`read_logon_send`] reads it from the file when it is
+/// written into the password store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CrtLogonRow {
+    pub expect: String,
+    /// `None`: the row is hidden ("Hide").
+    pub send: Option<String>,
+    /// "Send trailing carriage return".
+    pub enter: bool,
 }
 
 /// One of SecureCRT's saved credentials (`Config\Credentials\<title>.ini`,
@@ -380,6 +406,7 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
         encoding,
         com_port: ini.str("Com Port").map(str::to_string),
         logon_actions,
+        logon: None,
         saved_password,
         ppk_key: None,
         options: Vec::new(),
@@ -389,6 +416,72 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
         credential: ini.str("Credential Title").map(|t| t.trim().to_string()),
         file: PathBuf::new(),
     }
+}
+
+/// The values of the `Login Script V4` table, as in the file (one `03:`
+/// value a row); `None` without the key.
+fn logon_values(text: &str) -> Option<Vec<&str>> {
+    let mut lines = text.lines();
+    let count = lines.by_ref().find_map(|l| l.strip_prefix("Z:\"Login Script V4\"="))?;
+    let count = usize::from_str_radix(count.trim(), 16).ok()?;
+    Some(lines.take(count.min(crate::logon::MAX_STEPS)).map(|l| l.trim()).collect())
+}
+
+/// A row's fields: the text is six fields joined by `0x1F`, Hide (`1`),
+/// the Expect, the Send, a field always seen empty, the trailing carriage
+/// return (`1`), and another always empty. Hide is known from a row
+/// turned hidden in SecureCRT; the carriage return from every row seen
+/// having it, as SecureCRT's dialog does by default.
+fn logon_fields(value: &str, passphrase: &str) -> Result<Vec<String>, crate::securecrt_crypt::CryptError> {
+    let text = crate::securecrt_crypt::decrypt(value, passphrase)?;
+    let fields: Vec<String> = text.split('\u{1f}').map(str::to_string).collect();
+    drop(text);
+    if fields.len() < 3 {
+        return Err(crate::securecrt_crypt::CryptError::Format);
+    }
+    Ok(fields)
+}
+
+/// The Logon Actions page of a session file (`text`, read as `ini` too),
+/// with SecureCRT's configuration passphrase empty; `None` when it has a
+/// table that can't be read: an older SecureCRT's (`Login Script V3`,
+/// never seen), or one that doesn't decrypt.
+fn read_logon(text: &str, ini: &Ini) -> Option<CrtLogon> {
+    let values = logon_values(text).unwrap_or_default();
+    let older = ini.secrets.iter().any(|(k, v)| {
+        let k = k.to_ascii_lowercase();
+        *v && (k.contains("login script") || k.contains("logon script")) && k != "login script v4"
+    });
+    if older && values.is_empty() {
+        return None;
+    }
+    let mut rows = Vec::with_capacity(values.len());
+    for value in values {
+        let fields = logon_fields(value, "").ok()?;
+        rows.push(CrtLogonRow {
+            expect: fields[1].clone(),
+            send: (fields[0].trim() != "1").then(|| fields[2].clone()),
+            enter: fields.get(4).is_none_or(|f| f.trim() != "0"),
+        });
+    }
+    let on = |key: &str| ini.num(key).is_some_and(|n| n != 0);
+    Some(CrtLogon { automate: on("Use Login Script"), initial_cr: on("Send Initial Carriage Return"), rows })
+}
+
+/// The Send of the table's `row`-th row (from 0) in a session file, read
+/// from the file now: for writing a hidden row's Send into the password
+/// store, nowhere else. `Ok(None)` when there is no such row.
+pub fn read_logon_send(
+    file: &Path,
+    row: usize,
+    passphrase: &str,
+) -> Result<Option<String>, crate::securecrt_crypt::CryptError> {
+    let bytes = fs::read(file).map_err(|_| crate::securecrt_crypt::CryptError::Format)?;
+    let text = String::from_utf8_lossy(&bytes);
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let Some(value) = logon_values(text).and_then(|v| v.get(row).copied()) else { return Ok(None) };
+    let mut fields = logon_fields(value, passphrase)?;
+    Ok(Some(fields.swap_remove(2)))
 }
 
 fn protocol_is(ini: &Ini, name: &str) -> bool {
@@ -578,8 +671,12 @@ fn walk(dir: &Path, folder: &mut Vec<String>, out: &mut Scan) -> io::Result<()> 
             }
         };
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-        let mut session = session_from(&parse_ini(text), folder.clone(), stem.to_string());
+        let ini = parse_ini(text);
+        let mut session = session_from(&ini, folder.clone(), stem.to_string());
         session.file = path.clone();
+        if session.logon_actions {
+            session.logon = read_logon(text, &ini);
+        }
         out.sessions.push(session);
     }
     Ok(())
@@ -618,6 +715,9 @@ pub struct PlannedHost {
     /// `password::target`); `None` without one, or where the session logs
     /// in with a saved credential instead.
     pub password_file: Option<PathBuf>,
+    /// The Logon Actions page, a hidden row's Send as `secret:<id>` (see
+    /// [`Plan::logon_secrets`]).
+    pub logon: Option<crate::logon::LogonActions>,
 }
 
 impl PlannedHost {
@@ -680,7 +780,11 @@ pub struct Notes {
     pub named_firewalls: BTreeMap<String, Vec<String>>,
     /// Jump sessions that aren't imported (or don't exist): path → target.
     pub unresolved_jumps: Vec<(String, String)>,
+    /// Sessions whose Logon Actions page is imported.
     pub logon_actions: Vec<String>,
+    /// Sessions with a logon action table that can't be read (not
+    /// imported).
+    pub logon_unread: Vec<String>,
     pub saved_passwords: usize,
     /// Non-UTF-8 character sets: path → name. OpenSSH sessions are UTF-8.
     pub encodings: Vec<(String, String)>,
@@ -693,6 +797,17 @@ pub struct Notes {
     pub ppk_keys: Vec<(String, String)>,
     /// Sessions naming a saved credential that isn't there: path → title.
     pub missing_credentials: Vec<(String, String)>,
+}
+
+/// A hidden logon action row's Send, to write into the password store as
+/// `logon::secret_entry(id)`: read from `file`'s table, row `row` (from 0;
+/// see [`read_logon_send`]). `session` is its path, for messages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogonSecret {
+    pub id: String,
+    pub file: PathBuf,
+    pub row: usize,
+    pub session: String,
 }
 
 /// A saved credential to keep as a credential set: the set's name, the
@@ -720,6 +835,8 @@ pub struct Plan {
     /// Saved credentials, as credential sets; written to the password store
     /// by the app (`Editor::import` writes the configuration only).
     pub credentials: Vec<PlannedCredential>,
+    /// Hidden logon action Sends, written to the password store by the app.
+    pub logon_secrets: Vec<LogonSecret>,
 }
 
 impl Plan {
@@ -781,6 +898,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
     let mut by_path: HashMap<String, String> = imported.clone();
     let mut pending_jumps: Vec<(usize, usize, String)> = Vec::new();
     let mut seen: HashMap<(String, u16, String), Vec<String>> = HashMap::new();
+    let mut logon_secrets: Vec<LogonSecret> = Vec::new();
 
     for s in &scan.sessions {
         let protocol = s.protocol.to_ascii_lowercase();
@@ -802,7 +920,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
         };
         if let Some(kind) = plink_protocol {
             let label = folder_label(&s.folder, origin);
-            match plink_session(s, kind, origin, &mut taken, &mut notes) {
+            match plink_session(s, kind, origin, &mut taken, &mut notes, &mut logon_secrets) {
                 Some(session) => {
                     let fi = *folder_index.entry(label.to_lowercase()).or_insert_with(|| {
                         folders.push(PlannedFolder {
@@ -855,9 +973,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             }
             Firewall::Named(name) => notes.named_firewalls.entry(name.clone()).or_default().push(s.path.clone()),
         }
-        if s.logon_actions {
-            notes.logon_actions.push(s.path.clone());
-        }
+        let logon = logon_of(s, &mut notes, &mut logon_secrets);
         if s.saved_password {
             notes.saved_passwords += 1;
         }
@@ -912,6 +1028,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             options,
             note,
             password_file: (s.saved_password && s.credential.is_none()).then(|| s.file.clone()),
+            logon,
         });
     }
 
@@ -926,7 +1043,40 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
     let mut duplicates: Vec<Vec<String>> = seen.into_values().filter(|paths| paths.len() > 1).collect();
     duplicates.sort();
     notes.duplicates = duplicates;
-    Plan { folders, skipped, notes, host_keys: scan.host_keys.keys.clone(), credentials }
+    Plan { folders, skipped, notes, host_keys: scan.host_keys.keys.clone(), credentials, logon_secrets }
+}
+
+/// A session's Logon Actions page as NativeTerm's, where it uses the page:
+/// rows as SecureCRT has them, Sends in plain text as the user left them;
+/// a hidden row's Send goes to the password store (`secrets`) and the row
+/// says `secret:<id>`, as NativeTerm keeps its own hidden rows.
+fn logon_of(s: &CrtSession, notes: &mut Notes, secrets: &mut Vec<LogonSecret>) -> Option<crate::logon::LogonActions> {
+    use crate::logon::{LogonActions, Step};
+    if !s.logon_actions {
+        return None;
+    }
+    let Some(page) = &s.logon else {
+        notes.logon_unread.push(s.path.clone());
+        return None;
+    };
+    if !page.automate && page.rows.is_empty() {
+        return None;
+    }
+    notes.logon_actions.push(s.path.clone());
+    let steps = page
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(row, r)| {
+            let send = r.send.clone().unwrap_or_else(|| {
+                let id = crate::logon::new_secret_id();
+                secrets.push(LogonSecret { id: id.clone(), file: s.file.clone(), row, session: s.path.clone() });
+                format!("secret:{id}")
+            });
+            Step { expect: r.expect.clone(), send, hide: r.send.is_none(), enter: r.enter, credential: None }
+        })
+        .collect();
+    Some(LogonActions { automate: page.automate, initial_cr: page.initial_cr, steps })
 }
 
 /// A Telnet / serial / raw / rlogin / SUPDUP session to import, or `None`
@@ -937,6 +1087,7 @@ fn plink_session(
     origin: Origin,
     taken: &mut HashSet<String>,
     notes: &mut Notes,
+    secrets: &mut Vec<LogonSecret>,
 ) -> Option<crate::plink::PlinkSession> {
     use crate::plink::{PlinkSession, Protocol};
     let plain = |v: &Option<String>| {
@@ -956,9 +1107,6 @@ fn plink_session(
         }
         None => None,
     };
-    if s.logon_actions {
-        notes.logon_actions.push(s.path.clone());
-    }
     if s.saved_password {
         notes.saved_passwords += 1;
     }
@@ -990,6 +1138,10 @@ fn plink_session(
     if session.check().is_err() {
         return None;
     }
+    let mut session = session;
+    let mut found = Vec::new();
+    session.logon = logon_of(s, notes, &mut found).map(|l| l.to_keys()).unwrap_or_default();
+    secrets.extend(found);
     Some(session)
 }
 
@@ -1110,6 +1262,37 @@ mod tests {
             println!("set {:?} (title {:?}), user {:?}, {} sessions, {password}", c.set, c.title, c.user, c.sessions);
         }
         println!("missing: {:?}", plan.notes.missing_credentials);
+    }
+
+    /// This machine's SecureCRT logon actions (`NATIVETERM_SECURECRT_CONFIG`
+    /// names the configuration folder): the pages as imported, every Send
+    /// shown as its length only.
+    #[test]
+    #[ignore]
+    fn this_machines_logon_actions() {
+        let config = std::env::var("NATIVETERM_SECURECRT_CONFIG").expect("NATIVETERM_SECURECRT_CONFIG");
+        let scan = scan(Path::new(&config)).unwrap();
+        let plan = plan(&scan, &SessionTree::default());
+        println!("imported {:?}, unread {:?}", plan.notes.logon_actions, plan.notes.logon_unread);
+        let hosts = plan.folders.iter().flat_map(|f| &f.hosts).filter_map(|h| Some((&h.source, h.logon.clone()?)));
+        let plink = plan.folders.iter().flat_map(|f| &f.plink).filter_map(|p| {
+            let keys = p.logon.iter().map(|(k, v)| (k.as_str(), v.as_str()));
+            Some((p.source.as_ref()?, crate::logon::LogonActions::from_keys(keys)?))
+        });
+        for (source, actions) in hosts.chain(plink) {
+            println!("{source}: automate {}, initial CR {}", actions.automate, actions.initial_cr);
+            for step in &actions.steps {
+                let send = match crate::logon::secret_id(&step.send) {
+                    Some(_) => "in the password store".to_string(),
+                    None => format!("{} characters", step.send.chars().count()),
+                };
+                println!("  expect {:?}, send {send}, hide {}, enter {}", step.expect, step.hide, step.enter);
+            }
+        }
+        for secret in &plan.logon_secrets {
+            let read = read_logon_send(&secret.file, secret.row, "").map(|s| s.map(|s| s.chars().count()));
+            println!("hidden {} row {}: {read:?} characters", secret.session, secret.row + 1);
+        }
     }
 
     fn fixture() -> tempfile::TempDir {
@@ -1337,7 +1520,8 @@ mod tests {
         assert_eq!(n.duplicates, [vec!["测试/dup".to_string(), "生产/控制节点/10.32.16.66(osp-control1)".to_string()]]);
         assert_eq!(n.named_firewalls["Corp Proxy"], ["测试/dup"]);
         assert_eq!(n.unresolved_jumps, [("root-host".to_string(), "gone/away".to_string())]);
-        assert_eq!(n.logon_actions, ["生产/控制节点/10.32.16.66(osp-control1)"]);
+        assert_eq!(n.logon_unread, ["生产/控制节点/10.32.16.66(osp-control1)"], "an older SecureCRT's table");
+        assert!(n.logon_actions.is_empty());
         assert_eq!(n.saved_passwords, 1);
         assert_eq!(n.encodings, [("测试/dup".to_string(), "GBK".to_string())], "a Telnet session takes its GBK along");
         assert_eq!((n.identity_files, n.forwards, n.joined_descriptions), (1, 4, 1));

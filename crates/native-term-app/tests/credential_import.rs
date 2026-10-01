@@ -115,3 +115,36 @@ fn a_sessions_saved_password_becomes_its_accounts() {
     assert!(again.len() == 1 && again[0].contains('2'), "kept the second time: {again:?}");
     assert!(!lines.iter().chain(&again).any(|l| l.contains("s3cret")));
 }
+
+/// A hidden logon action row (made with the public decoder: hide, `word:`,
+/// "hunter2-made-up"): its Send lands in the password store under the id
+/// the configuration names, and is never said.
+#[test]
+fn a_hidden_logon_send_lands_in_the_password_store() {
+    const HIDDEN: &str = "03:ee23bbd7d99783b2c20b33c46121e16d73c646640e9f6c4f5f0dd92ea518e85e7680ea943ffed7aa56c8911166b4f2cb51464ae5a3b58dbd7dbee88e9ce82d9fc6439d147e1d7b0d70f6e2acf17fe9261db4c93d339c1f6af350c6e190772bb8";
+    let prefix = format!("NativeTerm-Tests-crtimport-{}", std::process::id());
+    std::env::set_var("NATIVETERM_CRED_PREFIX", &prefix);
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        &dir.path().join("Sessions").join("switch.ini"),
+        &[
+            "S:\"Protocol Name\"=Telnet",
+            "S:\"Hostname\"=10.0.0.6",
+            "Z:\"Login Script V4\"=00000001",
+            &format!(" {HIDDEN}"),
+            "D:\"Use Login Script\"=00000001",
+        ],
+    );
+    let scan = securecrt::scan(dir.path()).unwrap();
+    let plan = securecrt::plan(&scan, &SessionTree::default());
+    assert_eq!(plan.logon_secrets.len(), 1);
+    let entry = native_term_config::logon::secret_entry(&plan.logon_secrets[0].id);
+
+    let lines = native_term_app::import::store_logon_secrets(&plan.logon_secrets);
+    let stored = credentials::read(&entry).unwrap();
+    let _ = credentials::delete(&entry);
+
+    assert_eq!(stored.expect("stored").secret, "hunter2-made-up");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains('1') && !lines[0].contains("hunter2"), "{lines:?}");
+}

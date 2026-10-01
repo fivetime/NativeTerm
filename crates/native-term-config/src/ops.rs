@@ -1275,6 +1275,12 @@ impl Editor {
                     .into_iter()
                     .map(|(keyword, value)| format!("    {keyword} {}", directive_args(keyword, &value))),
             );
+            lines.extend(
+                host.logon
+                    .iter()
+                    .flat_map(crate::logon::LogonActions::directives)
+                    .map(|(keyword, value)| format!("    {keyword} {}", crate::document::quote_arg(&value))),
+            );
             append_raw(&mut doc, &lines);
         }
         folder_options::arrange(&mut doc, &folder_options::tag_for(path));
@@ -2067,6 +2073,72 @@ mod tests {
         let t = tree(&editor);
         assert!(t.find("a1").is_some());
         assert!(!t.folders().any(|f| f.label() == "B"), "the failed folder's file is gone");
+    }
+
+    /// SecureCRT's Logon Actions (`Login Script V4`, rows made with the
+    /// public decoder): a shown row's Send comes along as it is, a hidden
+    /// one's is left for the password store and read from the file only
+    /// then, the trailing carriage return as the row has it; the same for
+    /// a Telnet session's `logon` table.
+    #[test]
+    fn logon_actions_come_along() {
+        const ROWS: [&str; 3] = [
+            "03:8a66c42a113032d3a9df580e7db69a7e58be0c5f45c8a11a8276debada927d72300f6c04e524c4e34468a412495134c516ccfa9816e524af854bc08c29c595d4110e5ee9f0de643dca3adb38077cbcc56cea39023ff084bc287c96f30c064873e73aee75f8c769996407b3390bed8197998915e5ac5a8d35400c1dd2777f0525",
+            "03:ee23bbd7d99783b2c20b33c46121e16d73c646640e9f6c4f5f0dd92ea518e85e7680ea943ffed7aa56c8911166b4f2cb51464ae5a3b58dbd7dbee88e9ce82d9fc6439d147e1d7b0d70f6e2acf17fe9261db4c93d339c1f6af350c6e190772bb8",
+            "03:705a8491cbfe13786142c67706b6083a35614b976281dbe3c84263658360a554ddcb0bc49091b72370e9a7226f2095e36b13b13a51452fcfa2bb8b7639dce923650b3759479c7f714a0716a272238f8b67c29aac3ed74f02b45a4dc1de81a83a",
+        ];
+        let Some((home, editor)) = setup() else { return };
+        let config = home.path().join("crt");
+        let crt = config.join("Sessions");
+        let table = format!(
+            "Z:\"Login Script V4\"=00000003\r\n {}\r\n {}\r\n {}\r\nD:\"Use Login Script\"=00000001\r\nD:\"Send Initial Carriage Return\"=00000001\r\n",
+            ROWS[0], ROWS[1], ROWS[2]
+        );
+        crt_file(&crt, "Lab/jump.ini", &format!("{table}S:\"Hostname\"=10.0.0.5\r\n"));
+        crt_file(&crt, "Lab/switch.ini", &format!("{table}S:\"Protocol Name\"=Telnet\r\nS:\"Hostname\"=10.0.0.6\r\n"));
+        // the page's defaults alone: nothing
+        crt_file(&crt, "Lab/plain.ini", "Z:\"Login Script V4\"=00000000\r\nD:\"Send Initial Carriage Return\"=00000001\r\nS:\"Hostname\"=10.0.0.7\r\n");
+        crt_file(&crt, "Lab/broken.ini", "Z:\"Login Script V4\"=00000001\r\n 03:00112233\r\nD:\"Use Login Script\"=00000001\r\nS:\"Hostname\"=10.0.0.8\r\n");
+        let scan = securecrt::scan(&config).unwrap();
+        assert!(!format!("{scan:?}").contains("hunter2"), "a hidden Send isn't kept");
+        let plan = securecrt::plan(&scan, &tree(&editor));
+        assert_eq!(plan.notes.logon_actions, ["Lab/jump", "Lab/switch"]);
+        assert_eq!(plan.notes.logon_unread, ["Lab/broken"]);
+        assert_eq!(plan.logon_secrets.len(), 2, "one hidden row each");
+        editor.import(&plan, &|_, _| {}).unwrap();
+
+        let t = tree(&editor);
+        let by_source = |path: &str| {
+            t.hosts()
+                .find(|(_, h)| h.nt.get("source").is_some_and(|s| s.ends_with(path)))
+                .map(|(_, h)| h.clone())
+                .unwrap()
+        };
+        for path in ["Lab/jump", "Lab/switch"] {
+            let actions = crate::logon::LogonActions::own(&by_source(path)).unwrap_or_else(|| panic!("{path}"));
+            assert!(actions.automate && actions.initial_cr, "{path}");
+            let steps = &actions.steps;
+            assert_eq!(steps.len(), 3, "{path}");
+            assert_eq!(steps[0].expect, ">");
+            assert_eq!(steps[0].send, "ssh -o StrictHostKeyChecking=accept-new root@10.0.0.7");
+            assert!(!steps[0].hide && steps[0].enter);
+            assert_eq!(steps[1].expect, "word:");
+            assert!(steps[1].hide && steps[1].enter);
+            let id = crate::logon::secret_id(&steps[1].send).expect("secret:<id>");
+            let secret = plan.logon_secrets.iter().find(|s| s.id == id).unwrap();
+            assert_eq!(secret.row, 1);
+            assert_eq!(
+                securecrt::read_logon_send(&secret.file, secret.row, "").unwrap().as_deref(),
+                Some("hunter2-made-up")
+            );
+            assert_eq!((steps[2].send.as_str(), steps[2].enter), ("terminal length 0", false));
+        }
+        assert!(crate::logon::LogonActions::own(&by_source("Lab/plain")).is_none());
+        assert!(crate::logon::LogonActions::own(&by_source("Lab/broken")).is_none());
+        for entry in std::fs::read_dir(editor.folders_dir()).unwrap() {
+            let text = std::fs::read_to_string(entry.unwrap().path()).unwrap_or_default();
+            assert!(!text.contains("hunter2"), "a hidden Send isn't written: {text}");
+        }
     }
 
     #[test]

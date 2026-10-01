@@ -190,6 +190,7 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
         encoding,
         com_port: v.str("SerialLine").map(str::to_string),
         logon_actions: false,
+        logon: None,
         saved_password: false,
         ppk_key: v.str("PublicKeyFile").filter(|_| ssh).map(str::to_string),
         options,
