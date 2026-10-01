@@ -4243,7 +4243,10 @@ All UI surfaces invoke one shared app-level command layer
   platform. egui draws a face in one weight, so each weight is a family
   of its own: `Proportional` is Inter Regular, `native_term_skin::font`
   names `medium` and `semibold` (`Weight`, `font()`); egui's own fonts
-  stay behind them (emoji), then the CJK font and the icons.
+  stay behind them (emoji), then the CJK font and the icons. Their
+  private use area is taken out of their character maps (Inter maps 745
+  code points there, the icon fonts' own: in front of the icons it drew
+  its glyphs for them, seen on Lingmo); how, in `assets/fonts/README.md`.
 - **CJK fonts**: egui's bundled fonts have no Chinese glyphs. A system font
   (Microsoft YaHei, else SimSun) is added as a fallback font. It is
   **memory-mapped**, not read: egui clones owned font data while

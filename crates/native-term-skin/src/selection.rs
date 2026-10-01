@@ -140,12 +140,22 @@ impl<K: Clone + Eq + Hash> Selection<K> {
         }
         let last = keys.len() - 1;
         let across = across.max(1);
-        let mods = input.modifiers;
-        if mods.command && input.key_pressed(egui::Key::A) {
+        // each key with the modifiers it came with: a key tapped with Ctrl
+        // let go in the same frame is still Ctrl+key
+        let pressed: Vec<(egui::Key, egui::Modifiers)> = input
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                _ => None,
+            })
+            .collect();
+        let with = |wanted: egui::Key| pressed.iter().find(|(k, _)| *k == wanted).map(|(_, m)| *m);
+        if with(egui::Key::A).is_some_and(|m| m.command) {
             self.chosen = keys.iter().cloned().collect();
             return Keyed::Nothing;
         }
-        if input.key_pressed(egui::Key::Enter) && !self.chosen.is_empty() {
+        if with(egui::Key::Enter).is_some() && !self.chosen.is_empty() {
             return Keyed::Open;
         }
         let at = self.cursor.map(|c| c.min(last));
@@ -154,28 +164,25 @@ impl<K: Clone + Eq + Hash> Selection<K> {
             Some(c) if back => c.saturating_sub(by),
             Some(c) => (c + by).min(last),
         };
-        let pressed = |key| input.key_pressed(key);
-        let to = if pressed(egui::Key::ArrowDown) {
-            Some(step(false, across))
-        } else if pressed(egui::Key::ArrowUp) {
-            Some(step(true, across))
-        } else if across > 1 && pressed(egui::Key::ArrowRight) {
-            Some(step(false, 1))
-        } else if across > 1 && pressed(egui::Key::ArrowLeft) {
-            Some(step(true, 1))
-        } else if pressed(egui::Key::PageDown) {
-            Some(step(false, page.max(1)))
-        } else if pressed(egui::Key::PageUp) {
-            Some(step(true, page.max(1)))
-        } else if pressed(egui::Key::Home) {
-            Some(0)
-        } else if pressed(egui::Key::End) {
-            Some(last)
-        } else {
-            self.typed(input, at, keys.len(), &name)
+        let moves = [
+            (egui::Key::ArrowDown, Some(step(false, across))),
+            (egui::Key::ArrowUp, Some(step(true, across))),
+            (egui::Key::ArrowRight, (across > 1).then(|| step(false, 1))),
+            (egui::Key::ArrowLeft, (across > 1).then(|| step(true, 1))),
+            (egui::Key::PageDown, Some(step(false, page.max(1)))),
+            (egui::Key::PageUp, Some(step(true, page.max(1)))),
+            (egui::Key::Home, Some(0)),
+            (egui::Key::End, Some(last)),
+        ];
+        let moved = moves.into_iter().find_map(|(key, to)| Some((to?, with(key)?)));
+        let (to, shift) = match moved {
+            Some((to, m)) => (to, m.shift),
+            None => match self.typed(input, at, keys.len(), &name) {
+                Some(to) => (to, false),
+                None => return Keyed::Nothing,
+            },
         };
-        let Some(to) = to else { return Keyed::Nothing };
-        if mods.shift {
+        if shift {
             let from = self.anchor.unwrap_or(at.unwrap_or(to));
             self.chosen.clear();
             let (a, b) = (from.min(to), from.max(to));
@@ -293,6 +300,12 @@ mod tests {
         assert_eq!(s.keys(&key(egui::Key::A, COMMAND), &k, 1, 3, none), Keyed::Nothing);
         assert_eq!(chosen(&s), [0, 1, 2, 3, 4, 5]);
         assert_eq!(s.keys(&key(egui::Key::Enter, PLAIN), &k, 1, 3, none), Keyed::Open);
+        // Ctrl let go in the same frame: the key still came with it
+        s.only(0, 0);
+        let mut tapped = key(egui::Key::A, COMMAND);
+        tapped.modifiers = PLAIN;
+        assert_eq!(s.keys(&tapped, &k, 1, 3, none), Keyed::Nothing);
+        assert_eq!(chosen(&s), [0, 1, 2, 3, 4, 5]);
     }
 
     #[test]
