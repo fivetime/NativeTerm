@@ -85,6 +85,16 @@ fn snapshots() {
         let size = egui::vec2(440.0, 170.0 + native_term_skin::TITLE_BAR);
         save(&format!("tab-title-{theme}"), picture(size, dark, |ui| window.ui(ui)));
 
+        // the files window, made with the picture's context (it keeps one)
+        let mut files: Option<Box<dyn crate::window::Ui>> = None;
+        let size = egui::vec2(1440.0, 900.0);
+        save(
+            &format!("files-{theme}"),
+            picture(size, dark, |ui| {
+                files.get_or_insert_with(|| crate::files_window::snapshot::for_snapshot(ui.ctx())).ui(ui)
+            }),
+        );
+
         // dialogs inside the main window, over a page standing for it
         let over = |name: &str, show: &mut dyn FnMut(&egui::Context)| {
             save(

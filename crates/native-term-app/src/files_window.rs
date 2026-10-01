@@ -328,6 +328,16 @@ struct Remote {
     anchor: Option<usize>,
     renaming: Option<(Vec<u8>, String)>,
     names: Names,
+    /// Drawn as connected without a connection: the pictures drawn off
+    /// the screen (`files_snapshot`).
+    pictured: bool,
+}
+
+impl Remote {
+    /// Connected, as far as what is shown goes.
+    fn up(&self) -> bool {
+        self.sftp.is_some() || self.pictured
+    }
 }
 
 /// The local side of a session: a folder, or `None` for the drives.
@@ -630,6 +640,7 @@ impl FilesWindow {
                     anchor: None,
                     renaming: None,
                     names,
+                    pictured: false,
                 },
                 local: Local {
                     path: None,
@@ -1478,7 +1489,7 @@ impl FilesWindow {
         let Some(tab) = self.tabs.get(self.active) else { return };
         let id = tab.id;
         let (connected, selected, at_folder) =
-            (tab.remote.sftp.is_some(), !tab.local.selected.is_empty(), tab.local.path.is_some());
+            (tab.remote.up(), !tab.local.selected.is_empty(), tab.local.path.is_some());
         let mut path_text = tab.local.path_text.clone();
         let mut go_to = None;
         let mut up = false;
@@ -1669,10 +1680,10 @@ impl FilesWindow {
         // the status line, at the very bottom (in line with the local one)
         egui::Panel::bottom("remote-status").show(ui, |ui| {
             let remote = &self.tabs[self.active].remote;
-            let state = match (&remote.sftp, &remote.failed) {
+            let state = match (remote.up(), &remote.failed) {
                 (_, Some(_)) => (RED, t!("files-status-failed")),
-                (None, None) => (ui.visuals().weak_text_color(), t!("files-status-connecting")),
-                (Some(_), None) => (GREEN, t!("files-status-connected")),
+                (false, None) => (ui.visuals().weak_text_color(), t!("files-status-connecting")),
+                (true, None) => (GREEN, t!("files-status-connected")),
             };
             let chosen = remote.rows.iter().filter(|r| remote.selected.contains(&r.entry.name));
             let (count, bytes) =
@@ -1694,7 +1705,7 @@ impl FilesWindow {
             });
         });
         let tab = &self.tabs[self.active];
-        let connected = tab.remote.sftp.is_some();
+        let connected = tab.remote.up();
         let selected = !tab.remote.selected.is_empty();
         let file = tab
             .remote
@@ -1803,7 +1814,7 @@ impl FilesWindow {
         }
 
         let tab = &self.tabs[self.active];
-        match (&tab.remote.sftp, &tab.remote.failed) {
+        match (tab.remote.up(), &tab.remote.failed) {
             (_, Some(error)) => {
                 ui.colored_label(RED, error);
                 ui.weak(t!("files-batch"));
@@ -1812,14 +1823,14 @@ impl FilesWindow {
                 }
                 return;
             }
-            (None, None) => {
+            (false, None) => {
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.label(t!("files-connecting", host = tab.spec.alias.as_str()));
                 });
                 return;
             }
-            (Some(_), None) => {}
+            (true, None) => {}
         }
         if let Some(e) = &tab.remote.error {
             ui.colored_label(RED, e);
@@ -2709,6 +2720,10 @@ fn click(
         *anchor = Some(i);
     }
 }
+
+#[cfg(test)]
+#[path = "files_snapshot.rs"]
+pub(crate) mod snapshot;
 
 impl crate::window::Ui for FilesWindow {
     fn ui(&mut self, ui: &mut egui::Ui) {
