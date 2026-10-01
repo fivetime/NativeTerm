@@ -6,7 +6,36 @@
 //! a menu, renaming in place, dragging out and dropping in.
 
 use super::*;
-use native_term_skin::{Cell, Column, ListView, Selection, Sort, Width};
+use native_term_skin::{Cell, Column, GridView, Item, ListView, Selection, Sort, Width};
+
+/// How a side shows its files: in columns, or only their names across
+/// and down (for a folder of many).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum View {
+    Details,
+    Names,
+}
+
+/// The switch between the views (at a side's status line's end): the
+/// view asked for.
+pub(super) fn view_switch(ui: &mut egui::Ui, view: View) -> Option<View> {
+    let mut asked = None;
+    // (right to left: the last first)
+    for (this, glyph, hint) in
+        [(View::Names, icons::GRID, t!("files-view-names")), (View::Details, icons::LIST, t!("files-view-details"))]
+    {
+        let on = view == this;
+        let button = egui::Button::new(egui::RichText::new(glyph.to_string()).size(13.0))
+            .selected(on)
+            .frame_when_inactive(false);
+        let response = ui.add(button).on_hover_text(&hint);
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &hint));
+        if response.clicked() && !on {
+            asked = Some(this);
+        }
+    }
+    asked
+}
 
 /// The design's colours for a side and for kinds of files (its tokens
 /// `--accent`, `--remote`, `--file-*`), dark and light.
@@ -173,8 +202,6 @@ pub(super) fn order(lines: &[Line], sort: Sort, remote: bool) -> Vec<usize> {
     order
 }
 
-/// A file list: what is chosen, opened, renamed, dragged and dropped;
-/// `lines` in the order shown.
 /// Which list: its id, the server's side or not, whether the keys go to it.
 pub(super) struct Side<'a> {
     pub salt: &'a str,
@@ -182,6 +209,8 @@ pub(super) struct Side<'a> {
     pub keyboard: bool,
 }
 
+/// A file list, in columns or names only: what is chosen, opened,
+/// renamed, dragged and dropped; `lines` in the order shown.
 pub(super) fn list(
     ui: &mut egui::Ui,
     side: Side<'_>,
@@ -189,6 +218,7 @@ pub(super) fn list(
     selected: &mut Selection<Vec<u8>>,
     renaming: &mut Option<(Vec<u8>, String)>,
     sort: &mut Sort,
+    view: View,
 ) -> Listed {
     let Side { salt, remote, keyboard } = side;
     let palette = crate::looks::skin(ui.visuals()).palette;
@@ -218,11 +248,56 @@ pub(super) fn list(
     let keys: Vec<Vec<u8>> = lines.iter().map(|l| l.key.clone()).collect();
     let many = selected.len() > 1;
     let mut renamed = None;
-    let shown = ListView::new(salt, &columns, &palette)
-        .accent(accent)
-        .sorted(Some(*sort))
-        .keyboard(keyboard && renaming.is_none())
-        .show(
+    // a name with its icon, tinted by kind (in a row or an item)
+    let name_cell = |ui: &mut egui::Ui,
+                     line: &Line,
+                     chosen: bool,
+                     renaming: &mut Option<(Vec<u8>, String)>,
+                     renamed: &mut Option<(Vec<u8>, String)>| {
+        let tint = match line.kind {
+            Kind::Folder => look.folder,
+            Kind::Code => look.code,
+            Kind::Doc => look.doc,
+            Kind::Binary => look.binary,
+            Kind::Link | Kind::Plain => palette.weak,
+        };
+        ui.label(egui::RichText::new(line.glyph.to_string()).size(14.0).color(tint));
+        ui.add_space(4.0);
+        if renaming.as_ref().is_some_and(|(k, _)| *k == line.key) {
+            rename_field(ui, salt, line, renaming, renamed);
+        } else {
+            let (font, color) = if chosen { (chosen_font.clone(), ink) } else { (name_font.clone(), palette.text) };
+            ui.add(
+                egui::Label::new(egui::RichText::new(&line.name).font(font).color(color)).truncate().selectable(false),
+            );
+        }
+    };
+    let mut each = |i: usize, is_chosen: bool, response: &egui::Response| {
+        let line = &lines[i];
+        response
+            .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, is_chosen, &line.name));
+        if response.clicked() || response.secondary_clicked() {
+            out.clicked = true;
+        }
+        if response.drag_started() {
+            out.drag = true;
+            out.response = response.clone();
+            out.drag_row = Some(i);
+        }
+        response.context_menu(|ui| menu(ui, i, line, remote, many, &mut out));
+    };
+    let keyboard = keyboard && renaming.is_none();
+    let shown = if view == View::Names {
+        GridView::new(salt, &palette).accent(accent).keyboard(keyboard).show(
+            ui,
+            &keys,
+            selected,
+            |i| lines[i].name.clone(),
+            |ui, Item { index, chosen }| name_cell(ui, &lines[index], chosen, renaming, &mut renamed),
+            &mut each,
+        )
+    } else {
+        ListView::new(salt, &columns, &palette).accent(accent).sorted(Some(*sort)).keyboard(keyboard).show(
             ui,
             &keys,
             selected,
@@ -230,28 +305,7 @@ pub(super) fn list(
             |ui, Cell { row, column, chosen }| {
                 let line = &lines[row];
                 match column {
-                    0 => {
-                        let tint = match line.kind {
-                            Kind::Folder => look.folder,
-                            Kind::Code => look.code,
-                            Kind::Doc => look.doc,
-                            Kind::Binary => look.binary,
-                            Kind::Link | Kind::Plain => palette.weak,
-                        };
-                        ui.label(egui::RichText::new(line.glyph.to_string()).size(14.0).color(tint));
-                        ui.add_space(4.0);
-                        if renaming.as_ref().is_some_and(|(k, _)| *k == line.key) {
-                            rename_field(ui, salt, line, renaming, &mut renamed);
-                        } else {
-                            let (font, color) =
-                                if chosen { (chosen_font.clone(), ink) } else { (name_font.clone(), palette.text) };
-                            ui.add(
-                                egui::Label::new(egui::RichText::new(&line.name).font(font).color(color))
-                                    .truncate()
-                                    .selectable(false),
-                            );
-                        }
-                    }
+                    0 => name_cell(ui, line, chosen, renaming, &mut renamed),
                     1 => {
                         if let Some(size) = line.size {
                             ui.label(egui::RichText::new(size_text(size)).font(mono.clone()).color(palette.weak));
@@ -281,22 +335,9 @@ pub(super) fn list(
                     }
                 }
             },
-            |i, is_chosen, response| {
-                let line = &lines[i];
-                response.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, is_chosen, &line.name)
-                });
-                if response.clicked() || response.secondary_clicked() {
-                    out.clicked = true;
-                }
-                if response.drag_started() {
-                    out.drag = true;
-                    out.response = response.clone();
-                    out.drag_row = Some(i);
-                }
-                response.context_menu(|ui| menu(ui, i, line, remote, many, &mut out));
-            },
-        );
+            &mut each,
+        )
+    };
     if hovered_drop {
         ui.painter().rect_stroke(area, 4.0, egui::Stroke::new(2.0_f32, accent), egui::StrokeKind::Inside);
     }

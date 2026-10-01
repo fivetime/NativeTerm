@@ -4568,8 +4568,12 @@ maximize and close at the right), the title bar the main window's height
   by), the chosen rows in the accent's tint with a bar at their start,
   the design's sizes (a header of 32, rows of 34, cells padded 10). A
   cell's content is the program's; each row's response comes back for a
-  menu, dragging and dropping. `GridView` and `TreeView` follow (egui has
-  a layout grid and collapsing headers, no views).
+  menu, dragging and dropping. `GridView` is items across and down (a
+  file manager's list view): as many columns as fit items at least 200
+  wide, only the lines in view drawn, the arrows across and down, the
+  same tint and bar; egui's grid lays things out and is no view, so this
+  is drawn on its scroll area. `TreeView` follows (egui has collapsing
+  headers, no tree).
 - **Controls are egui's own** (the person's rule: what egui has is not
   made again): buttons, fields, check boxes, progress bars are egui's,
   given their look by the theme (`looks.rs` paints egui's visuals from

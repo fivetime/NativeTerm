@@ -726,6 +726,10 @@
         (the local side's chosen rows blue, the server's green, icons
         tinted by kind, sizes, modes and dates in JetBrains Mono, a type
         column here)
+  - [x] Each side's names-only view on the skin's `GridView` (the
+        switch at its status line's end): items across and down, the
+        arrows across and down, the same menu, dragging and renaming.
+        Tried on Lingmo by hand
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

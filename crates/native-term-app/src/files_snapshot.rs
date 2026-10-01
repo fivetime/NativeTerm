@@ -66,6 +66,7 @@ fn tab(window: &mut FilesWindow, alias: &str, up: bool) -> Tab {
             error: None,
             selected: Selection::default(),
             sort: NAME_SORT,
+            view: files_list::View::Details,
             renaming: None,
             names: Names::default(),
             pictured: up,
@@ -77,6 +78,7 @@ fn tab(window: &mut FilesWindow, alias: &str, up: bool) -> Tab {
             error: None,
             selected: Selection::default(),
             sort: NAME_SORT,
+            view: files_list::View::Details,
             renaming: None,
         },
         remote_tree: Tree::default(),
@@ -128,7 +130,8 @@ fn job(window: &mut FilesWindow, tab: u64, kind: Kind, title: &str, done: u64, t
 
 /// Three sessions (the second shown, the third failed), a folder on each
 /// side, the trees open down to them, and a queue.
-pub(crate) fn for_snapshot(ctx: &egui::Context) -> Box<dyn crate::window::Ui> {
+/// `names`: both sides in their names-only view.
+pub(crate) fn for_snapshot(ctx: &egui::Context, names: bool) -> Box<dyn crate::window::Ui> {
     let mut window = FilesWindow::new(ctx);
     let home = PathBuf::from(if cfg!(windows) { r"C:\Users\Projects" } else { "/home/projects" });
     window.computer = "MACBOOKPRO16".into();
@@ -181,6 +184,10 @@ pub(crate) fn for_snapshot(ctx: &egui::Context) -> Box<dyn crate::window::Ui> {
         ("14:03:40".into(), "PUT deploy_daemon.sh → /opt/nexus/bin/ 4.2 KB".into(), false),
     ];
 
+    if names {
+        shown.local.view = files_list::View::Names;
+        shown.remote.view = files_list::View::Names;
+    }
     let id = shown.id;
     window.tabs = vec![first, shown, failed];
     window.active = 1;

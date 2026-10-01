@@ -332,6 +332,7 @@ struct Remote {
     error: Option<String>,
     selected: Selection<Vec<u8>>,
     sort: Sort,
+    view: files_list::View,
     renaming: Option<(Vec<u8>, String)>,
     names: Names,
     /// Drawn as connected without a connection: the pictures drawn off
@@ -354,6 +355,7 @@ struct Local {
     error: Option<String>,
     selected: Selection<Vec<u8>>,
     sort: Sort,
+    view: files_list::View,
     renaming: Option<(Vec<u8>, String)>,
 }
 
@@ -644,6 +646,7 @@ impl FilesWindow {
                     error: None,
                     selected: Selection::default(),
                     sort: NAME_SORT,
+                    view: files_list::View::Details,
                     renaming: None,
                     names,
                     pictured: false,
@@ -655,6 +658,7 @@ impl FilesWindow {
                     error: None,
                     selected: Selection::default(),
                     sort: NAME_SORT,
+                    view: files_list::View::Details,
                     renaming: None,
                 },
                 remote_tree: Tree::default(),
@@ -1559,7 +1563,10 @@ impl FilesWindow {
             let chosen = local.rows.iter().filter(|r| local.selected.contains(&local_key(r)));
             let (count, bytes) = chosen.fold((0, 0), |(n, b), r| (n + 1, b + r.size.unwrap_or(0)));
             let folders = local.rows.iter().filter(|r| r.dir).count();
-            status_line(ui, None, folders, local.rows.len() - folders, count, bytes);
+            let asked = status_line(ui, None, folders, local.rows.len() - folders, count, bytes, local.view);
+            if let Some(view) = asked {
+                self.tabs[self.active].local.view = view;
+            }
         });
         // the tree
         let roots = self.local_roots.clone();
@@ -1606,7 +1613,7 @@ impl FilesWindow {
         let keyboard = !self.remote_focus;
         let mut local = std::mem::replace(&mut self.tabs[self.active].local, empty_local());
         let side = files_list::Side { salt: "local-list", remote: false, keyboard };
-        let out = list(ui, side, &lines, &mut local.selected, &mut local.renaming, &mut local.sort);
+        let out = list(ui, side, &lines, &mut local.selected, &mut local.renaming, &mut local.sort, local.view);
         self.tabs[self.active].local = local;
         if out.clicked {
             self.remote_focus = false;
@@ -1701,7 +1708,10 @@ impl FilesWindow {
             let (count, bytes) =
                 chosen.fold((0, 0), |(n, b), r| (n + 1, b + if r.dir { 0 } else { r.entry.attrs.size.unwrap_or(0) }));
             let folders = remote.rows.iter().filter(|r| r.dir).count();
-            status_line(ui, Some(state), folders, remote.rows.len() - folders, count, bytes);
+            let asked = status_line(ui, Some(state), folders, remote.rows.len() - folders, count, bytes, remote.view);
+            if let Some(view) = asked {
+                self.tabs[self.active].remote.view = view;
+            }
         });
         // the session's log, above the status line
         egui::Panel::bottom("files-log").resizable(true).default_size(110.0).show(ui, |ui| {
@@ -1904,7 +1914,8 @@ impl FilesWindow {
         let mut sort = self.tabs[self.active].remote.sort;
         let mut renaming = self.tabs[self.active].remote.renaming.take();
         let side = files_list::Side { salt: "remote-list", remote: true, keyboard };
-        let out = list(ui, side, &lines, &mut remote, &mut renaming, &mut sort);
+        let view = self.tabs[self.active].remote.view;
+        let out = list(ui, side, &lines, &mut remote, &mut renaming, &mut sort, view);
         {
             let r = &mut self.tabs[self.active].remote;
             r.selected = remote;
@@ -2579,6 +2590,8 @@ impl Drop for FilesWindow {
 
 /// A side's status line: the connection (the server's side), what the
 /// folder holds, and what is selected.
+/// A side's status line, with the switch between its views at the end:
+/// the view asked for.
 fn status_line(
     ui: &mut egui::Ui,
     state: Option<(egui::Color32, String)>,
@@ -2586,7 +2599,9 @@ fn status_line(
     files: usize,
     selected: usize,
     bytes: u64,
-) {
+    view: files_list::View,
+) -> Option<files_list::View> {
+    let mut asked = None;
     ui.horizontal(|ui| {
         if let Some((color, text)) = state {
             // a dot drawn (the font may have no glyph for one)
@@ -2600,7 +2615,11 @@ fn status_line(
             ui.separator();
             ui.label(t!("files-status-selected", count = selected, size = size_text(bytes)));
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            asked = files_list::view_switch(ui, view);
+        });
     });
+    asked
 }
 
 /// Every file and folder a transfer involves.
@@ -2661,6 +2680,7 @@ fn empty_local() -> Local {
         error: None,
         selected: Selection::default(),
         sort: NAME_SORT,
+        view: files_list::View::Details,
         renaming: None,
     }
 }
