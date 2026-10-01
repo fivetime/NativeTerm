@@ -313,6 +313,17 @@ struct Docking {
     top_after_restore: bool,
 }
 
+/// A frame's texture changes once given to the renderer: let go when
+/// dropped (egui 0.36 asserts, in a debug build, that a `TexturesDelta`
+/// dropped was handled).
+struct Handled(egui::TexturesDelta);
+
+impl Drop for Handled {
+    fn drop(&mut self) {
+        self.0.clear();
+    }
+}
+
 /// How a window is made: an ordinary one, one shown with its own
 /// transparency (the floating button), or a dialog of another window's
 /// (modal or not).
@@ -518,6 +529,9 @@ impl Pane {
             self.close_asked |= self.info.events.contains(&egui::ViewportEvent::Close);
         }
 
+        // the frame's texture changes, let go however the frame ends (egui
+        // asserts in a debug build that they were handled)
+        let textures = Handled(std::mem::take(&mut output.textures_delta));
         let ran = started.elapsed();
         let primitives = self.ctx.tessellate(output.shapes, output.pixels_per_point);
         let tessellated = started.elapsed();
@@ -531,7 +545,7 @@ impl Pane {
         let (renderer, hwnd) = (&mut self.renderer, self.hwnd);
         let mut paint = |bytes: &mut [[u8; 4]]| {
             let mut target = BufferMutRef::new(bytes, width.get() as usize, height.get() as usize);
-            renderer.render(&mut target, &primitives, &output.textures_delta, output.pixels_per_point);
+            renderer.render(&mut target, &primitives, &textures.0, output.pixels_per_point);
         };
         // its own transparency: the whole surface at once, premultiplied
         // (which is how egui paints), so the shape it drew is the window

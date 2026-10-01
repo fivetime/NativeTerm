@@ -307,7 +307,8 @@ fn over(ui: &egui::Ui, rect: egui::Rect, name: &str) -> Option<Vec<PathBuf>> {
         return None;
     }
     let (hovering, paths) = ui.ctx().input(|i| {
-        let paths: Vec<PathBuf> = i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect();
+        let paths: Vec<PathBuf> =
+            i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect();
         (!i.raw.hovered_files.is_empty(), paths)
     });
     if hovering {

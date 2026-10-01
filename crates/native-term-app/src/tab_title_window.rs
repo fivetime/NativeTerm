@@ -57,7 +57,7 @@ impl crate::window::Ui for TitleWindow {
             self.answer(true);
         }
         let frame = crate::skinned::page(&skin);
-        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.label(t!("tab-title-name"));
             let edit = ui.add(egui::TextEdit::singleline(&mut self.title).desired_width(f32::INFINITY));

@@ -1539,7 +1539,7 @@ impl FilesWindow {
             ui.colored_label(RED, e);
         }
         // the status line, under the tree and the list
-        egui::Panel::bottom("local-status").show_inside(ui, |ui| {
+        egui::Panel::bottom("local-status").show(ui, |ui| {
             let local = &self.tabs[self.active].local;
             let chosen = local.rows.iter().filter(|r| local.selected.contains(&local_key(r)));
             let (count, bytes) = chosen.fold((0, 0), |(n, b), r| (n + 1, b + r.size.unwrap_or(0)));
@@ -1552,7 +1552,7 @@ impl FilesWindow {
             .resizable(true)
             .default_size(180.0)
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..Default::default() }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let tab = &self.tabs[self.active];
                 tree(ui, "local-tree", &roots, &tab.local_tree, tab.local.path.as_ref(), false)
             })
@@ -1667,7 +1667,7 @@ impl FilesWindow {
         };
         let id = tab.id;
         // the status line, at the very bottom (in line with the local one)
-        egui::Panel::bottom("remote-status").show_inside(ui, |ui| {
+        egui::Panel::bottom("remote-status").show(ui, |ui| {
             let remote = &self.tabs[self.active].remote;
             let state = match (&remote.sftp, &remote.failed) {
                 (_, Some(_)) => (RED, t!("files-status-failed")),
@@ -1681,7 +1681,7 @@ impl FilesWindow {
             status_line(ui, Some(state), folders, remote.rows.len() - folders, count, bytes);
         });
         // the session's log, above the status line
-        egui::Panel::bottom("files-log").resizable(true).default_size(110.0).show_inside(ui, |ui| {
+        egui::Panel::bottom("files-log").resizable(true).default_size(110.0).show(ui, |ui| {
             egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
                 for (time, text, error) in &self.tabs[self.active].log {
                     let line = format!("{time}  {text}");
@@ -1835,7 +1835,7 @@ impl FilesWindow {
             .resizable(true)
             .default_size(180.0)
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..Default::default() }))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let tab = &self.tabs[self.active];
                 tree(ui, "remote-tree", &roots, &tab.remote_tree, Some(&tab.remote.path), true)
             })
@@ -2335,7 +2335,7 @@ struct TreeOut<P> {
 /// one shown is highlighted, and files dragged from the other side can be
 /// dropped on a folder. `remote`: the server's side (it takes files from
 /// the local side, and the other way round).
-fn tree<P: Clone + Eq + Hash>(
+fn tree<P: Clone + Eq + Hash + std::fmt::Debug>(
     ui: &mut egui::Ui,
     salt: &str,
     roots: &[(String, P)],
@@ -2354,7 +2354,7 @@ fn tree<P: Clone + Eq + Hash>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn tree_node<P: Clone + Eq + Hash>(
+fn tree_node<P: Clone + Eq + Hash + std::fmt::Debug>(
     ui: &mut egui::Ui,
     name: &str,
     path: &P,
@@ -2721,7 +2721,9 @@ impl crate::window::Ui for FilesWindow {
         // after the events: a tab that has just connected is ready here
         self.take_pending_uploads(&ctx);
         // files dropped from Explorer onto the server's side: uploaded there
-        let dropped: Vec<PathBuf> = ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect());
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect()
+        });
         if !dropped.is_empty() {
             let over_remote =
                 ctx.input(|i| i.pointer.latest_pos()).zip(self.remote_rect).is_none_or(|(p, r)| r.contains(p));
@@ -2738,7 +2740,7 @@ impl crate::window::Ui for FilesWindow {
             .default_size(150.0)
             .min_size(64.0)
             .max_size(360.0)
-            .show_inside(ui, |ui| self.activity(ui));
+            .show(ui, |ui| self.activity(ui));
         let half = ui.available_width() / 2.0;
         // the same margins on both sides, so their rows line up
         let frame = egui::Frame::NONE.inner_margin(8.0_f32).fill(skin.palette.page);
@@ -2746,8 +2748,8 @@ impl crate::window::Ui for FilesWindow {
             .resizable(true)
             .default_size(half)
             .frame(frame)
-            .show_inside(ui, |ui| self.local_side(ui));
-        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| self.remote_side(ui));
+            .show(ui, |ui| self.local_side(ui));
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| self.remote_side(ui));
         // its dialogs: each a window of its own
         let parts = FilesPart::ALL.map(|part| (part, part.window()));
         let me = self.me.clone();

@@ -1891,7 +1891,7 @@ impl App {
             .resizable(false)
             .show_separator_line(false)
             .frame(frame)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 // the design's gaps, or less in a low window
                 const LOGO: f32 = 44.0;
                 let below = if docked.is_some() { 3 } else { 2 };
@@ -2076,7 +2076,7 @@ impl App {
             return;
         }
         let frame = layout::bar(tones, egui::Margin::symmetric(20, 10));
-        egui::Panel::top("notices").frame(frame).show_inside(ui, |ui| {
+        egui::Panel::top("notices").frame(frame).show(ui, |ui| {
             self.profile.banner(ui, &mut self.notices);
             let mut settings = false;
             self.agent.banner(ui, self.core.as_ref(), &mut settings);
@@ -2108,7 +2108,7 @@ impl App {
         let selected = self.view.selected();
         let open = self.core.as_ref().map_or(0, |c| c.sessions().iter().filter(|s| s.state.is_open()).count());
         let terminal = self.core.as_ref().map_or(default_terminal_name(), |c| c.terminal_name().to_string());
-        egui::Panel::bottom("footer").exact_size(layout::FOOTER).resizable(false).frame(frame).show_inside(ui, |ui| {
+        egui::Panel::bottom("footer").exact_size(layout::FOOTER).resizable(false).frame(frame).show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 layout::footer_count(ui, tones, icons::LAYERS, &t!("footer-hosts"), hosts);
                 layout::footer_count(ui, tones, icons::FOLDER, &t!("footer-folders"), folders);
@@ -2154,7 +2154,7 @@ impl App {
                     .default_size(260.0)
                     .size_range(160.0..=420.0)
                     .frame(frame)
-                    .show_inside(ui, |ui| asked = crate::properties::show(ui, &about, &chosen));
+                    .show(ui, |ui| asked = crate::properties::show(ui, &about, &chosen));
             }
         } else {
             egui::Panel::right("properties")
@@ -2162,7 +2162,7 @@ impl App {
                 .default_size(layout::PROPERTIES)
                 .size_range(260.0..=480.0)
                 .frame(frame)
-                .show_inside(ui, |ui| asked = crate::properties::show(ui, &about, &chosen));
+                .show(ui, |ui| asked = crate::properties::show(ui, &about, &chosen));
             self.footer(ui, tones);
         }
         let scope = if self.page == Page::Recent { Scope::Recent } else { Scope::Tree };
@@ -2172,8 +2172,7 @@ impl App {
         let generation = self.generation;
         let shown = Shown { tree: &self.tree, generation, recent, activity, written, tags, servers, scope };
         let page = egui::Frame::new().fill(tones.page);
-        let mut actions =
-            egui::CentralPanel::default().frame(page).show_inside(ui, |ui| self.view.show(ui, &shown)).inner;
+        let mut actions = egui::CentralPanel::default().frame(page).show(ui, |ui| self.view.show(ui, &shown)).inner;
         for asked in asked {
             match asked {
                 crate::properties::Asked::Tree(action) => actions.push(action),
@@ -2188,7 +2187,7 @@ impl App {
     fn page(&mut self, ui: &mut egui::Ui, tones: &Tones, inside: impl FnOnce(&mut App, &mut egui::Ui)) {
         self.footer(ui, tones);
         let frame = egui::Frame::new().fill(tones.page).inner_margin(16);
-        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| inside(self, ui));
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| inside(self, ui));
     }
 
     /// Every tab of the terminal; a tab of ours here can take files as
@@ -2316,7 +2315,7 @@ impl App {
                     .exact_size(PAGES)
                     .resizable(false)
                     .frame(egui::Frame::new().inner_margin(egui::Margin { right: 12, ..egui::Margin::ZERO }))
-                    .show_inside(ui, |ui| {
+                    .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 4.0;
                         for page in SettingsPage::ALL {
                             let on = self.settings_page == page;
@@ -2329,7 +2328,7 @@ impl App {
                         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| about(ui, &tones));
                     });
                 let page = egui::Frame::new().inner_margin(egui::Margin { left: 16, ..egui::Margin::ZERO });
-                egui::CentralPanel::default().frame(page).show_inside(ui, |ui| {
+                egui::CentralPanel::default().frame(page).show(ui, |ui| {
                     egui::ScrollArea::vertical().id_salt("settings-page").auto_shrink([false, false]).show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 8.0;
                         self.settings_page(ui);
@@ -2567,7 +2566,8 @@ fn hovering_files(ctx: &egui::Context) -> Option<egui::Pos2> {
 /// Files just dropped on NativeTerm's own window, and where.
 fn dropped_files(ctx: &egui::Context) -> Option<(Vec<PathBuf>, egui::Pos2)> {
     ctx.input(|i| {
-        let paths: Vec<PathBuf> = i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect();
+        let paths: Vec<PathBuf> =
+            i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).filter(|p| !p.as_os_str().is_empty()).collect();
         let at = i.pointer.interact_pos().or_else(|| i.pointer.latest_pos());
         (!paths.is_empty()).then(|| at.map(|at| (paths, at))).flatten()
     })

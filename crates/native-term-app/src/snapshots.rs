@@ -12,18 +12,21 @@ fn picture(size: egui::Vec2, dark: bool, mut draw: impl FnMut(&mut egui::Ui)) ->
     crate::install_fonts(&ctx);
     crate::looks::Preset::from_setting(None).apply(&ctx);
     ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
-    let input = || egui::RawInput {
+    // (a second between frames: what fades in has)
+    let input = |frame: u32| egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+        time: Some(f64::from(frame)),
         ..egui::RawInput::default()
     };
     let mut renderer = EguiSoftwareRender::new(ColorFieldOrder::Rgba);
     let (w, h) = (size.x as usize, size.y as usize);
     let mut pixels = vec![[0u8; 4]; w * h];
-    for _ in 0..4 {
-        let output = ctx.run_ui(input(), &mut draw);
+    for frame in 0..4 {
+        let mut output = ctx.run_ui(input(frame), &mut draw);
         let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
         let mut target = BufferMutRef::new(&mut pixels, w, h);
         renderer.render(&mut target, &primitives, &output.textures_delta, output.pixels_per_point);
+        output.textures_delta.clear();
     }
     (w, h, pixels.into_iter().flatten().collect())
 }
@@ -89,7 +92,7 @@ fn snapshots() {
                 picture(egui::vec2(820.0, 620.0), dark, |ui| {
                     let skin = crate::looks::skin(ui.visuals());
                     let page = egui::Frame::NONE.fill(skin.palette.page);
-                    egui::CentralPanel::default().frame(page).show_inside(ui, |ui| ui.label("the main window, behind"));
+                    egui::CentralPanel::default().frame(page).show(ui, |ui| ui.label("the main window, behind"));
                     show(ui.ctx());
                 }),
             );
@@ -115,7 +118,7 @@ fn snapshots() {
             &format!("delete-{theme}"),
             picture(egui::vec2(720.0, 420.0), dark, |ui| {
                 let skin = crate::looks::skin(ui.visuals());
-                egui::CentralPanel::default().frame(egui::Frame::NONE.fill(skin.palette.page)).show_inside(ui, |ui| {
+                egui::CentralPanel::default().frame(egui::Frame::NONE.fill(skin.palette.page)).show(ui, |ui| {
                     ui.label("the main window, behind");
                 });
                 let _ = delete.show(ui.ctx());

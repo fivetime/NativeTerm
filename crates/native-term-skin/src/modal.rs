@@ -87,7 +87,7 @@ impl<'a> Modal<'a> {
     /// A modal dialog `title` with the close button, as wide as what it
     /// has; `id_salt` tells it from other dialogs.
     #[must_use]
-    pub fn new(id_salt: impl std::hash::Hash, title: &'a str) -> Modal<'a> {
+    pub fn new(id_salt: impl std::hash::Hash + std::fmt::Debug, title: &'a str) -> Modal<'a> {
         Modal {
             id: egui::Id::new(("skin-modal", id_salt)),
             bar: TitleBar::new(title),

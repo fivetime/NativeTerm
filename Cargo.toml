@@ -35,6 +35,9 @@ zmodem2 = { git = "https://codeberg.org/fivetime/zmodem2.git", rev = "94aec18" }
 # Wayland activation token it asks for carries the latest press's serial,
 # which GNOME needs to bring another program's window forward.
 winit = { path = "third_party/winit" }
+# the CPU renderer, our fork (fivetime/egui-render, branch nativeterm):
+# upstream is at egui 0.34 and takes no AI-made changes
+egui_software_backend = { git = "https://github.com/fivetime/egui-render", rev = "0f72b92a11daafb6f412f401958b0bed48b6dd52" }
 
 [profile.release]
 lto = true

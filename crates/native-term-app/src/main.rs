@@ -553,7 +553,7 @@ struct Fatal(String);
 
 impl window::Ui for Fatal {
     fn ui(&mut self, ui: &mut egui::Ui) {
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.heading(t!("fatal-title"));
             ui.label(&self.0);
         });

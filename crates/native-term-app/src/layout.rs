@@ -582,11 +582,13 @@ mod tests {
     fn a_long_text_ends_in_dots() {
         let ctx = egui::Context::default();
         let mut cut = None;
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let text = "control1.cloud.local, the first of three";
             let galley = elided(ui.painter(), text, font(SMALL), egui::Color32::WHITE, 80.0);
             cut = Some((galley.size().x, galley.rows.len(), galley.elided));
         });
+        // (nothing paints it: its texture changes are let go)
+        output.textures_delta.clear();
         let (width, rows, elided) = cut.unwrap();
         assert!(width <= 80.0, "{width}");
         assert_eq!(rows, 1);

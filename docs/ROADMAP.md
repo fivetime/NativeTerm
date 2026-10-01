@@ -682,6 +682,12 @@
         main window ended up active; to find what activates it
   - [ ] Wayland: the dialog's parent (`xdg_toplevel.set_parent`, the
         modal hint) in the winit fork
+  - [x] egui 0.36, the CPU renderer our fork (`fivetime/egui-render`,
+        branch `nativeterm`; upstream takes no AI-made changes)
+  - [x] Every window with the skin's frame round and shadowed on
+        Windows 11 (the system gave them only to resizable windows)
+  - [ ] The rail and its pages as a skin component (a window's tabs),
+        not the main window's own layout
   - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
         settled
 - [x] The main window's new design (2026-09-28), after a design the

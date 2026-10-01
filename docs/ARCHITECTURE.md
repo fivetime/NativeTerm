@@ -5160,6 +5160,18 @@ program owns.
   `Adwaita`), and LXQt's palette is in no other place
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
+- egui 0.36 (2026-10-01; was 0.34). The CPU renderer
+  (`egui_software_backend`) is our fork, `fivetime/egui-render`, branch
+  `nativeterm`, pinned in the workspace's `[patch.crates-io]`: upstream
+  is at egui 0.34, has one maintainer merging little, and takes no
+  AI-made changes (its README), so the fork is ours to keep up. Its 0.36
+  changes: a texture's changes in a frame are a list; changes handled
+  are let go (`TexturesDelta` asserts on drop in a debug build: the
+  window's paint wraps them, `Handled`, cleared however the frame ends);
+  `ViewportBuilder::monitor`. NativeTerm's own: `show_inside` is `show`,
+  `DroppedFile::path()` a method, an `Id`'s source `Debug`. Pictures of
+  the windows before and after (`snapshots.rs`, which now lets a second
+  pass between frames: egui fades a modal in) are the same.
 - `native-term-skin` — one look for every window (below, "One skin for
   every window"); egui only, nothing of NativeTerm's, so that it can
   become a library of its own once it has settled

@@ -108,7 +108,7 @@ impl<'a> TitleBar<'a> {
             .exact_size(self.height)
             .resizable(false)
             .frame(frame)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 // the window is taken by the title bar: what is put into
                 // it afterwards is over this, and is what it is
                 let bar = ui.max_rect().expand2(egui::vec2(f32::from(TITLE_PAD), 0.0));

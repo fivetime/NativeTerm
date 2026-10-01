@@ -317,9 +317,9 @@ impl crate::window::Ui for Fab {
                 .fill(visuals.window_fill)
                 .stroke(visuals.window_stroke)
                 .corner_radius(egui::CornerRadius::same(8));
-            egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| self.panel(ui));
+            egui::CentralPanel::default().frame(frame).show(ui, |ui| self.panel(ui));
         } else {
-            egui::CentralPanel::default().frame(egui::Frame::NONE).show_inside(ui, |ui| self.button(ui));
+            egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.button(ui));
         }
     }
 }

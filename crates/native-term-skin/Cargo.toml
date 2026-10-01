@@ -6,4 +6,4 @@ license.workspace = true
 description = "One look for every window: title bar, window buttons, edges and modal dialogs, as each platform has them"
 
 [dependencies]
-egui = { version = "0.34", default-features = false, features = ["default_fonts"] }
+egui = { version = "0.36", default-features = false, features = ["default_fonts"] }

@@ -71,6 +71,6 @@ pub fn buttons(
     egui::Panel::bottom(id)
         .frame(frame)
         .show_separator_line(false)
-        .show_inside(ui, |ui| native_term_skin::footer(ui, skin, left, choices))
+        .show(ui, |ui| native_term_skin::footer(ui, skin, left, choices))
         .inner
 }

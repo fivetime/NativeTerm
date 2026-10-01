@@ -263,7 +263,7 @@ pub struct MessageShown<R> {
 impl<'a> Message<'a> {
     /// A dialog `title`; `id_salt` tells it from others.
     #[must_use]
-    pub fn new(id_salt: impl std::hash::Hash, title: &'a str) -> Message<'a> {
+    pub fn new(id_salt: impl std::hash::Hash + std::fmt::Debug, title: &'a str) -> Message<'a> {
         Message { modal: Modal::new(id_salt, title), notice: None, choices: Vec::new() }
     }
 

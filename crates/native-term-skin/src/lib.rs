@@ -145,7 +145,7 @@ pub fn window<R>(
 ) -> (TitleShown, R) {
     let shown = bar.show_window(ui, skin);
     let page = egui::Frame::NONE.fill(skin.palette.page);
-    let inner = egui::CentralPanel::default().frame(page).show_inside(ui, content).inner;
+    let inner = egui::CentralPanel::default().frame(page).show(ui, content).inner;
     edges(ui.ctx(), skin, resizable);
     (shown, inner)
 }

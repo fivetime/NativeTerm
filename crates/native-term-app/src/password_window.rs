@@ -101,7 +101,7 @@ impl crate::window::Ui for PasswordWindow {
         let skin = crate::skinned::chrome(ui, &t!("password-ask-title"), crate::icons::KEY);
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
         let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(skin.palette.page);
-        egui::Panel::bottom("password-buttons").frame(frame).show_separator_line(false).show_inside(ui, |ui| {
+        egui::Panel::bottom("password-buttons").frame(frame).show_separator_line(false).show(ui, |ui| {
             use native_term_skin::{Choice, Role};
             let valid = self.user_is_valid();
             let choices = [
@@ -128,7 +128,7 @@ impl crate::window::Ui for PasswordWindow {
             }
         });
         let frame = frame.inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(14) });
-        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             let changed = self.user.trim() != self.question.user;
             let q = &self.question;

@@ -72,7 +72,7 @@ impl crate::window::Ui for QuotationWindow {
             self.answer(true);
         }
         let frame = crate::skinned::page(&skin);
-        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.horizontal(|ui| {
                 ui.label(t!("quote-chars"));

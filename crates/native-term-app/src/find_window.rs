@@ -135,32 +135,29 @@ impl crate::window::Ui for FindWindow {
         let can_find = self.ticket.is_some() && !self.find.text.is_empty();
         let frame = egui::Frame::NONE.inner_margin(crate::skinned::PADDING).fill(skin.palette.page);
         // the buttons in a column of their own at the right, as SecureCRT's
-        egui::Panel::right("find-buttons").frame(frame).show_separator_line(false).resizable(false).show_inside(
-            ui,
-            |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                use native_term_skin::Role;
-                // (the column's buttons as wide as each other)
-                ui.set_width(110.0);
-                let (next, cancel) = ui
-                    .with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
-                        let next = native_term_skin::button(ui, &skin, &t!("find-next"), Role::Primary, can_find);
-                        (
-                            next.clicked(),
-                            native_term_skin::button(ui, &skin, &t!("button-cancel"), Role::Plain, true).clicked(),
-                        )
-                    })
-                    .inner;
-                if next || (enter && can_find) {
-                    self.find_next();
-                }
-                if cancel || escape {
-                    self.close();
-                }
-            },
-        );
+        egui::Panel::right("find-buttons").frame(frame).show_separator_line(false).resizable(false).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 8.0;
+            use native_term_skin::Role;
+            // (the column's buttons as wide as each other)
+            ui.set_width(110.0);
+            let (next, cancel) = ui
+                .with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
+                    let next = native_term_skin::button(ui, &skin, &t!("find-next"), Role::Primary, can_find);
+                    (
+                        next.clicked(),
+                        native_term_skin::button(ui, &skin, &t!("button-cancel"), Role::Plain, true).clicked(),
+                    )
+                })
+                .inner;
+            if next || (enter && can_find) {
+                self.find_next();
+            }
+            if cancel || escape {
+                self.close();
+            }
+        });
         let frame = frame.inner_margin(egui::Margin { right: 0, ..egui::Margin::same(14) });
-        egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {
+        egui::CentralPanel::default().frame(frame).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.horizontal(|ui| {
                 ui.label(t!("find-what"));

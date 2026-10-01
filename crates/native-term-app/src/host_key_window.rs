@@ -90,7 +90,7 @@ impl crate::window::Ui for HostKeyWindow {
             self.answer(HostKeyAnswer::Once);
         }
         let notice = if changed { Notice::Error } else { Notice::Question };
-        egui::CentralPanel::default().frame(crate::skinned::page(&skin)).show_inside(ui, |ui| {
+        egui::CentralPanel::default().frame(crate::skinned::page(&skin)).show(ui, |ui| {
             native_term_skin::body(ui, Some(notice), |ui| self.text(ui, &skin));
         });
     }
