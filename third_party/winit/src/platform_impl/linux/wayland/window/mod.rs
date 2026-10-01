@@ -65,6 +65,10 @@ pub struct Window {
     /// Handle to the main queue to perform requests.
     queue_handle: QueueHandle<WinitState>,
 
+    /// (NativeTerm) The window as a modal dialog, kept while it is one.
+    #[allow(dead_code)]
+    dialog: Option<wayland_protocols::xdg::dialog::v1::client::xdg_dialog_v1::XdgDialogV1>,
+
     /// Window requests to the event loop.
     window_requests: Arc<WindowRequests>,
 
@@ -106,6 +110,28 @@ impl Window {
 
         let window =
             state.xdg_shell.create_window(surface.clone(), default_decorations, &queue_handle);
+
+        // (NativeTerm) A window made with a parent (`with_parent_window`, the parent's Wayland
+        // handle) is its dialog: the parent's toplevel is set as its parent
+        // (`xdg_toplevel.set_parent`), which the compositor keeps it above and with.
+        // A modal one is said to be so (`xdg_wm_dialog_v1`), where the compositor has it.
+        #[allow(unused_mut)]
+        let mut dialog = None;
+        #[cfg(feature = "rwh_06")]
+        if let Some(rwh_06::RawWindowHandle::Wayland(parent)) =
+            attributes.parent_window.as_ref().map(|handle| handle.0)
+        {
+            let parent_id = WindowId(parent.surface.as_ptr() as u64);
+            if let Some(parent) = state.windows.borrow().get(&parent_id) {
+                window.set_parent(Some(&parent.lock().unwrap().window));
+                if attributes.platform_specific.modal {
+                    dialog = state
+                        .xdg_dialog
+                        .as_ref()
+                        .map(|dialogs| dialogs.modal(window.xdg_toplevel(), &queue_handle));
+                }
+            }
+        }
 
         let mut window_state = WindowState::new(
             event_loop_window_target.connection.clone(),
@@ -225,6 +251,7 @@ impl Window {
             window_state,
             queue_handle,
             xdg_activation,
+            dialog,
             attention_requested: Arc::new(AtomicBool::new(false)),
             event_loop_awakener,
             window_requests,

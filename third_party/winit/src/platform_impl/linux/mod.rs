@@ -73,6 +73,8 @@ impl ApplicationName {
 pub struct PlatformSpecificWindowAttributes {
     pub name: Option<ApplicationName>,
     pub activation_token: Option<ActivationToken>,
+    /// (NativeTerm) Wayland: a window with a parent is its modal dialog.
+    pub modal: bool,
     #[cfg(x11_platform)]
     pub x11: X11WindowAttributes,
 }
@@ -96,6 +98,7 @@ impl Default for PlatformSpecificWindowAttributes {
         Self {
             name: None,
             activation_token: None,
+            modal: false,
             #[cfg(x11_platform)]
             x11: X11WindowAttributes {
                 visual_id: None,

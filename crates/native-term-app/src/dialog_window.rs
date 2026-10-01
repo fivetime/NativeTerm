@@ -12,8 +12,11 @@
 //!   the owner by NativeTerm itself (`blocks`).
 //! - macOS: a child window of the owner (`addChildWindow`: above it, moved
 //!   with it); the input kept from the owner by NativeTerm.
-//! - Wayland: winit has no parent for a toplevel yet; the dialog is a
-//!   window of its own and the input is kept from the owner by NativeTerm.
+//! - Wayland: the owner's toplevel the dialog's parent
+//!   (`xdg_toplevel.set_parent`) and a modal one marked so
+//!   (`xdg_wm_dialog_v1.set_modal`, where the compositor has it), both
+//!   through the winit fork (`third_party/winit/NATIVETERM.md`); the input
+//!   is kept from the owner by NativeTerm too.
 
 use winit::event::WindowEvent;
 use winit::window::{Window, WindowAttributes};
@@ -39,7 +42,9 @@ pub fn skinned(attributes: WindowAttributes) -> WindowAttributes {
 /// `attributes` for a window that is `owner`'s dialog (`None`: a window
 /// of its own).
 pub fn owned_by(attributes: WindowAttributes, owner: Option<(&Window, bool)>) -> WindowAttributes {
-    let Some((owner, _)) = owner else { return attributes };
+    let Some((owner, modal)) = owner else { return attributes };
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    let _ = modal;
     #[cfg(windows)]
     {
         use winit::platform::windows::WindowAttributesExtWindows;
@@ -61,8 +66,22 @@ pub fn owned_by(attributes: WindowAttributes, owner: Option<(&Window, bool)>) ->
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         use winit::platform::x11::{WindowAttributesExtX11, WindowType};
-        let _ = owner;
-        attributes.with_x11_window_type(vec![WindowType::Dialog])
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        match owner.window_handle().map(|handle| handle.as_raw()) {
+            // Wayland: the owner's toplevel its parent (the winit fork's
+            // `xdg_toplevel.set_parent`); on X11 a parent window would make
+            // it a window inside the owner's, so there it is said apart
+            // (`dialog_of`)
+            Ok(handle @ RawWindowHandle::Wayland(_)) => {
+                use winit::platform::wayland::WindowAttributesExtWayland;
+                // SAFETY: the owner outlives its dialogs (they are closed
+                // before it, and with it)
+                let attributes = unsafe { attributes.with_parent_window(Some(handle)) };
+                // and a modal one said to be (`xdg-dialog-v1`, the fork's)
+                attributes.with_modal(modal)
+            }
+            _ => attributes.with_x11_window_type(vec![WindowType::Dialog]),
+        }
     }
 }
 

@@ -4496,6 +4496,14 @@ All UI surfaces invoke one shared app-level command layer
 
 ### One skin for every window
 
+**The rule** (the person's, 2026-10-01): every piece of UI is first
+judged for whether it is a general component and belongs in the skin
+rather than in the app; the skin is peeled off and completed step by
+step as a library of its own. egui's own controls are used where egui
+has them; the skin adds only what egui lacks. A piece moved into the
+skin is proven unchanged by pictures compared with the commit before,
+pixel by pixel, not by eye.
+
 Every window NativeTerm draws gets the same title bar, window buttons,
 edges, dialogs and buttons from `native-term-skin`, as SkinUI's
 `CSkinDialog` gave a Win32 program one (the author's own programs used
@@ -4571,7 +4579,10 @@ maximize and close at the right), the title bar the main window's height
   plus `EnableWindow(owner, FALSE)` while modal, as `DialogBox` does;
   X11's `WM_TRANSIENT_FOR`, `_NET_WM_WINDOW_TYPE_DIALOG` and
   `_NET_WM_STATE_MODAL` (what GTK and Qt set); a child window on macOS;
-  Wayland has no parent for a toplevel in winit yet. Elsewhere than
+  on Wayland the owner's toplevel its parent (`xdg_toplevel.set_parent`)
+  and a modal one marked so (`xdg_wm_dialog_v1.set_modal`, GNOME 47+ and
+  KDE Plasma 6.1+), both added to the winit fork
+  (`third_party/winit/NATIVETERM.md`). Elsewhere than
   Windows the event loop keeps the input from the owner itself, a press
   on it bringing the dialog forward. A dialog is painted twice hidden,
   takes its content's size, is put over its owner's middle and shown;

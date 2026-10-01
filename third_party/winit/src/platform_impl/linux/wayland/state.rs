@@ -109,6 +109,9 @@ pub struct WinitState {
     /// KWin blur manager.
     pub kwin_blur_manager: Option<KWinBlurManager>,
 
+    /// (NativeTerm) Modal dialogs, where the compositor has them.
+    pub xdg_dialog: Option<crate::platform_impl::wayland::types::xdg_dialog::XdgDialogState>,
+
     /// Loop handle to re-register event sources, such as keyboard repeat.
     pub loop_handle: LoopHandle<'static, Self>,
 
@@ -177,6 +180,11 @@ impl WinitState {
             viewporter_state,
             fractional_scaling_manager,
             kwin_blur_manager: KWinBlurManager::new(globals, queue_handle).ok(),
+            xdg_dialog: crate::platform_impl::wayland::types::xdg_dialog::XdgDialogState::bind(
+                globals,
+                queue_handle,
+            )
+            .ok(),
 
             seats,
             text_input_state: TextInputState::new(globals, queue_handle).ok(),

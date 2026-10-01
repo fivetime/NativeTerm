@@ -106,6 +106,10 @@ pub trait WindowAttributesExtWayland {
     /// For details about application ID conventions, see the
     /// [Desktop Entry Spec](https://specifications.freedesktop.org/desktop-entry-spec/desktop-entry-spec-latest.html#desktop-file-id)
     fn with_name(self, general: impl Into<String>, instance: impl Into<String>) -> Self;
+
+    /// (NativeTerm) A window made with a parent (`with_parent_window`) is its modal
+    /// dialog (`xdg_wm_dialog_v1.set_modal`), where the compositor has the protocol.
+    fn with_modal(self, modal: bool) -> Self;
 }
 
 impl WindowAttributesExtWayland for WindowAttributes {
@@ -113,6 +117,12 @@ impl WindowAttributesExtWayland for WindowAttributes {
     fn with_name(mut self, general: impl Into<String>, instance: impl Into<String>) -> Self {
         self.platform_specific.name =
             Some(crate::platform_impl::ApplicationName::new(general.into(), instance.into()));
+        self
+    }
+
+    #[inline]
+    fn with_modal(mut self, modal: bool) -> Self {
+        self.platform_specific.modal = modal;
         self
     }
 }

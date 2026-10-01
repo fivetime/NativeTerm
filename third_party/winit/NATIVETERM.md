@@ -1,4 +1,4 @@
-# winit 0.30.13, with one change
+# winit 0.30.13, with three changes
 
 The crates.io release of winit 0.30.13 (Apache-2.0, `LICENSE`), without
 its examples, tests and documentation, used through `[patch.crates-io]`
@@ -20,3 +20,18 @@ winit's master had the same code then.
 
 It goes when a winit release sets the serial (offering the change
 upstream is for the person to decide).
+
+The second (2026-10-01): a window made on Wayland with
+`WindowAttributes::with_parent_window` given the parent's Wayland
+handle has the parent's toplevel as its parent
+(`xdg_toplevel.set_parent`, `src/platform_impl/linux/wayland/window/mod.rs`),
+which winit ignored there: NativeTerm's dialogs are their owners' on
+Wayland too, kept above them by the compositor as X11's
+`WM_TRANSIENT_FOR` and Windows' owner window do elsewhere.
+
+The third (2026-10-01): `WindowAttributesExtWayland::with_modal` makes
+such a window a modal dialog of its parent (`xdg_wm_dialog_v1`, the
+staging protocol `xdg-dialog-v1`, `types/xdg_dialog.rs`), where the
+compositor has it (GNOME 46 and later, KDE Plasma 6.1 and later): the
+compositor keeps the parent from input, as `_NET_WM_STATE_MODAL` asks
+on X11.

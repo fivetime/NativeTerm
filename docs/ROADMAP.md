@@ -684,8 +684,13 @@
         starts in 6). Now set and read back until it holds, off the event
         loop's thread: 8 cold starts in 8 with it, 9 runs in 9 with the
         dialog keeping the keyboard
-  - [ ] Wayland: the dialog's parent (`xdg_toplevel.set_parent`, the
-        modal hint) in the winit fork
+  - [x] Wayland: the dialog's parent (`xdg_toplevel.set_parent`) and the
+        modal hint (`xdg_wm_dialog_v1.set_modal`, where the compositor
+        has it) through the winit fork. Seen in the protocol log
+        (`WAYLAND_DEBUG=1`, the first-run guide over the main window): all
+        three on Fedora (GNOME 50) and EndeavourOS (KDE Plasma), the
+        parent only on Zorin (GNOME 46 has no `xdg_wm_dialog_v1`); GNOME
+        46 and KDE put the guide over its owner's middle
   - [x] egui 0.36, the CPU renderer our fork (`fivetime/egui-render`,
         branch `nativeterm`; upstream takes no AI-made changes)
   - [x] Every window with the skin's frame round and shadowed on
