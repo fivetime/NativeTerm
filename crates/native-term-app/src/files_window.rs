@@ -503,7 +503,11 @@ struct FilesWindow {
     tx: Sender<Event>,
     rx: Receiver<Event>,
     tabs: Vec<Tab>,
+    /// The session the server's side shows (and the local side too while
+    /// the sides are linked).
     active: usize,
+    /// The session the local side shows when the sides aren't linked.
+    local_active: Option<usize>,
     next_id: u64,
     jobs: Vec<Job>,
     /// A new folder: session, server's side, name.
@@ -545,6 +549,7 @@ impl FilesWindow {
             rx,
             tabs: Vec::new(),
             active: 0,
+            local_active: None,
             next_id: 1,
             jobs: Vec::new(),
             new_folder: None,
@@ -1134,7 +1139,8 @@ impl FilesWindow {
 
     /// Items dragged from the server's list, as a download needs them.
     fn dragged_remote(&self, dragged: &Dragged) -> Vec<(Vec<u8>, Attrs)> {
-        let r = &self.tabs[self.active].remote;
+        let Some(tab) = self.tabs.iter().find(|t| t.id == dragged.tab) else { return Vec::new() };
+        let r = &tab.remote;
         r.rows
             .iter()
             .filter(|x| dragged.keys.contains(&x.entry.name))
@@ -1150,7 +1156,8 @@ impl FilesWindow {
 
     /// Files dragged from the local list.
     fn dragged_local(&self, dragged: &Dragged) -> Vec<PathBuf> {
-        let l = &self.tabs[self.active].local;
+        let Some(tab) = self.tabs.iter().find(|t| t.id == dragged.tab) else { return Vec::new() };
+        let l = &tab.local;
         l.rows.iter().filter(|r| dragged.keys.contains(&local_key(r))).map(|r| r.path.clone()).collect()
     }
 
@@ -1515,18 +1522,32 @@ impl FilesWindow {
             if self.active >= self.tabs.len() {
                 self.active = self.tabs.len().saturating_sub(1);
             }
+            self.local_active =
+                self.local_active.map(|l| if l > i { l - 1 } else { l.min(self.tabs.len().saturating_sub(1)) });
+        }
+    }
+
+    /// The session a side shows: the server's side the active one, the
+    /// local side its own while the sides aren't linked.
+    pub(super) fn side_index(&self, remote: bool) -> usize {
+        match (remote, self.local_active) {
+            (false, Some(l)) => l.min(self.tabs.len().saturating_sub(1)),
+            _ => self.active,
         }
     }
 
     /// One row of session tabs; `remote`: the server's side (with close).
     fn local_side(&mut self, ui: &mut egui::Ui) {
         self.strip(ui, false);
-        let Some(tab) = self.tabs.get(self.active) else { return };
+        let at = self.side_index(false);
+        // where uploads go: the server's side's session
+        let remote_id = self.tabs.get(self.active).map(|t| t.id);
+        let Some(tab) = self.tabs.get(at) else { return };
         let id = tab.id;
         for asked in self.head(ui, false) {
             self.local_asked(id, asked, ui.ctx());
         }
-        if let Some(e) = self.tabs.get(self.active).and_then(|t| t.local.error.clone()) {
+        if let Some(e) = self.tabs.get(at).and_then(|t| t.local.error.clone()) {
             ui.colored_label(RED, e);
         }
         // the foot, under the tree and the list
@@ -1538,7 +1559,7 @@ impl FilesWindow {
             .default_size(180.0)
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..Default::default() }))
             .show(ui, |ui| {
-                let tab = &self.tabs[self.active];
+                let tab = &self.tabs[at];
                 let keyboard = !self.remote_focus && self.tree_focus;
                 tree(ui, "local-tree", &roots, &tab.local_tree, tab.local.path.as_ref(), false, keyboard)
             })
@@ -1552,12 +1573,12 @@ impl FilesWindow {
         if let Some(folder) = tree_out.toggle {
             self.toggle_local(id, folder);
         }
-        if let Some((folder, dragged)) = tree_out.dropped.filter(|(_, d)| d.tab == id) {
+        if let Some((folder, dragged)) = tree_out.dropped {
             let items = self.dragged_remote(&dragged);
-            self.download_to(id, items, Some(folder));
+            self.download_to(dragged.tab, items, Some(folder));
         }
         // the list
-        let tab = &self.tabs[self.active];
+        let tab = &self.tabs[at];
         let lines: Vec<Line> = tab
             .local
             .rows
@@ -1578,10 +1599,10 @@ impl FilesWindow {
             .collect();
         let lines = filtered(sorted(lines, tab.local.sort, false), &tab.local.filter);
         let keyboard = !self.remote_focus && !self.tree_focus;
-        let mut local = std::mem::replace(&mut self.tabs[self.active].local, empty_local());
+        let mut local = std::mem::replace(&mut self.tabs[at].local, empty_local());
         let side = files_list::Side { salt: "local-list", remote: false, keyboard };
         let out = list(ui, side, &lines, &mut local.selected, &mut local.renaming, &mut local.sort, local.view);
-        self.tabs[self.active].local = local;
+        self.tabs[at].local = local;
         if out.clicked {
             (self.remote_focus, self.tree_focus) = (false, false);
         }
@@ -1589,28 +1610,31 @@ impl FilesWindow {
             self.open_local(id, i);
         }
         if let Some((old, new)) = out.renamed {
-            if let Some(row) = self.tabs[self.active].local.rows.iter().find(|r| local_key(r) == old) {
+            if let Some(row) = self.tabs[at].local.rows.iter().find(|r| local_key(r) == old) {
                 let path = row.path.clone();
                 self.rename_local(id, path, new);
             }
         }
         if out.drag {
-            let keys = self.tabs[self.active].local.selected.iter().cloned().collect();
+            let keys = self.tabs[at].local.selected.iter().cloned().collect();
             out.response.dnd_set_drag_payload(Dragged { tab: id, from_remote: false, keys });
         }
-        if let Some(dragged) = out.dropped.filter(|d| d.from_remote && d.tab == id) {
+        if let Some(dragged) = out.dropped.filter(|d| d.from_remote) {
             let items = self.dragged_remote(&dragged);
-            self.download(id, items);
+            let here = self.tabs.get(at).and_then(|t| t.local.path.clone());
+            self.download_to(dragged.tab, items, here);
         }
         match out.action {
             Some((i, Action::Open)) => self.open_local(id, i),
             Some((_, Action::Transfer)) => {
                 let files = self.local_selection(id);
-                self.upload(id, files);
+                if let Some(remote_id) = remote_id {
+                    self.upload(remote_id, files);
+                }
             }
             Some((i, Action::Rename)) => {
-                let row = self.tabs[self.active].local.rows[i].clone();
-                self.tabs[self.active].local.renaming = Some((local_key(&row), row.name));
+                let row = self.tabs[at].local.rows[i].clone();
+                self.tabs[at].local.renaming = Some((local_key(&row), row.name));
             }
             Some((_, Action::CopyPath)) => {
                 let text: Vec<String> = self.local_selection(id).iter().map(|p| p.display().to_string()).collect();
@@ -1641,7 +1665,8 @@ impl FilesWindow {
             }
             Asked::Send => {
                 let files = self.local_selection(id);
-                self.upload(id, files);
+                let remote_id = self.tabs.get(self.active).map_or(id, |t| t.id);
+                self.upload(remote_id, files);
             }
             Asked::Bookmark(picked) => self.bookmark_picked(false, picked),
             Asked::NewFolder if path.is_some() => self.new_folder = Some((id, false, String::new())),
@@ -1673,7 +1698,8 @@ impl FilesWindow {
             },
             Asked::Send => {
                 let items = self.remote_selection(id);
-                self.download(id, items);
+                let here = self.tabs.get(self.side_index(false)).and_then(|t| t.local.path.clone());
+                self.download_to(id, items, here);
             }
             Asked::Bookmark(picked) => self.bookmark_picked(true, picked),
             Asked::NewFolder => self.new_folder = Some((id, true, String::new())),
@@ -1805,7 +1831,7 @@ impl FilesWindow {
         if let Some(folder) = tree_out.toggle {
             self.toggle_remote(id, folder);
         }
-        if let Some((folder, dragged)) = tree_out.dropped.filter(|(_, d)| d.tab == id) {
+        if let Some((folder, dragged)) = tree_out.dropped {
             let files = self.dragged_local(&dragged);
             self.upload_to(id, files, Some(folder));
         }
@@ -1862,7 +1888,7 @@ impl FilesWindow {
             let keys = self.tabs[self.active].remote.selected.iter().cloned().collect();
             out.response.dnd_set_drag_payload(Dragged { tab: id, from_remote: true, keys });
         }
-        if let Some(dragged) = out.dropped.filter(|d| !d.from_remote && d.tab == id) {
+        if let Some(dragged) = out.dropped.filter(|d| !d.from_remote) {
             let files = self.dragged_local(&dragged);
             self.upload(id, files);
         }
@@ -2090,7 +2116,10 @@ impl FilesWindow {
                 self.tabs[self.active].remote.renaming = Some((row.entry.name.clone(), row.name));
             }
         } else {
-            let tab = &self.tabs[self.active];
+            // the local side's own session (the sides may not be linked)
+            let at = self.side_index(false);
+            let tab = &self.tabs[at];
+            let id = tab.id;
             let single = tab
                 .local
                 .rows
@@ -2107,8 +2136,8 @@ impl FilesWindow {
                 self.ask_recycle(id);
             }
             if let (true, Some(i)) = (f2, single) {
-                let row = self.tabs[self.active].local.rows[i].clone();
-                self.tabs[self.active].local.renaming = Some((local_key(&row), row.name));
+                let row = self.tabs[at].local.rows[i].clone();
+                self.tabs[at].local.renaming = Some((local_key(&row), row.name));
             }
         }
     }

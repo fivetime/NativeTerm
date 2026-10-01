@@ -74,6 +74,8 @@ impl FilesWindow {
         let palette = crate::looks::skin(ui.visuals()).palette;
         let look = files_list::Look::of(ui.visuals());
         let tones = crate::looks::tones(ui.visuals());
+        // (unlinked: the other side's session's number shows on this one)
+        let (unlinked, local_at) = (self.local_active.is_some(), self.side_index(false));
         let tabs: Vec<StripTab> = self
             .tabs
             .iter()
@@ -93,7 +95,7 @@ impl FilesWindow {
                         dot: Some(dot),
                         hint: Some(tab.spec.alias.clone()),
                         closable: true,
-                        marked: false,
+                        marked: unlinked && i == local_at,
                     }
                 } else {
                     let folder =
@@ -108,7 +110,7 @@ impl FilesWindow {
                         dot: None,
                         hint: Some(format!("{} · {shown}", self.computer)),
                         closable: true,
-                        marked: false,
+                        marked: unlinked && i == self.active,
                     }
                 }
             })
@@ -118,12 +120,15 @@ impl FilesWindow {
         let shown = TabStrip::new(salt, &palette).accent(accent).show(
             ui,
             &tabs,
-            Some(self.active),
+            Some(self.side_index(remote)),
             &t!("files-close-tab"),
             |_| {},
         );
         if let Some(i) = shown.clicked {
-            self.active = i;
+            match (remote, self.local_active.is_some()) {
+                (false, true) => self.local_active = Some(i),
+                _ => self.active = i,
+            }
             self.remote_focus = remote;
         }
         if let Some(i) = shown.closed {
@@ -141,8 +146,8 @@ impl FilesWindow {
         let mut asked = Vec::new();
         let palette = crate::looks::skin(ui.visuals()).palette;
         let look = files_list::Look::of(ui.visuals());
-        let Some(tab) = self.tabs.get(self.active) else { return asked };
-        let connected = tab.remote.up();
+        let Some(tab) = self.tabs.get(self.side_index(remote)) else { return asked };
+        let connected = self.tabs.get(self.active).is_some_and(|t| t.remote.up());
         let (enabled, chosen, at_top) = if remote {
             (connected, !tab.remote.selected.is_empty(), tab.remote.path == b"/")
         } else {
@@ -302,7 +307,8 @@ impl FilesWindow {
                 });
             }
         });
-        if let Some(tab) = self.tabs.get_mut(self.active) {
+        let at = self.side_index(remote);
+        if let Some(tab) = self.tabs.get_mut(at) {
             if remote {
                 tab.remote.filter = filter;
             } else {
@@ -315,7 +321,7 @@ impl FilesWindow {
     /// A side's foot: its counts, what is chosen, the view's switch.
     pub(super) fn foot(&mut self, ui: &mut egui::Ui, remote: bool) {
         let palette = crate::looks::skin(ui.visuals()).palette;
-        let Some(tab) = self.tabs.get(self.active) else { return };
+        let Some(tab) = self.tabs.get(self.side_index(remote)) else { return };
         let space = if remote { tab.remote.space } else { tab.local.space };
         let (folders, files, count, bytes, view) = if remote {
             let r = &tab.remote;
@@ -374,7 +380,8 @@ impl FilesWindow {
                 ));
             }
         });
-        if let (Some(view), Some(tab)) = (asked, self.tabs.get_mut(self.active)) {
+        let at = self.side_index(remote);
+        if let (Some(view), Some(tab)) = (asked, self.tabs.get_mut(at)) {
             if remote {
                 tab.remote.view = view;
             } else {

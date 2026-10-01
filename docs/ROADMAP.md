@@ -776,6 +776,13 @@
         found where they install; without one the errors say which to
         install. Tried on Lingmo: without Meld the error, with it Meld
         started on the two files
+  - [x] The sides linked or not (the rail's link button): linked, both
+        strips switch together; not, the local side keeps a session of
+        its own, each strip marks the other side's number, and what goes
+        across (the rail, the bars, dragging) goes from the local side's
+        session to the server's side's; sync only while linked (a
+        session's own two folders). Tried on Lingmo: a file from session
+        2's local side up to session 1's server
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

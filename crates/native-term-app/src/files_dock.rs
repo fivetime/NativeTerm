@@ -76,12 +76,14 @@ impl FilesWindow {
         ui.painter().vline(rect.left() + 0.5, rect.y_range(), egui::Stroke::new(1.0, palette.line));
         ui.painter().vline(rect.right() - 0.5, rect.y_range(), egui::Stroke::new(1.0, palette.line));
         let Some(tab) = self.tabs.get(self.active) else { return };
-        let id = tab.id;
+        let Some(here) = self.tabs.get(self.side_index(false)) else { return };
+        let (id, local_id) = (tab.id, here.id);
         let connected = tab.remote.up();
-        let (local_chosen, remote_chosen) = (!tab.local.selected.is_empty(), !tab.remote.selected.is_empty());
-        let local_folder = tab.local.path.is_some();
+        let (local_chosen, remote_chosen) = (!here.local.selected.is_empty(), !tab.remote.selected.is_empty());
+        let local_folder = here.local.path.clone();
+        let linked = self.local_active.is_none();
         let pair = self.diff_pair().is_some();
-        let (mut upload, mut download, mut sync, mut diff) = (false, false, false, false);
+        let (mut upload, mut download, mut sync, mut diff, mut link) = (false, false, false, false, false);
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             ui.add_space((ui.available_height() / 2.0 - 70.0).max(8.0));
@@ -94,6 +96,12 @@ impl FilesWindow {
             download = download_button.enabled(connected && remote_chosen).show(ui, &palette).clicked();
             let (line, _) = ui.allocate_exact_size(egui::vec2(16.0, 1.0), egui::Sense::hover());
             ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, palette.line));
+            // the sides' sessions switched together, or each its own
+            let glyph = icons::LINK.to_string();
+            let hint = if linked { t!("files-unlink-hint") } else { t!("files-link-hint") };
+            link = IconButton::new(glyph, hint).round(look.local).on(linked).show(ui, &palette).clicked();
+            let (line, _) = ui.allocate_exact_size(egui::vec2(16.0, 1.0), egui::Sense::hover());
+            ui.painter().hline(line.x_range(), line.center().y, egui::Stroke::new(1.0, palette.line));
             let glyph = icons::COMPARE.to_string();
             diff = IconButton::new(glyph, t!("files-diff-hint"))
                 .round(look.local)
@@ -102,15 +110,23 @@ impl FilesWindow {
                 .clicked();
             let glyph = icons::SYNC.to_string();
             let sync_button = IconButton::new(&glyph, t!("files-sync-hint")).round(look.local);
-            sync = sync_button.enabled(connected && local_folder).show(ui, &palette).clicked();
+            // (a session's own folders: the sides linked)
+            sync = sync_button.enabled(connected && local_folder.is_some() && linked).show(ui, &palette).clicked();
         });
         if upload {
-            let files = self.local_selection(id);
+            let files = self.local_selection(local_id);
             self.upload(id, files);
         }
         if download {
             let items = self.remote_selection(id);
-            self.download(id, items);
+            self.download_to(id, items, local_folder);
+        }
+        if link {
+            // linked again: the server's side follows the local side
+            match self.local_active.take() {
+                Some(l) => self.active = l.min(self.tabs.len().saturating_sub(1)),
+                None => self.local_active = Some(self.active),
+            }
         }
         if sync {
             self.open_sync(id);

@@ -74,11 +74,11 @@ impl FilesWindow {
     /// The local file and the server's file to compare: one file chosen on
     /// each side.
     pub(super) fn diff_pair(&self) -> Option<(PathBuf, RemoteRow)> {
-        let tab = self.tabs.get(self.active)?;
-        let local = tab.local.rows.iter().filter(|r| !r.dir && tab.local.selected.contains(&local_key(r)));
+        let (here, tab) = (self.tabs.get(self.side_index(false))?, self.tabs.get(self.active)?);
+        let local = here.local.rows.iter().filter(|r| !r.dir && here.local.selected.contains(&local_key(r)));
         let remote = tab.remote.rows.iter().filter(|r| !r.dir && tab.remote.selected.contains(&r.entry.name));
         let (local, remote): (Vec<_>, Vec<_>) = (local.collect(), remote.collect());
-        match (local.as_slice(), remote.as_slice(), tab.local.selected.len(), tab.remote.selected.len()) {
+        match (local.as_slice(), remote.as_slice(), here.local.selected.len(), tab.remote.selected.len()) {
             ([l], [r], 1, 1) => Some((l.path.clone(), (*r).clone())),
             _ => None,
         }

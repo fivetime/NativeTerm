@@ -134,7 +134,7 @@ impl FilesWindow {
     /// Whether the folder a side shows is kept.
     pub(super) fn kept(&mut self, remote: bool) -> bool {
         let core = self.core().cloned();
-        let Some(tab) = self.tabs.get(self.active) else { return false };
+        let Some(tab) = self.tabs.get(self.side_index(remote)) else { return false };
         if remote {
             let (alias, path) = (tab.spec.alias.clone(), tab.remote.path.clone());
             [alias.as_str(), EVERY_HOST]
@@ -168,7 +168,7 @@ impl FilesWindow {
             );
         }
         let core = self.core().cloned();
-        let tab = self.tabs.get(self.active)?;
+        let tab = self.tabs.get(self.side_index(remote))?;
         let (alias, label) = (tab.spec.alias.clone(), tab.spec.label.clone());
         let (local_now, remote_now) = (tab.local.path.clone(), tab.remote.path.clone());
         let names = tab.remote.names;
@@ -252,7 +252,7 @@ impl FilesWindow {
     /// Carries out what a side's bookmarks were asked for.
     pub(super) fn bookmark_picked(&mut self, remote: bool, picked: Picked) {
         let core = self.core().cloned();
-        let Some(tab) = self.tabs.get(self.active) else { return };
+        let Some(tab) = self.tabs.get(self.side_index(remote)) else { return };
         let (id, alias) = (tab.id, tab.spec.alias.clone());
         match picked {
             Picked::Toggle if remote => {
