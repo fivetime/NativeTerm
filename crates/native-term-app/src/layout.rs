@@ -15,13 +15,8 @@ use std::sync::Arc;
 use crate::icons;
 use crate::looks::{Tint, Tones};
 
-/// The rail's width (`w-14`).
-pub const RAIL: f32 = 56.0;
-/// A button of the rail: its icon (`w-5`) with `py-2.5` above and below,
-/// and what is between two of them (`space-y-4`; less in a low window).
-const RAIL_ICON: f32 = 20.0;
-pub const RAIL_BUTTON: f32 = 40.0;
-pub const RAIL_GAP: f32 = 16.0;
+/// The rail's width (the skin's tabs draw it).
+pub const RAIL: f32 = native_term_skin::RAIL;
 /// The bar below the tree (`h-9`, `px-4`).
 pub const FOOTER: f32 = 36.0;
 /// What is chosen, at the right (`w-80`; the design has `w-96` from a
@@ -59,68 +54,6 @@ pub fn elided(
     let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
     job.wrap = egui::text::TextWrapping::truncate_at_width(width.max(0.0));
     painter.layout_job(job)
-}
-
-/// What is between two of the rail's buttons, for `count` of them in a
-/// rail `height` high: the design's, or less where they would not fit.
-#[must_use]
-pub fn rail_gap(height: f32, count: usize) -> f32 {
-    if count < 2 {
-        return RAIL_GAP;
-    }
-    let free = height - count as f32 * RAIL_BUTTON;
-    (free / (count - 1) as f32).clamp(0.0, RAIL_GAP)
-}
-
-/// One of the rail's buttons, as it is now.
-pub struct Rail<'a> {
-    pub icon: char,
-    /// Said under the pointer.
-    pub hint: &'a str,
-    /// It is what is shown.
-    pub active: bool,
-    /// In a bubble at its corner (none for 0).
-    pub count: usize,
-    /// Its colour under the pointer.
-    pub near: egui::Color32,
-}
-
-/// One of the rail's buttons: an icon, in the accent's colour with a bar
-/// at the window's edge while it is what is shown.
-pub fn rail_button(ui: &mut egui::Ui, tones: &Tones, rail: Rail<'_>) -> egui::Response {
-    let Rail { icon, hint, active, count, near } = rail;
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(RAIL, RAIL_BUTTON), egui::Sense::click());
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, hint));
-    if ui.is_rect_visible(rect) {
-        let color = if active {
-            tones.accent
-        } else if response.hovered() {
-            near
-        } else {
-            tones.weak
-        };
-        let painter = ui.painter();
-        if active {
-            // from a quarter of its height to three (`top: 25%; bottom: 25%`)
-            let bar = egui::Rect::from_min_max(
-                egui::pos2(rect.left(), rect.top() + rect.height() * 0.25),
-                egui::pos2(rect.left() + 3.0, rect.bottom() - rect.height() * 0.25),
-            );
-            let round = egui::CornerRadius { nw: 0, sw: 0, ne: 4, se: 4 };
-            painter.rect_filled(bar, round, tones.accent);
-        }
-        painter.text(rect.center(), egui::Align2::CENTER_CENTER, icon, font(RAIL_ICON), color);
-        if count > 0 {
-            let text = if count > 99 { "99+".to_string() } else { count.to_string() };
-            let galley = painter.layout_no_wrap(text, font(9.5), tones.on_primary);
-            let size = egui::vec2((galley.size().x + 8.0).max(15.0), 15.0);
-            let center = rect.center() + egui::vec2(11.0, -10.0);
-            let bubble = egui::Rect::from_center_size(center, size);
-            painter.rect_filled(bubble, 7.5, tones.primary);
-            painter.galley(bubble.center() - galley.size() / 2.0, galley, tones.on_primary);
-        }
-    }
-    response.on_hover_text(hint)
 }
 
 /// What a tile's picture is 24 a side.
@@ -568,15 +501,6 @@ pub fn bar(tones: &Tones, margin: impl Into<egui::Margin>) -> egui::Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_rail_fits_a_low_window() {
-        assert_eq!(rail_gap(640.0, 6), RAIL_GAP, "the design's, where there is room");
-        // six buttons in 280: 40 left for five gaps
-        assert_eq!(rail_gap(280.0, 6), 8.0);
-        assert_eq!(rail_gap(200.0, 6), 0.0, "never over each other's place");
-        assert_eq!(rail_gap(100.0, 1), RAIL_GAP);
-    }
 
     #[test]
     fn a_long_text_ends_in_dots() {

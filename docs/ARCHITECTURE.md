@@ -4529,6 +4529,15 @@ maximize and close at the right), the title bar the main window's height
   coloured (`Role::Primary`, or `Danger` for what takes something away)
   and is Enter; the platform's order: first on Windows, KDE and LXQt (OK
   Cancel), last on macOS and the GTK desktops (Cancel OK).
+- **Tabs** (`Tabs`): a window's pages and the bar at its side that
+  chooses among them, as desktops and phones have it; `Style::Rail`
+  (icons, the page shown in the accent with a bar at the edge, a count,
+  the program's sign at the top, actions at the bottom: the main
+  window's) or `Style::List` (icons and names, egui's selectable
+  buttons, what goes below: the settings'). `bar` draws the bar and the
+  program the page (the main window, whose header sits beside it);
+  `show` draws both. egui 0.36 has no tabs control: the list is made of
+  its side panel and selectable buttons, the rail is the design's own.
 - **Controls are egui's own** (the person's rule: what egui has is not
   made again): buttons, fields, check boxes, progress bars are egui's,
   given their look by the theme (`looks.rs` paints egui's visuals from

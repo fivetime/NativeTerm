@@ -429,6 +429,10 @@ pub fn skin(visuals: &egui::Visuals) -> native_term_skin::Skin {
             primary: t.primary,
             on_primary: t.on_primary,
             tile: tint(t.tile),
+            rail: t.rail,
+            rail_line: t.rail_line,
+            accent: t.accent,
+            rail_near: t.rail_near,
             backdrop: egui::Color32::from_black_alpha(if visuals.dark_mode { 140 } else { 90 }),
         },
         hints: native_term_skin::Hints {

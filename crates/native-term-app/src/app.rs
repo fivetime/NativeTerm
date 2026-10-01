@@ -135,14 +135,25 @@ impl SettingsPage {
         SettingsPage::Data,
     ];
 
-    fn title(self) -> String {
+    fn icon(self) -> char {
         match self {
-            SettingsPage::General => icons::with(icons::SETTINGS, t!("settings-general")),
-            SettingsPage::Look => icons::with(icons::SUN, t!("theme-label")),
-            SettingsPage::Terminal => icons::with(icons::TERMINAL, t!("settings-terminal-page")),
-            SettingsPage::Keys => icons::with(icons::KEY, t!("settings-keys")),
-            SettingsPage::Shortcuts => icons::with(icons::LIST, t!("keys-title")),
-            SettingsPage::Data => icons::with(icons::FOLDER, t!("settings-data")),
+            SettingsPage::General => icons::SETTINGS,
+            SettingsPage::Look => icons::SUN,
+            SettingsPage::Terminal => icons::TERMINAL,
+            SettingsPage::Keys => icons::KEY,
+            SettingsPage::Shortcuts => icons::LIST,
+            SettingsPage::Data => icons::FOLDER,
+        }
+    }
+
+    fn label(self) -> String {
+        match self {
+            SettingsPage::General => t!("settings-general"),
+            SettingsPage::Look => t!("theme-label"),
+            SettingsPage::Terminal => t!("settings-terminal-page"),
+            SettingsPage::Keys => t!("settings-keys"),
+            SettingsPage::Shortcuts => t!("keys-title"),
+            SettingsPage::Data => t!("settings-data"),
         }
     }
 }
@@ -1878,84 +1889,57 @@ impl App {
     /// and from its bottom the settings, light or dark, and (docked)
     /// the pin.
     fn rail(&mut self, ui: &mut egui::Ui, tones: &Tones) {
+        use native_term_skin::{Action, Style, Tab, Tabs};
         let open = self.core.as_ref().map_or(0, |c| c.sessions().iter().filter(|s| s.state.is_open()).count());
         let docked = crate::dock::docked_edge();
-        let frame = egui::Frame::new().fill(tones.rail).inner_margin(egui::Margin::symmetric(0, 12));
-        fn rail<'a>(tones: &Tones, icon: char, hint: &'a str, active: bool) -> layout::Rail<'a> {
-            layout::Rail { icon, hint, active, count: 0, near: tones.rail_near }
+        let skin = crate::looks::skin(ui.visuals());
+        // (what each page is, and a line about it)
+        let hosts = self.tree.hosts().count();
+        let pages = Page::ALL.map(|page| (page, page.title(), format!("{}\n{}", page.title(), page.about(hosts))));
+        let terminal = t!("rail-terminal");
+        let settings = t!("settings-toggle");
+        let (theme_icon, theme_hint) = other_theme(ui);
+        let pin = docked.map(|edge| t!("dock-pin-hint", edge = edge.name()));
+        let mut tabs = Tabs::new("rail", Style::Rail).sign(Action::new(icons::TERMINAL, &terminal));
+        for (page, title, hint) in &pages {
+            let badge = if *page == Page::Sessions { open } else { 0 };
+            tabs = tabs.tab(Tab::new(*page, page.icon(), title).hint(hint).badge(badge));
         }
-        // (the line at its side is the rail's own)
-        let whole = ui.max_rect();
-        egui::Panel::left("rail")
-            .exact_size(layout::RAIL)
-            .resizable(false)
-            .show_separator_line(false)
-            .frame(frame)
-            .show(ui, |ui| {
-                // the design's gaps, or less in a low window
-                const LOGO: f32 = 44.0;
-                let below = if docked.is_some() { 3 } else { 2 };
-                let buttons = Page::ALL.len() + below;
-                let gap = layout::rail_gap(ui.available_height() - LOGO - 12.0, buttons);
-                ui.spacing_mut().item_spacing = egui::vec2(0.0, gap);
-                // the program's own sign (`p-2 rounded-xl`, `mb-1`)
-                let (at, logo) = ui.allocate_exact_size(egui::vec2(layout::RAIL, LOGO), egui::Sense::click());
-                let tile = egui::Rect::from_center_size(at.center(), egui::vec2(40.0, 40.0));
-                if logo.hovered() {
-                    // (`hover:bg-blue-500/10`)
-                    ui.painter().rect_filled(tile, 12.0, tones.tile.fill);
+        // (from the bottom up: settings, light or dark, the pin)
+        tabs = tabs
+            .action(Action::new(icons::SETTINGS, &settings).on(self.show_settings))
+            .action(Action::new(theme_icon, &theme_hint).near(tones.sun));
+        if let Some(pin) = &pin {
+            tabs = tabs.action(Action::new(icons::PIN, pin).on(crate::dock::pinned()));
+        }
+        let shown = tabs.bar(ui, &skin, self.page);
+        // the terminal itself: its window in front, or a new one with the
+        // person's own shell
+        if shown.sign {
+            if let Some(core) = &self.core {
+                core.show_terminal();
+            }
+        }
+        if let Some(page) = shown.chosen {
+            self.page = page;
+            match page {
+                Page::Tree | Page::Recent => self.view.focus_search(),
+                Page::Tabs => self.tab_list.focus_search(),
+                _ => {}
+            }
+        }
+        match shown.action {
+            Some(0) => self.show_settings = !self.show_settings,
+            Some(1) => self.change_theme(ui),
+            Some(2) => {
+                let pinned = crate::dock::pinned();
+                crate::dock::set_pinned(!pinned);
+                if let Some(core) = &self.core {
+                    core.set_setting(PINNED_SETTING, if pinned { "0" } else { "1" });
                 }
-                let sign = egui::FontId::proportional(24.0);
-                ui.painter().text(tile.center(), egui::Align2::CENTER_CENTER, icons::TERMINAL, sign, tones.accent);
-                // the terminal itself: its window in front, or a new
-                // one with the person's own shell
-                if logo.on_hover_text(t!("rail-terminal")).clicked() {
-                    if let Some(core) = &self.core {
-                        core.show_terminal();
-                    }
-                }
-                for page in Page::ALL {
-                    let count = if page == Page::Sessions { open } else { 0 };
-                    // (what the page is, and a line about it)
-                    let title = format!("{}\n{}", page.title(), page.about(self.tree.hosts().count()));
-                    let button = layout::Rail { count, ..rail(tones, page.icon(), &title, self.page == page) };
-                    if layout::rail_button(ui, tones, button).clicked() {
-                        self.page = page;
-                        match page {
-                            Page::Tree | Page::Recent => self.view.focus_search(),
-                            Page::Tabs => self.tab_list.focus_search(),
-                            _ => {}
-                        }
-                    }
-                }
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    // (`space-y-3`)
-                    ui.spacing_mut().item_spacing.y = gap.min(12.0);
-                    let settings = t!("settings-toggle");
-                    if layout::rail_button(ui, tones, rail(tones, icons::SETTINGS, &settings, self.show_settings))
-                        .clicked()
-                    {
-                        self.show_settings = !self.show_settings;
-                    }
-                    let (icon, hint) = other_theme(ui);
-                    let button = layout::Rail { near: tones.sun, ..rail(tones, icon, &hint, false) };
-                    if layout::rail_button(ui, tones, button).clicked() {
-                        self.change_theme(ui);
-                    }
-                    if let Some(edge) = docked {
-                        let pinned = crate::dock::pinned();
-                        let hint = t!("dock-pin-hint", edge = edge.name());
-                        if layout::rail_button(ui, tones, rail(tones, icons::PIN, &hint, pinned)).clicked() {
-                            crate::dock::set_pinned(!pinned);
-                            if let Some(core) = &self.core {
-                                core.set_setting(PINNED_SETTING, if pinned { "0" } else { "1" });
-                            }
-                        }
-                    }
-                });
-            });
-        let side = (whole.left() + layout::RAIL).round() - 0.5;
-        ui.painter().vline(side, whole.y_range(), egui::Stroke::new(1.0_f32, tones.rail_line));
+            }
+            _ => {}
+        }
     }
 
     /// From light to dark, or from dark to light: the setting, and the
@@ -2311,22 +2295,17 @@ impl App {
             |ui| {
                 ui.set_min_height(size.y);
                 ui.set_max_height(size.y);
-                egui::Panel::left("settings-pages")
-                    .exact_size(PAGES)
-                    .resizable(false)
-                    .frame(egui::Frame::new().inner_margin(egui::Margin { right: 12, ..egui::Margin::ZERO }))
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.y = 4.0;
-                        for page in SettingsPage::ALL {
-                            let on = self.settings_page == page;
-                            let row = egui::Button::selectable(on, page.title());
-                            let width = ui.available_width();
-                            if ui.add_sized([width, 30.0], row).clicked() {
-                                self.settings_page = page;
-                            }
-                        }
-                        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| about(ui, &tones));
-                    });
+                // the pages: the skin's tabs, as a list
+                let labels = SettingsPage::ALL.map(|page| (page, page.label()));
+                let mut tabs =
+                    native_term_skin::Tabs::new("settings-pages", native_term_skin::Style::List { width: PAGES });
+                for (page, label) in &labels {
+                    tabs = tabs.tab(native_term_skin::Tab::new(*page, page.icon(), label));
+                }
+                let shown = tabs.below(|ui| about(ui, &tones)).bar(ui, &skin, self.settings_page);
+                if let Some(page) = shown.chosen {
+                    self.settings_page = page;
+                }
                 let page = egui::Frame::new().inner_margin(egui::Margin { left: 16, ..egui::Margin::ZERO });
                 egui::CentralPanel::default().frame(page).show(ui, |ui| {
                     egui::ScrollArea::vertical().id_salt("settings-page").auto_shrink([false, false]).show(ui, |ui| {

@@ -21,12 +21,14 @@ mod caption;
 mod dialog;
 mod frame;
 mod modal;
+mod tabs;
 mod title;
 
 pub use caption::{caption_buttons, caption_dots, Buttons, Caption};
 pub use dialog::{body, button, footer, Choice, Message, MessageShown, Notice, Order, Role};
 pub use frame::{edges, frame_cursor, frame_hit, FRAME_BAND, FRAME_CORNER};
 pub use modal::{as_window, close_asked, room, set_room, Modal, ModalShown};
+pub use tabs::{rail_gap, Action, Style, Tab, Tabs, TabsShown, RAIL};
 pub use title::{TitleBar, TitleShown};
 
 /// The title bar's height unless a window says otherwise: the main
@@ -74,6 +76,12 @@ pub struct Palette {
     pub on_primary: egui::Color32,
     /// The icon's tile in the title bar.
     pub tile: Tint,
+    /// The pages' rail (`--rail-bg`), the line at its side, the page shown
+    /// and the program's sign (the accent), a button under the pointer.
+    pub rail: egui::Color32,
+    pub rail_line: egui::Color32,
+    pub accent: egui::Color32,
+    pub rail_near: egui::Color32,
     /// Over what is behind a modal dialog.
     pub backdrop: egui::Color32,
 }

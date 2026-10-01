@@ -690,8 +690,14 @@
         branch `nativeterm`; upstream takes no AI-made changes)
   - [x] Every window with the skin's frame round and shadowed on
         Windows 11 (the system gave them only to resizable windows)
-  - [ ] The rail and its pages as a skin component (a window's tabs),
-        not the main window's own layout
+  - [x] The rail and its pages as a skin component (`Tabs`: a window's
+        tabs, as desktops and phones have them): the main window's rail
+        (icons, the sign, a count, settings / light or dark / pin at its
+        bottom) and the settings' list (icons and names, the "about"
+        below) are the same component in two looks. egui has no tabs or
+        rail of its own (0.36): the list is egui's side panel and
+        selectable buttons, the rail the design's own drawing, moved from
+        the main window. Seen on Lingmo: both as they were
   - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
         settled
 - [x] The main window's new design (2026-09-28), after a design the
