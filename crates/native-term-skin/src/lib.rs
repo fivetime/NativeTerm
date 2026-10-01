@@ -27,6 +27,7 @@ mod modal;
 mod selection;
 mod tabs;
 mod title;
+mod tree;
 
 pub use caption::{caption_buttons, caption_dots, Buttons, Caption};
 pub use dialog::{body, button, footer, Choice, Message, MessageShown, Notice, Order, Role};
@@ -38,6 +39,7 @@ pub use modal::{as_window, close_asked, room, set_room, Modal, ModalShown};
 pub use selection::{Keyed, Selection};
 pub use tabs::{rail_gap, Action, Style, Tab, Tabs, TabsShown, RAIL};
 pub use title::{TitleBar, TitleShown};
+pub use tree::{Kids, TreeRow, TreeShown, TreeView};
 
 /// The title bar's height unless a window says otherwise: the main
 /// window's header (`h-14`).

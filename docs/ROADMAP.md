@@ -730,6 +730,13 @@
         switch at its status line's end): items across and down, the
         arrows across and down, the same menu, dragging and renaming.
         Tried on Lingmo by hand
+  - [x] Both folder trees on the skin's `TreeView`: the design's rows
+        (28 high, chevrons, a line down beside each level, the folder
+        shown in the side's colour), the keys (Up / Down, Left closes or
+        goes up, Right opens or goes in; a click on the tree gives it the
+        arrows, a click on the list takes them back), the folder shown
+        kept in view while the folders above it are read, dropping on a
+        folder as before. Tried on Lingmo by hand
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

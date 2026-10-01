@@ -4572,8 +4572,16 @@ maximize and close at the right), the title bar the main window's height
   file manager's list view): as many columns as fit items at least 200
   wide, only the lines in view drawn, the arrows across and down, the
   same tint and bar; egui's grid lays things out and is no view, so this
-  is drawn on its scroll area. `TreeView` follows (egui has collapsing
-  headers, no tree).
+  is drawn on its scroll area. `TreeView` is a navigation pane's tree:
+  the program lays its tree out as rows (depth, name, icon, whether it
+  has rows under it, open, still being read) and the view draws only
+  those in view, with chevrons, a line down beside each level, the
+  current row in the accent's tint with a bar, a spinner where a folder
+  is read; Up / Down move, Left closes or goes up, Right opens or goes
+  in; the current row is kept in view while the rows above it still
+  come in. egui has collapsing headers, no tree. (`show_rows` places its
+  rows by its ui's spacing: the views zero it before, not inside, or
+  their rows drift from where it thinks they are, seen on Lingmo.)
 - **Controls are egui's own** (the person's rule: what egui has is not
   made again): buttons, fields, check boxes, progress bars are egui's,
   given their look by the theme (`looks.rs` paints egui's visuals from

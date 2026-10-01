@@ -112,8 +112,10 @@ impl<'a> GridView<'a> {
         if let Some(y) = offset {
             area = area.vertical_scroll_offset(y.max(0.0));
         }
+        // no space between lines, for the lines' places too (`show_rows`
+        // places them by its ui's spacing)
+        let spacing = std::mem::replace(&mut ui.spacing_mut().item_spacing, egui::Vec2::ZERO);
         area.show_rows(ui, line, lines, |ui, range| {
-            ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
             for l in range {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), line), egui::Sense::hover());
                 for c in 0..across {
@@ -150,6 +152,7 @@ impl<'a> GridView<'a> {
                 }
             }
         });
+        ui.spacing_mut().item_spacing = spacing;
         if let Some((i, modifiers, secondary)) = clicked {
             if secondary {
                 selection.context_click(keys, i);

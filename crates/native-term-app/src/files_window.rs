@@ -495,6 +495,9 @@ struct FilesWindow {
     question: Option<(u64, Question, String)>,
     /// The side keys go to (clicked last): the server's.
     remote_focus: bool,
+    /// On that side, the tree was clicked last (the arrows are its), not
+    /// the list.
+    tree_focus: bool,
     /// Where the server's side is (for files dropped from Explorer).
     remote_rect: Option<egui::Rect>,
     edit_dir: PathBuf,
@@ -524,6 +527,7 @@ impl FilesWindow {
             close: false,
             question: None,
             remote_focus: true,
+            tree_focus: false,
             remote_rect: None,
             edit_dir: std::env::temp_dir().join("NativeTerm-edit"),
             computer: native_term_os::host::name(),
@@ -1576,9 +1580,13 @@ impl FilesWindow {
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..Default::default() }))
             .show(ui, |ui| {
                 let tab = &self.tabs[self.active];
-                tree(ui, "local-tree", &roots, &tab.local_tree, tab.local.path.as_ref(), false)
+                let keyboard = !self.remote_focus && self.tree_focus;
+                tree(ui, "local-tree", &roots, &tab.local_tree, tab.local.path.as_ref(), false, keyboard)
             })
             .inner;
+        if tree_out.clicked {
+            (self.remote_focus, self.tree_focus) = (false, true);
+        }
         if let Some(folder) = tree_out.go {
             self.list_local(id, Some(folder));
         }
@@ -1610,13 +1618,13 @@ impl FilesWindow {
             })
             .collect();
         let lines = sorted(lines, tab.local.sort, false);
-        let keyboard = !self.remote_focus;
+        let keyboard = !self.remote_focus && !self.tree_focus;
         let mut local = std::mem::replace(&mut self.tabs[self.active].local, empty_local());
         let side = files_list::Side { salt: "local-list", remote: false, keyboard };
         let out = list(ui, side, &lines, &mut local.selected, &mut local.renaming, &mut local.sort, local.view);
         self.tabs[self.active].local = local;
         if out.clicked {
-            self.remote_focus = false;
+            (self.remote_focus, self.tree_focus) = (false, false);
         }
         if let Some(i) = out.open {
             self.open_local(id, i);
@@ -1870,9 +1878,13 @@ impl FilesWindow {
             .frame(egui::Frame::NONE.inner_margin(egui::Margin { right: 6, ..Default::default() }))
             .show(ui, |ui| {
                 let tab = &self.tabs[self.active];
-                tree(ui, "remote-tree", &roots, &tab.remote_tree, Some(&tab.remote.path), true)
+                let keyboard = self.remote_focus && self.tree_focus;
+                tree(ui, "remote-tree", &roots, &tab.remote_tree, Some(&tab.remote.path), true, keyboard)
             })
             .inner;
+        if tree_out.clicked {
+            (self.remote_focus, self.tree_focus) = (true, true);
+        }
         if let Some(folder) = tree_out.go {
             self.go(id, folder);
         }
@@ -1909,7 +1921,7 @@ impl FilesWindow {
             })
             .collect();
         let lines = sorted(lines, tab.remote.sort, true);
-        let keyboard = self.remote_focus;
+        let keyboard = self.remote_focus && !self.tree_focus;
         let mut remote = std::mem::take(&mut self.tabs[self.active].remote.selected);
         let mut sort = self.tabs[self.active].remote.sort;
         let mut renaming = self.tabs[self.active].remote.renaming.take();
@@ -1924,7 +1936,7 @@ impl FilesWindow {
         }
         self.remote_rect = Some(out.response.rect);
         if out.clicked {
-            self.remote_focus = true;
+            (self.remote_focus, self.tree_focus) = (true, false);
         }
         if let Some(i) = out.open {
             self.open_remote(id, i);
@@ -2358,20 +2370,21 @@ impl FilesWindow {
 
 /// What a tree reports back.
 struct TreeOut<P> {
-    /// A folder clicked: show it.
+    /// A folder clicked or moved to: show it.
     go: Option<P>,
-    /// A chevron clicked.
+    /// A folder to open or close.
     toggle: Option<P>,
     /// Files from the other side dropped on a folder.
     dropped: Option<(P, Arc<Dragged>)>,
-    /// Where the tree keeps which folder it last scrolled to.
-    scrolled: egui::Id,
+    /// A row clicked (the keys are the tree's now).
+    clicked: bool,
 }
 
-/// A folder tree: chevrons open and close, a click shows the folder, the
-/// one shown is highlighted, and files dragged from the other side can be
-/// dropped on a folder. `remote`: the server's side (it takes files from
-/// the local side, and the other way round).
+/// A side's folder tree on the skin's `TreeView`: chevrons open and
+/// close, a click or the keys show a folder, the one shown in the side's
+/// colour, and files dragged from the other side can be dropped on a
+/// folder. `remote`: the server's side (it takes files from the local
+/// side, and the other way round).
 fn tree<P: Clone + Eq + Hash + std::fmt::Debug>(
     ui: &mut egui::Ui,
     salt: &str,
@@ -2379,106 +2392,67 @@ fn tree<P: Clone + Eq + Hash + std::fmt::Debug>(
     tree: &Tree<P>,
     current: Option<&P>,
     remote: bool,
+    keyboard: bool,
 ) -> TreeOut<P> {
-    let mut out = TreeOut { go: None, toggle: None, dropped: None, scrolled: egui::Id::new((salt, "scrolled")) };
-    egui::ScrollArea::both().id_salt(salt).auto_shrink([false, false]).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for (name, path) in roots {
-            tree_node(ui, name, path, 0, tree, current, remote, &mut out);
-        }
-    });
+    let look = files_list::Look::of(ui.visuals());
+    let palette = crate::looks::skin(ui.visuals()).palette;
+    let mut rows = Vec::new();
+    for (name, path) in roots {
+        lay_out(&mut rows, name, path, 0, tree, look.folder);
+    }
+    let at = current.and_then(|c| rows.iter().position(|r| &r.key == c));
+    let accent = look.side(remote);
+    let ink = if remote { look.remote } else { look.local_ink };
+    let mut out = TreeOut { go: None, toggle: None, dropped: None, clicked: false };
+    let shown = native_term_skin::TreeView::new(salt, &palette).accent(accent).ink(ink).keyboard(keyboard).show(
+        ui,
+        &rows,
+        at,
+        |i, response| {
+            out.clicked |= response.clicked();
+            if response.dnd_hover_payload::<Dragged>().is_some_and(|d| d.from_remote != remote) {
+                let painter = response.ctx.layer_painter(response.layer_id);
+                painter.rect_stroke(response.rect, 3.0, egui::Stroke::new(1.5_f32, accent), egui::StrokeKind::Inside);
+            }
+            if let Some(dragged) = response.dnd_release_payload::<Dragged>().filter(|d| d.from_remote != remote) {
+                out.dropped = Some((rows[i].key.clone(), dragged));
+            }
+        },
+    );
+    out.go = shown.go.map(|i| rows[i].key.clone());
+    out.toggle = shown.toggle.map(|i| rows[i].key.clone());
     out
 }
 
-#[allow(clippy::too_many_arguments)]
-fn tree_node<P: Clone + Eq + Hash + std::fmt::Debug>(
-    ui: &mut egui::Ui,
+/// `path` and, when open, what is under it, as the tree's rows.
+fn lay_out<P: Clone + Eq + Hash>(
+    rows: &mut Vec<native_term_skin::TreeRow<P>>,
     name: &str,
     path: &P,
     depth: usize,
     tree: &Tree<P>,
-    current: Option<&P>,
-    remote: bool,
-    out: &mut TreeOut<P>,
+    folder: egui::Color32,
 ) {
+    use native_term_skin::Kids;
     let node = tree.nodes.get(path);
     let open = node.is_some_and(|n| n.open);
-    let leaf = node.and_then(|n| n.children.as_ref()).is_some_and(|c| c.is_empty());
-    let visuals = ui.visuals().clone();
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let color = if current == Some(path) { visuals.selection.stroke.color } else { visuals.text_color() };
-    let galley = ui.painter().layout_no_wrap(name.to_string(), font.clone(), color);
-    // as wide as the panel, or as the name where it's indented (the tree
-    // scrolls sideways to deep folders)
-    let indent = 4.0 + depth as f32 * 14.0;
-    let width = ui.available_width().max(160.0).max(indent + 40.0 + galley.size().x + 8.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 20.0), egui::Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, current == Some(path), name)
+    let children = node.and_then(|n| n.children.as_ref());
+    rows.push(native_term_skin::TreeRow {
+        key: path.clone(),
+        depth,
+        label: name.to_string(),
+        icon: Some(((if open { icons::FOLDER_OPEN } else { icons::FOLDER }).to_string(), folder)),
+        kids: match children {
+            Some(c) if c.is_empty() => Kids::No,
+            Some(_) => Kids::Yes,
+            None => Kids::Unknown,
+        },
+        open,
+        loading: open && children.is_none(),
     });
-    let target = response.dnd_hover_payload::<Dragged>().is_some_and(|d| d.from_remote != remote);
-    if current == Some(path) {
-        ui.painter().rect_filled(rect, 3.0, visuals.selection.bg_fill);
-        // brought into view once each time another folder is shown (and
-        // once it is drawn at all: the folders above open first)
-        let this = egui::Id::new(path);
-        let fresh = ui.data_mut(|d| {
-            let fresh = d.get_temp::<egui::Id>(out.scrolled) != Some(this);
-            d.insert_temp(out.scrolled, this);
-            fresh
-        });
-        if fresh {
-            let text = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + indent, rect.top()),
-                egui::vec2(40.0 + galley.size().x + 8.0, rect.height()),
-            );
-            ui.scroll_to_rect(text, None);
-        }
-    } else if target || response.hovered() {
-        ui.painter().rect_filled(rect, 3.0, visuals.widgets.hovered.weak_bg_fill);
-    }
-    if target {
-        ui.painter().rect_stroke(rect, 3.0, egui::Stroke::new(1.5_f32, GREEN), egui::StrokeKind::Inside);
-    }
-    let x = rect.left() + indent;
-    let y = rect.center().y;
-    let painter = ui.painter_at(rect);
-    let chevron = egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(16.0, rect.height()));
-    if !leaf {
-        let glyph = if open { icons::CHEVRON_DOWN } else { icons::CHEVRON_RIGHT };
-        let small = egui::FontId::new(font.size * 0.7, font.family.clone());
-        painter.text(chevron.center(), egui::Align2::CENTER_CENTER, glyph, small, visuals.weak_text_color());
-    }
-    let folder = if open { icons::FOLDER_OPEN } else { icons::FOLDER };
-    painter.text(egui::pos2(x + 18.0, y), egui::Align2::LEFT_CENTER, folder, font.clone(), color);
-    painter.galley(egui::pos2(x + 40.0, y - galley.size().y / 2.0), galley, color);
-    if response.clicked() {
-        let on_chevron = response.interact_pointer_pos().is_some_and(|p| chevron.contains(p));
-        if on_chevron && !leaf {
-            out.toggle = Some(path.clone());
-        } else {
-            out.go = Some(path.clone());
-        }
-    }
-    if response.double_clicked() && !leaf {
-        out.toggle = Some(path.clone());
-    }
-    if let Some(dragged) = response.dnd_release_payload::<Dragged>().filter(|d| d.from_remote != remote) {
-        out.dropped = Some((path.clone(), dragged));
-    }
-    if open {
-        match node.and_then(|n| n.children.as_ref()) {
-            Some(children) => {
-                for (child_name, child) in children {
-                    tree_node(ui, child_name, child, depth + 1, tree, current, remote, out);
-                }
-            }
-            None => {
-                ui.horizontal(|ui| {
-                    ui.add_space(x + 18.0 - rect.left());
-                    ui.spinner();
-                });
-            }
+    if let (true, Some(children)) = (open, children) {
+        for (child_name, child) in children {
+            lay_out(rows, child_name, child, depth + 1, tree, folder);
         }
     }
 }
