@@ -140,6 +140,7 @@ impl ImportDialog {
             let mut commands: Vec<String> = commands.into_iter().collect();
             if result.is_ok() {
                 commands.extend(import::store_credentials(&plan.credentials));
+                commands.extend(import::store_session_passwords(&editor, &plan));
             }
             let _ = tx.send((result, commands));
             ctx.request_repaint();

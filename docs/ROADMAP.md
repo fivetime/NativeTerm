@@ -2550,6 +2550,9 @@ one needed a terminal that can move a tab, which WezTerm can.
   - [x] SecureCRT's saved credentials imported as credential sets (the
         passwords decrypted into the system's password store; checked
         against a real SecureCRT 9 configuration), sessions linked to them
+  - [x] Sessions' own saved passwords imported as their accounts' (the
+        name OpenSSH gives the account; 766 of the author's sessions,
+        all read)
   - [ ] SecureCRT's own logon action tables (`Login Script V4`) imported:
         needs a configuration that has one (the author's 769 sessions have
         none)

@@ -273,6 +273,9 @@ pub struct CrtSession {
     /// The saved credential it logs in with ("Credential Title"), by its
     /// title.
     pub credential: Option<String>,
+    /// The session's file (its saved password is read from it when the
+    /// import writes it, see [`read_credential_password`]).
+    pub file: PathBuf,
 }
 
 /// One of SecureCRT's saved credentials (`Config\Credentials\<title>.ini`,
@@ -384,6 +387,7 @@ fn session_from(ini: &Ini, folder: Vec<String>, name: String) -> CrtSession {
         putty: BTreeMap::new(),
         log: log_from(ini),
         credential: ini.str("Credential Title").map(|t| t.trim().to_string()),
+        file: PathBuf::new(),
     }
 }
 
@@ -574,7 +578,9 @@ fn walk(dir: &Path, folder: &mut Vec<String>, out: &mut Scan) -> io::Result<()> 
             }
         };
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-        out.sessions.push(session_from(&parse_ini(text), folder.clone(), stem.to_string()));
+        let mut session = session_from(&parse_ini(text), folder.clone(), stem.to_string());
+        session.file = path.clone();
+        out.sessions.push(session);
     }
     Ok(())
 }
@@ -607,6 +613,11 @@ pub struct PlannedHost {
     pub forwards: Vec<Forward>,
     pub options: Vec<(&'static str, String)>,
     pub note: Option<String>,
+    /// The session's own saved password, in this file: written by the app
+    /// into the system's password store as the account's (see
+    /// `password::target`); `None` without one, or where the session logs
+    /// in with a saved credential instead.
+    pub password_file: Option<PathBuf>,
 }
 
 impl PlannedHost {
@@ -900,6 +911,7 @@ pub fn plan(scan: &Scan, tree: &SessionTree) -> Plan {
             forwards: s.forwards.clone(),
             options,
             note,
+            password_file: (s.saved_password && s.credential.is_none()).then(|| s.file.clone()),
         });
     }
 

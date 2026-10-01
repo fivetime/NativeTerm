@@ -52,3 +52,66 @@ fn saved_credentials_land_in_the_password_store() {
     assert!(again.iter().any(|l| l.contains("login")), "kept the second time: {again:?}");
     assert!(!lines.iter().chain(&again).any(|l| l.contains("s3cret")), "the password is never said");
 }
+
+/// A session's own saved password: imported with the session (OpenSSH
+/// asked for the account, as the shim asks at connecting), then kept as
+/// that account's entry; one already there is left as it is.
+#[test]
+fn a_sessions_saved_password_becomes_its_accounts() {
+    use native_term_config::ops::Editor;
+    use native_term_config::write::Writer;
+    let ssh = std::path::PathBuf::from(r"C:\Windows\System32\OpenSSH\ssh.exe");
+    if !ssh.exists() {
+        eprintln!("skipped: no Windows OpenSSH");
+        return;
+    }
+    let prefix = format!("NativeTerm-Tests-crtimport-{}", std::process::id());
+    std::env::set_var("NATIVETERM_CRED_PREFIX", &prefix);
+    let crt = tempfile::tempdir().unwrap();
+    write(
+        &crt.path().join("Sessions").join("lab").join("db.ini"),
+        &[
+            "S:\"Hostname\"=10.0.0.9",
+            "S:\"Username\"=root",
+            "D:\"[SSH2] Port\"=00000016",
+            &format!("S:\"Password V2\"={S3CRET}"),
+        ],
+    );
+    write(
+        &crt.path().join("Sessions").join("lab").join("nouser.ini"),
+        &["S:\"Hostname\"=10.0.0.8", &format!("S:\"Password V2\"={S3CRET}")],
+    );
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join(".ssh");
+    std::fs::create_dir_all(&dir).unwrap();
+    let editor = Editor::for_directory(&dir, Writer::new(home.path().join("backups")), &ssh);
+    std::fs::write(
+        editor.main_config(),
+        "# mine
+",
+    )
+    .unwrap();
+    let scan = securecrt::scan(crt.path()).unwrap();
+    let plan = securecrt::plan(&scan, &SessionTree::load(&dir));
+    editor.import(&plan, &|_, _| {}).unwrap();
+    let entry = format!("{prefix}:root@10.0.0.9:22");
+    let _ = credentials::delete(&entry);
+
+    let lines = native_term_app::import::store_session_passwords(&editor, &plan);
+    let stored = credentials::read(&entry).unwrap();
+    // the session without a user name: ssh's own, this computer's user
+    let local = credentials::list(&format!("{prefix}:")).unwrap();
+    let again = native_term_app::import::store_session_passwords(&editor, &plan);
+    for name in &local {
+        let _ = credentials::delete(name);
+    }
+
+    let stored = stored.expect("the account's entry");
+    assert_eq!((stored.user.as_str(), stored.secret.as_str()), ("root", "s3cret"));
+    assert_eq!(local.len(), 2, "both accounts, as ssh names them: {local:?}");
+    assert!(local.iter().any(|n| n.ends_with("@10.0.0.8:22") && !n.contains(":root@")), "{local:?}");
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains('2'), "two stored: {lines:?}");
+    assert!(again.len() == 1 && again[0].contains('2'), "kept the second time: {again:?}");
+    assert!(!lines.iter().chain(&again).any(|l| l.contains("s3cret")));
+}

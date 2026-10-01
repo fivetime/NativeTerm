@@ -197,6 +197,7 @@ fn session_from(name: &str, v: &Values, names: &HashSet<String>) -> CrtSession {
         putty: if ssh { BTreeMap::new() } else { putty_options(v) },
         log: log_from(v),
         credential: None,
+        file: PathBuf::new(),
     }
 }
 

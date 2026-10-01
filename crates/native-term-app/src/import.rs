@@ -68,6 +68,59 @@ pub fn store_credentials(credentials: &[PlannedCredential]) -> Vec<String> {
     out
 }
 
+/// The imported hosts' own saved passwords, after the configuration was
+/// written: each read from its SecureCRT session file and written straight
+/// into the system's password store as the account's entry, named as the
+/// shim looks it up at connecting (`password::target` of `ssh -G`). An
+/// entry already there is left as it is. What happened, in a few lines.
+pub fn store_session_passwords(editor: &native_term_config::ops::Editor, plan: &Plan) -> Vec<String> {
+    use native_term_config::password;
+    use native_term_os::credentials::{self, Saved};
+    let (mut added, mut kept, mut unread, mut no_account) = (0, 0, 0, 0);
+    let mut failed = Vec::new();
+    for host in plan.folders.iter().flat_map(|f| &f.hosts) {
+        let Some(file) = &host.password_file else { continue };
+        let target = editor.effective(&host.alias).ok().and_then(|e| password::target(&e, None));
+        let Some(target) = target else {
+            no_account += 1;
+            continue;
+        };
+        if credentials::read(&target.name).ok().flatten().is_some() {
+            kept += 1;
+            continue;
+        }
+        let secret = match native_term_config::securecrt::read_credential_password(file, "") {
+            Ok(Some(secret)) => secret,
+            Ok(None) => continue,
+            Err(_) => {
+                unread += 1;
+                continue;
+            }
+        };
+        let saved = Saved { user: target.user.clone(), secret, comment: String::new() };
+        match credentials::write(&target.name, &saved) {
+            Ok(()) => added += 1,
+            Err(e) => failed.push(t!("import-password-failed", label = host.label.as_str(), error = e.to_string())),
+        }
+        drop(saved);
+    }
+    let mut out = Vec::new();
+    if added > 0 {
+        out.push(t!("import-passwords-added", count = added));
+    }
+    if kept > 0 {
+        out.push(t!("import-passwords-kept", count = kept));
+    }
+    if unread > 0 {
+        out.push(t!("import-passwords-unread", count = unread));
+    }
+    if no_account > 0 {
+        out.push(t!("import-passwords-no-account", count = no_account));
+    }
+    out.extend(failed);
+    out
+}
+
 /// One line of the summary; `detail` lines list session paths.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
@@ -136,8 +189,13 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
     if !n.logon_actions.is_empty() {
         out.push(line(t!("summary-logon-actions", count = n.logon_actions.len()), true, n.logon_actions.clone()));
     }
-    if n.saved_passwords > 0 {
-        out.push(line(t!("summary-saved-passwords", count = n.saved_passwords), true, Vec::new()));
+    let with_password = plan.folders.iter().flat_map(|f| &f.hosts).filter(|h| h.password_file.is_some()).count();
+    if with_password > 0 {
+        out.push(line(t!("summary-session-passwords", count = with_password), false, Vec::new()));
+    }
+    let left_out = n.saved_passwords.saturating_sub(with_password);
+    if left_out > 0 {
+        out.push(line(t!("summary-saved-passwords", count = left_out), true, Vec::new()));
     }
     if !plan.credentials.is_empty() {
         out.push(line(

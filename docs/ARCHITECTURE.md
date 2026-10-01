@@ -1825,8 +1825,10 @@ The result is shown as a summary before anything is written.
 - **Secrets never enter the model.** Values of keys containing
   "password", "passphrase", "login script" or "logon script" are not
   kept; only whether they were set is recorded, for the report
-  ("Saved passwords aren't imported (N sessions)"). A test checks that
-  no such value survives parsing. During development only public
+  ("Saved passwords aren't imported (N sessions)", now only for non-SSH
+  sessions). A test checks that no such value survives parsing; the
+  passwords that are imported are read from the files when they are
+  written (below). During development only public
   samples and synthetic files were read, not the author's own session
   files.
 - **Saved credentials** (2026-10-01): `Config\Credentials\<title>.ini`
@@ -1850,6 +1852,23 @@ The result is shown as a summary before anything is written.
   and lengths printed) and against values made by HyperSine's
   `securecrt_cipher.py`. Logon action tables (`Login Script V4`) are not
   imported yet: no configuration with one has been seen.
+- **Sessions' own saved passwords** (2026-10-01): an SSH session with a
+  `Password V2` (and no saved credential, which wins) keeps it as its
+  account's saved password: after the configuration is written the app
+  asks OpenSSH for the imported host (`ssh -G`, as the shim does when it
+  connects), and writes `NativeTerm:<user>@<host>:<port>` in the system's
+  password store from the session file (`import::store_session_passwords`),
+  never through the model. A session without a user name gets ssh's own
+  (this computer's user), which is the account ssh logs in as. An entry
+  already there is left. Non-SSH sessions' passwords are still not
+  imported. On the author's configuration: 766 sessions with a saved
+  password, all `03:`, all read with the checksum holding (counts only).
+- **Public samples of `Login Script V4`** (GitHub, a Cisco lab's SecureCRT
+  9 sessions) show a row per list item, each a `03:` value whose text is
+  six fields joined by `0x1F`: something, the Expect, the Send, something,
+  `1`, something. Every public row has the same flags, so which field is
+  Hide, the trailing carriage return or the credential is not known yet;
+  the importer waits for a configuration whose rows differ.
 - **Folders:** SecureCRT's nested folders become flat NativeTerm folders
   labeled with the whole path (`生产 / 控制节点`); sessions directly
   under `Sessions` go to a folder "SecureCRT". A folder whose label
