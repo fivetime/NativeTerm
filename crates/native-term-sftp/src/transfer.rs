@@ -30,6 +30,38 @@ pub struct Item {
     /// The source's modification time (seconds since the Unix epoch): a
     /// partial copy older than it isn't continued.
     pub modified: Option<u64>,
+    /// Copied as text: line ends as the side copied to has them (CR LF
+    /// here, LF on the server: a Windows computer and a Unix server).
+    /// Not continued once broken off (the bytes differ on both sides).
+    pub text: bool,
+}
+
+/// Text's lines ended as on the server (LF): every CR LF to LF.
+pub fn to_server_lines(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' && bytes.get(i + 1) == Some(&b'\n') {
+            i += 1;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Text's lines ended as here (CR LF): every LF without a CR before it
+/// to CR LF.
+pub fn to_local_lines(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len() + bytes.len() / 32);
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'\n' && (i == 0 || bytes[i - 1] != b'\r') {
+            out.push(b'\r');
+        }
+        out.push(b);
+    }
+    out
 }
 
 /// What a file being copied is called until it is complete.
@@ -330,7 +362,7 @@ fn walk_remote(
         let size = attrs.size.unwrap_or(0);
         progress.total.fetch_add(size, Ordering::Relaxed);
         let modified = attrs.atime_mtime.map(|(_, m)| m as u64);
-        items.push(Item { remote: remote.to_vec(), local, dir: false, size, permissions: None, modified });
+        items.push(Item { remote: remote.to_vec(), local, dir: false, size, permissions: None, modified, text: false });
         return Ok(());
     }
     items.push(Item {
@@ -340,6 +372,7 @@ fn walk_remote(
         size: 0,
         permissions: None,
         modified: None,
+        text: false,
     });
     for entry in sftp.read_dir(remote)? {
         let path = join(remote, &entry.name);
@@ -409,6 +442,7 @@ fn walk_local(names: &Names, local: &Path, remote: Vec<u8>, items: &mut Vec<Item
             size: meta.len(),
             permissions: Some(0o644),
             modified: meta.modified().ok().and_then(unix_secs),
+            text: false,
         });
         return Ok(());
     }
@@ -419,6 +453,7 @@ fn walk_local(names: &Names, local: &Path, remote: Vec<u8>, items: &mut Vec<Item
         size: 0,
         permissions: Some(0o755),
         modified: None,
+        text: false,
     });
     let mut children: Vec<PathBuf> = std::fs::read_dir(local)?.filter_map(|e| e.ok().map(|e| e.path())).collect();
     children.sort();
@@ -446,7 +481,7 @@ pub fn download(sftp: &Session, names: &Names, items: &[Item], progress: &Progre
             }
             progress.set_current(names.decode(&item.remote));
             let part = local_part(&item.local);
-            let offset = local_resume(&part, item);
+            let offset = if item.text { 0 } else { local_resume(&part, item) };
             progress.done.fetch_add(offset, Ordering::Relaxed);
             progress.skipped.fetch_add(offset, Ordering::Relaxed);
             // the callback counts this run's bytes, from zero
@@ -467,6 +502,11 @@ pub fn download(sftp: &Session, names: &Names, items: &[Item], progress: &Progre
                     return Err(e);
                 }
             };
+            if item.text {
+                // its lines as here
+                let lines = to_local_lines(&std::fs::read(&part)?);
+                std::fs::write(&part, lines)?;
+            }
             if let Some(m) = item.modified {
                 // the server's modification time kept (compare / sync go by it)
                 let file = std::fs::OpenOptions::new().write(true).open(&part)?;
@@ -503,12 +543,27 @@ pub fn upload(sftp: &Session, names: &Names, items: &[Item], progress: &Progress
         |item, progress| {
             progress.set_current(names.decode(&item.remote));
             let part = remote_part(&item.remote);
-            let offset = remote_resume(sftp, &part, item);
+            // text: its lines as the server's, sent from a copy of its own
+            let converted;
+            let source = if item.text {
+                let lines = to_server_lines(&std::fs::read(&item.local)?);
+                // (several files go at once: each copy its own name)
+                static COPIES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let n = COPIES.fetch_add(1, Ordering::Relaxed);
+                let copy = std::env::temp_dir().join(format!("nativeterm-text-{}-{n}.tmp", std::process::id()));
+                std::fs::write(&copy, &lines)?;
+                converted = Some((copy, lines.len() as u64));
+                converted.as_ref().map(|(c, _)| c.as_path()).expect("set")
+            } else {
+                converted = None;
+                item.local.as_path()
+            };
+            let offset = if item.text { 0 } else { remote_resume(sftp, &part, item) };
             progress.done.fetch_add(offset, Ordering::Relaxed);
             progress.skipped.fetch_add(offset, Ordering::Relaxed);
             // the callback counts this run's bytes, from zero
             let mut counted = 0;
-            let result = sftp.upload_from(&item.local, &part, offset, item.permissions, &mut |done| {
+            let result = sftp.upload_from(source, &part, offset, item.permissions, &mut |done| {
                 progress.done.fetch_add(done.saturating_sub(counted), Ordering::Relaxed);
                 counted = done;
                 !progress.stopped()
@@ -528,6 +583,11 @@ pub fn upload(sftp: &Session, names: &Names, items: &[Item], progress: &Progress
             }
             finish_upload(sftp, &part, &item.remote)?;
             progress.done.fetch_add(done.saturating_sub(counted), Ordering::Relaxed);
+            if let Some((copy, sent)) = converted {
+                let _ = std::fs::remove_file(copy);
+                // (the plan counted the file as it is here)
+                progress.done.fetch_add(item.size.saturating_sub(sent), Ordering::Relaxed);
+            }
             Ok(())
         },
     )
@@ -614,6 +674,15 @@ pub fn remove(sftp: &Session, path: &[u8], attrs: &Attrs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_lines_both_ways() {
+        assert_eq!(to_server_lines(b"a\r\nb\r\n\r\nc"), b"a\nb\n\nc");
+        assert_eq!(to_server_lines(b"lone\rcr\n"), b"lone\rcr\n", "a CR alone stays");
+        assert_eq!(to_local_lines(b"a\nb\n\nc"), b"a\r\nb\r\n\r\nc");
+        assert_eq!(to_local_lines(b"\nx\r\ny"), b"\r\nx\r\ny", "a CR LF stays one");
+        assert_eq!(to_local_lines(&to_server_lines(b"x\r\ny\r\n")), b"x\r\ny\r\n");
+    }
 
     /// One file at a time, as the tests below expect.
     fn one() -> Slots {
@@ -777,6 +846,37 @@ mod tests {
         assert!(!server_dir.join("源").exists());
     }
 
+    /// Text goes up with the server's line ends and comes back with
+    /// these, over a real sftp-server; the progress ends at the planned
+    /// total.
+    #[test]
+    fn text_goes_across_with_each_sides_line_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let Some(sftp) = local_server(dir.path()) else { return };
+        let names = Names::default();
+        let src = dir.path().join("notes.txt");
+        std::fs::write(&src, b"one\r\ntwo\r\n\r\nthree").unwrap();
+        let up = dir.path().join("up");
+        std::fs::create_dir(&up).unwrap();
+        let progress = Progress::default();
+        let mut items = plan_upload(&names, std::slice::from_ref(&src), &remote(&up), &progress).unwrap();
+        items.iter_mut().for_each(|i| i.text = true);
+        upload(&sftp, &names, &items, &progress, &one()).unwrap();
+        assert_eq!(std::fs::read(up.join("notes.txt")).unwrap(), b"one\ntwo\n\nthree", "LF on the server");
+        assert_eq!(progress.done.load(Ordering::Relaxed), progress.total.load(Ordering::Relaxed));
+
+        let down = dir.path().join("down");
+        std::fs::create_dir(&down).unwrap();
+        let path = join(&remote(&up), b"notes.txt");
+        let attrs = sftp.stat(&path).unwrap();
+        let progress = Progress::default();
+        let mut items = plan_download(&sftp, &names, &path, &attrs, &down, &progress).unwrap();
+        items.iter_mut().for_each(|i| i.text = true);
+        download(&sftp, &names, &items, &progress, &one()).unwrap();
+        assert_eq!(std::fs::read(down.join("notes.txt")).unwrap(), b"one\r\ntwo\r\n\r\nthree", "CR LF here");
+        assert!(!local_part(&down.join("notes.txt")).exists());
+    }
+
     #[test]
     fn a_cancelled_download_leaves_no_partial_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -901,6 +1001,7 @@ mod tests {
             size: 100,
             permissions: None,
             modified: Some(1_000),
+            text: false,
         };
         assert_eq!(resume_at(40, Some(2_000), &item), 40);
         assert_eq!(resume_at(100, Some(2_000), &item), 100);

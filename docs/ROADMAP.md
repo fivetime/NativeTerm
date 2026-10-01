@@ -783,6 +783,17 @@
         session to the server's side's; sync only while linked (a
         session's own two folders). Tried on Lingmo: a file from session
         2's local side up to session 1's server
+  - [x] The transfer mode in the status line (Auto, Binary, Text; kept):
+        SFTP has no text mode, so text's line ends are changed here (CR
+        LF on Windows, LF on the server; a Linux or macOS computer ends
+        lines as the server does: copied as they are, nothing asked).
+        Auto goes by known text and binary extensions, then the ones the
+        person chose for always; for one not known it asks with
+        SecureCRT's "Choose Transfer Type" (ASCII / Binary, for this
+        extension always, for every unknown one in this transfer;
+        Cancel stops the transfer). Text goes whole (not continued once
+        broken off). Tested against Windows' own sftp-server: CR LF up
+        as LF, back as CR LF, the progress at its total
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

@@ -223,3 +223,25 @@ pub(crate) fn for_snapshot(ctx: &egui::Context, names: bool) -> Box<dyn crate::w
     window.jobs = jobs;
     Box::new(window)
 }
+
+/// "Choose Transfer Type" over a page standing for the window, as a
+/// transfer would ask it (the answer goes nowhere).
+pub(crate) fn transfer_type() -> impl FnMut(&egui::Context) {
+    let mut window: Option<FilesWindow> = None;
+    let (reply, _answer) = mpsc::channel();
+    move |ctx: &egui::Context| {
+        let window = window.get_or_insert_with(|| {
+            let mut w = FilesWindow::new(ctx);
+            w.ask_type = Some(files_mode::TypeQuestion {
+                name: "frb_generated.rs".into(),
+                ext: "rs".into(),
+                reply: reply.clone(),
+                text: false,
+                always: false,
+                all: false,
+            });
+            w
+        });
+        window.type_dialog(ctx);
+    }
+}

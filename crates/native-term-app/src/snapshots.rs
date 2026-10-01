@@ -96,6 +96,17 @@ fn snapshots() {
             );
         }
 
+        // the files window's "Choose Transfer Type"
+        let mut asked = crate::files_window::snapshot::transfer_type();
+        save(
+            &format!("files-type-{theme}"),
+            picture(egui::vec2(560.0, 360.0), dark, |ui| {
+                let skin = crate::looks::skin(ui.visuals());
+                egui::CentralPanel::default().frame(egui::Frame::NONE.fill(skin.palette.page)).show(ui, |_| {});
+                asked(ui.ctx());
+            }),
+        );
+
         // dialogs inside the main window, over a page standing for it
         let over = |name: &str, show: &mut dyn FnMut(&egui::Context)| {
             save(

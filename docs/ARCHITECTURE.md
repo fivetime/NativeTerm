@@ -4582,6 +4582,15 @@ maximize and close at the right), the title bar the main window's height
   come in. egui has collapsing headers, no tree. (`show_rows` places its
   rows by its ui's spacing: the views zero it before, not inside, or
   their rows drift from where it thinks they are, seen on Lingmo.)
+- **Text transfers** (2026-10-02): `transfer::Item::text` marks a file
+  to go as text: up, a copy with the server's line ends (LF) is sent
+  from the start; down, the file's lines get these (CR LF) once it is
+  all there; neither is continued after a break (the bytes differ). The
+  window decides it per file before the plan is kept (`files_mode`:
+  the mode, known extensions, the person's for-always choices in
+  `state.db`); an unknown one asks the window from the transfer's thread
+  (an event with a channel back, as ssh's questions do) and waits, a
+  cancel ending the wait. Only where the line ends differ (Windows).
 - **The files window's server facts** (2026-10-02): free space from
   `statvfs@openssh.com` (`Session::space`; an SFTP v3 extension OpenSSH
   has, absent elsewhere: then nothing is shown), latency as the

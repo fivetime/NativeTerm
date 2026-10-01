@@ -206,6 +206,12 @@ enum What {
     Refresh,
     LocalRefresh,
     Ask(Question),
+    /// A file whose type isn't known: text or binary? (Auto)
+    AskType {
+        name: String,
+        ext: String,
+        reply: Sender<Option<files_mode::Answer>>,
+    },
     /// A folder's subfolders, for a tree.
     RemoteTree {
         path: Vec<u8>,
@@ -447,11 +453,19 @@ enum FilesPart {
     Confirm,
     /// What may be done with files on the server.
     Chmod,
+    /// Text or binary, for a file Auto doesn't know.
+    TransferType,
 }
 
 impl FilesPart {
-    const ALL: [FilesPart; 5] =
-        [FilesPart::Sync, FilesPart::Question, FilesPart::NewFolder, FilesPart::Confirm, FilesPart::Chmod];
+    const ALL: [FilesPart; 6] = [
+        FilesPart::Sync,
+        FilesPart::Question,
+        FilesPart::NewFolder,
+        FilesPart::Confirm,
+        FilesPart::Chmod,
+        FilesPart::TransferType,
+    ];
 
     fn window(self) -> crate::part_window::PartWindow {
         let key = match self {
@@ -460,6 +474,7 @@ impl FilesPart {
             FilesPart::NewFolder => "files-new-folder",
             FilesPart::Confirm => "files-confirm",
             FilesPart::Chmod => "files-chmod",
+            FilesPart::TransferType => "files-type",
         };
         let sync = self == FilesPart::Sync;
         let owner = crate::window::Owner::Window(KEY.into());
@@ -478,6 +493,7 @@ impl crate::part_window::Parts for FilesWindow {
             FilesPart::NewFolder => self.new_folder_dialog(ctx),
             FilesPart::Confirm => self.confirm_dialog(ctx),
             FilesPart::Chmod => self.chmod_dialog(ctx),
+            FilesPart::TransferType => self.type_dialog(ctx),
         }
         // what it did shows in the files window
         self.ctx.request_repaint();
@@ -490,6 +506,7 @@ impl crate::part_window::Parts for FilesWindow {
             FilesPart::NewFolder => self.new_folder.is_some(),
             FilesPart::Confirm => self.confirm.is_some(),
             FilesPart::Chmod => self.chmod.is_some(),
+            FilesPart::TransferType => self.ask_type.is_some(),
         }
     }
 }
@@ -535,6 +552,8 @@ struct FilesWindow {
     bookmarks: files_bookmarks::Bookmarks,
     /// What may be done with files on the server: being asked.
     chmod: Option<files_chmod::Chmod>,
+    /// Text or binary: being asked (a transfer waits for it).
+    ask_type: Option<files_mode::TypeQuestion>,
 }
 
 impl FilesWindow {
@@ -572,6 +591,7 @@ impl FilesWindow {
             dock: files_dock::Dock::default(),
             bookmarks: files_bookmarks::Bookmarks::default(),
             chmod: None,
+            ask_type: None,
         }
     }
 
@@ -1034,6 +1054,13 @@ impl FilesWindow {
                     node.loading = false;
                 }
             }
+            What::AskType { name, ext, reply } => {
+                if let Some(old) = self.ask_type.take() {
+                    let _ = old.reply.send(None);
+                }
+                self.ask_type =
+                    Some(files_mode::TypeQuestion { name, ext, reply, text: false, always: false, all: false });
+            }
             What::Ask(question) => {
                 if let Some((_, old, _)) = self.question.take() {
                     let _ = old.reply.send(None);
@@ -1223,6 +1250,9 @@ impl FilesWindow {
         job.started = Instant::now();
         job.finished = None;
         let plan = Arc::clone(&job.plan);
+        let mode = files_mode::Mode::read(self.core());
+        let types = files_mode::chosen_types(self.core());
+        let (tx, ctx) = (self.tx.clone(), self.ctx.clone());
         let slots = self
             .tabs
             .iter()
@@ -1236,7 +1266,24 @@ impl FilesWindow {
                     // planned again from scratch (a pause while planning)
                     progress.total.store(0, Ordering::Relaxed);
                     progress.next.store(0, Ordering::Relaxed);
-                    plan_work(&sftp, &work, &progress)
+                    // and each file as text or binary (Auto may ask)
+                    plan_work(&sftp, &work, &progress).and_then(|mut items| {
+                        let ask = |name: &str, ext: &str| {
+                            let (reply, answer) = mpsc::channel();
+                            let what = What::AskType { name: name.to_string(), ext: ext.to_string(), reply };
+                            tx.send(Event { tab, what }).ok()?;
+                            ctx.request_repaint();
+                            // (a cancel meanwhile ends the wait)
+                            loop {
+                                match answer.recv_timeout(Duration::from_millis(250)) {
+                                    Ok(a) => return a,
+                                    Err(mpsc::RecvTimeoutError::Timeout) if !progress.stopped() => continue,
+                                    Err(_) => return None,
+                                }
+                            }
+                        };
+                        files_mode::decide(&mut items, mode, types, ask).map(|()| items)
+                    })
                 }
             };
             let result = items.and_then(|items| {
@@ -2255,6 +2302,8 @@ mod files_diff;
 mod files_dock;
 #[path = "files_list.rs"]
 mod files_list;
+#[path = "files_mode.rs"]
+mod files_mode;
 #[path = "files_pane.rs"]
 mod files_pane;
 

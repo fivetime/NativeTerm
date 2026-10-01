@@ -381,6 +381,7 @@ impl FilesWindow {
                 }
             });
             ui.label(egui::RichText::new("SFTP v3").font(mono).color(palette.weak));
+            self.mode_menu(ui, &palette);
         });
         if let Some(choice) = chosen {
             let id = self.tabs[self.active].id;
