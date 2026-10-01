@@ -250,7 +250,8 @@ macOS / Linux builds.
 Builds on this machine (VS 2026 Enterprise with the v143 build tools and
 Spectre libraries for v143 and v145 added): `nativeterm\build.ps1` in the
 fork (branch `nativeterm`) → `bin\x64\Release\ssh.exe`,
-`OpenSSH_for_Windows_10.2p1 Win32-OpenSSH-GitHub, LibreSSL 4.2.0`, 0 errors;
+`OpenSSH_10.2p1, LibreSSL 4.2.0` (the plain name since fork commit
+`5c1d6a970`, on every platform), 0 errors;
 it logged in to the test container and `ssh -G` resolves our configs.
 What the repo's own `Start-OpenSSHBuild` trips over here, and what the
 script does instead:
@@ -286,7 +287,8 @@ The same fork builds the same ssh on Linux: the `nativeterm` branch's
 `Makefile.in` lists `nativeterm/nt_zmodem.o` and `nt_drop.o` next to the
 other ssh objects, so `autoreconf -i && ./configure && make ssh` (with
 `autoconf`, `automake`, `libssl-dev`, `zlib1g-dev`) gives a `ssh` whose
-`-V` still says `OpenSSH_for_Windows_10.2p1` (the fork's banner; cosmetic).
+`-V` says `OpenSSH_10.2p1` (no platform in the name since `5c1d6a970`;
+servers are told `SSH-2.0-OpenSSH_10.2`).
 `nt_zmodem.c` is portable already (`posix_spawn`, pipes; `windows.h` only
 under `WINDOWS`). NativeTerm's `ssh_program()` now prefers `openssh/ssh`
 next to the running program on every platform (`openssh\ssh.exe` on

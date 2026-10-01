@@ -1048,6 +1048,10 @@
       `zmodem2`): pickers, progress, Esc cancels, `.ntpart` resume.
       Verified live against lrzsz installed on the spot (see
       `docs/RZSZ.md`)
+- [x] The fork's ssh names itself plainly (2026-10-02, fork `5c1d6a970`):
+      `OpenSSH_10.2p1` on every platform, no `OpenSSH_for_Windows` or
+      `Win32-OpenSSH-GitHub` (the Linux builds said so too); servers are
+      told `SSH-2.0-OpenSSH_10.2`
 - [x] rz / sz in ntplink sessions (Telnet, serial, raw): the same helper,
       with flow control both ways and every control character escaped
       (Telnet changes CR / NUL / 0xFF); Esc / Ctrl+C cancel through a
