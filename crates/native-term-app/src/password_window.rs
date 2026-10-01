@@ -9,9 +9,11 @@ use native_term_app::t;
 
 /// Asks the question `ticket` names (see `password_ask::answer`).
 pub fn open(ticket: u64, question: Question) {
+    // (the skin's title bar is in the window: as much higher)
+    let height = if question.can_save { 280.0 } else { 240.0 } + native_term_skin::TITLE_BAR;
     let viewport = egui::ViewportBuilder::default()
         .with_title(t!("password-ask-title"))
-        .with_inner_size([460.0, if question.can_save { 280.0 } else { 240.0 }])
+        .with_inner_size([460.0, height])
         .with_resizable(false)
         .with_minimize_button(false)
         .with_maximize_button(false)
@@ -27,10 +29,26 @@ pub fn open(ticket: u64, question: Question) {
         shown: false,
         answered: false,
     };
+    let viewport = native_term_skin::undecorated(viewport);
     crate::window::open_at_pointer(format!("password-{ticket}"), viewport, move |_| Box::new(window));
 }
 
-struct PasswordWindow {
+/// The window for a picture of it (`snapshots.rs`), answering nothing.
+#[cfg(test)]
+pub(crate) fn for_snapshot(question: Question) -> PasswordWindow {
+    PasswordWindow {
+        ticket: u64::MAX,
+        user: question.user.clone(),
+        question,
+        secret: "secret".into(),
+        save: true,
+        focused: true,
+        shown: false,
+        answered: true,
+    }
+}
+
+pub(crate) struct PasswordWindow {
     ticket: u64,
     question: Question,
     /// The user name, as the person may change it.
@@ -90,23 +108,39 @@ impl crate::window::Ui for PasswordWindow {
                 ui.ctx().set_theme(theme);
             }
         }
+        // the skin's title bar and edges (its close button gives up, as
+        // the system's did: see `Drop`)
+        let skin = crate::looks::skin(ui.visuals());
+        let title = t!("password-ask-title");
+        native_term_skin::TitleBar::new(&title).icon(crate::icons::KEY).show_window(ui, &skin);
+        native_term_skin::edges(ui.ctx(), &skin, false);
         let (enter, escape) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
-        let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(ui.visuals().panel_fill);
+        let frame = egui::Frame::NONE.inner_margin(14.0_f32).fill(skin.palette.page);
         egui::Panel::bottom("password-buttons").frame(frame).show_separator_line(false).show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button(t!("password-ask-skip")).on_hover_text(t!("password-ask-skip-hint")).clicked() {
-                    self.answer(PasswordAnswer::Skip);
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(t!("button-cancel")).clicked() || escape {
-                        self.answer(PasswordAnswer::Cancel);
-                    }
-                    let valid = self.user_is_valid();
-                    if ui.add_enabled(valid, egui::Button::new(t!("button-ok"))).clicked() || (enter && valid) {
-                        self.given();
-                    }
-                });
-            });
+            use native_term_skin::{Choice, Role};
+            let valid = self.user_is_valid();
+            let choices = [
+                Choice::new(t!("button-ok"), Role::Primary).enabled(valid),
+                Choice::new(t!("button-cancel"), Role::Plain),
+            ];
+            let mut skip = false;
+            let pressed = native_term_skin::footer(
+                ui,
+                &skin,
+                |ui| {
+                    let button = native_term_skin::button(ui, &skin, &t!("password-ask-skip"), Role::Plain, true);
+                    skip = button.on_hover_text(t!("password-ask-skip-hint")).clicked();
+                },
+                &choices,
+            );
+            if skip {
+                self.answer(PasswordAnswer::Skip);
+            } else if pressed == Some(1) || escape {
+                self.answer(PasswordAnswer::Cancel);
+            } else if pressed == Some(0) || (enter && valid) {
+                // (Enter in the field too)
+                self.given();
+            }
         });
         let frame = frame.inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(14) });
         egui::CentralPanel::default().frame(frame).show_inside(ui, |ui| {

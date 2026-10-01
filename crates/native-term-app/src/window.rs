@@ -1196,7 +1196,10 @@ impl Runner {
             Which::Extra(n) => {
                 let Some((_, _, pane)) = self.extras.iter_mut().find(|(m, _, _)| *m == n) else { return Ok(()) };
                 pane.paint(log, true)?;
-                if pane.ui.wants_close() {
+                // its own close button (the skin's title bar) is the
+                // system's: asked first, as `CloseRequested` is
+                let asked = std::mem::take(&mut pane.close_asked) && pane.ui.close_requested();
+                if asked || pane.ui.wants_close() {
                     self.close_extra(n);
                 }
             }

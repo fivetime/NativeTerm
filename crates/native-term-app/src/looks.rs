@@ -412,6 +412,52 @@ impl Tones {
     }
 }
 
+/// The skin every window is drawn with (`native-term-skin`): the
+/// look's colours, the window buttons' names in the person's language.
+#[must_use]
+pub fn skin(visuals: &egui::Visuals) -> native_term_skin::Skin {
+    let t = tones(visuals);
+    let tint = |x: Tint| native_term_skin::Tint { fill: x.fill, line: x.line, text: x.text };
+    native_term_skin::Skin {
+        palette: native_term_skin::Palette {
+            page: t.page,
+            bar: t.bar,
+            line: t.line,
+            text: t.text,
+            weak: t.weak,
+            danger: t.danger,
+            primary: t.primary,
+            primary_near: t.primary_near,
+            on_primary: t.on_primary,
+            card: t.card,
+            raised: t.raised,
+            tile: tint(t.tile),
+            backdrop: egui::Color32::from_black_alpha(if visuals.dark_mode { 140 } else { 90 }),
+        },
+        hints: native_term_skin::Hints {
+            minimize: native_term_app::t!("window-minimize"),
+            maximize: native_term_app::t!("window-maximize"),
+            restore: native_term_app::t!("window-restore"),
+            close: native_term_app::t!("window-close"),
+        },
+        order: button_order(),
+    }
+}
+
+/// Where a dialog's main button goes: first on Windows and KDE (OK
+/// Cancel), last on macOS and the GTK desktops (Cancel OK).
+fn button_order() -> native_term_skin::Order {
+    use native_term_skin::Order;
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_ascii_lowercase();
+        if desktop.split(':').any(|d| matches!(d, "kde" | "lxqt")) {
+            return Order::PrimaryFirst;
+        }
+    }
+    Order::platform()
+}
+
 /// The colours of the look chosen, as `visuals` has it (dark or light).
 #[must_use]
 pub fn tones(visuals: &egui::Visuals) -> Tones {

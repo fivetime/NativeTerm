@@ -1940,53 +1940,25 @@ impl App {
         let mut actions = Vec::new();
         // (the design's widths are the whole window's)
         let short = ui.available_width() + layout::RAIL < layout::SHORT_HEADER;
-        let (maximized, focused) = ui.input(|i| {
-            let window = i.viewport();
-            (window.maximized.unwrap_or(false), window.focused.unwrap_or(true))
-        });
-        let frame = layout::bar(tones, egui::Margin::symmetric(layout::TITLE_PAD, 0));
-        egui::Panel::top("header").exact_size(layout::TITLE_BAR).resizable(false).frame(frame).show_inside(ui, |ui| {
-            // the window is taken by the header: what is put into it
-            // afterwards is over this, and is what it is
-            let bar = ui.max_rect().expand2(egui::vec2(f32::from(layout::TITLE_PAD), 0.0));
-            let taken = ui.interact(bar, ui.id().with("title-bar"), egui::Sense::click_and_drag());
-            if taken.double_clicked() {
-                self.title_double_click(ui, maximized);
-            } else if taken.drag_started_by(egui::PointerButton::Primary) {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-            let mut caption = None;
-            ui.horizontal_centered(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                if cfg!(target_os = "macos") {
-                    caption = layout::caption_dots(ui, tones, focused);
-                    ui.add_space(6.0);
-                }
-                layout::header_tile(ui, tones, self.page.icon());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 8.0;
-                    if !cfg!(target_os = "macos") {
-                        caption = layout::caption_buttons(ui, tones, maximized);
-                    }
-                    if self.page == Page::Tree {
-                        self.header_buttons(ui, tones, short, &mut actions);
-                    }
-                    ui.add_space(4.0);
-                    // the title has what the buttons leave
-                    layout::header_title(ui, tones, &self.page.title(), ui.available_width());
-                });
-            });
-            match caption {
-                Some(layout::Caption::Minimize) => {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                }
-                Some(layout::Caption::Maximize | layout::Caption::Restore) => {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-                }
-                Some(layout::Caption::Close) => ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close),
-                None => {}
+        let maximized = ui.input(|i| i.viewport().maximized.unwrap_or(false));
+        // the skin's title bar, every window's: here with the page's
+        // title and icon, all three window buttons and the tree's own
+        let skin = crate::looks::skin(ui.visuals());
+        let title = self.page.title();
+        let bar = native_term_skin::TitleBar::new(&title)
+            .icon(self.page.icon())
+            .buttons(native_term_skin::Buttons::ALL)
+            .own_double_click()
+            .line_before_buttons();
+        let tree = self.page == Page::Tree;
+        let shown = bar.show_window_with(ui, &skin, |ui| {
+            if tree {
+                self.header_buttons(ui, tones, short, &mut actions);
             }
         });
+        if shown.double_clicked {
+            self.title_double_click(ui, maximized);
+        }
         actions
     }
 
@@ -2006,44 +1978,8 @@ impl App {
     /// made larger or smaller. Over everything else, so that what is
     /// under a band is not pressed with it. Not while the window fills
     /// the screen.
-    fn window_frame(&self, ui: &egui::Ui, tones: &Tones) {
-        if cfg!(target_os = "macos") {
-            return;
-        }
-        let filling = ui.input(|i| {
-            let window = i.viewport();
-            window.maximized.unwrap_or(false) || window.fullscreen.unwrap_or(false)
-        });
-        if filling {
-            return;
-        }
-        let ctx = ui.ctx();
-        let whole = ctx.content_rect();
-        let over = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("window-frame"));
-        let line = egui::Stroke::new(1.0_f32, tones.line);
-        ctx.layer_painter(over).rect_stroke(whole, 0.0, line, egui::StrokeKind::Inside);
-        let band = layout::FRAME_BAND;
-        let bands = [
-            ("n", egui::Rect::from_min_max(whole.min, egui::pos2(whole.right(), whole.top() + band))),
-            ("s", egui::Rect::from_min_max(egui::pos2(whole.left(), whole.bottom() - band), whole.max)),
-            ("w", egui::Rect::from_min_max(whole.min, egui::pos2(whole.left() + band, whole.bottom()))),
-            ("e", egui::Rect::from_min_max(egui::pos2(whole.right() - band, whole.top()), whole.max)),
-        ];
-        for (name, rect) in bands {
-            egui::Area::new(egui::Id::new(("window-frame", name)))
-                .order(egui::Order::Foreground)
-                .fixed_pos(rect.min)
-                .constrain(false)
-                .show(ctx, |ui| {
-                    let (_, edge) = ui.allocate_exact_size(rect.size(), egui::Sense::drag());
-                    let to = edge.hover_pos().and_then(|at| layout::frame_hit(at - whole.min, whole.size()));
-                    let Some(to) = to else { return };
-                    ui.ctx().set_cursor_icon(layout::frame_cursor(to));
-                    if edge.drag_started_by(egui::PointerButton::Primary) {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::BeginResize(to));
-                    }
-                });
-        }
+    fn window_frame(&self, ui: &egui::Ui) {
+        native_term_skin::edges(ui.ctx(), &crate::looks::skin(ui.visuals()), true);
     }
 
     /// The tree's buttons, from the right: a narrow window has their
@@ -3163,7 +3099,7 @@ impl crate::window::Ui for App {
             }
         }
         self.settings_window(ctx);
-        self.window_frame(ui, &tones);
+        self.window_frame(ui);
         self.show_dialog(ctx);
         self.show_wizard(ctx);
         // over everything else, in the corner

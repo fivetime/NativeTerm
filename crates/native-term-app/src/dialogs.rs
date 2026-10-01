@@ -935,32 +935,32 @@ impl ConfirmDelete {
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
-        let mut outcome = Outcome::Open;
-        let mut open = true;
-        egui::Window::new(t!("delete-title"))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.label(t!("delete-question", label = self.label.as_str(), alias = self.alias.as_str()));
-                ui.weak(t!("delete-backup-note"));
-                if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
-                }
-                ui.horizontal(|ui| {
-                    if ui.button(t!("button-delete")).clicked() {
-                        outcome = Outcome::Submit(());
+        use native_term_skin::{Choice, Message, Notice, Role};
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let title = t!("delete-title");
+        let shown = Message::new("delete-host", &title)
+            .icon(crate::icons::DELETE)
+            .notice(Notice::Warning)
+            .choice(Choice::new(t!("button-delete"), Role::Danger))
+            .choice(Choice::new(t!("button-cancel"), Role::Plain))
+            .show(
+                ctx,
+                &skin,
+                |ui| {
+                    ui.label(t!("delete-question", label = self.label.as_str(), alias = self.alias.as_str()));
+                    ui.weak(t!("delete-backup-note"));
+                    if let Some(error) = &self.error {
+                        ui.colored_label(skin.palette.danger, error);
                     }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
-            });
-        if !open {
-            outcome = Outcome::Cancel;
+                },
+                |_| {},
+            );
+        match shown.pressed {
+            Some(0) => Outcome::Submit(()),
+            Some(_) => Outcome::Cancel,
+            None if shown.closed => Outcome::Cancel,
+            None => Outcome::Open,
         }
-        outcome
     }
 }
 

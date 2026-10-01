@@ -2037,6 +2037,7 @@ dependencies = [
  "native-term-platform",
  "native-term-session",
  "native-term-sftp",
+ "native-term-skin",
  "native-term-wezterm",
  "png",
  "rusqlite",
@@ -2152,6 +2153,13 @@ dependencies = [
  "vte",
  "windows 0.62.2",
  "zmodem2",
+]
+
+[[package]]
+name = "native-term-skin"
+version = "0.1.0"
+dependencies = [
+ "egui",
 ]
 
 [[package]]

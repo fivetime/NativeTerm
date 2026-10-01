@@ -637,6 +637,20 @@
       keeps the title fixed)
 - [x] Light / dark / system theme (title bar included), Fluent/MDL2 icons,
       nested folders in the tree, status dots on hosts
+- [ ] One skin for every window (`native-term-skin`, 2026-10-01; see
+      ARCHITECTURE "One skin for every window"): title bar, window
+      buttons per platform, edges, real modal dialogs, message dialogs
+      with a sign, a row of buttons in the platform's order
+  - [x] The skin, the main window's header and edges on it, a window's
+        own close button closes it, the password window and the delete
+        confirmation moved to it; pictures drawn off the screen
+  - [ ] The other windows of their own (host key, files, find,
+        quotation, tab title)
+  - [ ] The dialogs inside the main window (options, import, credential
+        sets, keys, send, wizard, cleanup, server sessions, the
+        confirmations), then the files window's
+  - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
+        settled
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

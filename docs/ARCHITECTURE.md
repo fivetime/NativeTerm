@@ -4494,6 +4494,51 @@ All UI surfaces invoke one shared app-level command layer
     (`DWMWA_WINDOW_CORNER_PREFERENCE` for the drawer's menus; the
     floating button draws its own round shape).
 
+### One skin for every window
+
+Every window NativeTerm draws gets the same title bar, window buttons,
+edges, dialogs and buttons from `native-term-skin`, as SkinUI's
+`CSkinDialog` gave a Win32 program one (the author's own programs used
+it): a window says what it is and draws its content, the rest is the
+skin's. Decided with the person on 2026-10-01: the window buttons as each
+platform has them (macOS's three dots at the left, the others' minimize,
+maximize and close at the right), the title bar the main window's height
+(56) unless a window says otherwise.
+
+- **Title bar** (`TitleBar`): title, icon in its tile, which buttons,
+  height; a window of its own is moved by it, double-clicked it is
+  maximized where it can be (the main window asks the system first, as
+  before), its buttons send egui's viewport commands. The main window's
+  header is one, with the tree's buttons in it.
+- **A window of its own** is made `undecorated` (no system title bar; on
+  macOS the system frame stays, see-through) and its `edges` are the
+  skin's: a line around it, bands to resize it by (Chromium's numbers),
+  none while maximized. Its own close button is the system's: the event
+  loop asks the window (`Ui::close_requested`) and closes it, which it
+  did not do before for windows other than the main one.
+- **Modal dialogs inside a window** (`Modal`, `Message`): egui's `Modal`
+  underneath (a backdrop that takes the clicks meant for what is behind;
+  until now a dialog was modal by convention only), the skin's title
+  bar, Escape and the close button give it up, a click beside it does
+  not. `Message` adds what SkinUI's `MsgBox` / `Confirm` / `ShowLoading`
+  had: a large sign for what is said (information, warning, error, done,
+  question; drawn, no font needed), the program's own content at its
+  right, and a row of buttons (`footer`) with what goes at its left
+  ("Don't ask again", Skip).
+- **Buttons in a row**: the one that does what the dialog is for is
+  coloured (`Role::Primary`, or `Danger` for what takes something away)
+  and is Enter; the platform's order: first on Windows, KDE and LXQt (OK
+  Cancel), last on macOS and the GTK desktops (Cancel OK).
+- **Colours** come from the look chosen (`looks::skin`, the main
+  window's `Tones`), the window buttons' names from the person's
+  language.
+- Pictures without opening anything on the desktop: `snapshots.rs`
+  draws windows with the software renderer into PNGs (dark and light),
+  `NATIVETERM_SNAPSHOTS=<folder> cargo test -p native-term-app --bin
+  nativeterm snapshots -- --ignored`.
+- Done so far: the main window's header and edges, the password window,
+  the delete confirmation. The other windows follow (ROADMAP).
+
 ### Terminal tabs
 Rendering belongs to Windows Terminal, but each tab can be opened with:
 - `--profile <name>` — a Windows Terminal profile (font, colors, opacity,
@@ -5052,6 +5097,9 @@ program owns.
   `Adwaita`), and LXQt's palette is in no other place
 - `native-term-wezterm` — WezTerm as a `TerminalBackend`, through
   `wezterm cli` (Linux first; builds everywhere)
+- `native-term-skin` — one look for every window (below, "One skin for
+  every window"); egui only, nothing of NativeTerm's, so that it can
+  become a library of its own once it has settled
 - `native-term-app` — the `egui` GUI. Off Windows it builds against
   `native_term_platform::stub::NoTerminal` (no terminal driven yet) and
   a stand-in Terminal profile (`terminal_profile_stub.rs`); everything
