@@ -68,14 +68,10 @@ pub struct Palette {
     /// The close button under the pointer (red 500); a button that takes
     /// something away.
     pub danger: egui::Color32,
-    /// The button that does what a dialog is for (`bg-blue-600`), the
-    /// same under the pointer (`hover:bg-blue-500`), and what is on it.
+    /// The button that does what a dialog is for (`bg-blue-600`), and
+    /// what is on it; the other buttons are the theme's.
     pub primary: egui::Color32,
-    pub primary_near: egui::Color32,
     pub on_primary: egui::Color32,
-    /// The other buttons (`--bg-card`), the same under the pointer.
-    pub card: egui::Color32,
-    pub raised: egui::Color32,
     /// The icon's tile in the title bar.
     pub tile: Tint,
     /// Over what is behind a modal dialog.

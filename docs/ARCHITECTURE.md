@@ -4529,6 +4529,12 @@ maximize and close at the right), the title bar the main window's height
   coloured (`Role::Primary`, or `Danger` for what takes something away)
   and is Enter; the platform's order: first on Windows, KDE and LXQt (OK
   Cancel), last on macOS and the GTK desktops (Cancel OK).
+- **Controls are egui's own** (the person's rule: what egui has is not
+  made again): buttons, fields, check boxes, progress bars are egui's,
+  given their look by the theme (`looks.rs` paints egui's visuals from
+  the same colours). The skin makes only what egui has no part for: a
+  window's frame and buttons, the platform's rules, a dialog's sign; a
+  dialog's button is egui's `Button`, sized and coloured.
 - **Colours** come from the look chosen (`looks::skin`, the main
   window's `Tones`), the window buttons' names from the person's
   language.

@@ -116,37 +116,21 @@ impl Order {
 const BUTTON_WIDTH: f32 = 88.0;
 const BUTTON_HEIGHT: f32 = 32.0;
 
-/// A dialog's button, as the row has them: for one at the row's left.
+/// A dialog's button, as the row has them (for one at the row's left
+/// too): egui's own, as large as the row's, the primary one and the one
+/// that takes something away in their colours; the others as the theme
+/// has buttons.
 pub fn button(ui: &mut egui::Ui, skin: &Skin, text: &str, role: Role, enabled: bool) -> egui::Response {
     let p = &skin.palette;
-    let (fill, near, color, stroke) = match role {
-        Role::Primary => (p.primary, p.primary_near, p.on_primary, egui::Color32::TRANSPARENT),
-        Role::Danger => (p.danger, p.danger, egui::Color32::WHITE, egui::Color32::TRANSPARENT),
-        Role::Plain => (p.card, p.raised, p.text, p.line),
+    let colored = |fill: egui::Color32, on: egui::Color32| {
+        egui::Button::new(egui::RichText::new(text).color(on)).fill(fill).stroke(egui::Stroke::NONE)
     };
-    let galley = ui.painter().layout_no_wrap(text.to_string(), egui::FontId::proportional(14.0), color);
-    let width = (galley.size().x + 32.0).max(BUTTON_WIDTH);
-    let sense = if enabled { egui::Sense::click() } else { egui::Sense::hover() };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, BUTTON_HEIGHT), sense);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, text));
-    if ui.is_rect_visible(rect) {
-        let fill = if response.hovered() { near } else { fill };
-        let alpha = if enabled { 255 } else { 110 };
-        let painter = ui.painter();
-        painter.rect_filled(rect, 8.0, thin(fill, alpha.min(fill.a())));
-        painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.0_f32, stroke), egui::StrokeKind::Inside);
-        if response.has_focus() {
-            painter.rect_stroke(
-                rect.expand(2.0),
-                10.0,
-                egui::Stroke::new(1.0_f32, p.primary),
-                egui::StrokeKind::Outside,
-            );
-        }
-        let at = rect.center() - galley.size() / 2.0;
-        painter.galley(at, galley, thin(color, alpha));
-    }
-    response
+    let button = match role {
+        Role::Primary => colored(p.primary, p.on_primary),
+        Role::Danger => colored(p.danger, egui::Color32::WHITE),
+        Role::Plain => egui::Button::new(text),
+    };
+    ui.add_enabled(enabled, button.min_size(egui::vec2(BUTTON_WIDTH, BUTTON_HEIGHT)).corner_radius(8.0))
 }
 
 /// A button of the row: its text, what it is for, whether it can be
