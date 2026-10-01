@@ -705,6 +705,27 @@
         the main window. Seen on Lingmo: both as they were
   - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
         settled
+- [ ] The files window's new design (2026-10-02), after the person's
+      page `nexus-sftp-workstation.html`: a session strip on each side
+      (numbered, the side's colour), a path of crumbs to click or type,
+      a filter, bookmarks, the tree and a list or a grid, each side's
+      free space, a rail between the sides (upload, download, linked
+      tabs, diff, sync), the queue / log / errors below, a status bar
+      (latency, SFTP version, key type, the transfer mode). The lists,
+      the grid and the trees are the skin's, so the other windows get
+      them too. The person's choices: Inter and JetBrains Mono bundled,
+      the icon sets kept, the server's free space (`statvfs@openssh.com`),
+      latency from our own requests, a diff tool, a chmod dialog, the
+      transfer mode with SecureCRT's "Choose Transfer Type" dialog
+  - [x] Inter and JetBrains Mono bundled, the weights as families
+  - [x] The window drawn off the screen with made-up sessions
+        (`files_snapshot.rs`), to compare each step with
+  - [x] Both lists on the skin's `ListView` and `Selection`: columns
+        sorted by a click (folders first), the keys (arrows, Home / End,
+        pages, Shift, Ctrl+A, typing a name, Enter), the design's rows
+        (the local side's chosen rows blue, the server's green, icons
+        tinted by kind, sizes, modes and dates in JetBrains Mono, a type
+        column here)
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

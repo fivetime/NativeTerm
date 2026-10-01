@@ -10,8 +10,9 @@
 //! in the tab's current folder. Everything that touches the network or
 //! the disk runs on a thread; the window only shows what comes back.
 
+use native_term_skin::{Selection, Sort};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +29,6 @@ use crate::icons;
 
 pub const RED: egui::Color32 = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
 pub const GREEN: egui::Color32 = egui::Color32::from_rgb(0x2e, 0xa0, 0x43);
-const ROW: f32 = 22.0;
 /// Log lines kept per session.
 const LOG_LINES: usize = 200;
 
@@ -141,8 +141,14 @@ struct LocalRow {
 /// One line of a list, whichever side: `key` identifies it for selection.
 struct Line {
     key: Vec<u8>,
+    /// Its row's place in the side's rows (the list shows them sorted).
+    index: usize,
     name: String,
     glyph: char,
+    dir: bool,
+    kind: files_list::Kind,
+    /// The local side's type column.
+    kind_text: String,
     size: Option<u64>,
     modified: Option<u64>,
     mode: Option<String>,
@@ -324,8 +330,8 @@ struct Remote {
     rows: Vec<RemoteRow>,
     listing: bool,
     error: Option<String>,
-    selected: HashSet<Vec<u8>>,
-    anchor: Option<usize>,
+    selected: Selection<Vec<u8>>,
+    sort: Sort,
     renaming: Option<(Vec<u8>, String)>,
     names: Names,
     /// Drawn as connected without a connection: the pictures drawn off
@@ -346,8 +352,8 @@ struct Local {
     path_text: String,
     rows: Vec<LocalRow>,
     error: Option<String>,
-    selected: HashSet<Vec<u8>>,
-    anchor: Option<usize>,
+    selected: Selection<Vec<u8>>,
+    sort: Sort,
     renaming: Option<(Vec<u8>, String)>,
 }
 
@@ -636,8 +642,8 @@ impl FilesWindow {
                     rows: Vec::new(),
                     listing: false,
                     error: None,
-                    selected: HashSet::new(),
-                    anchor: None,
+                    selected: Selection::default(),
+                    sort: NAME_SORT,
                     renaming: None,
                     names,
                     pictured: false,
@@ -647,8 +653,8 @@ impl FilesWindow {
                     path_text: String::new(),
                     rows: Vec::new(),
                     error: None,
-                    selected: HashSet::new(),
-                    anchor: None,
+                    selected: Selection::default(),
+                    sort: NAME_SORT,
                     renaming: None,
                 },
                 remote_tree: Tree::default(),
@@ -799,7 +805,6 @@ impl FilesWindow {
     fn go(&mut self, id: u64, path: Vec<u8>) {
         if let Some(tab) = self.tab(id) {
             tab.remote.selected.clear();
-            tab.remote.anchor = None;
             tab.remote.renaming = None;
         }
         self.list(id, path);
@@ -813,7 +818,6 @@ impl FilesWindow {
     fn list_local(&mut self, id: u64, path: Option<PathBuf>) {
         if let Some(tab) = self.tab(id) {
             tab.local.selected.clear();
-            tab.local.anchor = None;
             tab.local.renaming = None;
         }
         self.spawn(id, move || {
@@ -856,8 +860,8 @@ impl FilesWindow {
                             r.path = path;
                             r.rows = rows;
                             r.error = None;
-                            let keys: HashSet<&Vec<u8>> = r.rows.iter().map(|x| &x.entry.name).collect();
-                            r.selected.retain(|n| keys.contains(n));
+                            let keys: Vec<Vec<u8>> = r.rows.iter().map(|x| x.entry.name.clone()).collect();
+                            r.selected.keep(&keys);
                             expand = Some(r.path.clone());
                         }
                         // the connection went: say so, offer to reconnect
@@ -1584,17 +1588,25 @@ impl FilesWindow {
             .local
             .rows
             .iter()
-            .map(|r| Line {
+            .enumerate()
+            .map(|(index, r)| Line {
                 key: local_key(r),
+                index,
                 name: r.name.clone(),
                 glyph: if r.dir { icons::FOLDER } else { icons::DOCUMENT },
+                dir: r.dir,
+                kind: files_list::kind(&r.name, r.dir, false),
+                kind_text: files_list::type_text(&r.name, r.dir),
                 size: (!r.dir).then_some(r.size).flatten(),
                 modified: r.modified,
                 mode: None,
             })
             .collect();
+        let lines = sorted(lines, tab.local.sort, false);
+        let keyboard = !self.remote_focus;
         let mut local = std::mem::replace(&mut self.tabs[self.active].local, empty_local());
-        let out = list(ui, "local-list", &lines, &mut local.selected, &mut local.anchor, &mut local.renaming, false);
+        let side = files_list::Side { salt: "local-list", remote: false, keyboard };
+        let out = list(ui, side, &lines, &mut local.selected, &mut local.renaming, &mut local.sort);
         self.tabs[self.active].local = local;
         if out.clicked {
             self.remote_focus = false;
@@ -1866,8 +1878,10 @@ impl FilesWindow {
             .remote
             .rows
             .iter()
-            .map(|r| Line {
+            .enumerate()
+            .map(|(index, r)| Line {
                 key: r.entry.name.clone(),
+                index,
                 name: r.name.clone(),
                 glyph: if r.dir {
                     icons::FOLDER
@@ -1876,19 +1890,25 @@ impl FilesWindow {
                 } else {
                     icons::DOCUMENT
                 },
+                dir: r.dir,
+                kind: files_list::kind(&r.name, r.dir, r.entry.attrs.is_symlink()),
+                kind_text: String::new(),
                 size: if r.dir { None } else { r.entry.attrs.size },
                 modified: r.entry.attrs.mtime().map(u64::from),
                 mode: r.entry.attrs.permissions.map(mode_text),
             })
             .collect();
+        let lines = sorted(lines, tab.remote.sort, true);
+        let keyboard = self.remote_focus;
         let mut remote = std::mem::take(&mut self.tabs[self.active].remote.selected);
-        let mut anchor = self.tabs[self.active].remote.anchor;
+        let mut sort = self.tabs[self.active].remote.sort;
         let mut renaming = self.tabs[self.active].remote.renaming.take();
-        let out = list(ui, "remote-list", &lines, &mut remote, &mut anchor, &mut renaming, true);
+        let side = files_list::Side { salt: "remote-list", remote: true, keyboard };
+        let out = list(ui, side, &lines, &mut remote, &mut renaming, &mut sort);
         {
             let r = &mut self.tabs[self.active].remote;
             r.selected = remote;
-            r.anchor = anchor;
+            r.sort = sort;
             r.renaming = renaming;
         }
         self.remote_rect = Some(out.response.rect);
@@ -2270,9 +2290,10 @@ impl FilesWindow {
         {
             return;
         }
-        let (f5, back, delete, f2, enter) = ctx.input(|i| {
+        // (Enter, the arrows, typing: the list's own, see `files_list`)
+        let (f5, back, delete, f2) = ctx.input(|i| {
             let k = |key| i.key_pressed(key);
-            (k(egui::Key::F5), k(egui::Key::Backspace), k(egui::Key::Delete), k(egui::Key::F2), k(egui::Key::Enter))
+            (k(egui::Key::F5), k(egui::Key::Backspace), k(egui::Key::Delete), k(egui::Key::F2))
         });
         let id = self.tabs[self.active].id;
         if self.remote_focus {
@@ -2299,9 +2320,6 @@ impl FilesWindow {
                 let row = self.tabs[self.active].remote.rows[i].clone();
                 self.tabs[self.active].remote.renaming = Some((row.entry.name.clone(), row.name));
             }
-            if let (true, Some(i)) = (enter, single) {
-                self.open_remote(id, i);
-            }
         } else {
             let tab = &self.tabs[self.active];
             let single = tab
@@ -2322,9 +2340,6 @@ impl FilesWindow {
             if let (true, Some(i)) = (f2, single) {
                 let row = self.tabs[self.active].local.rows[i].clone();
                 self.tabs[self.active].local.renaming = Some((local_key(&row), row.name));
-            }
-            if let (true, Some(i)) = (enter, single) {
-                self.open_local(id, i);
             }
         }
     }
@@ -2465,261 +2480,14 @@ struct Listed {
     action: Option<(usize, Action)>,
     renamed: Option<(Vec<u8>, String)>,
     drag: bool,
+    /// The row dragged (its place in the list).
+    drag_row: Option<usize>,
     dropped: Option<Arc<Dragged>>,
 }
 
-/// A file list: selection (Ctrl, Shift), double-click, right-click menu,
-/// inline rename, dragging out and dropping in.
-fn list(
-    ui: &mut egui::Ui,
-    salt: &str,
-    lines: &[Line],
-    selected: &mut HashSet<Vec<u8>>,
-    anchor: &mut Option<usize>,
-    renaming: &mut Option<(Vec<u8>, String)>,
-    remote: bool,
-) -> Listed {
-    let visuals = ui.visuals().clone();
-    // a narrow list keeps the name readable: permissions go first, then
-    // the date, then the size
-    let width = ui.available_width();
-    let mut columns = [80.0, 130.0, if remote { 104.0 } else { 0.0 }];
-    for i in [2, 1, 0] {
-        if width - columns.iter().sum::<f32>() < 180.0 {
-            columns[i] = 0.0;
-        }
-    }
-    let [size_w, date_w, mode_w] = columns;
-    let area = ui.available_rect_before_wrap();
-    let response = ui.interact(area, ui.id().with((salt, "drop")), egui::Sense::hover());
-    let dropped = response.dnd_release_payload::<Dragged>();
-    let hovered_drop = response.dnd_hover_payload::<Dragged>().is_some_and(|d| d.from_remote != remote);
-    if hovered_drop {
-        ui.painter().rect_stroke(area, 4.0, egui::Stroke::new(2.0_f32, GREEN), egui::StrokeKind::Inside);
-    }
-    let mut out = Listed { response, clicked: false, open: None, action: None, renamed: None, drag: false, dropped };
-    // header, placed like the rows' columns
-    {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 18.0), egui::Sense::hover());
-        let (font, color, y) = (egui::TextStyle::Body.resolve(ui.style()), visuals.weak_text_color(), rect.center().y);
-        let name_right = rect.right() - size_w - date_w - mode_w;
-        let painter = ui.painter_at(rect);
-        painter.text(
-            egui::pos2(rect.left() + 28.0, y),
-            egui::Align2::LEFT_CENTER,
-            t!("files-col-name"),
-            font.clone(),
-            color,
-        );
-        if size_w > 0.0 {
-            painter.text(
-                egui::pos2(name_right + size_w - 8.0, y),
-                egui::Align2::RIGHT_CENTER,
-                t!("files-col-size"),
-                font.clone(),
-                color,
-            );
-        }
-        if date_w > 0.0 {
-            painter.text(
-                egui::pos2(name_right + size_w + 8.0, y),
-                egui::Align2::LEFT_CENTER,
-                t!("files-col-modified"),
-                font.clone(),
-                color,
-            );
-        }
-        if mode_w > 0.0 {
-            painter.text(
-                egui::pos2(name_right + size_w + date_w + 4.0, y),
-                egui::Align2::LEFT_CENTER,
-                t!("files-col-mode"),
-                font,
-                color,
-            );
-        }
-    }
-    ui.separator();
-    let modifiers = ui.input(|i| i.modifiers);
-    egui::ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).show_rows(
-        ui,
-        ROW,
-        lines.len(),
-        |ui, range| {
-            for i in range {
-                let line = &lines[i];
-                let is_selected = selected.contains(&line.key);
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW), egui::Sense::click_and_drag());
-                // for screen readers and UI automation: a selectable item named after the file
-                response.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, is_selected, &line.name)
-                });
-                if is_selected {
-                    ui.painter().rect_filled(rect, 3.0, visuals.selection.bg_fill);
-                } else if response.hovered() {
-                    ui.painter().rect_filled(rect, 3.0, visuals.widgets.hovered.weak_bg_fill);
-                }
-                let color = if is_selected { visuals.selection.stroke.color } else { visuals.text_color() };
-                let font = egui::TextStyle::Body.resolve(ui.style());
-                let y = rect.center().y;
-                let painter = ui.painter_at(rect);
-                painter.text(
-                    egui::pos2(rect.left() + 6.0, y),
-                    egui::Align2::LEFT_CENTER,
-                    line.glyph,
-                    font.clone(),
-                    color,
-                );
-                let name_right = rect.right() - size_w - date_w - mode_w;
-                let name_rect = egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + 28.0, rect.top()),
-                    egui::pos2(name_right - 8.0, rect.bottom()),
-                );
-                if renaming.as_ref().is_some_and(|(k, _)| *k == line.key) {
-                    let (_, text) = renaming.as_mut().expect("renaming");
-                    let edit = ui.put(name_rect, egui::TextEdit::singleline(text));
-                    // the focus once, when renaming starts (taken every frame,
-                    // the field would never give it up)
-                    let started = egui::Id::new((salt, "renaming"));
-                    let fresh = ui.data_mut(|d| {
-                        let fresh = d.get_temp::<Vec<u8>>(started).as_ref() != Some(&line.key);
-                        d.insert_temp(started, line.key.clone());
-                        fresh
-                    });
-                    if fresh {
-                        edit.request_focus();
-                    } else if edit.lost_focus() {
-                        // Enter or a click elsewhere renames; Esc doesn't
-                        let (key, text) = renaming.take().expect("renaming");
-                        ui.data_mut(|d| d.remove::<Vec<u8>>(started));
-                        let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                        if !cancelled && !text.trim().is_empty() && text != line.name {
-                            out.renamed = Some((key, text));
-                        }
-                    }
-                } else {
-                    ui.painter_at(name_rect).text(
-                        egui::pos2(name_rect.left(), y),
-                        egui::Align2::LEFT_CENTER,
-                        &line.name,
-                        font.clone(),
-                        color,
-                    );
-                }
-                if let (Some(size), true) = (line.size, size_w > 0.0) {
-                    painter.text(
-                        egui::pos2(name_right + size_w - 8.0, y),
-                        egui::Align2::RIGHT_CENTER,
-                        size_text(size),
-                        font.clone(),
-                        color,
-                    );
-                }
-                if let (Some(m), true) = (line.modified, date_w > 0.0) {
-                    painter.text(
-                        egui::pos2(name_right + size_w + 8.0, y),
-                        egui::Align2::LEFT_CENTER,
-                        native_term_os::time::local_date_time(m),
-                        font.clone(),
-                        color,
-                    );
-                }
-                if let (Some(mode), true) = (&line.mode, mode_w > 0.0) {
-                    let mono = egui::TextStyle::Monospace.resolve(ui.style());
-                    painter.text(
-                        egui::pos2(name_right + size_w + date_w + 4.0, y),
-                        egui::Align2::LEFT_CENTER,
-                        mode,
-                        mono,
-                        color,
-                    );
-                }
-
-                if response.clicked() {
-                    out.clicked = true;
-                    click(lines, i, modifiers, selected, anchor);
-                }
-                if response.double_clicked() {
-                    out.open = Some(i);
-                }
-                if response.drag_started() {
-                    if !is_selected {
-                        *selected = std::iter::once(line.key.clone()).collect();
-                        *anchor = Some(i);
-                    }
-                    out.drag = true;
-                    out.response = response.clone();
-                }
-                if response.secondary_clicked() {
-                    out.clicked = true;
-                    if !is_selected {
-                        *selected = std::iter::once(line.key.clone()).collect();
-                        *anchor = Some(i);
-                    }
-                }
-                response.context_menu(|ui| {
-                    let many = selected.len() > 1;
-                    let mut item = |ui: &mut egui::Ui, text: String, action: Action| {
-                        if ui.button(text).clicked() {
-                            out.action = Some((i, action));
-                            ui.close();
-                        }
-                    };
-                    item(ui, format!("{} {}", icons::OPEN, t!("files-open")), Action::Open);
-                    if remote {
-                        item(ui, format!("{} {}", icons::DOWNLOAD, t!("files-download-to-local")), Action::Transfer);
-                        if !many && line.glyph != icons::FOLDER {
-                            item(ui, format!("{} {}", icons::EDIT, t!("files-edit")), Action::Edit);
-                        }
-                    } else {
-                        item(ui, format!("{} {}", t!("files-upload-to-remote"), icons::UPLOAD), Action::Transfer);
-                    }
-                    ui.separator();
-                    if !many {
-                        item(ui, format!("{} {}", icons::RENAME, t!("files-rename")), Action::Rename);
-                    }
-                    item(ui, t!("files-copy-path"), Action::CopyPath);
-                    ui.separator();
-                    if ui
-                        .button(egui::RichText::new(format!("{} {}", icons::DELETE, t!("files-delete"))).color(RED))
-                        .clicked()
-                    {
-                        out.action = Some((i, Action::Delete));
-                        ui.close();
-                    }
-                });
-            }
-        },
-    );
-    out
-}
-
-fn click(
-    lines: &[Line],
-    i: usize,
-    modifiers: egui::Modifiers,
-    selected: &mut HashSet<Vec<u8>>,
-    anchor: &mut Option<usize>,
-) {
-    let key = lines[i].key.clone();
-    if modifiers.shift {
-        let from = anchor.unwrap_or(i);
-        let (a, b) = (from.min(i), from.max(i));
-        if !modifiers.command {
-            selected.clear();
-        }
-        selected.extend(lines[a..=b].iter().map(|l| l.key.clone()));
-    } else if modifiers.command {
-        if !selected.remove(&key) {
-            selected.insert(key);
-        }
-        *anchor = Some(i);
-    } else {
-        *selected = std::iter::once(key).collect();
-        *anchor = Some(i);
-    }
-}
+#[path = "files_list.rs"]
+mod files_list;
+use files_list::list;
 
 #[cfg(test)]
 #[path = "files_snapshot.rs"]
@@ -2891,11 +2659,21 @@ fn empty_local() -> Local {
         path_text: String::new(),
         rows: Vec::new(),
         error: None,
-        selected: HashSet::new(),
-        anchor: None,
+        selected: Selection::default(),
+        sort: NAME_SORT,
         renaming: None,
     }
 }
+
+/// A list as a side is sorted.
+fn sorted(lines: Vec<Line>, sort: Sort, remote: bool) -> Vec<Line> {
+    let order = files_list::order(&lines, sort, remote);
+    let mut lines: Vec<Option<Line>> = lines.into_iter().map(Some).collect();
+    order.into_iter().filter_map(|i| lines[i].take()).collect()
+}
+
+/// By name, A to Z: how a side starts.
+const NAME_SORT: Sort = Sort { column: 0, descending: false };
 
 /// A local row's key (its path, as bytes).
 fn local_key(row: &LocalRow) -> Vec<u8> {

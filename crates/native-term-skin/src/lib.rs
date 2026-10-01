@@ -21,7 +21,9 @@ mod caption;
 mod dialog;
 pub mod font;
 mod frame;
+mod list;
 mod modal;
+mod selection;
 mod tabs;
 mod title;
 
@@ -29,7 +31,9 @@ pub use caption::{caption_buttons, caption_dots, Buttons, Caption};
 pub use dialog::{body, button, footer, Choice, Message, MessageShown, Notice, Order, Role};
 pub use font::{font, Weight};
 pub use frame::{edges, frame_cursor, frame_hit, FRAME_BAND, FRAME_CORNER};
+pub use list::{Cell, Column, ListShown, ListView, Sort, Width};
 pub use modal::{as_window, close_asked, room, set_room, Modal, ModalShown};
+pub use selection::{Keyed, Selection};
 pub use tabs::{rail_gap, Action, Style, Tab, Tabs, TabsShown, RAIL};
 pub use title::{TitleBar, TitleShown};
 

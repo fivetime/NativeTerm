@@ -64,8 +64,8 @@ fn tab(window: &mut FilesWindow, alias: &str, up: bool) -> Tab {
             rows: Vec::new(),
             listing: false,
             error: None,
-            selected: HashSet::new(),
-            anchor: None,
+            selected: Selection::default(),
+            sort: NAME_SORT,
             renaming: None,
             names: Names::default(),
             pictured: up,
@@ -75,8 +75,8 @@ fn tab(window: &mut FilesWindow, alias: &str, up: bool) -> Tab {
             path_text: String::new(),
             rows: Vec::new(),
             error: None,
-            selected: HashSet::new(),
-            anchor: None,
+            selected: Selection::default(),
+            sort: NAME_SORT,
             renaming: None,
         },
         remote_tree: Tree::default(),
@@ -146,7 +146,7 @@ pub(crate) fn for_snapshot(ctx: &egui::Context) -> Box<dyn crate::window::Ui> {
         local(&folder, "deploy_daemon.sh", false, 4_301, 21),
         local(&folder, "OVN_Fabric_Topology.json", false, 131_993, 18),
     ];
-    shown.local.selected.insert(local_key(&shown.local.rows[2]));
+    shown.local.selected.set([local_key(&shown.local.rows[2])]);
     shown.local.path_text = folder.display().to_string();
     shown.local.path = Some(folder.clone());
     opened(&mut shown.local_tree, home.join("Documents"), vec![("OpenStack-Dev".into(), folder.clone())]);
@@ -164,7 +164,7 @@ pub(crate) fn for_snapshot(ctx: &egui::Context) -> Box<dyn crate::window::Ui> {
         remote("config-7.0.0-31", false, 315_802, 0o644, 12),
         remote("System.map-7.0.0-31", false, 9_012_334, 0o600, 12),
     ];
-    shown.remote.selected.insert(b"vmlinuz-7.0.0-31".to_vec());
+    shown.remote.selected.set([b"vmlinuz-7.0.0-31".to_vec()]);
     shown.remote.path_text = String::from_utf8_lossy(&path).into_owned();
     shown.remote.path = path.clone();
     opened(&mut shown.remote_tree, b"/".to_vec(), vec![sub(b"/", "boot"), sub(b"/", "etc"), sub(b"/", "var")]);

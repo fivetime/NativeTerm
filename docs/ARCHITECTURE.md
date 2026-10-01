@@ -4553,6 +4553,20 @@ maximize and close at the right), the title bar the main window's height
   program the page (the main window, whose header sits beside it);
   `show` draws both. egui 0.36 has no tabs control: the list is made of
   its side panel and selectable buttons, the rail is the design's own.
+- **Lists** (2026-10-02; the files window first, the session tree and
+  the other lists after it): `Selection` is which rows are chosen, as
+  every file manager has it (a click, Ctrl / ⌘ to add or take away,
+  Shift for a run from the last plain click; the arrows, Home / End, the
+  page keys, Shift on the way, Ctrl+A, typing a name's first letters,
+  Enter to open), the same for a list, a grid and a tree. `ListView` is
+  rows in columns on egui's own table (`egui_extras::TableBuilder`:
+  widths, the header kept at the top, only the rows in view drawn): the
+  skin adds titles that sort when clicked (an arrow at the one sorted
+  by), the chosen rows in the accent's tint with a bar at their start,
+  the design's sizes (a header of 32, rows of 34, cells padded 10). A
+  cell's content is the program's; each row's response comes back for a
+  menu, dragging and dropping. `GridView` and `TreeView` follow (egui has
+  a layout grid and collapsing headers, no views).
 - **Controls are egui's own** (the person's rule: what egui has is not
   made again): buttons, fields, check boxes, progress bars are egui's,
   given their look by the theme (`looks.rs` paints egui's visuals from
