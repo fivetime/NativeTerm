@@ -2576,6 +2576,14 @@ one needed a terminal that can move a tab, which WezTerm can.
   identification string and more, see `RZSZ.md`), shipped in `openssh\`
   next to the program; the system's `ssh` only where that is missing.
   Config, keys, the agent and known_hosts stay where OpenSSH keeps them
+- SSH-1 (decided 2026-10-01): OpenSSH dropped it, and ntplink is built
+  without PuTTY's SSH code (Telnet, raw, rlogin, SUPDUP and serial only);
+  turning that on would mean a second SSH stack with its own host keys
+  for a protocol that is unsafe and leaving with the devices that speak
+  it. SecureCRT's SSH1 sessions stay skipped on import. Old devices that
+  speak SSH-2 with old algorithms are reached by OpenSSH with
+  `KexAlgorithms +diffie-hellman-group1-sha1`, `HostKeyAlgorithms
+  +ssh-rsa`, `Ciphers +3des-cbc` (still in the fork; DSA host keys are not)
 - Moving a running tab to a new window from NativeTerm ("Send to New
   Window") on Windows Terminal — no `wt` command exists; dragging the
   tab out works and is re-claimed (WezTerm has a command for it: see
