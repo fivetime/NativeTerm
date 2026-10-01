@@ -67,6 +67,13 @@ pub const PLUS_CIRCLE: char = glyph(Icon::PlusCircle);
 pub const POINTER: char = glyph(Icon::Pointer);
 pub const TREE: char = glyph(Icon::Tree);
 pub const TERMINAL: char = glyph(Icon::Terminal);
+pub const LAPTOP: char = glyph(Icon::Laptop);
+pub const SERVER: char = glyph(Icon::Server);
+pub const MORE: char = glyph(Icon::More);
+pub const ARROW_RIGHT: char = glyph(Icon::ArrowRight);
+pub const ARROW_LEFT: char = glyph(Icon::ArrowLeft);
+pub const ERROR: char = glyph(Icon::Error);
+pub const ACTIVITY: char = glyph(Icon::Activity);
 
 /// `glyph` then `text`, for buttons.
 pub fn with(glyph: char, text: impl AsRef<str>) -> String {
@@ -133,6 +140,18 @@ const fn phosphor(icon: Icon) -> char {
         Icon::Pointer => p::CURSOR_CLICK,
         Icon::Tree => p::TREE_STRUCTURE,
         Icon::Terminal => p::TERMINAL_WINDOW,
+        Icon::Laptop => p::LAPTOP,
+        Icon::Server => p::HARD_DRIVES,
+        Icon::Bookmark => p::BOOKMARK_SIMPLE,
+        Icon::More => p::DOTS_THREE,
+        Icon::ArrowRight => p::ARROW_RIGHT,
+        Icon::ArrowLeft => p::ARROW_LEFT,
+        Icon::Shield => p::SHIELD,
+        Icon::Error => p::WARNING_CIRCLE,
+        Icon::Speed => p::GAUGE,
+        Icon::Clock => p::CLOCK,
+        Icon::Compare => p::GIT_DIFF,
+        Icon::Activity => p::PULSE,
     })
 }
 

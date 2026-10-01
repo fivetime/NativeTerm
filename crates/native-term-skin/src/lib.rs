@@ -18,25 +18,31 @@
 //! for a frame of its own.
 
 mod caption;
+mod controls;
 mod dialog;
 pub mod font;
 mod frame;
 mod grid;
 mod list;
 mod modal;
+mod path;
 mod selection;
+mod strip;
 mod tabs;
 mod title;
 mod tree;
 
 pub use caption::{caption_buttons, caption_dots, Buttons, Caption};
+pub use controls::{badge, count, filter_field, segmented, IconButton, Kind, Segment, ICON_BUTTON, SMALL_ICON_BUTTON};
 pub use dialog::{body, button, footer, Choice, Message, MessageShown, Notice, Order, Role};
 pub use font::{font, Weight};
 pub use frame::{edges, frame_cursor, frame_hit, FRAME_BAND, FRAME_CORNER};
 pub use grid::{GridView, Item};
 pub use list::{Cell, Column, ListShown, ListView, Sort, Width};
 pub use modal::{as_window, close_asked, room, set_room, Modal, ModalShown};
+pub use path::{PathBar, PathShown};
 pub use selection::{Keyed, Selection};
+pub use strip::{StripShown, StripTab, TabStrip, STRIP};
 pub use tabs::{rail_gap, Action, Style, Tab, Tabs, TabsShown, RAIL};
 pub use title::{TitleBar, TitleShown};
 pub use tree::{Kids, TreeRow, TreeShown, TreeView};
@@ -74,6 +80,10 @@ pub struct Palette {
     /// The lines (`--border-color`): around a window, under its title
     /// bar, before its buttons.
     pub line: egui::Color32,
+    /// What sits on a page (a field, a badge, a count: `--bg-muted`) and
+    /// what is under the pointer.
+    pub card: egui::Color32,
+    pub raised: egui::Color32,
     /// `--text-main`, `--text-muted` (a window button's sign).
     pub text: egui::Color32,
     pub weak: egui::Color32,

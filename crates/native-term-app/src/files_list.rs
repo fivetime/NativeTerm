@@ -18,19 +18,16 @@ pub(super) enum View {
 
 /// The switch between the views (at a side's status line's end): the
 /// view asked for.
-pub(super) fn view_switch(ui: &mut egui::Ui, view: View) -> Option<View> {
+pub(super) fn view_switch(ui: &mut egui::Ui, palette: &native_term_skin::Palette, view: View) -> Option<View> {
     let mut asked = None;
     // (right to left: the last first)
     for (this, glyph, hint) in
         [(View::Names, icons::GRID, t!("files-view-names")), (View::Details, icons::LIST, t!("files-view-details"))]
     {
         let on = view == this;
-        let button = egui::Button::new(egui::RichText::new(glyph.to_string()).size(13.0))
-            .selected(on)
-            .frame_when_inactive(false);
-        let response = ui.add(button).on_hover_text(&hint);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, &hint));
-        if response.clicked() && !on {
+        let glyph = glyph.to_string();
+        let button = native_term_skin::IconButton::new(&glyph, &hint).on(on);
+        if button.small().show(ui, palette).clicked() && !on {
             asked = Some(this);
         }
     }
@@ -171,15 +168,32 @@ fn date(unix: u64) -> (String, String) {
 }
 
 /// The columns of a side.
-pub(super) fn columns(remote: bool) -> Vec<Column> {
-    let name = Column::new(t!("files-col-name"), Width::Rest(140.0));
-    let size = Column::new(t!("files-col-size"), Width::Fixed(84.0)).at_end();
-    let modified = Column::new(t!("files-col-modified"), Width::Fixed(104.0));
-    if remote {
-        vec![name, size, Column::new(t!("files-col-mode"), Width::Fixed(100.0)), modified]
-    } else {
-        vec![name, size, Column::new(t!("files-col-type"), Width::Fixed(96.0)), modified]
+/// The columns of a side that fit `width`, and which of all four each
+/// is (name, size, mode or type, modified): a narrow list keeps the name
+/// readable, so the mode (or type) goes first, then the date, then the
+/// size.
+pub(super) fn columns(remote: bool, width: f32) -> (Vec<Column>, Vec<usize>) {
+    let all = [
+        Column::new(t!("files-col-name"), Width::Rest(140.0)),
+        Column::new(t!("files-col-size"), Width::Fixed(84.0)).at_end(),
+        if remote {
+            Column::new(t!("files-col-mode"), Width::Fixed(100.0))
+        } else {
+            Column::new(t!("files-col-type"), Width::Fixed(96.0))
+        },
+        Column::new(t!("files-col-modified"), Width::Fixed(104.0)),
+    ];
+    let wide = |c: &Column| match c.width {
+        Width::Rest(least) | Width::Fixed(least) => least,
+    };
+    let mut kept: Vec<usize> = (0..all.len()).collect();
+    for drop in [2, 3, 1] {
+        if kept.iter().map(|&i| wide(&all[i])).sum::<f32>() <= width {
+            break;
+        }
+        kept.retain(|&i| i != drop);
     }
+    (kept.iter().map(|&i| all[i].clone()).collect(), kept)
 }
 
 /// Folders first, then by the column sorted by (names as people read
@@ -244,7 +258,9 @@ pub(super) fn list(
         dropped,
     };
 
-    let columns = columns(remote);
+    let (columns, kept) = columns(remote, ui.available_width());
+    // the sort is by one of all four; the view knows those it shows
+    let shown_sort = kept.iter().position(|&i| i == sort.column).map(|column| Sort { column, ..*sort });
     let keys: Vec<Vec<u8>> = lines.iter().map(|l| l.key.clone()).collect();
     let many = selected.len() > 1;
     let mut renamed = None;
@@ -297,14 +313,14 @@ pub(super) fn list(
             &mut each,
         )
     } else {
-        ListView::new(salt, &columns, &palette).accent(accent).sorted(Some(*sort)).keyboard(keyboard).show(
+        ListView::new(salt, &columns, &palette).accent(accent).sorted(shown_sort).keyboard(keyboard).show(
             ui,
             &keys,
             selected,
             |i| lines[i].name.clone(),
             |ui, Cell { row, column, chosen }| {
                 let line = &lines[row];
-                match column {
+                match kept[column] {
                     0 => name_cell(ui, line, chosen, renaming, &mut renamed),
                     1 => {
                         if let Some(size) = line.size {
@@ -342,7 +358,7 @@ pub(super) fn list(
         ui.painter().rect_stroke(area, 4.0, egui::Stroke::new(2.0_f32, accent), egui::StrokeKind::Inside);
     }
     if let Some(s) = shown.sort {
-        *sort = s;
+        *sort = Sort { column: kept[s.column], ..s };
     }
     if shown.open.is_some() {
         out.open = shown.open;

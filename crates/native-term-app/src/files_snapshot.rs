@@ -67,6 +67,7 @@ fn tab(window: &mut FilesWindow, alias: &str, up: bool) -> Tab {
             selected: Selection::default(),
             sort: NAME_SORT,
             view: files_list::View::Details,
+            filter: String::new(),
             renaming: None,
             names: Names::default(),
             pictured: up,
@@ -79,6 +80,7 @@ fn tab(window: &mut FilesWindow, alias: &str, up: bool) -> Tab {
             selected: Selection::default(),
             sort: NAME_SORT,
             view: files_list::View::Details,
+            filter: String::new(),
             renaming: None,
         },
         remote_tree: Tree::default(),
@@ -191,7 +193,12 @@ pub(crate) fn for_snapshot(ctx: &egui::Context, names: bool) -> Box<dyn crate::w
     let id = shown.id;
     window.tabs = vec![first, shown, failed];
     window.active = 1;
-    let jobs = vec![
+    let downloads = home.join("Downloads");
+    let from = |name: &str| {
+        let item = (format!("/boot/sys/kernel-5.15/{name}").into_bytes(), Attrs::default());
+        Some(Work::Download { names: Names::default(), items: vec![item], folder: downloads.clone() })
+    };
+    let mut jobs = vec![
         job(&mut window, id, Kind::Download, "vmlinuz-7.0.0-31", 7_985_954, 11_744_051, JobState::Paused),
         job(
             &mut window,
@@ -204,6 +211,13 @@ pub(crate) fn for_snapshot(ctx: &egui::Context, names: bool) -> Box<dyn crate::w
         ),
         job(&mut window, id, Kind::Upload, "deploy_daemon.sh", 4_301, 4_301, JobState::Done),
     ];
+    jobs[0].work = from("vmlinuz-7.0.0-31");
+    jobs[1].work = from("initrd.img-7.0.0-31");
+    jobs[2].work = Some(Work::Upload {
+        names: Names::default(),
+        files: vec![folder.join("deploy_daemon.sh")],
+        into: b"/opt/nexus/bin".to_vec(),
+    });
     window.jobs = jobs;
     Box::new(window)
 }

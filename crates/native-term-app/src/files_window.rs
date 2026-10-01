@@ -333,6 +333,8 @@ struct Remote {
     selected: Selection<Vec<u8>>,
     sort: Sort,
     view: files_list::View,
+    /// Only the names with this in them (any case).
+    filter: String,
     renaming: Option<(Vec<u8>, String)>,
     names: Names,
     /// Drawn as connected without a connection: the pictures drawn off
@@ -356,6 +358,7 @@ struct Local {
     selected: Selection<Vec<u8>>,
     sort: Sort,
     view: files_list::View,
+    filter: String,
     renaming: Option<(Vec<u8>, String)>,
 }
 
@@ -506,6 +509,8 @@ struct FilesWindow {
     local_roots: Vec<(String, PathBuf)>,
     /// Synchronize: the folders compared, what was found, what to do.
     sync: Option<crate::files_sync::SyncDialog>,
+    /// What the panel below the sides shows.
+    dock: files_dock::Dock,
 }
 
 impl FilesWindow {
@@ -539,6 +544,7 @@ impl FilesWindow {
                 })
                 .collect(),
             sync: None,
+            dock: files_dock::Dock::default(),
         }
     }
 
@@ -651,6 +657,7 @@ impl FilesWindow {
                     selected: Selection::default(),
                     sort: NAME_SORT,
                     view: files_list::View::Details,
+                    filter: String::new(),
                     renaming: None,
                     names,
                     pictured: false,
@@ -663,6 +670,7 @@ impl FilesWindow {
                     selected: Selection::default(),
                     sort: NAME_SORT,
                     view: files_list::View::Details,
+                    filter: String::new(),
                     renaming: None,
                 },
                 remote_tree: Tree::default(),
@@ -814,6 +822,10 @@ impl FilesWindow {
         if let Some(tab) = self.tab(id) {
             tab.remote.selected.clear();
             tab.remote.renaming = None;
+            // a filter is for the folder it was typed in
+            if tab.remote.path != path {
+                tab.remote.filter.clear();
+            }
         }
         self.list(id, path);
     }
@@ -827,6 +839,9 @@ impl FilesWindow {
         if let Some(tab) = self.tab(id) {
             tab.local.selected.clear();
             tab.local.renaming = None;
+            if tab.local.path != path {
+                tab.local.filter.clear();
+            }
         }
         self.spawn(id, move || {
             let result = list_local(path.as_deref()).map_err(|e| e.to_string());
@@ -1458,120 +1473,18 @@ impl FilesWindow {
     }
 
     /// One row of session tabs; `remote`: the server's side (with close).
-    fn tab_row(&mut self, ui: &mut egui::Ui, remote: bool) {
-        let mut close = None;
-        // both rows the same height, centered (the server's has close buttons)
-        let row = egui::vec2(ui.available_width(), 28.0);
-        ui.allocate_ui_with_layout(row, egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            for (i, tab) in self.tabs.iter().enumerate() {
-                let text = if remote {
-                    tab.spec.label.clone()
-                } else {
-                    t!("files-local-tab", computer = self.computer.as_str())
-                };
-                let text = if remote && tab.remote.failed.is_some() { format!("{text} ⚠") } else { text };
-                if ui.selectable_label(i == self.active, text).on_hover_text(tab.spec.alias.as_str()).clicked() {
-                    self.active = i;
-                    self.remote_focus = remote;
-                }
-                if remote {
-                    let button = ui.small_button(icon(icons::CLEAR)).on_hover_text(t!("files-close-tab"));
-                    button.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t!("files-close-tab"))
-                    });
-                    if button.clicked() {
-                        close = Some(tab.id);
-                    }
-                }
-                ui.add_space(6.0);
-            }
-        });
-        if let Some(id) = close {
-            if self.running(Some(id)) + self.edits(Some(id)) > 0 {
-                self.confirm = Some(Confirm::CloseTab(id));
-            } else {
-                self.close_tab(id);
-            }
-        }
-    }
-
     fn local_side(&mut self, ui: &mut egui::Ui) {
-        self.tab_row(ui, false);
-        ui.separator();
+        self.strip(ui, false);
         let Some(tab) = self.tabs.get(self.active) else { return };
         let id = tab.id;
-        let (connected, selected, at_folder) =
-            (tab.remote.up(), !tab.local.selected.is_empty(), tab.local.path.is_some());
-        let mut path_text = tab.local.path_text.clone();
-        let mut go_to = None;
-        let mut up = false;
-        let mut refresh = false;
-        let mut upload = false;
-        let mut delete = false;
-        let mut new_folder = false;
-        ui.horizontal(|ui| {
-            let b = ui.add_enabled(at_folder, egui::Button::new(icon(icons::UP))).on_hover_text(t!("files-up"));
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, at_folder, t!("files-up")));
-            up = b.clicked();
-            let b = ui.button(icon(icons::REFRESH)).on_hover_text(t!("files-refresh"));
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t!("files-refresh")));
-            refresh = b.clicked();
-            let edit = ui.add(
-                egui::TextEdit::singleline(&mut path_text).desired_width((ui.available_width() - 290.0).max(160.0)),
-            );
-            if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                go_to = Some(path_text.clone());
-            }
-            let b = egui::Button::new(format!("{} {}", t!("files-upload-to-remote"), icons::UPLOAD));
-            upload = ui.add_enabled(connected && selected, b).on_hover_text(t!("files-upload-hint")).clicked();
-            delete = ui
-                .add_enabled(
-                    selected && at_folder,
-                    egui::Button::new(format!("{} {}", icons::DELETE, t!("files-delete"))),
-                )
-                .clicked();
-            new_folder = ui
-                .add_enabled(at_folder, egui::Button::new(format!("{} {}", icons::NEW_FOLDER, t!("files-new-folder"))))
-                .clicked();
-        });
-        if let Some(tab) = self.tab(id) {
-            tab.local.path_text = path_text;
-        }
-        if up {
-            let parent = self.tabs[self.active].local.path.as_ref().and_then(|p| p.parent().map(Path::to_path_buf));
-            self.list_local(id, parent);
-        }
-        if refresh {
-            self.refresh_local(id);
-        }
-        if let Some(text) = go_to {
-            let path = PathBuf::from(text.trim());
-            self.list_local(id, (!text.trim().is_empty()).then_some(path));
-        }
-        if upload {
-            let files = self.local_selection(id);
-            self.upload(id, files);
-        }
-        if delete {
-            self.ask_recycle(id);
-        }
-        if new_folder {
-            self.new_folder = Some((id, false, String::new()));
+        for asked in self.head(ui, false) {
+            self.local_asked(id, asked, ui.ctx());
         }
         if let Some(e) = self.tabs.get(self.active).and_then(|t| t.local.error.clone()) {
             ui.colored_label(RED, e);
         }
-        // the status line, under the tree and the list
-        egui::Panel::bottom("local-status").show(ui, |ui| {
-            let local = &self.tabs[self.active].local;
-            let chosen = local.rows.iter().filter(|r| local.selected.contains(&local_key(r)));
-            let (count, bytes) = chosen.fold((0, 0), |(n, b), r| (n + 1, b + r.size.unwrap_or(0)));
-            let folders = local.rows.iter().filter(|r| r.dir).count();
-            let asked = status_line(ui, None, folders, local.rows.len() - folders, count, bytes, local.view);
-            if let Some(view) = asked {
-                self.tabs[self.active].local.view = view;
-            }
-        });
+        // the foot, under the tree and the list
+        egui::Panel::bottom("local-status").frame(egui::Frame::NONE).show(ui, |ui| self.foot(ui, false));
         // the tree
         let roots = self.local_roots.clone();
         let tree_out = egui::Panel::left("local-tree")
@@ -1617,7 +1530,7 @@ impl FilesWindow {
                 mode: None,
             })
             .collect();
-        let lines = sorted(lines, tab.local.sort, false);
+        let lines = filtered(sorted(lines, tab.local.sort, false), &tab.local.filter);
         let keyboard = !self.remote_focus && !self.tree_focus;
         let mut local = std::mem::replace(&mut self.tabs[self.active].local, empty_local());
         let side = files_list::Side { salt: "local-list", remote: false, keyboard };
@@ -1662,6 +1575,93 @@ impl FilesWindow {
         }
     }
 
+    /// What the local side's bar asked for.
+    fn local_asked(&mut self, id: u64, asked: files_pane::Asked, ctx: &egui::Context) {
+        use files_pane::Asked;
+        let Some(tab) = self.tab(id) else { return };
+        let path = tab.local.path.clone();
+        match asked {
+            Asked::Up => self.list_local(id, path.as_ref().and_then(|p| p.parent().map(Path::to_path_buf))),
+            Asked::Refresh => self.refresh_local(id),
+            Asked::Crumb(i) => {
+                let crumbs = files_pane::local_crumbs(path.as_deref(), &self.computer);
+                if let Some((_, to)) = crumbs.into_iter().nth(i) {
+                    self.list_local(id, to);
+                }
+            }
+            Asked::Typed(text) => {
+                let text = text.trim();
+                self.list_local(id, (!text.is_empty()).then(|| PathBuf::from(text)));
+            }
+            Asked::Send => {
+                let files = self.local_selection(id);
+                self.upload(id, files);
+            }
+            Asked::NewFolder if path.is_some() => self.new_folder = Some((id, false, String::new())),
+            Asked::Delete if path.is_some() => self.ask_recycle(id),
+            Asked::CopyPath => {
+                let text: Vec<String> = self.local_selection(id).iter().map(|p| p.display().to_string()).collect();
+                ctx.copy_text(text.join("\n"));
+            }
+            _ => {}
+        }
+    }
+
+    /// What the server's side's bar asked for.
+    fn remote_asked(&mut self, id: u64, asked: files_pane::Asked, ctx: &egui::Context) {
+        use files_pane::Asked;
+        let Some(tab) = self.tab(id) else { return };
+        let (path, names) = (tab.remote.path.clone(), tab.remote.names);
+        match asked {
+            Asked::Up => self.go(id, native_term_sftp::parent(&path)),
+            Asked::Refresh => self.refresh(id),
+            Asked::Crumb(i) => {
+                if let Some((_, to)) = files_pane::remote_crumbs(&path, names).into_iter().nth(i) {
+                    self.go(id, to);
+                }
+            }
+            Asked::Typed(text) => match names.encode(text.trim()) {
+                Some(p) if !p.is_empty() => self.go(id, p),
+                _ => self.log(id, t!("files-bad-name", name = text.as_str()), true),
+            },
+            Asked::Send => {
+                let items = self.remote_selection(id);
+                self.download(id, items);
+            }
+            Asked::NewFolder => self.new_folder = Some((id, true, String::new())),
+            Asked::Delete => self.ask_delete_remote(id),
+            Asked::Edit => {
+                let tab = &self.tabs[self.active];
+                let file = tab
+                    .remote
+                    .rows
+                    .iter()
+                    .find(|r| !r.dir && tab.remote.selected.len() == 1 && tab.remote.selected.contains(&r.entry.name))
+                    .cloned();
+                if let Some(row) = file {
+                    self.edit(id, &row);
+                }
+            }
+            Asked::Sync => self.open_sync(id),
+            Asked::CopyPath => {
+                let tab = &self.tabs[self.active];
+                let text: Vec<String> =
+                    self.remote_selection(id).iter().map(|(p, _)| tab.remote.names.decode(p)).collect();
+                ctx.copy_text(text.join("\n"));
+            }
+            Asked::Names(choice) => {
+                if let Some(tab) = self.tab(id) {
+                    let r = &mut tab.remote;
+                    r.names = choice;
+                    for row in &mut r.rows {
+                        row.name = choice.decode(&row.entry.name);
+                    }
+                    r.path_text = choice.decode(&r.path);
+                }
+            }
+        }
+    }
+
     fn open_local(&mut self, id: u64, i: usize) {
         let Some(row) = self.tabs.get(self.active).and_then(|t| t.local.rows.get(i)).cloned() else { return };
         if row.dir {
@@ -1697,152 +1697,17 @@ impl FilesWindow {
     }
 
     fn remote_side(&mut self, ui: &mut egui::Ui) {
-        self.tab_row(ui, true);
-        ui.separator();
+        self.strip(ui, true);
         let Some(tab) = self.tabs.get(self.active) else {
             ui.weak(t!("files-no-tabs"));
             return;
         };
         let id = tab.id;
-        // the status line, at the very bottom (in line with the local one)
-        egui::Panel::bottom("remote-status").show(ui, |ui| {
-            let remote = &self.tabs[self.active].remote;
-            let state = match (remote.up(), &remote.failed) {
-                (_, Some(_)) => (RED, t!("files-status-failed")),
-                (false, None) => (ui.visuals().weak_text_color(), t!("files-status-connecting")),
-                (true, None) => (GREEN, t!("files-status-connected")),
-            };
-            let chosen = remote.rows.iter().filter(|r| remote.selected.contains(&r.entry.name));
-            let (count, bytes) =
-                chosen.fold((0, 0), |(n, b), r| (n + 1, b + if r.dir { 0 } else { r.entry.attrs.size.unwrap_or(0) }));
-            let folders = remote.rows.iter().filter(|r| r.dir).count();
-            let asked = status_line(ui, Some(state), folders, remote.rows.len() - folders, count, bytes, remote.view);
-            if let Some(view) = asked {
-                self.tabs[self.active].remote.view = view;
-            }
-        });
-        // the session's log, above the status line
-        egui::Panel::bottom("files-log").resizable(true).default_size(110.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().stick_to_bottom(true).auto_shrink([false, false]).show(ui, |ui| {
-                for (time, text, error) in &self.tabs[self.active].log {
-                    let line = format!("{time}  {text}");
-                    if *error {
-                        ui.colored_label(RED, line);
-                    } else {
-                        ui.weak(line);
-                    }
-                }
-            });
-        });
-        let tab = &self.tabs[self.active];
-        let connected = tab.remote.up();
-        let selected = !tab.remote.selected.is_empty();
-        let file = tab
-            .remote
-            .rows
-            .iter()
-            .find(|r| tab.remote.selected.len() == 1 && tab.remote.selected.contains(&r.entry.name) && !r.dir)
-            .cloned();
-        let at_root = tab.remote.path == b"/";
-        let mut path_text = tab.remote.path_text.clone();
-        let mut names = tab.remote.names;
-        let (mut up, mut refresh, mut download, mut edit, mut delete, mut new_folder, mut go_to) =
-            (false, false, false, false, false, false, None);
-        let mut sync = false;
-        let local_folder = tab.local.path.is_some();
-        ui.horizontal(|ui| {
-            let b =
-                ui.add_enabled(connected && !at_root, egui::Button::new(icon(icons::UP))).on_hover_text(t!("files-up"));
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, connected, t!("files-up")));
-            up = b.clicked();
-            let b =
-                ui.add_enabled(connected, egui::Button::new(icon(icons::REFRESH))).on_hover_text(t!("files-refresh"));
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, connected, t!("files-refresh")));
-            refresh = b.clicked();
-            let path = ui.add_enabled(
-                connected,
-                egui::TextEdit::singleline(&mut path_text).desired_width((ui.available_width() - 560.0).max(120.0)),
-            );
-            if path.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                go_to = Some(path_text.clone());
-            }
-            let b = egui::Button::new(format!("{} {}", icons::DOWNLOAD, t!("files-download-to-local")));
-            download = ui.add_enabled(connected && selected, b).on_hover_text(t!("files-download-hint")).clicked();
-            let b = egui::Button::new(format!("{} {}", icons::EDIT, t!("files-edit")));
-            edit = ui.add_enabled(connected && file.is_some(), b).on_hover_text(t!("files-edit-hint")).clicked();
-            delete = ui
-                .add_enabled(
-                    connected && selected,
-                    egui::Button::new(format!("{} {}", icons::DELETE, t!("files-delete"))),
-                )
-                .clicked();
-            new_folder = ui
-                .add_enabled(connected, egui::Button::new(format!("{} {}", icons::NEW_FOLDER, t!("files-new-folder"))))
-                .clicked();
-            sync = ui
-                .add_enabled(
-                    connected && local_folder,
-                    egui::Button::new(format!("{} {}", icons::SYNC, t!("files-sync"))),
-                )
-                .on_hover_text(t!("files-sync-hint"))
-                .clicked();
-            let shown =
-                if matches!(names, Names::Auto { .. }) { t!("files-encoding-auto") } else { names.label().to_string() };
-            egui::ComboBox::from_id_salt("files-encoding")
-                .selected_text(shown)
-                .width(100.0)
-                .show_ui(ui, |ui| {
-                    for label in ENCODINGS {
-                        if let Some(choice) = Names::from_label(label) {
-                            let text = if label == "auto" { t!("files-encoding-auto") } else { label.to_string() };
-                            ui.selectable_value(&mut names, choice, text);
-                        }
-                    }
-                })
-                .response
-                .on_hover_text(t!("files-encoding-hint"));
-        });
-        {
-            let r = &mut self.tabs[self.active].remote;
-            r.path_text = path_text;
-            if names != r.names {
-                r.names = names;
-                for row in &mut r.rows {
-                    row.name = names.decode(&row.entry.name);
-                }
-                r.path_text = names.decode(&r.path);
-            }
+        for asked in self.head(ui, true) {
+            self.remote_asked(id, asked, ui.ctx());
         }
-        if up {
-            let parent = native_term_sftp::parent(&self.tabs[self.active].remote.path);
-            self.go(id, parent);
-        }
-        if refresh {
-            self.refresh(id);
-        }
-        if let Some(text) = go_to {
-            match names.encode(text.trim()) {
-                Some(p) if !p.is_empty() => self.go(id, p),
-                _ => self.log(id, t!("files-bad-name", name = text.as_str()), true),
-            }
-        }
-        if download {
-            let items = self.remote_selection(id);
-            self.download(id, items);
-        }
-        if let (true, Some(row)) = (edit, &file) {
-            self.edit(id, row);
-        }
-        if delete {
-            self.ask_delete_remote(id);
-        }
-        if new_folder {
-            self.new_folder = Some((id, true, String::new()));
-        }
-        if sync {
-            self.open_sync(id);
-        }
-
+        // the foot, at the very bottom (in line with the local one)
+        egui::Panel::bottom("remote-status").frame(egui::Frame::NONE).show(ui, |ui| self.foot(ui, true));
         let tab = &self.tabs[self.active];
         match (tab.remote.up(), &tab.remote.failed) {
             (_, Some(error)) => {
@@ -1920,7 +1785,7 @@ impl FilesWindow {
                 mode: r.entry.attrs.permissions.map(mode_text),
             })
             .collect();
-        let lines = sorted(lines, tab.remote.sort, true);
+        let lines = filtered(sorted(lines, tab.remote.sort, true), &tab.remote.filter);
         let keyboard = self.remote_focus && !self.tree_focus;
         let mut remote = std::mem::take(&mut self.tabs[self.active].remote.selected);
         let mut sort = self.tabs[self.active].remote.sort;
@@ -1988,186 +1853,6 @@ impl FilesWindow {
     }
 
     /// The transfer queue (every session's) and edited files.
-    fn activity(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.strong(t!("files-queue"));
-            let running = self.running(None);
-            let done = self.jobs.iter().filter(|j| matches!(j.state, JobState::Done)).count();
-            let failed = self.jobs.iter().filter(|j| matches!(j.state, JobState::Failed(_))).count();
-            let paused = self.jobs.iter().filter(|j| matches!(j.state, JobState::Paused)).count();
-            if running > 0 {
-                let speed: f64 = self
-                    .jobs
-                    .iter()
-                    .filter(|j| matches!(j.state, JobState::Running) && j.kind != Kind::Delete)
-                    .map(Job::speed)
-                    .sum();
-                ui.label(t!("files-queue-running", count = running));
-                ui.weak(format!("{}/s", size_text(speed as u64)));
-            }
-            if paused > 0 {
-                ui.label(t!("files-queue-paused", count = paused));
-            }
-            if done > 0 {
-                ui.colored_label(GREEN, t!("files-queue-done", count = done));
-            }
-            if failed > 0 {
-                ui.colored_label(RED, t!("files-queue-failed", count = failed));
-            }
-            let pausable = self.jobs.iter().any(|j| matches!(j.state, JobState::Running) && j.work.is_some());
-            let label = format!("{} {}", icons::PAUSE, t!("files-queue-pause-all"));
-            if ui.add_enabled(pausable, egui::Button::new(label).small()).clicked() {
-                for job in self.jobs.iter().filter(|j| matches!(j.state, JobState::Running) && j.work.is_some()) {
-                    job.progress.pause.store(true, Ordering::Relaxed);
-                }
-            }
-            let label = format!("{} {}", icons::PLAY, t!("files-queue-resume-all"));
-            if ui.add_enabled(paused > 0, egui::Button::new(label).small()).clicked() {
-                let ids: Vec<u64> =
-                    self.jobs.iter().filter(|j| matches!(j.state, JobState::Paused)).map(|j| j.id).collect();
-                for id in ids {
-                    self.run_job(id);
-                }
-            }
-            // finished: done, cancelled or failed (paused ones stay)
-            let finished = self.jobs.iter().any(|j| !matches!(j.state, JobState::Running | JobState::Paused));
-            if ui.add_enabled(finished, egui::Button::new(t!("files-queue-clear")).small()).clicked() {
-                self.jobs.retain(|j| matches!(j.state, JobState::Running | JobState::Paused));
-            }
-            // how many files each connection copies at once; the rest wait
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut at_once = self.at_once();
-                let widget = egui::DragValue::new(&mut at_once).range(1..=AT_ONCE_MAX).speed(0.05);
-                let response = ui.add(widget).on_hover_text(t!("files-at-once-hint"));
-                ui.label(t!("files-at-once"));
-                if response.changed() {
-                    self.set_at_once(at_once);
-                }
-            });
-        });
-        let mut actions = Vec::new();
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            if self.jobs.is_empty() && self.edits(None) == 0 {
-                ui.weak(t!("files-queue-empty"));
-            }
-            for job in &self.jobs {
-                ui.horizontal(|ui| {
-                    let done = job.progress.done.load(Ordering::Relaxed);
-                    let total = job.progress.total.load(Ordering::Relaxed);
-                    let secs =
-                        job.finished.unwrap_or_else(Instant::now).duration_since(job.started).as_secs_f64().max(0.001);
-                    let rate = job.speed();
-                    let speed = format!("{}/s", size_text(rate as u64));
-                    let fraction = if total > 0 { done as f32 / total as f32 } else { 0.0 };
-                    let figures = format!("{}%  {} / {}", (fraction * 100.0) as u32, size_text(done), size_text(total));
-                    ui.weak(format!("[{}]", job.host));
-                    // the buttons are on the right; the bar takes what's left
-                    let buttons = 150.0;
-                    match &job.state {
-                        JobState::Running => {
-                            let text = if job.kind == Kind::Delete {
-                                job.title.clone()
-                            } else {
-                                // the time left, once something has gone (a rate to go by)
-                                let left = (rate > 0.0 && total > done).then(|| {
-                                    let secs = ((total - done) as f64 / rate).ceil() as u64;
-                                    format!("  {}", t!("files-job-left", time = clock_text(secs)))
-                                });
-                                format!("{}  {figures}  {speed}{}", job.title, left.unwrap_or_default())
-                            };
-                            let width = ui.available_width() - buttons;
-                            ui.add(egui::ProgressBar::new(fraction).desired_width(width).text(text));
-                            if job.work.is_some()
-                                && ui.small_button(format!("{} {}", icons::PAUSE, t!("files-job-pause"))).clicked()
-                            {
-                                actions.push((job.id, JobAction::Pause));
-                            }
-                            if ui.small_button(t!("button-cancel")).clicked() {
-                                actions.push((job.id, JobAction::Cancel));
-                            }
-                        }
-                        JobState::Paused => {
-                            let text = format!("{}  {figures}  {}", job.title, t!("files-job-paused-short"));
-                            let width = ui.available_width() - buttons;
-                            ui.add(
-                                egui::ProgressBar::new(fraction)
-                                    .desired_width(width)
-                                    .text(text)
-                                    .fill(ui.visuals().widgets.inactive.bg_fill),
-                            );
-                            if ui.small_button(format!("{} {}", icons::PLAY, t!("files-job-resume"))).clicked() {
-                                actions.push((job.id, JobAction::Resume));
-                            }
-                            if ui.small_button(t!("button-cancel")).clicked() {
-                                actions.push((job.id, JobAction::Cancel));
-                            }
-                        }
-                        JobState::Done => {
-                            let size = match (job.kind, secs >= 1.0) {
-                                (Kind::Delete, _) => String::new(),
-                                (_, true) => format!("  {}  {speed}", size_text(done)),
-                                (_, false) => format!("  {}", size_text(done)),
-                            };
-                            ui.colored_label(GREEN, format!("{} {}{size}", icons::ACCEPT, job.title));
-                        }
-                        JobState::Failed(e) => {
-                            ui.colored_label(RED, format!("{}: {e}", job.title));
-                            if job.work.is_some() {
-                                let b = ui
-                                    .small_button(format!("{} {}", icons::PLAY, t!("files-job-resume")))
-                                    .on_hover_text(t!("files-job-resume-hint"));
-                                if b.clicked() {
-                                    actions.push((job.id, JobAction::Resume));
-                                }
-                            }
-                        }
-                        JobState::Cancelled => {
-                            ui.weak(t!("files-job-cancelled", what = job.title.as_str()));
-                        }
-                    }
-                    if matches!(job.state, JobState::Done | JobState::Cancelled | JobState::Failed(_)) {
-                        let b = ui.small_button(icon(icons::CLEAR)).on_hover_text(t!("files-job-remove"));
-                        b.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, t!("files-job-remove"))
-                        });
-                        if b.clicked() {
-                            actions.push((job.id, JobAction::Remove));
-                        }
-                    }
-                });
-            }
-            for tab in &mut self.tabs {
-                let mut stop = None;
-                for (i, edit) in tab.edits.iter().enumerate() {
-                    ui.horizontal(|ui| {
-                        ui.weak(format!("[{}]", tab.spec.label));
-                        ui.label(format!("{} {}", icons::EDIT, edit.name));
-                        ui.weak(edit.status.lock().unwrap_or_else(|e| e.into_inner()).as_str());
-                        if edit.conflict.load(Ordering::Relaxed)
-                            && ui.small_button(egui::RichText::new(t!("files-edit-overwrite")).color(RED)).clicked()
-                        {
-                            edit.overwrite.store(true, Ordering::Relaxed);
-                        }
-                        if ui
-                            .small_button(t!("files-edit-stop"))
-                            .on_hover_text(edit.local.display().to_string())
-                            .clicked()
-                        {
-                            stop = Some(i);
-                        }
-                    });
-                }
-                if let Some(i) = stop {
-                    let edit = tab.edits.remove(i);
-                    edit.stop.store(true, Ordering::Relaxed);
-                }
-            }
-        });
-        for (id, action) in actions {
-            self.job_action(id, action);
-        }
-    }
-
     /// The sync's dialog (modeless: the window stays in use).
     fn sync_dialog(&mut self, ctx: &egui::Context) {
         if let Some(d) = &mut self.sync {
@@ -2470,8 +2155,15 @@ struct Listed {
     dropped: Option<Arc<Dragged>>,
 }
 
+#[path = "files_dock.rs"]
+mod files_dock;
 #[path = "files_list.rs"]
 mod files_list;
+#[path = "files_pane.rs"]
+mod files_pane;
+
+/// The rail between the sides (`.rail`).
+const RAIL: f32 = 44.0;
 use files_list::list;
 
 #[cfg(test)]
@@ -2502,21 +2194,34 @@ impl crate::window::Ui for FilesWindow {
             }
         }
         self.keys(&ctx);
-        // the queue is always there (empty, it says how to start a transfer)
-        egui::Panel::bottom("files-activity")
+        // the session shown, in the title bar's middle
+        let bar = egui::Rect::from_min_size(
+            ctx.content_rect().min,
+            egui::vec2(ctx.content_rect().width(), native_term_skin::TITLE_BAR),
+        );
+        self.title_middle(ui, bar);
+        let frame = egui::Frame::NONE.fill(skin.palette.page);
+        // the status line at the very bottom, the panel of transfers, log
+        // and errors above it (always there: empty, it says how to start)
+        egui::Panel::bottom("files-status")
+            .exact_size(30.0)
+            .resizable(false)
+            .frame(frame)
+            .show(ui, |ui| self.status_bar(ui));
+        egui::Panel::bottom("files-dock")
             .resizable(true)
-            .default_size(150.0)
-            .min_size(64.0)
-            .max_size(360.0)
-            .show(ui, |ui| self.activity(ui));
-        let half = ui.available_width() / 2.0;
-        // the same margins on both sides, so their rows line up
-        let frame = egui::Frame::NONE.inner_margin(8.0_f32).fill(skin.palette.page);
+            .default_size(224.0)
+            .min_size(96.0)
+            .max_size(420.0)
+            .frame(frame)
+            .show(ui, |ui| self.dock(ui));
+        let half = (ui.available_width() - RAIL) / 2.0;
         egui::Panel::left("files-local")
             .resizable(true)
             .default_size(half)
             .frame(frame)
             .show(ui, |ui| self.local_side(ui));
+        egui::Panel::left("files-rail").exact_size(RAIL).resizable(false).frame(frame).show(ui, |ui| self.rail(ui));
         egui::CentralPanel::default().frame(frame).show(ui, |ui| self.remote_side(ui));
         // its dialogs: each a window of its own
         let parts = FilesPart::ALL.map(|part| (part, part.window()));
@@ -2564,38 +2269,6 @@ impl Drop for FilesWindow {
 
 /// A side's status line: the connection (the server's side), what the
 /// folder holds, and what is selected.
-/// A side's status line, with the switch between its views at the end:
-/// the view asked for.
-fn status_line(
-    ui: &mut egui::Ui,
-    state: Option<(egui::Color32, String)>,
-    folders: usize,
-    files: usize,
-    selected: usize,
-    bytes: u64,
-    view: files_list::View,
-) -> Option<files_list::View> {
-    let mut asked = None;
-    ui.horizontal(|ui| {
-        if let Some((color, text)) = state {
-            // a dot drawn (the font may have no glyph for one)
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-            ui.painter().circle_filled(rect.center(), 4.0, color);
-            ui.colored_label(color, text);
-            ui.separator();
-        }
-        ui.weak(t!("files-status-items", folders = folders, files = files));
-        if selected > 0 {
-            ui.separator();
-            ui.label(t!("files-status-selected", count = selected, size = size_text(bytes)));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            asked = files_list::view_switch(ui, view);
-        });
-    });
-    asked
-}
-
 /// Every file and folder a transfer involves.
 fn plan_work(sftp: &Session, work: &Work, progress: &Progress) -> native_term_sftp::Result<Vec<Item>> {
     match work {
@@ -2655,6 +2328,7 @@ fn empty_local() -> Local {
         selected: Selection::default(),
         sort: NAME_SORT,
         view: files_list::View::Details,
+        filter: String::new(),
         renaming: None,
     }
 }
@@ -2664,6 +2338,15 @@ fn sorted(lines: Vec<Line>, sort: Sort, remote: bool) -> Vec<Line> {
     let order = files_list::order(&lines, sort, remote);
     let mut lines: Vec<Option<Line>> = lines.into_iter().map(Some).collect();
     order.into_iter().filter_map(|i| lines[i].take()).collect()
+}
+
+/// Only the lines whose names have `filter` in them (any case).
+fn filtered(lines: Vec<Line>, filter: &str) -> Vec<Line> {
+    let filter = filter.trim().to_lowercase();
+    if filter.is_empty() {
+        return lines;
+    }
+    lines.into_iter().filter(|l| l.name.to_lowercase().contains(&filter)).collect()
 }
 
 /// By name, A to Z: how a side starts.
@@ -2899,11 +2582,6 @@ fn ok_cancel(ui: &mut egui::Ui, ok: String, role: native_term_skin::Role) -> Opt
     ];
     ui.add_space(8.0);
     native_term_skin::footer(ui, &skin, |_| {}, &choices).map(|i| i == 0)
-}
-
-/// An icon alone (the icon font is a fallback of the text font).
-fn icon(glyph: char) -> egui::RichText {
-    egui::RichText::new(glyph.to_string())
 }
 
 /// A path's last part.

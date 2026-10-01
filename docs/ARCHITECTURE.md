@@ -4582,6 +4582,18 @@ maximize and close at the right), the title bar the main window's height
   come in. egui has collapsing headers, no tree. (`show_rows` places its
   rows by its ui's spacing: the views zero it before, not inside, or
   their rows drift from where it thinks they are, seen on Lingmo.)
+- **Bars** (2026-10-02, the files window's): `TabStrip` is a strip of
+  tabs across a pane's top as a browser's (a number, an icon, a name,
+  what is under it once chosen, a dot for its state, a close button; the
+  chosen one on the page with a line in the accent; sideways scrolling,
+  tools at its end). `PathBar` is a path as crumbs to click; a click
+  beside them (or F4) makes it a field, Enter goes there; crumbs that
+  don't fit fold into "…" after the first, the last always shown.
+  `IconButton` (no frame until pointed at; small, danger, switched on,
+  or round and outlined as a rail's), `filter_field`, `segmented` (the
+  choices on a tile, the chosen one raised, counts), `badge`, `count`.
+  The palette has `card` (fields, badges) and `raised` (under the
+  pointer) for them.
 - **Controls are egui's own** (the person's rule: what egui has is not
   made again): buttons, fields, check boxes, progress bars are egui's,
   given their look by the theme (`looks.rs` paints egui's visuals from

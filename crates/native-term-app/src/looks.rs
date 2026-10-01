@@ -423,6 +423,8 @@ pub fn skin(visuals: &egui::Visuals) -> native_term_skin::Skin {
             page: t.page,
             bar: t.bar,
             line: t.line,
+            card: t.card,
+            raised: t.raised,
             text: t.text,
             weak: t.weak,
             danger: t.danger,

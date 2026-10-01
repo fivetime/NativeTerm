@@ -69,6 +69,30 @@ pub enum Icon {
     /// the session tree, the program itself.
     Tree,
     Terminal,
+    /// A computer: the local side.
+    Laptop,
+    /// A server: the server's side.
+    Server,
+    /// A folder kept to go back to.
+    Bookmark,
+    /// More of what a bar does, in a menu.
+    More,
+    /// To the right: to the server.
+    ArrowRight,
+    /// To the left: to this computer.
+    ArrowLeft,
+    /// Permissions.
+    Shield,
+    /// What went wrong.
+    Error,
+    /// How fast: a latency.
+    Speed,
+    /// Waiting.
+    Clock,
+    /// Two files side by side (diff).
+    Compare,
+    /// What is moving: a speed.
+    Activity,
 }
 
 impl Icon {
@@ -133,6 +157,18 @@ impl Icon {
             Icon::Pointer => '\u{E7C9}',
             Icon::Tree => '\u{F003}',
             Icon::Terminal => '\u{E756}',
+            Icon::Laptop => '\u{E7F8}',
+            Icon::Server => '\u{E968}',
+            Icon::Bookmark => '\u{E734}',
+            Icon::More => '\u{E712}',
+            Icon::ArrowRight => '\u{E72A}',
+            Icon::ArrowLeft => '\u{E72B}',
+            Icon::Shield => '\u{EA18}',
+            Icon::Error => '\u{E783}',
+            Icon::Speed => '\u{EC4A}',
+            Icon::Clock => '\u{E823}',
+            Icon::Compare => '\u{E7C4}',
+            Icon::Activity => '\u{E9D9}',
         }
     }
 }

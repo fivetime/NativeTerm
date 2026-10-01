@@ -737,6 +737,21 @@
         arrows, a click on the list takes them back), the folder shown
         kept in view while the folders above it are read, dropping on a
         folder as before. Tried on Lingmo by hand
+  - [x] The design's layout (skin: `TabStrip`, `PathBar`, `IconButton`,
+        `filter_field`, `segmented`, `badge`): each side's numbered
+        session strip (closing from either side), a bar of up, refresh,
+        the path's crumbs (F4 or a click beside them to type a path), a
+        filter (the folder's names, any case; cleared in another
+        folder), send to the other side in the side's colour, new
+        folder, edit, delete and a menu (copy paths, sync, the names'
+        encoding); the foot with counts and the view's switch; the rail
+        between the sides (upload, download, sync); the panel below
+        (transfers with where from and to, a track, a badge and buttons;
+        the session's log; its errors); the status line (state, host,
+        SFTP v3, the encoding to change); the session in the title bar's
+        middle. Columns that don't fit go (mode or type, date, size).
+        Tried on Lingmo connected to itself: path typed, upload and
+        download from the rail, the log
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above
