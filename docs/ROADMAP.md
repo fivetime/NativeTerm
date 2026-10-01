@@ -943,8 +943,9 @@
             becomes that one once logged in. Seen on Lingmo: a host
             whose user was wrong, set right in the window, logged in,
             its config and the wallet's entry the new user's.
-      Open: the design's font (Inter, bold titles; here the text font
-      NativeTerm has, which has one weight), the properties' width (320
+      The design's font: Inter and JetBrains Mono bundled since
+      2026-10-02 (weights as families, `native_term_skin::font`).
+      Open: bold titles drawn with it, the properties' width (320
       here, 384 in the design), the pages that are not the tree (open
       sessions' cards, all tabs, the dialogs) still drawn with egui's
       own widgets in the design's colours.

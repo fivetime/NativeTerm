@@ -523,28 +523,58 @@ fn floating_button(core: Option<Core>) -> window::FloatingButton {
 /// `state.db` setting: the window's placement.
 const WINDOW_SETTING: &str = "window";
 
-/// Chinese text needs a system font; egui's own fonts have no CJK.
+/// The design's faces, the same on every platform (SIL OFL 1.1, the texts
+/// beside them in `assets/fonts`): Inter for the interface in the weights
+/// it uses, JetBrains Mono for paths and numbers.
+const BUNDLED_FONTS: [(&str, &[u8]); 4] = [
+    ("Inter-Regular", include_bytes!("../assets/fonts/Inter-Regular.ttf")),
+    ("Inter-Medium", include_bytes!("../assets/fonts/Inter-Medium.ttf")),
+    ("Inter-SemiBold", include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
+    ("JetBrainsMono-Regular", include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf")),
+];
+
+/// Inter and JetBrains Mono first, egui's own behind them (emoji), then
+/// the system's CJK font (egui's have none) and the icons.
 pub(crate) fn install_fonts(ctx: &egui::Context) {
+    use egui::FontFamily;
     use native_term_os::fonts;
-    // mapped, not read: egui would keep two private copies of a 20 MB file
+    use native_term_skin::font::{MEDIUM, SEMIBOLD};
     let mut fonts = egui::FontDefinitions::default();
+    for (name, bytes) in BUNDLED_FONTS {
+        fonts.font_data.insert(name.into(), std::sync::Arc::new(egui::FontData::from_static(bytes)));
+    }
+    let behind = |family: FontFamily| fonts.families.get(&family).cloned().unwrap_or_default();
+    let (proportional, monospace) = (behind(FontFamily::Proportional), behind(FontFamily::Monospace));
+    let first = |face: &str, rest: &[String]| std::iter::once(face.to_string()).chain(rest.iter().cloned()).collect();
+    let families = [
+        (FontFamily::Proportional, first("Inter-Regular", &proportional)),
+        (FontFamily::Monospace, first("JetBrainsMono-Regular", &monospace)),
+        (FontFamily::Name(MEDIUM.into()), first("Inter-Medium", &proportional)),
+        (FontFamily::Name(SEMIBOLD.into()), first("Inter-SemiBold", &proportional)),
+    ];
+    let names: Vec<FontFamily> = families.iter().map(|(family, _)| family.clone()).collect();
+    fonts.families.extend(families);
+    // mapped, not read: egui would keep two private copies of a 20 MB file
     let cjk = fonts::cjk_font().and_then(|(f, index)| Some((fonts::map_file(&f).ok()?, index)));
     // icons last: their code points (private use area) are in no other font
     let glyphs = fonts::icon_file().and_then(|f| fonts::map_file(&f).ok()).map(|bytes| (bytes, 0));
+    let mut fallbacks = Vec::new();
     for (name, font) in [("cjk", cjk), ("icons", glyphs)] {
         let Some((bytes, index)) = font else { continue };
         let mut data = egui::FontData::from_static(bytes);
         data.index = index;
         fonts.font_data.insert(name.into(), std::sync::Arc::new(data));
-        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-            fonts.families.entry(family).or_default().push(name.into());
-        }
+        fallbacks.push(name);
     }
     // no icon font on the system: Phosphor, bundled (see `icons`)
     #[cfg(not(windows))]
     {
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
-        fonts.families.entry(egui::FontFamily::Monospace).or_default().push("phosphor".into());
+        fonts.families.entry(FontFamily::Proportional).or_default().retain(|f| f != "phosphor");
+        fallbacks.push("phosphor");
+    }
+    for family in names {
+        fonts.families.entry(family).or_default().extend(fallbacks.iter().map(|f| f.to_string()));
     }
     ctx.set_fonts(fonts);
 }

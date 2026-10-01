@@ -4237,6 +4237,13 @@ All UI surfaces invoke one shared app-level command layer
 - `egui` light/dark visuals, following the system by default. A "skin" is
   a named `Style`/`Visuals` preset (colors, rounding, spacing, text sizes).
   Community theme crates (e.g. `catppuccin-egui`) can be offered as presets.
+- **The interface's faces** (2026-10-02): Inter (Regular, Medium,
+  SemiBold) and JetBrains Mono, bundled (SIL OFL 1.1, the licence texts in
+  `native-term-app/assets/fonts`, ≈1.5 MB), the design's on every
+  platform. egui draws a face in one weight, so each weight is a family
+  of its own: `Proportional` is Inter Regular, `native_term_skin::font`
+  names `medium` and `semibold` (`Weight`, `font()`); egui's own fonts
+  stay behind them (emoji), then the CJK font and the icons.
 - **CJK fonts**: egui's bundled fonts have no Chinese glyphs. A system font
   (Microsoft YaHei, else SimSun) is added as a fallback font. It is
   **memory-mapped**, not read: egui clones owned font data while
