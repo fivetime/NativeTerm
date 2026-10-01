@@ -2063,26 +2063,28 @@ impl FilesWindow {
         if let Some((tab, question, typed)) = &mut self.question {
             let host = self.tabs.iter().find(|t| t.id == *tab).map(|t| t.spec.alias.clone()).unwrap_or_default();
             let mut done = None;
-            modal(ctx, "files-question", t!("files-question-title", host = host.as_str()), |ui| {
-                ui.label(question.prompt.trim());
-                let edit = ui.add(egui::TextEdit::singleline(typed).password(question.secret).desired_width(320.0));
-                edit.request_focus();
-                // no IME in a password field (it would compose the typing)
-                if question.secret {
-                    crate::dialogs::no_ime(&edit);
-                }
-                // the field keeps the focus (it gives it up on Enter and takes
-                // it back in the same frame): Enter anywhere submits
-                let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                ui.horizontal(|ui| {
-                    if ui.button(t!("button-ok")).clicked() || enter {
-                        done = Some(true);
+            let closed = modal(
+                ctx,
+                "files-question",
+                t!("files-question-title", host = host.as_str()),
+                crate::icons::LOCK,
+                |ui| {
+                    ui.label(question.prompt.trim());
+                    let edit = ui.add(egui::TextEdit::singleline(typed).password(question.secret).desired_width(320.0));
+                    edit.request_focus();
+                    // no IME in a password field (it would compose the typing)
+                    if question.secret {
+                        crate::dialogs::no_ime(&edit);
                     }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        done = Some(false);
-                    }
-                });
-            });
+                    // the field keeps the focus (it gives it up on Enter and takes
+                    // it back in the same frame): Enter anywhere submits
+                    let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    done = ok_cancel(ui, t!("button-ok"), native_term_skin::Role::Primary).or(enter.then_some(true));
+                },
+            );
+            if closed && done.is_none() {
+                done = Some(false);
+            }
             if let Some(ok) = done {
                 // the field's focus goes with the dialog (else the list's keys stay dead)
                 ctx.memory_mut(|m| m.stop_text_input());
@@ -2094,19 +2096,15 @@ impl FilesWindow {
         if let Some((tab, remote, name)) = &mut self.new_folder {
             let (tab, remote) = (*tab, *remote);
             let mut done = None;
-            modal(ctx, "files-new-folder", t!("files-new-folder"), |ui| {
+            let closed = modal(ctx, "files-new-folder", t!("files-new-folder"), crate::icons::NEW_FOLDER, |ui| {
                 let edit = ui.add(egui::TextEdit::singleline(name).hint_text(t!("files-new-folder-hint")));
                 edit.request_focus();
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                ui.horizontal(|ui| {
-                    if ui.button(t!("button-create")).clicked() || enter {
-                        done = Some(true);
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        done = Some(false);
-                    }
-                });
+                done = ok_cancel(ui, t!("button-create"), native_term_skin::Role::Primary).or(enter.then_some(true));
             });
+            if closed && done.is_none() {
+                done = Some(false);
+            }
             if let Some(ok) = done {
                 ctx.memory_mut(|m| m.stop_text_input());
                 let name = self.new_folder.take().map(|(_, _, n)| n).unwrap_or_default();
@@ -2143,21 +2141,28 @@ impl FilesWindow {
                 t!("files-close-now"),
             ),
         };
-        let mut done = None;
-        modal(ctx, "files-confirm", title, |ui| {
-            ui.label(text);
-            if let Some(w) = warning {
-                ui.colored_label(RED, w);
-            }
-            ui.horizontal(|ui| {
-                if ui.button(egui::RichText::new(button).color(RED)).clicked() {
-                    done = Some(true);
-                }
-                if ui.button(t!("button-cancel")).clicked() {
-                    done = Some(false);
-                }
-            });
-        });
+        use native_term_skin::{Choice, Message, Notice, Role};
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let shown = Message::new("files-confirm", &title)
+            .icon(crate::icons::DELETE)
+            .notice(Notice::Warning)
+            .choice(Choice::new(button, Role::Danger))
+            .choice(Choice::new(t!("button-cancel"), Role::Plain))
+            .show(
+                ctx,
+                &skin,
+                |ui| {
+                    ui.label(text);
+                    if let Some(w) = warning {
+                        ui.colored_label(skin.palette.danger, w);
+                    }
+                },
+                |_| {},
+            );
+        let done = match shown.pressed {
+            Some(i) => Some(i == 0),
+            None => shown.closed.then_some(false),
+        };
         match (done, self.confirm.take()) {
             (Some(true), Some(Confirm::DeleteRemote { tab, items, what, .. })) => self.delete_remote(tab, items, what),
             (Some(true), Some(Confirm::RecycleLocal { tab, paths, .. })) => self.recycle_local(tab, paths),
@@ -3002,13 +3007,23 @@ fn upload_in_place(sftp: &Session, remote: &[u8], local: &Path, attrs: &Attrs) -
     }
 }
 
-fn modal(ctx: &egui::Context, id: &str, title: String, body: impl FnOnce(&mut egui::Ui)) {
-    egui::Window::new(title)
-        .id(egui::Id::new(id))
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, body);
+/// A dialog of the files window's, on the skin. Whether it was given up
+/// (its close button, Escape).
+fn modal(ctx: &egui::Context, id: &str, title: String, icon: char, body: impl FnOnce(&mut egui::Ui)) -> bool {
+    let skin = crate::looks::skin(&ctx.global_style().visuals);
+    native_term_skin::Modal::new(id, &title).icon(icon).show(ctx, &skin, body).closed
+}
+
+/// The row of buttons at a files dialog's bottom: the one it is for and
+/// Cancel. True for the first, false for Cancel.
+fn ok_cancel(ui: &mut egui::Ui, ok: String, role: native_term_skin::Role) -> Option<bool> {
+    let skin = crate::looks::skin(ui.visuals());
+    let choices = [
+        native_term_skin::Choice::new(ok, role),
+        native_term_skin::Choice::new(t!("button-cancel"), native_term_skin::Role::Plain),
+    ];
+    ui.add_space(8.0);
+    native_term_skin::footer(ui, &skin, |_| {}, &choices).map(|i| i == 0)
 }
 
 /// An icon alone (the icon font is a fallback of the text font).

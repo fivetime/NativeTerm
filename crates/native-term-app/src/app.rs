@@ -2257,16 +2257,14 @@ impl App {
         let size =
             egui::vec2((around.width() - 64.0).clamp(320.0, 720.0), (around.height() - 120.0).clamp(240.0, 520.0));
         const PAGES: f32 = 168.0;
-        let mut open = true;
-        egui::Window::new(icons::with(icons::SETTINGS, t!("settings-toggle")))
-            .id(egui::Id::new("settings-window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .fixed_size(size)
-            .show(ctx, |ui| {
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let title = t!("settings-toggle");
+        let shown = native_term_skin::Modal::new("settings-window", &title).icon(icons::SETTINGS).width(size.x).show(
+            ctx,
+            &skin,
+            |ui| {
                 ui.set_min_height(size.y);
+                ui.set_max_height(size.y);
                 egui::Panel::left("settings-pages")
                     .exact_size(PAGES)
                     .resizable(false)
@@ -2290,8 +2288,9 @@ impl App {
                         self.settings_page(ui);
                     });
                 });
-            });
-        if !open {
+            },
+        );
+        if shown.closed {
             self.show_settings = false;
         }
     }

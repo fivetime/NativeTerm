@@ -240,14 +240,12 @@ impl SendDialog {
         let mut outcome = Outcome::Open;
         let mut open = true;
         let chosen: Vec<String> = self.targets.iter().filter(|t| t.chosen).map(|t| t.id.clone()).collect();
-        egui::Window::new(t!("send-title"))
-            .id(egui::Id::new("send-command"))
-            .collapsible(false)
-            .resizable(true)
-            .default_width(560.0)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = t!("send-title");
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("send-command", &dialog_title)
+            .icon(crate::icons::SEND)
+            .min_width(560.0)
+            .show(ctx, &skin, |ui| {
                 self.library_ui(ui);
                 ui.separator();
                 ui.label(t!("send-command-label"));
@@ -302,29 +300,30 @@ impl SendDialog {
                 ui.separator();
                 let n = chosen.len();
                 let can_send = n > 0 && (!self.text.is_empty() || self.enter);
+                use native_term_skin::{Choice, Role};
                 if self.confirm {
                     ui.colored_label(AMBER, t!("send-confirm", count = n));
-                    ui.horizontal(|ui| {
-                        if ui.button(t!("send-button", count = n)).clicked() {
-                            self.send(core, &chosen, ui.ctx());
-                        }
-                        if ui.button(t!("send-back")).clicked() {
-                            self.confirm = false;
-                        }
-                    });
+                    // (to several hosts: never by Enter, which goes back)
+                    let choices = [
+                        Choice::new(t!("send-button", count = n), Role::Primary),
+                        Choice::new(t!("send-back"), Role::Plain).default(),
+                    ];
+                    match crate::skinned::row(ui, &choices) {
+                        Some(0) => self.send(core, &chosen, ui.ctx()),
+                        Some(_) => self.confirm = false,
+                        None => {}
+                    }
                 } else {
-                    ui.horizontal(|ui| {
-                        if ui.add_enabled(can_send, egui::Button::new(t!("send-button", count = n))).clicked() {
-                            if n > 1 {
-                                self.confirm = true;
-                            } else {
-                                self.send(core, &chosen, ui.ctx());
-                            }
-                        }
-                        if ui.button(t!("button-close")).clicked() {
-                            outcome = Outcome::Cancel;
-                        }
-                    });
+                    let choices = [
+                        Choice::new(t!("send-button", count = n), Role::Primary).enabled(can_send),
+                        Choice::new(t!("button-close"), Role::Plain),
+                    ];
+                    match crate::skinned::row(ui, &choices) {
+                        Some(0) if n > 1 => self.confirm = true,
+                        Some(0) => self.send(core, &chosen, ui.ctx()),
+                        Some(_) => outcome = Outcome::Cancel,
+                        None => {}
+                    }
                 }
                 for (ok, line) in &self.result {
                     ui.colored_label(if *ok { GREEN } else { RED }, line);
@@ -336,6 +335,9 @@ impl SendDialog {
                     });
                 }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }

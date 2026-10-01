@@ -82,6 +82,34 @@ fn snapshots() {
         let size = egui::vec2(440.0, 170.0 + native_term_skin::TITLE_BAR);
         save(&format!("tab-title-{theme}"), picture(size, dark, |ui| window.ui(ui)));
 
+        // dialogs inside the main window, over a page standing for it
+        let over = |name: &str, show: &mut dyn FnMut(&egui::Context)| {
+            save(
+                &format!("{name}-{theme}"),
+                picture(egui::vec2(820.0, 620.0), dark, |ui| {
+                    let skin = crate::looks::skin(ui.visuals());
+                    let page = egui::Frame::NONE.fill(skin.palette.page);
+                    egui::CentralPanel::default().frame(page).show_inside(ui, |ui| ui.label("the main window, behind"));
+                    show(ui.ctx());
+                }),
+            );
+        };
+        let mut host = crate::dialogs::HostDialog::new_host("lab.conf".into(), "Lab");
+        over("host", &mut |ctx| {
+            let _ = host.show(ctx);
+        });
+        let mut folder = crate::dialogs::FolderDialog::new_folder();
+        over("folder", &mut |ctx| {
+            let _ = folder.show(ctx);
+        });
+        let mut mixed = crate::dialogs::ConfirmCloseMixed::new(
+            vec!["a".into(), "b".into()],
+            vec![("web01".into(), false), ("local".into(), true)],
+        );
+        over("close-mixed", &mut |ctx| {
+            let _ = mixed.show(ctx);
+        });
+
         let mut delete = crate::dialogs::ConfirmDelete::new("web01", "Web server 01");
         save(
             &format!("delete-{theme}"),

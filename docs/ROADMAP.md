@@ -650,9 +650,17 @@
         with the dialogs' sign (a question for a new key, an error for a
         changed one, where Enter is Cancel); seen on Lingmo (the files
         window: all three buttons, its edges)
-  - [ ] The dialogs inside the main window (options, import, credential
-        sets, keys, send, wizard, cleanup, server sessions, the
-        confirmations), then the files window's
+  - [x] The dialogs inside the main window (settings, options, Telnet /
+        serial options, import, credential sets, keys, send, wizard,
+        cleanup, server sessions and their log, host, folder, tag, the
+        confirmations, dropped files) and the files window's (the
+        server's question, new folder, sync, the confirmations): the
+        skin's `Modal` (real modal: a backdrop, Escape; the server's log
+        and the sync dialog modeless, made larger by their corner), each
+        with its icon, their rows of buttons the skin's (the platform's
+        order, the main one coloured; Enter never sends to several hosts
+        nor takes anything away); no `egui::Window` left. Seen off the
+        screen and on Lingmo (settings, host, import)
   - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
         settled
 - [x] The main window's new design (2026-09-28), after a design the

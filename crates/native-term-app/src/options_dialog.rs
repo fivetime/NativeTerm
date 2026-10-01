@@ -283,7 +283,7 @@ impl OptionsDialog {
         self.proxy_secret.follow(chosen.as_ref().and_then(Proxy::password_entry));
         let Some(entry) = self.proxy_secret.entry.clone() else { return };
         let secret = &mut self.proxy_secret;
-        let red = egui::Color32::from_rgb(0xd0, 0x3a, 0x3a);
+        let red = crate::looks::skin(ui.visuals()).palette.danger;
         match (secret.saved, secret.refused) {
             (true, true) => ui.colored_label(red, t!("proxy-password-refused")),
             (true, false) => ui.weak(t!("proxy-password-saved")),
@@ -372,7 +372,7 @@ impl OptionsDialog {
                 }
             });
             if let Some(error) = self.proxy_error().filter(|_| !self.proxy_address.trim().is_empty()) {
-                ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, error);
             }
             self.proxy_login(ui);
             // ssh uses whichever of the two it reads first
@@ -483,12 +483,11 @@ impl OptionsDialog {
         // (NativeTerm's own pages are long: what the window has room for,
         // the title, the note and the buttons kept in sight)
         let room = (ctx.content_rect().height() - 190.0).clamp(160.0, 560.0);
-        egui::Window::new(title)
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = title;
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("options_dialog-0", &dialog_title)
+            .icon(crate::icons::SETTINGS)
+            .show(ctx, &skin, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(120.0);
@@ -562,20 +561,25 @@ impl OptionsDialog {
                     Extra::None => note,
                 });
                 if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                    ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, error);
                 }
-                ui.horizontal(|ui| {
-                    if ui.button(t!("button-save")).clicked() {
-                        match self.proxy_error().or_else(|| self.logon.as_ref().and_then(LogonPage::error)) {
-                            Some(error) => self.error = Some(error),
-                            None => outcome = Outcome::Submit(self.values()),
-                        }
+                let choices = [
+                    native_term_skin::Choice::new(t!("button-save"), native_term_skin::Role::Primary),
+                    native_term_skin::Choice::new(t!("button-cancel"), native_term_skin::Role::Plain),
+                ];
+                let pressed = crate::skinned::row(ui, &choices);
+                if pressed == Some(0) {
+                    match self.proxy_error().or_else(|| self.logon.as_ref().and_then(LogonPage::error)) {
+                        Some(error) => self.error = Some(error),
+                        None => outcome = Outcome::Submit(self.values()),
                     }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                } else if pressed == Some(1) {
+                    outcome = Outcome::Cancel;
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }

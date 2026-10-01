@@ -4548,9 +4548,17 @@ maximize and close at the right), the title bar the main window's height
   edges (`chrome`, or `chrome_resizable` with all three buttons), the
   page, the row of buttons. A `Choice` marked `default` is what Enter
   presses (Cancel for a changed host key: never trusted by a key press).
-- Done so far: the main window, every window of its own (password, host
-  key, files, find, quotation, tab title), the delete confirmation. The
-  dialogs inside the main window follow (ROADMAP).
+- A dialog in a window is as wide as what it has (at least its
+  `min_width`) or a width it is given; its title bar is laid out after
+  what is under it, as wide as that. Its row of buttons is as wide as
+  what is above it (a window's bottom bar: the window's width), so that
+  the buttons don't widen a dialog. A modeless one (`Modal::modeless`:
+  no backdrop, moved by dragging it) is for what is looked at beside the
+  rest (a session's log); `Modal::resizable` gives one a corner.
+- Done: every window and dialog NativeTerm draws (no `egui::Window`
+  left): the main window, its windows of their own, the dialogs inside
+  the main window and the files window. Rows of buttons inside a page's
+  content (a field and its button) stay egui's own buttons.
 
 ### Terminal tabs
 Rendering belongs to Windows Terminal, but each tab can be opened with:

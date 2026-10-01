@@ -139,13 +139,12 @@ impl CleanupDialog {
     pub fn show(&mut self, ctx: &egui::Context, status: &Status, actions: &mut Vec<CleanupAction>) -> Outcome<()> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(t!("cleanup-title"))
-            .collapsible(false)
-            .resizable(true)
+        let dialog_title = t!("cleanup-title");
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("cleanup-0", &dialog_title)
+            .icon(crate::icons::CLEAR)
             .min_width(680.0)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+            .show(ctx, &skin, |ui| {
                 ui.weak(t!("cleanup-intro"));
                 ui.separator();
 
@@ -207,15 +206,19 @@ impl CleanupDialog {
                     ui.label(line.as_str());
                 }
                 ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button(t!("cleanup-copy")).clicked() {
-                        ui.ctx().copy_text(self.cleanup.as_text());
-                    }
-                    if ui.button(t!("button-close")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                let choices = [
+                    native_term_skin::Choice::new(t!("cleanup-copy"), native_term_skin::Role::Plain),
+                    native_term_skin::Choice::new(t!("button-close"), native_term_skin::Role::Plain),
+                ];
+                match crate::skinned::row(ui, &choices) {
+                    Some(0) => ui.ctx().copy_text(self.cleanup.as_text()),
+                    Some(_) => outcome = Outcome::Cancel,
+                    None => {}
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }

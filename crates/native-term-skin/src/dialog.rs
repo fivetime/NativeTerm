@@ -179,28 +179,45 @@ impl Choice {
 /// something away, unless marked), where it can be pressed and no field
 /// has the keyboard.
 pub fn footer(ui: &mut egui::Ui, skin: &Skin, left: impl FnOnce(&mut egui::Ui), choices: &[Choice]) -> Option<usize> {
+    const GAP: f32 = 10.0;
     let mut pressed = None;
+    // left to right, in the platform's order
+    let mut order: Vec<usize> = (0..choices.len()).collect();
+    if skin.order == Order::PrimaryLast {
+        order.reverse();
+    }
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let padding = ui.spacing().button_padding.x;
+    let buttons: f32 = choices
+        .iter()
+        .map(|c| {
+            let text = ui.painter().layout_no_wrap(c.text.clone(), font.clone(), egui::Color32::WHITE).size().x;
+            (text + 2.0 * padding).max(BUTTON_WIDTH)
+        })
+        .sum::<f32>()
+        + GAP * choices.len().saturating_sub(1) as f32;
+    // as wide as what is above it (a dialog grows to what it has, not to
+    // its buttons' row), or the room there is where nothing is (a
+    // window's bottom bar)
+    let above = ui.min_rect().width();
+    let room = if above > 1.0 { above } else { ui.available_width() };
     ui.horizontal(|ui| {
         ui.set_min_height(BUTTON_HEIGHT);
+        let start = ui.cursor().min.x;
         left(ui);
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 10.0;
-            // (laid out from the right: the last one shown comes first)
-            let mut order: Vec<usize> = (0..choices.len()).collect();
-            if skin.order == Order::PrimaryFirst {
-                order.reverse();
+        let used = ui.cursor().min.x - start;
+        ui.add_space((room - used - buttons).max(0.0));
+        ui.spacing_mut().item_spacing.x = GAP;
+        for i in order {
+            let c = &choices[i];
+            let mut response = button(ui, skin, &c.text, c.role, c.enabled);
+            if let Some(hint) = &c.hint {
+                response = response.on_hover_text(hint);
             }
-            for i in order {
-                let c = &choices[i];
-                let mut response = button(ui, skin, &c.text, c.role, c.enabled);
-                if let Some(hint) = &c.hint {
-                    response = response.on_hover_text(hint);
-                }
-                if response.clicked() {
-                    pressed = Some(i);
-                }
+            if response.clicked() {
+                pressed = Some(i);
             }
-        });
+        }
     });
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter)) && ui.memory(|m| m.focused().is_none());
     if pressed.is_none() && enter {

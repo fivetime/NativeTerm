@@ -48,6 +48,15 @@ pub fn page(skin: &Skin) -> egui::Frame {
     egui::Frame::NONE.fill(skin.palette.page).inner_margin(egui::Margin { bottom: 0, ..egui::Margin::same(PADDING) })
 }
 
+/// A dialog's row of buttons at its end (inside a dialog in the main
+/// window: under what it has), in the platform's order. Which was
+/// pressed.
+pub fn row(ui: &mut egui::Ui, choices: &[Choice]) -> Option<usize> {
+    let skin = crate::looks::skin(ui.visuals());
+    ui.add_space(8.0);
+    native_term_skin::footer(ui, &skin, |_| {}, choices)
+}
+
 /// The row of buttons at the window's bottom (put before the content:
 /// it keeps its room whatever the content takes), `left` at its left.
 /// Which was pressed.

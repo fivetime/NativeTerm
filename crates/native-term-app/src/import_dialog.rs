@@ -188,14 +188,12 @@ impl ImportDialog {
             Origin::Putty => (t!("import-title-putty"), t!("import-putty-from")),
         };
         let editable = self.origin == Origin::SecureCrt && matches!(self.step, Step::Choose | Step::Preview { .. });
-        egui::Window::new(title)
-            .id(egui::Id::new("import-sessions"))
-            .collapsible(false)
-            .resizable(true)
-            .default_width(640.0)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = title;
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("import-sessions", &dialog_title)
+            .icon(crate::icons::IMPORT)
+            .min_width(640.0)
+            .show(ctx, &skin, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(folder_label);
                     ui.add_enabled(
@@ -256,46 +254,58 @@ impl ImportDialog {
                     }
                 }
                 ui.separator();
-                ui.horizontal(|ui| match &self.step {
-                    Step::Choose | Step::Preview { .. } => {
-                        if ui
-                            .add_enabled(!self.path.trim().is_empty(), egui::Button::new(t!("import-preview")))
-                            .clicked()
-                        {
-                            self.preview(ctx);
-                        }
-                        if let Step::Preview { plan, commands, .. } = &self.step {
-                            let n = plan.host_count();
-                            let keys = !plan.host_keys.is_empty();
-                            let label = if commands.is_empty() {
-                                t!("import-run", count = n)
-                            } else {
-                                t!("import-run-commands", count = n, commands = commands.len())
-                            };
-                            if ui.add_enabled(n > 0 || keys || !commands.is_empty(), egui::Button::new(label)).clicked()
-                            {
-                                start = Some((Plan::clone(plan), commands.clone()));
-                            }
-                        }
-                        if ui.button(t!("button-cancel")).clicked() {
-                            outcome = Outcome::Cancel;
-                        }
+                use native_term_skin::{Choice, Role};
+                // the buttons of the step: what it is for coloured, Cancel
+                // (the import going: a spinner, nothing to press)
+                let cancel = || Choice::new(t!("button-cancel"), Role::Plain);
+                let choices: Vec<Choice> = match &self.step {
+                    Step::Choose => vec![
+                        Choice::new(t!("import-preview"), Role::Primary).enabled(!self.path.trim().is_empty()),
+                        cancel(),
+                    ],
+                    Step::Preview { plan, commands, .. } => {
+                        let n = plan.host_count();
+                        let label = if commands.is_empty() {
+                            t!("import-run", count = n)
+                        } else {
+                            t!("import-run-commands", count = n, commands = commands.len())
+                        };
+                        let any = n > 0 || !plan.host_keys.is_empty() || !commands.is_empty();
+                        vec![
+                            Choice::new(label, Role::Primary).enabled(any),
+                            Choice::new(t!("import-preview"), Role::Plain).enabled(!self.path.trim().is_empty()),
+                            cancel(),
+                        ]
                     }
-                    Step::Scanning { .. } => {
-                        if ui.button(t!("button-cancel")).clicked() {
-                            outcome = Outcome::Cancel;
-                        }
+                    Step::Scanning { .. } => vec![cancel()],
+                    Step::Running { .. } => Vec::new(),
+                    Step::Finished { .. } => vec![Choice::new(t!("button-close"), Role::Primary)],
+                };
+                if matches!(self.step, Step::Running { .. }) {
+                    ui.add(egui::Spinner::new());
+                }
+                let pressed = crate::skinned::row(ui, &choices);
+                let last = choices.len().saturating_sub(1);
+                let mut preview = false;
+                match (&self.step, pressed) {
+                    (_, None) => {}
+                    (Step::Finished { wrote, .. }, Some(_)) => {
+                        outcome = if *wrote { Outcome::Submit(()) } else { Outcome::Cancel };
                     }
-                    Step::Running { .. } => {
-                        ui.add(egui::Spinner::new());
+                    (_, Some(i)) if i == last => outcome = Outcome::Cancel,
+                    (Step::Choose, Some(0)) | (Step::Preview { .. }, Some(1)) => preview = true,
+                    (Step::Preview { plan, commands, .. }, Some(0)) => {
+                        start = Some((Plan::clone(plan), commands.clone()));
                     }
-                    Step::Finished { wrote, .. } => {
-                        if ui.button(t!("button-close")).clicked() {
-                            outcome = if *wrote { Outcome::Submit(()) } else { Outcome::Cancel };
-                        }
-                    }
-                });
+                    _ => {}
+                }
+                if preview {
+                    self.preview(ctx);
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if let Some((plan, commands)) = start {
             self.start(plan, commands, ctx);
         }

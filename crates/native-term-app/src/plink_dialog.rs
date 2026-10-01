@@ -281,12 +281,11 @@ impl PlinkDialog {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(self.title.clone())
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = self.title.clone();
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("plink_dialog-0", &dialog_title)
+            .icon(crate::icons::NETWORK)
+            .show(ctx, &skin, |ui| {
                 egui::Grid::new("plink-fields").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                     let field = |ui: &mut egui::Ui, name: String, value: &mut String, hint: String| {
                         ui.label(name);
@@ -428,17 +427,22 @@ impl PlinkDialog {
                     ui.weak(t!("plink-alias-kept", alias = alias.as_str()));
                 }
                 if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                    ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, error);
                 }
-                ui.horizontal(|ui| {
-                    if ui.button(t!("button-save")).clicked() {
-                        outcome = Outcome::Submit(());
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                let choices = [
+                    native_term_skin::Choice::new(t!("button-save"), native_term_skin::Role::Primary),
+                    native_term_skin::Choice::new(t!("button-cancel"), native_term_skin::Role::Plain),
+                ];
+                let pressed = crate::skinned::row(ui, &choices);
+                match pressed {
+                    Some(0) => outcome = Outcome::Submit(()),
+                    Some(_) => outcome = Outcome::Cancel,
+                    None => {}
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }

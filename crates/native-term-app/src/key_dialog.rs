@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use native_term_app::{t, Core};
+use native_term_skin::{Choice, Role};
 
 use crate::dialogs::Outcome;
 
@@ -77,29 +78,35 @@ impl KeyDialog {
     pub fn show(&mut self, ctx: &egui::Context, core: &Core) -> Outcome<()> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(t!("key-title"))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = t!("key-title");
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("key_dialog-0", &dialog_title).icon(crate::icons::KEY).show(
+            ctx,
+            &skin,
+            |ui| {
                 if self.keys.is_empty() {
                     ui.label(t!("key-none", dir = self.ssh_dir.display().to_string()));
-                    ui.horizontal(|ui| {
-                        if ui.button(t!("key-create")).clicked() {
+                    let choices = [
+                        Choice::new(t!("key-create"), Role::Primary),
+                        Choice::new(t!("key-refresh"), Role::Plain),
+                        Choice::new(t!("button-cancel"), Role::Plain),
+                    ];
+                    let pressed = crate::skinned::row(ui, &choices);
+                    {
+                        if pressed == Some(0) {
                             let path = self.ssh_dir.join("id_ed25519").display().to_string();
                             match core.terminal().open_tool(&t!("key-create-tab"), &["--create-key".into(), path]) {
                                 Ok(()) => outcome = Outcome::Cancel,
                                 Err(e) => self.error = Some(e.to_string()),
                             }
                         }
-                        if ui.button(t!("key-refresh")).clicked() {
+                        if pressed == Some(1) {
                             self.keys = public_keys(&self.ssh_dir);
                         }
-                        if ui.button(t!("button-cancel")).clicked() {
+                        if pressed == Some(2) {
                             outcome = Outcome::Cancel;
                         }
-                    });
+                    }
                 } else {
                     ui.horizontal(|ui| {
                         ui.label(t!("key-which"));
@@ -121,8 +128,13 @@ impl KeyDialog {
                         ui.checkbox(&mut self.one_password, t!("key-one-password"));
                     }
                     ui.weak(if batch { t!("key-one-password-hint") } else { t!("key-note") });
-                    ui.horizontal(|ui| {
-                        if ui.button(t!("key-install", count = self.hosts.len())).clicked() {
+                    let choices = [
+                        Choice::new(t!("key-install", count = self.hosts.len()), Role::Primary),
+                        Choice::new(t!("button-cancel"), Role::Plain),
+                    ];
+                    let pressed = crate::skinned::row(ui, &choices);
+                    {
+                        if pressed == Some(0) {
                             let key = self.keys[self.chosen].display().to_string();
                             let terminal_hosts = self.hosts.clone();
                             let core = core.clone();
@@ -157,15 +169,19 @@ impl KeyDialog {
                             });
                             outcome = Outcome::Cancel;
                         }
-                        if ui.button(t!("button-cancel")).clicked() {
+                        if pressed == Some(1) {
                             outcome = Outcome::Cancel;
                         }
-                    });
+                    }
                 }
                 if let Some(e) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), e);
+                    ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, e);
                 }
-            });
+            },
+        );
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }

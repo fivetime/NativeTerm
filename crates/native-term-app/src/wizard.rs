@@ -285,14 +285,12 @@ impl Wizard {
         let mut actions = Vec::new();
         let mut open = true;
         let title = t!("wizard-title");
-        egui::Window::new(title)
-            .id(egui::Id::new("first-run"))
-            .collapsible(false)
-            .resizable(false)
-            .default_width(560.0)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = title;
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("first-run", &dialog_title)
+            .icon(crate::icons::INFO)
+            .min_width(560.0)
+            .show(ctx, &skin, |ui| {
                 ui.set_min_width(520.0);
                 let n = self.step + 1;
                 ui.strong(t!("wizard-step", n = n, total = STEPS, title = self.step_title()));
@@ -307,22 +305,27 @@ impl Wizard {
                     }
                 });
                 ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(self.step > 0, egui::Button::new(t!("wizard-back"))).clicked() {
-                        self.step -= 1;
-                    }
-                    if self.step + 1 < STEPS {
-                        if ui.button(t!("wizard-next")).clicked() {
-                            self.step += 1;
-                        }
-                        if ui.button(t!("wizard-skip")).clicked() {
-                            actions.push(WizardAction::Done);
-                        }
-                    } else if ui.button(t!("wizard-finish")).clicked() {
-                        actions.push(WizardAction::Done);
-                    }
-                });
+                use native_term_skin::{Choice, Role};
+                let last = self.step + 1 >= STEPS;
+                let forward = if last { t!("wizard-finish") } else { t!("wizard-next") };
+                let mut choices = vec![
+                    Choice::new(forward, Role::Primary),
+                    Choice::new(t!("wizard-back"), Role::Plain).enabled(self.step > 0),
+                ];
+                if !last {
+                    choices.push(Choice::new(t!("wizard-skip"), Role::Plain));
+                }
+                match crate::skinned::row(ui, &choices) {
+                    Some(0) if last => actions.push(WizardAction::Done),
+                    Some(0) => self.step += 1,
+                    Some(1) => self.step -= 1,
+                    Some(_) => actions.push(WizardAction::Done),
+                    None => {}
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             actions.push(WizardAction::Done);
         }

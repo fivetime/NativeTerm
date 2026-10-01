@@ -8,6 +8,7 @@ use native_term_config::ops::HostDraft;
 use native_term_config::password::{self, Target, REFUSED};
 use native_term_config::persistent;
 use native_term_os::credentials::{self, Saved};
+use native_term_skin::{Choice, Role};
 
 pub enum Outcome<T> {
     Open,
@@ -103,12 +104,10 @@ impl TagDialog {
             Some(_) => t!("tag-rename-title", tag = self.tag.as_str()),
             None => t!("tag-delete-title", tag = self.tag.as_str()),
         };
-        egui::Window::new(title)
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = title;
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown =
+            native_term_skin::Modal::new("dialogs-0", &dialog_title).icon(crate::icons::EDIT).show(ctx, &skin, |ui| {
                 ui.set_max_width(320.0);
                 let mut entered = false;
                 match &mut self.name {
@@ -126,21 +125,26 @@ impl TagDialog {
                     }
                 }
                 if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                    ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, error);
                 }
-                ui.horizontal(|ui| {
-                    // (one name: a comma would make two tags of it)
-                    let named = self.name.as_deref().map(native_term_app::registry::Note::tags_from);
-                    let fine = named.as_ref().is_none_or(|tags| tags.len() == 1);
-                    let button = if self.name.is_some() { t!("button-save") } else { t!("button-delete") };
-                    if ui.add_enabled(fine, egui::Button::new(button)).clicked() || (entered && fine) {
-                        outcome = Outcome::Submit(named.and_then(|mut tags| tags.pop()));
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                // (one name: a comma would make two tags of it)
+                let named = self.name.as_deref().map(native_term_app::registry::Note::tags_from);
+                let fine = named.as_ref().is_none_or(|tags| tags.len() == 1);
+                let first = match self.name {
+                    Some(_) => Choice::new(t!("button-save"), Role::Primary),
+                    None => Choice::new(t!("button-delete"), Role::Danger),
+                };
+                let pressed =
+                    crate::skinned::row(ui, &[first.enabled(fine), Choice::new(t!("button-cancel"), Role::Plain)]);
+                if pressed == Some(0) || (entered && fine) {
+                    outcome = Outcome::Submit(named.and_then(|mut tags| tags.pop()));
+                } else if pressed == Some(1) {
+                    outcome = Outcome::Cancel;
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }
@@ -243,9 +247,11 @@ impl PasswordField {
             (PasswordState::Saved, Some(_)) => (t!("password-saved-set"), None),
             (PasswordState::Saved, None) => (t!("password-saved", target = self.target.name.as_str()), None),
             (PasswordState::Refused, Some(_)) => {
-                (t!("password-refused-set"), Some(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a)))
+                (t!("password-refused-set"), Some(crate::looks::skin(ui.visuals()).palette.danger))
             }
-            (PasswordState::Refused, None) => (t!("password-refused"), Some(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a))),
+            (PasswordState::Refused, None) => {
+                (t!("password-refused"), Some(crate::looks::skin(ui.visuals()).palette.danger))
+            }
         };
         match color {
             Some(c) => ui.colored_label(c, text),
@@ -512,12 +518,10 @@ impl HostDialog {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<HostDraft> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(self.title.clone())
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = self.title.clone();
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown =
+            native_term_skin::Modal::new("dialogs-1", &dialog_title).icon(crate::icons::HOST).show(ctx, &skin, |ui| {
                 // (in a window that is lower than all of it, what is asked
                 // is scrolled through: the buttons under it stay in sight)
                 let room = (ui.ctx().content_rect().height() - 130.0).max(200.0);
@@ -613,21 +617,25 @@ impl HostDialog {
                     }
                 });
                 if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                    ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, error);
                 }
-                ui.horizontal(|ui| {
-                    let ready = !self.hostname.trim().is_empty();
-                    if ui.add_enabled(ready, egui::Button::new(t!("button-save"))).clicked() {
-                        match self.draft() {
-                            Ok(d) => outcome = Outcome::Submit(d),
-                            Err(e) => self.error = Some(e),
-                        }
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                let ready = !self.hostname.trim().is_empty();
+                let choices = [
+                    Choice::new(t!("button-save"), Role::Primary).enabled(ready),
+                    Choice::new(t!("button-cancel"), Role::Plain),
+                ];
+                match crate::skinned::row(ui, &choices) {
+                    Some(0) => match self.draft() {
+                        Ok(d) => outcome = Outcome::Submit(d),
+                        Err(e) => self.error = Some(e),
+                    },
+                    Some(_) => outcome = Outcome::Cancel,
+                    None => {}
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }
@@ -794,12 +802,12 @@ impl FolderDialog {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<String> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(self.title.clone())
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = self.title.clone();
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("dialogs-2", &dialog_title).icon(crate::icons::FOLDER).show(
+            ctx,
+            &skin,
+            |ui| {
                 let edit = ui.add(
                     egui::TextEdit::singleline(&mut self.name).hint_text(t!("folder-name-hint")).desired_width(260.0),
                 );
@@ -807,20 +815,25 @@ impl FolderDialog {
                     edit.request_focus();
                 }
                 if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                    ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, error);
                 }
-                ui.horizontal(|ui| {
-                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                    if ui.add_enabled(!self.name.trim().is_empty(), egui::Button::new(t!("button-save"))).clicked()
-                        || (enter && !self.name.trim().is_empty())
-                    {
-                        outcome = Outcome::Submit(self.name.trim().to_string());
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
-            });
+                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let named = !self.name.trim().is_empty();
+                let choices = [
+                    Choice::new(t!("button-save"), Role::Primary).enabled(named),
+                    Choice::new(t!("button-cancel"), Role::Plain),
+                ];
+                let pressed = crate::skinned::row(ui, &choices);
+                if pressed == Some(0) || (enter && named) {
+                    outcome = Outcome::Submit(self.name.trim().to_string());
+                } else if pressed == Some(1) {
+                    outcome = Outcome::Cancel;
+                }
+            },
+        );
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }
@@ -843,29 +856,29 @@ impl ConfirmForget {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(t!("forget-title"))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = t!("forget-title");
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown =
+            native_term_skin::Modal::new("dialogs-3", &dialog_title).icon(crate::icons::LOCK).show(ctx, &skin, |ui| {
                 ui.label(t!("forget-question", alias = self.alias.as_str()));
                 for name in &self.names {
                     ui.monospace(format!("  {name}"));
                 }
                 ui.weak(t!("forget-note"));
                 if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::from_rgb(0xd0, 0x3a, 0x3a), error);
+                    ui.colored_label(crate::looks::skin(ui.visuals()).palette.danger, error);
                 }
-                ui.horizontal(|ui| {
-                    if ui.button(t!("forget-button")).clicked() {
-                        outcome = Outcome::Submit(());
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                let choices =
+                    [Choice::new(t!("forget-button"), Role::Danger), Choice::new(t!("button-cancel"), Role::Plain)];
+                match crate::skinned::row(ui, &choices) {
+                    Some(0) => outcome = Outcome::Submit(()),
+                    Some(_) => outcome = Outcome::Cancel,
+                    None => {}
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }
@@ -890,12 +903,10 @@ impl ConfirmCloseMixed {
         let mut outcome = Outcome::Open;
         let mut open = true;
         let mixed: Vec<&str> = self.sessions.iter().filter(|(_, m)| *m).map(|(l, _)| l.as_str()).collect();
-        egui::Window::new(t!("close-mixed-title"))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = t!("close-mixed-title");
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown =
+            native_term_skin::Modal::new("dialogs-4", &dialog_title).icon(crate::icons::TABS).show(ctx, &skin, |ui| {
                 ui.label(t!("close-mixed-what", count = self.sessions.len(), mixed = mixed.len()));
                 ui.weak(t!("close-mixed-hint"));
                 egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
@@ -907,15 +918,19 @@ impl ConfirmCloseMixed {
                         }
                     }
                 });
-                ui.horizontal(|ui| {
-                    if ui.button(t!("close-mixed-close", count = self.sessions.len())).clicked() {
-                        outcome = Outcome::Submit(());
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                let choices = [
+                    Choice::new(t!("close-mixed-close", count = self.sessions.len()), Role::Danger),
+                    Choice::new(t!("button-cancel"), Role::Plain),
+                ];
+                match crate::skinned::row(ui, &choices) {
+                    Some(0) => outcome = Outcome::Submit(()),
+                    Some(_) => outcome = Outcome::Cancel,
+                    None => {}
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }
@@ -935,7 +950,7 @@ impl ConfirmDelete {
     }
 
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
-        use native_term_skin::{Choice, Message, Notice, Role};
+        use native_term_skin::{Message, Notice};
         let skin = crate::looks::skin(&ctx.global_style().visuals);
         let title = t!("delete-title");
         let shown = Message::new("delete-host", &title)
@@ -995,12 +1010,12 @@ impl DropDialog {
         let files = self.paths.iter().filter(|p| p.is_file());
         let total: u64 = files.filter_map(|p| p.metadata().ok()).map(|m| m.len()).sum();
         let folders = self.paths.iter().any(|p| p.is_dir());
-        egui::Window::new(t!("drop-title"))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = t!("drop-title");
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("dialogs-5", &dialog_title).icon(crate::icons::UPLOAD).show(
+            ctx,
+            &skin,
+            |ui| {
                 ui.label(t!("drop-what", count = self.paths.len(), label = self.label.as_str()));
                 egui::ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
                     for path in &self.paths {
@@ -1020,22 +1035,25 @@ impl DropDialog {
                 }
                 ui.weak(t!("drop-where"));
                 ui.checkbox(&mut self.remember, t!("drop-remember"));
-                ui.horizontal(|ui| {
-                    let upload = ui.add_enabled(self.can_upload, egui::Button::new(t!("drop-upload")));
-                    if upload.clicked() {
-                        outcome = Outcome::Submit((DropChoice::Upload, self.remember));
-                    }
-                    if ui.button(t!("drop-text")).clicked() {
-                        outcome = Outcome::Submit((DropChoice::Text, self.remember));
-                    }
-                    if ui.button(t!("button-cancel")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                let choices = [
+                    Choice::new(t!("drop-upload"), Role::Primary).enabled(self.can_upload),
+                    Choice::new(t!("drop-text"), Role::Plain),
+                    Choice::new(t!("button-cancel"), Role::Plain),
+                ];
+                match crate::skinned::row(ui, &choices) {
+                    Some(0) => outcome = Outcome::Submit((DropChoice::Upload, self.remember)),
+                    Some(1) => outcome = Outcome::Submit((DropChoice::Text, self.remember)),
+                    Some(_) => outcome = Outcome::Cancel,
+                    None => {}
+                }
                 if !self.can_upload {
                     ui.weak(t!("drop-no-sftp"));
                 }
-            });
+            },
+        );
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }

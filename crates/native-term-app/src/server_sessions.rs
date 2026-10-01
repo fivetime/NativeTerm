@@ -154,11 +154,13 @@ impl ServerSessionsDialog {
     fn log_window(&mut self, ctx: &egui::Context, delete: &mut Option<Named>, copy: &mut Option<Named>) {
         let Some(view) = &mut self.log else { return };
         let mut open = true;
-        egui::Window::new(t!("server-log-title", name = view.name.as_str()))
-            .id(egui::Id::new("server-log"))
-            .open(&mut open)
-            .default_size([760.0, 480.0])
-            .show(ctx, |ui| {
+        let dialog_title = t!("server-log-title", name = view.name.as_str());
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("server-log", &dialog_title)
+            .icon(crate::icons::LIST)
+            .resizable(egui::vec2(760.0, 480.0))
+            .modeless()
+            .show(ctx, &skin, |ui| {
                 ui.horizontal(|ui| {
                     let ready = matches!(view.text, Some(Ok(_)));
                     let button = egui::Button::new(t!("server-log-copy"));
@@ -199,6 +201,9 @@ impl ServerSessionsDialog {
                     }
                 }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open || delete.is_some() {
             self.log = None;
         }
@@ -266,12 +271,11 @@ impl ServerSessionsDialog {
         let tabs = core.sessions();
         let several = self.hosts.len() > 1;
         let detached = if several { self.detached(&tabs) } else { Vec::new() };
-        egui::Window::new(t!("server-sessions-title", label = self.title.as_str()))
-            .collapsible(false)
-            .resizable(false)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+        let dialog_title = t!("server-sessions-title", label = self.title.as_str());
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("server_sessions-1", &dialog_title)
+            .icon(crate::icons::LAYERS)
+            .show(ctx, &skin, |ui| {
                 ui.weak(t!("server-sessions-intro"));
                 ui.add_space(6.0);
                 if self.hosts.is_empty() {
@@ -320,21 +324,26 @@ impl ServerSessionsDialog {
                     ui.weak(note);
                 }
                 ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(!busy, egui::Button::new(t!("server-sessions-refresh"))).clicked() {
-                        refresh = true;
-                    }
-                    if !detached.is_empty() {
-                        let button = egui::Button::new(t!("server-sessions-open-all", count = detached.len()));
-                        if ui.add(button).on_hover_text(t!("server-sessions-open-all-hint")).clicked() {
-                            reopen.extend(detached.iter().cloned());
-                        }
-                    }
-                    if ui.button(t!("button-close")).clicked() {
-                        outcome = Outcome::Cancel;
-                    }
-                });
+                use native_term_skin::{Choice, Role};
+                let mut choices = vec![Choice::new(t!("server-sessions-refresh"), Role::Plain).enabled(!busy)];
+                if !detached.is_empty() {
+                    choices.push(
+                        Choice::new(t!("server-sessions-open-all", count = detached.len()), Role::Plain)
+                            .hint(t!("server-sessions-open-all-hint")),
+                    );
+                }
+                choices.push(Choice::new(t!("button-close"), Role::Plain));
+                let last = choices.len() - 1;
+                match crate::skinned::row(ui, &choices) {
+                    Some(0) => refresh = true,
+                    Some(i) if i == last => outcome = Outcome::Cancel,
+                    Some(_) => reopen.extend(detached.iter().cloned()),
+                    None => {}
+                }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if let Some(named) = read {
             self.read_log(ctx, named);
         }

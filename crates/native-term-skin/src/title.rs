@@ -136,10 +136,16 @@ impl<'a> TitleBar<'a> {
         shown
     }
 
-    /// The title bar inside something else (a modal dialog): it moves
-    /// nothing; `width` wide, its top corners as round as `round`.
-    pub(crate) fn show_inside(self, ui: &mut egui::Ui, skin: &Skin, width: f32, round: u8) -> TitleShown {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, self.height), egui::Sense::hover());
+    /// How high it is.
+    pub(crate) fn bar_height(&self) -> f32 {
+        self.height
+    }
+
+    /// The title bar inside something else (a dialog in a window), in
+    /// `rect` (its place, kept before what is under it was laid out: as
+    /// wide as that turned out), its top corners as round as `round`. It
+    /// moves nothing.
+    pub(crate) fn show_at(self, ui: &mut egui::Ui, skin: &Skin, rect: egui::Rect, round: u8) -> TitleShown {
         let corners = egui::CornerRadius { nw: round, ne: round, sw: 0, se: 0 };
         ui.painter().rect_filled(rect, corners, skin.palette.bar);
         ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0_f32, skin.palette.line));

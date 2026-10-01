@@ -98,13 +98,16 @@ impl SyncDialog {
     pub fn show(&mut self, ctx: &egui::Context) -> Option<Asked> {
         let mut asked = None;
         let mut open = true;
-        egui::Window::new(t!("files-sync-title", host = self.host.as_str()))
-            .id(egui::Id::new("files-sync"))
-            .collapsible(false)
-            .resizable(true)
-            .default_size([900.0, 560.0])
-            .open(&mut open)
-            .show(ctx, |ui| asked = self.body(ui));
+        let dialog_title = t!("files-sync-title", host = self.host.as_str());
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("files-sync", &dialog_title)
+            .icon(crate::icons::SYNC)
+            .resizable(egui::vec2(900.0, 560.0))
+            .modeless()
+            .show(ctx, &skin, |ui| asked = self.body(ui));
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             self.stop();
             return Some(Asked::Close);
@@ -261,27 +264,33 @@ impl SyncDialog {
                     .on_hover_text(t!("files-sync-conflict-hint"));
             }
         });
-        ui.horizontal(|ui| {
-            let work = plan.uploads.len() + plan.downloads.len() + deletes > 0;
-            if self.confirming {
+        use native_term_skin::{Choice, Role};
+        let work = plan.uploads.len() + plan.downloads.len() + deletes > 0;
+        let confirming = self.confirming;
+        let first = if confirming {
+            Choice::new(t!("files-sync-start-delete"), Role::Danger)
+        } else {
+            Choice::new(t!("files-sync-start"), Role::Primary).enabled(work)
+        };
+        let choices = [
+            first,
+            Choice::new(format!("{} {}", icons::REFRESH, t!("files-sync-rescan")), Role::Plain),
+            Choice::new(t!("button-close"), Role::Plain),
+        ];
+        let skin = crate::looks::skin(ui.visuals());
+        ui.add_space(8.0);
+        let left = |ui: &mut egui::Ui| {
+            if confirming {
                 ui.colored_label(RED, t!("files-sync-confirm-delete", count = deletes));
-                if ui.button(egui::RichText::new(t!("files-sync-start-delete")).color(RED)).clicked() {
-                    asked = Some(Asked::Start(self.plan(found)));
-                }
-            } else if ui.add_enabled(work, egui::Button::new(t!("files-sync-start"))).clicked() {
-                if deletes > 0 {
-                    self.confirming = true;
-                } else {
-                    asked = Some(Asked::Start(self.plan(found)));
-                }
             }
-            if ui.button(format!("{} {}", icons::REFRESH, t!("files-sync-rescan"))).clicked() {
-                asked = Some(Asked::Rescan);
-            }
-            if ui.button(t!("button-close")).clicked() {
-                asked = Some(Asked::Close);
-            }
-        });
+        };
+        match native_term_skin::footer(ui, &skin, left, &choices) {
+            Some(0) if confirming || deletes == 0 => asked = Some(Asked::Start(self.plan(found))),
+            Some(0) => self.confirming = true,
+            Some(1) => asked = Some(Asked::Rescan),
+            Some(_) => asked = Some(Asked::Close),
+            None => {}
+        }
         asked
     }
 }

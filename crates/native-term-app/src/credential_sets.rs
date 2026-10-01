@@ -110,13 +110,12 @@ impl CredentialSetsDialog {
     pub fn show(&mut self, ctx: &egui::Context) -> Outcome<()> {
         let mut outcome = Outcome::Open;
         let mut open = true;
-        egui::Window::new(t!("cred-sets-title"))
-            .collapsible(false)
-            .resizable(false)
+        let dialog_title = t!("cred-sets-title");
+        let skin = crate::looks::skin(&ctx.global_style().visuals);
+        let dialog_shown = native_term_skin::Modal::new("credential_sets-0", &dialog_title)
+            .icon(crate::icons::KEY)
             .min_width(660.0)
-            .open(&mut open)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
+            .show(ctx, &skin, |ui| {
                 ui.weak(t!("cred-sets-intro"));
                 ui.separator();
                 if self.rows.is_empty() {
@@ -239,10 +238,18 @@ impl CredentialSetsDialog {
                 if changed {
                     self.refresh();
                 }
-                if ui.button(t!("button-close")).clicked() {
+                if crate::skinned::row(
+                    ui,
+                    &[native_term_skin::Choice::new(t!("button-close"), native_term_skin::Role::Plain)],
+                )
+                .is_some()
+                {
                     outcome = Outcome::Cancel;
                 }
             });
+        if dialog_shown.closed {
+            open = false;
+        }
         if !open {
             outcome = Outcome::Cancel;
         }
