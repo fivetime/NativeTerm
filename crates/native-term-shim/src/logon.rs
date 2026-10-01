@@ -355,6 +355,12 @@ fn stored(entry: &str) -> Option<native_term_os::credentials::Saved> {
 }
 
 fn type_text(text: &str) {
+    // (the unit tests' engines type nowhere: their process's console is
+    // the one `cargo test` runs in, shared with the shims other tests
+    // start, which would read the keys left there as the person's)
+    if cfg!(test) {
+        return;
+    }
     if let Err(e) = crate::console::inject(text, false) {
         crate::debug::log(format!("logon: typing failed: {e}"));
     }
