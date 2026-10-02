@@ -96,10 +96,17 @@ impl Combo {
         (!combo.key.is_empty()).then_some(combo)
     }
 
-    /// As shown to the user: `Ctrl+Alt+F`.
+    /// As shown to the user: `Ctrl+Alt+F`; on macOS as its menus show
+    /// it, `⌥⌘F` (`ctrl` is the Command key there, see `to_egui`).
     pub fn label(&self) -> String {
         let mut parts = Vec::new();
-        for (on, name) in [(self.ctrl, "Ctrl"), (self.alt, "Alt"), (self.shift, "Shift")] {
+        let mac = cfg!(target_os = "macos");
+        let names = if mac {
+            [(self.alt, "⌥"), (self.shift, "⇧"), (self.ctrl, "⌘")]
+        } else {
+            [(self.ctrl, "Ctrl"), (self.alt, "Alt"), (self.shift, "Shift")]
+        };
+        for (on, name) in names {
             if on {
                 parts.push(name.to_string());
             }
@@ -114,7 +121,7 @@ impl Combo {
                 c.next().map(|f| f.to_ascii_uppercase().to_string() + c.as_str()).unwrap_or_default()
             }
         });
-        parts.join("+")
+        parts.join(if mac { "" } else { "+" })
     }
 
     /// From a key press in NativeTerm's window; `None` for a key no
@@ -127,8 +134,16 @@ impl Combo {
     /// The same combination for egui (to catch it in the window).
     pub fn to_egui(&self) -> Option<egui::KeyboardShortcut> {
         let key = egui_key(&self.key)?;
-        let modifiers =
-            egui::Modifiers { alt: self.alt, ctrl: self.ctrl, shift: self.shift, mac_cmd: false, command: self.ctrl };
+        // `ctrl` is the platform's command key: Ctrl, or Command on macOS
+        // (Ctrl and Command both, as it was, was a chord no one presses)
+        let mac = cfg!(target_os = "macos");
+        let modifiers = egui::Modifiers {
+            alt: self.alt,
+            ctrl: self.ctrl && !mac,
+            shift: self.shift,
+            mac_cmd: self.ctrl && mac,
+            command: self.ctrl,
+        };
         Some(egui::KeyboardShortcut::new(modifiers, key))
     }
 
@@ -269,6 +284,20 @@ pub struct Keys {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Shortcuts(pub HashMap<Command, Keys>);
 
+/// The in-window shortcuts as shown, for the hints that name them.
+static LABELS: std::sync::Mutex<Vec<(Command, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// A search field's hint with the shortcut that focuses it, as this
+/// platform shows it (`(Ctrl+F)`, `（⌘F）`); the hint alone when there is
+/// none.
+pub fn hint(text: String, command: Command) -> String {
+    let labels = LABELS.lock().unwrap_or_else(|e| e.into_inner());
+    match labels.iter().find(|(c, _)| *c == command) {
+        Some((_, key)) => text + &crate::t!("search-hint-key", key = key.clone()),
+        None => text,
+    }
+}
+
 impl Default for Shortcuts {
     /// Few: the window's Ctrl+F and Ctrl+T; nothing global.
     fn default() -> Shortcuts {
@@ -280,6 +309,12 @@ impl Default for Shortcuts {
 }
 
 impl Shortcuts {
+    /// Make these the shortcuts `hint` names.
+    pub fn show_in_hints(&self) {
+        let labels = Command::ALL.into_iter().filter_map(|c| Some((c, self.get(c).local.as_ref()?.label()))).collect();
+        *LABELS.lock().unwrap_or_else(|e| e.into_inner()) = labels;
+    }
+
     pub fn get(&self, command: Command) -> &Keys {
         static NONE: Keys = Keys { local: None, global: None };
         self.0.get(&command).unwrap_or(&NONE)
@@ -481,9 +516,15 @@ mod tests {
     fn combinations_read_and_written() {
         let c = Combo::parse("Shift+CTRL+comma").unwrap();
         assert_eq!(c.to_string(), "ctrl+shift+comma", "Windows Terminal's order");
-        assert_eq!(c.label(), "Ctrl+Shift+Comma");
-        assert_eq!(Combo::parse("ctrl+alt+f").unwrap().label(), "Ctrl+Alt+F");
-        assert_eq!(Combo::parse("alt+f11").unwrap().label(), "Alt+F11");
+        if cfg!(target_os = "macos") {
+            assert_eq!(c.label(), "⇧⌘Comma");
+            assert_eq!(Combo::parse("ctrl+alt+f").unwrap().label(), "⌥⌘F");
+            assert_eq!(Combo::parse("alt+f11").unwrap().label(), "⌥F11");
+        } else {
+            assert_eq!(c.label(), "Ctrl+Shift+Comma");
+            assert_eq!(Combo::parse("ctrl+alt+f").unwrap().label(), "Ctrl+Alt+F");
+            assert_eq!(Combo::parse("alt+f11").unwrap().label(), "Alt+F11");
+        }
         for bad in ["", "ctrl", "ctrl+a+b", "win+a", "ctrl+f25", "ctrl+ü"] {
             assert_eq!(Combo::parse(bad), None, "{bad}");
         }

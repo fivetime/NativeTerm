@@ -60,7 +60,9 @@ settings-profile = "NativeTerm SSH" プロファイル: { $status }
 ## セッションツリー
 
 tree-reload-hint = ~/.ssh を読み直す
-tree-search-hint = 名前・ホスト・タグ・メモを検索…（Ctrl+F）
+tree-search-hint = 名前・ホスト・タグ・メモを検索…
+# after a search hint: the shortcut that focuses it
+search-hint-key = （{ $key }）
 tree-search-clear = 検索をクリア（Esc）
 tree-no-match = 「{ $query }」に一致するホストはありません
 tree-favorites = お気に入り
@@ -253,7 +255,7 @@ host-alias = 別名 { $alias }
 ## 開いているセッション
 
 view-tabs = すべてのタブ
-tabs-search-hint = タブのタイトルを検索…（Ctrl+T）
+tabs-search-hint = タブのタイトルを検索…
 tabs-none = Windows Terminal のタブが見つかりません。
 tabs-no-match = 一致するタブはありません。
 tabs-window =
@@ -945,7 +947,7 @@ files-log-done = { $what }: 完了
 tabmenu-files = ファイル（SFTP）
 notice-files-ssh-only = { $label } は SSH のセッションではないため、表示できるファイルがありません（SFTP には SSH が必要です）。
 keys-title = キーボードショートカット
-keys-intro = 「ウィンドウ内」は NativeTerm のウィンドウでのみ効きます。「グローバル」は Windows Terminal など別のプログラムが前面にあるときも効きます（既定ではどれも無効です）。「現在のセッション」とは、最後に前面にあった Terminal ウィンドウで選択されているタブのことです。ボタンを押してから新しい組み合わせを押してください。Esc で取り消します。
+keys-intro = 「ウィンドウ内」は NativeTerm のウィンドウでのみ効きます。「グローバル」は ターミナルなど別のプログラムが前面にあるときも効きます（既定ではどれも無効です）。「現在のセッション」とは、最後に前面にあったターミナルのウィンドウで選択されているタブのことです。ボタンを押してから新しい組み合わせを押してください。Esc で取り消します。
 keys-command = コマンド
 keys-local = ウィンドウ内
 keys-global = グローバル

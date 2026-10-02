@@ -60,7 +60,9 @@ settings-profile = "NativeTerm SSH" profile: { $status }
 ## Session tree
 
 tree-reload-hint = Reload ~/.ssh
-tree-search-hint = Search name, host, tags, notes…  (Ctrl+F)
+tree-search-hint = Search name, host, tags, notes…
+# after a search hint: the shortcut that focuses it
+search-hint-key = {"  "}({ $key })
 tree-search-clear = Clear the search (Esc)
 tree-no-match = No host matches "{ $query }"
 tree-favorites = Favorites
@@ -254,7 +256,7 @@ host-alias = alias { $alias }
 ## Open sessions
 
 view-tabs = All tabs
-tabs-search-hint = Search tab titles…  (Ctrl+T)
+tabs-search-hint = Search tab titles…
 tabs-none = No Windows Terminal tabs found.
 tabs-no-match = No tab matches.
 tabs-window =
@@ -955,7 +957,7 @@ files-log-done = { $what }: done
 tabmenu-files = Files (SFTP)
 notice-files-ssh-only = { $label } isn't an SSH session: it has no files to show (SFTP needs SSH).
 keys-title = Keyboard Shortcuts
-keys-intro = "In the window" works only in NativeTerm's window; "Global" also works while another program, such as Windows Terminal, is in front (none is on by default). "The active session" is the selected tab of the Terminal window last in front. Click a button, then press the new combination; Esc cancels.
+keys-intro = "In the window" works only in NativeTerm's window; "Global" also works while another program, such as a terminal, is in front (none is on by default). "The active session" is the selected tab of the terminal window last in front. Click a button, then press the new combination; Esc cancels.
 keys-command = Command
 keys-local = In the window
 keys-global = Global

@@ -929,7 +929,15 @@ impl TreeView {
             .frame(frame)
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 12.0;
-                let search = layout::search_field(ui, tones, &mut self.query, &t!("tree-search-hint"));
+                let search = layout::search_field(
+                    ui,
+                    tones,
+                    &mut self.query,
+                    &native_term_app::shortcuts::hint(
+                        t!("tree-search-hint"),
+                        native_term_app::shortcuts::Command::SearchHosts,
+                    ),
+                );
                 self.chips_row(ui, tones, actions);
                 search
             })

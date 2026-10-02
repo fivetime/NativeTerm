@@ -27,6 +27,7 @@ pub struct ShortcutUi {
 impl ShortcutUi {
     pub fn new(ctx: &egui::Context, core: Option<&Core>, terminal_settings: &Path) -> ShortcutUi {
         let shortcuts = Shortcuts::load(core.and_then(|c| c.setting(SETTING)).as_deref());
+        shortcuts.show_in_hints();
         let (tx, pressed) = mpsc::channel();
         let wake = ctx.clone();
         // a press on the hotkey thread: its command, and a frame to run it
@@ -69,6 +70,7 @@ impl ShortcutUi {
         if let Some(core) = core {
             core.set_setting(SETTING, &self.shortcuts.save());
         }
+        self.shortcuts.show_in_hints();
         self.register();
     }
 

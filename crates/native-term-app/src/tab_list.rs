@@ -172,7 +172,12 @@ impl TabList {
                 let view_width = 2.0 * (ui.spacing().interact_size.y + ui.spacing().item_spacing.x) + 8.0;
                 let width = ui.available_width() - view_width - if self.query.is_empty() { 0.0 } else { clear_width };
                 let search = ui.add(
-                    egui::TextEdit::singleline(&mut self.query).hint_text(t!("tabs-search-hint")).desired_width(width),
+                    egui::TextEdit::singleline(&mut self.query)
+                        .hint_text(native_term_app::shortcuts::hint(
+                            t!("tabs-search-hint"),
+                            native_term_app::shortcuts::Command::AllTabs,
+                        ))
+                        .desired_width(width),
                 );
                 if !self.query.is_empty() && ui.small_button(icons::CLEAR.to_string()).clicked() {
                     clear = true;

@@ -57,7 +57,9 @@ settings-profile = “NativeTerm SSH”配置：{ $status }
 ## 会话树
 
 tree-reload-hint = 重新读取 ~/.ssh
-tree-search-hint = 搜索名称、主机、标签、备注、笔记…（Ctrl+F）
+tree-search-hint = 搜索名称、主机、标签、备注、笔记…
+# after a search hint: the shortcut that focuses it
+search-hint-key = （{ $key }）
 tree-search-clear = 清除搜索（Esc）
 tree-no-match = 没有匹配“{ $query }”的主机
 tree-favorites = 收藏
@@ -251,7 +253,7 @@ host-alias = 别名 { $alias }
 ## 打开的会话
 
 view-tabs = 所有标签
-tabs-search-hint = 搜索标签标题…（Ctrl+T）
+tabs-search-hint = 搜索标签标题…
 tabs-none = 没有找到 Windows Terminal 标签。
 tabs-no-match = 没有匹配的标签。
 tabs-window = 窗口 { $number } · { $count } 个标签
@@ -929,7 +931,7 @@ files-log-done = { $what }：完成
 tabmenu-files = 文件（SFTP）
 notice-files-ssh-only = { $label } 不是 SSH 会话，无法打开文件（SFTP 需要 SSH）。
 keys-title = 快捷键
-keys-intro = “窗口内”只在 NativeTerm 窗口里有效；“全局”在 Windows Terminal 等其他程序在前台时也有效（默认都不开）。“当前会话”是最后在前台的 Terminal 窗口里选中的那个标签。点按钮后按下新的组合键，Esc 取消。
+keys-intro = “窗口内”只在 NativeTerm 窗口里有效；“全局”在终端等其他程序在前台时也有效（默认都不开）。“当前会话”是最后在前台的终端窗口里选中的那个标签。点按钮后按下新的组合键，Esc 取消。
 keys-command = 命令
 keys-local = 窗口内
 keys-global = 全局

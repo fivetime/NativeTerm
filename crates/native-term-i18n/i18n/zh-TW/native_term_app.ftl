@@ -57,7 +57,9 @@ settings-profile = 「NativeTerm SSH」設定：{ $status }
 ## 工作階段樹
 
 tree-reload-hint = 重新讀取 ~/.ssh
-tree-search-hint = 搜尋名稱、主機、標籤、備註、筆記…（Ctrl+F）
+tree-search-hint = 搜尋名稱、主機、標籤、備註、筆記…
+# after a search hint: the shortcut that focuses it
+search-hint-key = （{ $key }）
 tree-search-clear = 清除搜尋（Esc）
 tree-no-match = 沒有符合「{ $query }」的主機
 tree-favorites = 收藏
@@ -251,7 +253,7 @@ host-alias = 別名 { $alias }
 ## 開啟的工作階段
 
 view-tabs = 所有分頁
-tabs-search-hint = 搜尋分頁標題…（Ctrl+T）
+tabs-search-hint = 搜尋分頁標題…
 tabs-none = 沒有找到 Windows Terminal 分頁。
 tabs-no-match = 沒有符合的分頁。
 tabs-window = 視窗 { $number } · { $count } 個分頁
@@ -929,7 +931,7 @@ files-log-done = { $what }：完成
 tabmenu-files = 檔案（SFTP）
 notice-files-ssh-only = { $label } 不是 SSH 工作階段，無法開啟檔案（SFTP 需要 SSH）。
 keys-title = 快速鍵
-keys-intro = 「視窗內」只在 NativeTerm 視窗裡有效；「全域」在 Windows Terminal 等其他程式在前景時也有效（預設都不開）。「目前工作階段」是最後在前景的 Terminal 視窗裡選取的那個分頁。點按鈕後按下新的組合鍵，Esc 取消。
+keys-intro = 「視窗內」只在 NativeTerm 視窗裡有效；「全域」在終端機等其他程式在前景時也有效（預設都不開）。「目前工作階段」是最後在前景的終端機視窗裡選取的那個分頁。點按鈕後按下新的組合鍵，Esc 取消。
 keys-command = 命令
 keys-local = 視窗內
 keys-global = 全域
