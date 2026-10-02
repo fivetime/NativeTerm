@@ -677,6 +677,10 @@ struct Runner {
     kept: Vec<(u64, Kept)>,
     /// Dialogs and the window they belong to, by number: whether modal.
     owned: Vec<(u64, Which, bool)>,
+    /// macOS: windows closed, out of sight and done with (their Ui gone),
+    /// destroyed a little later (see `close_extra`).
+    #[cfg(target_os = "macos")]
+    retiring: Vec<(Instant, Pane)>,
     /// The strip along the edge that stands for the docked window while
     /// it is hidden outright (see `set_hidden`): plain, painted by the
     /// server, brings the window back when the pointer touches it.
@@ -688,6 +692,21 @@ struct Runner {
     /// Where the floating button was last shown (see `sync_button`).
     #[cfg(not(windows))]
     button_at: Option<(i32, i32)>,
+}
+
+/// How long a closed window outlives its closing on macOS (a few display
+/// cycles: the Touch Bar has moved on from it by then).
+#[cfg(target_os = "macos")]
+const RETIRE: Duration = Duration::from_millis(500);
+
+/// What a closed window shows while it waits to be destroyed (nothing:
+/// it is out of sight).
+#[cfg(target_os = "macos")]
+struct Retired;
+
+#[cfg(target_os = "macos")]
+impl Ui for Retired {
+    fn ui(&mut self, _: &mut egui::Ui) {}
 }
 
 /// Run the windows until the main one is closed.
@@ -729,6 +748,8 @@ pub fn run(
         save,
         docking: Docking::default(),
         extras: Vec::new(),
+        #[cfg(target_os = "macos")]
+        retiring: Vec::new(),
         next_extra: 1,
         kept: Vec::new(),
         owned: Vec::new(),
@@ -1016,7 +1037,20 @@ impl Runner {
             OPEN_KEYS.with(|k| k.borrow_mut().retain(|open| *open != key));
         }
         // dropping the pane drops its Ui (which ends its connections)
+        #[cfg(not(target_os = "macos"))]
         self.extras.retain(|(m, _, _)| *m != n);
+        // macOS: the window itself a moment later. The Touch Bar follows
+        // the keyboard's focus along the views in the display cycle after
+        // the focus moved; a window destroyed before that threw there
+        // ("Cannot remove an observer … nextResponder" from its view),
+        // which ended the program (a MacBook with a Touch Bar, a password
+        // typed in the files window's question)
+        #[cfg(target_os = "macos")]
+        if let Some(at) = self.extras.iter().position(|(m, _, _)| *m == n) {
+            let (_, _, mut pane) = self.extras.remove(at);
+            pane.ui = Box::new(Retired);
+            self.retiring.push((Instant::now() + RETIRE, pane));
+        }
     }
 
     /// The window `owner` names, if it is open.
@@ -1615,10 +1649,16 @@ impl ApplicationHandler<UserEvent> for Runner {
                 }
             }
         }
+        #[cfg(target_os = "macos")]
+        self.retiring.retain(|(until, _)| *until > now);
+        #[cfg(target_os = "macos")]
+        let retiring = self.retiring.iter().map(|(until, _)| *until).min();
+        #[cfg(not(target_os = "macos"))]
+        let retiring = None;
         let main = self.main.as_mut().and_then(|p| p.tick(now));
         let button = self.button.as_mut().and_then(|p| p.tick(now));
         let extras = self.extras.iter_mut().filter_map(|(_, _, p)| p.tick(now)).min();
-        match [main, button, docking, self.button_settle, extras].into_iter().flatten().min() {
+        match [main, button, docking, self.button_settle, extras, retiring].into_iter().flatten().min() {
             Some(at) => event_loop.set_control_flow(ControlFlow::WaitUntil(at.max(now))),
             None => event_loop.set_control_flow(ControlFlow::Wait),
         }
