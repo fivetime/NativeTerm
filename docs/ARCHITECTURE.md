@@ -4247,6 +4247,14 @@ All UI surfaces invoke one shared app-level command layer
   private use area is taken out of their character maps (Inter maps 745
   code points there, the icon fonts' own: in front of the icons it drew
   its glyphs for them, seen on Lingmo); how, in `assets/fonts/README.md`.
+  The icon fonts come before the CJK font (macOS's PingFang has glyphs
+  in the private use area too: it drew "ǹ" for an icon). egui centers a
+  fallback face's line in the first font's instead of lining up the
+  baselines, so the CJK font is shifted (`FontTweak::y_offset_factor`)
+  by what its metrics and Inter's say (`baseline_shift`): measured at 40
+  points (`snapshots::cjk_baseline`), an ideograph's foot was 6 px above
+  Inter's baseline with PingFang and 6 px below with YaHei and Noto CJK;
+  now 3–5 px below on all three, each font's own descent.
 - **CJK fonts**: egui's bundled fonts have no Chinese glyphs. A system font
   (Microsoft YaHei, else SimSun) is added as a fallback font. It is
   **memory-mapped**, not read: egui clones owned font data while

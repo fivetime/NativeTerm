@@ -148,3 +148,44 @@ fn snapshots() {
         );
     }
 }
+
+/// Where the CJK font's ideographs sit against Inter's baseline: the
+/// bottom of "H" (the baseline) and of "国" at 40 points, as pixel rows
+/// (`cargo test -p native-term-app cjk_baseline -- --ignored --nocapture`).
+#[test]
+#[ignore]
+fn cjk_baseline() {
+    let size = egui::vec2(200.0, 80.0);
+    let (w, h, rgba) = picture(size, false, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(egui::Color32::WHITE)).show(ui, |ui| {
+            ui.label(egui::RichText::new("H国（").size(40.0).color(egui::Color32::BLACK));
+        });
+    });
+    // the columns each glyph is in: H first, then 国, then the bracket
+    let dark = |x: usize, y: usize| rgba[(y * w + x) * 4] < 128;
+    let columns: Vec<bool> = (0..w).map(|x| (0..h).any(|y| dark(x, y))).collect();
+    let mut runs = Vec::new();
+    let mut start = None;
+    for (x, &on) in columns.iter().enumerate() {
+        match (on, start) {
+            (true, None) => start = Some(x),
+            (false, Some(s)) => {
+                runs.push((s, x));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    let rows = |(a, b): (usize, usize)| {
+        let ys: Vec<usize> = (0..h).filter(|&y| (a..b).any(|x| dark(x, y))).collect();
+        (ys[0], *ys.last().unwrap())
+    };
+    let (h_top, h_bottom) = rows(runs[0]);
+    // 国 may be several runs of columns: from the second run to the last but one
+    let guo = (runs[1].0, runs[runs.len() - 2].1);
+    let (g_top, g_bottom) = rows(guo);
+    println!(
+        "CJK H top {h_top} bottom {h_bottom}; 国 top {g_top} bottom {g_bottom}; below the baseline {}",
+        g_bottom as i64 - h_bottom as i64
+    );
+}

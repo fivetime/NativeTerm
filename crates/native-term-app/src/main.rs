@@ -533,6 +533,22 @@ const BUNDLED_FONTS: [(&str, &[u8]); 4] = [
     ("JetBrainsMono-Regular", include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf")),
 ];
 
+/// How far down (a fraction of the font size) a fallback face's glyphs go
+/// for its baseline to be the first font's: egui puts the face's baseline
+/// at its own ascent plus half the difference of the two line heights.
+fn baseline_shift(first: &[u8], face: &[u8], index: u32) -> Option<f32> {
+    use skrifa::MetadataProvider;
+    let em = |bytes: &[u8], index: u32| {
+        let font = skrifa::FontRef::from_index(bytes, index).ok()?;
+        let m = font.metrics(skrifa::instance::Size::unscaled(), skrifa::instance::LocationRef::default());
+        let upem = f32::from(m.units_per_em.max(1));
+        let (ascent, descent, gap) = (m.ascent / upem, m.descent / upem, m.leading / upem);
+        Some((ascent, ascent - descent + gap))
+    };
+    let ((first_ascent, first_height), (face_ascent, face_height)) = (em(first, 0)?, em(face, index)?);
+    Some(first_ascent - face_ascent - 0.5 * (first_height - face_height))
+}
+
 /// Inter and JetBrains Mono first, egui's own behind them (emoji), then
 /// the system's CJK font (egui's have none) and the icons.
 pub(crate) fn install_fonts(ctx: &egui::Context) {
@@ -554,24 +570,38 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
     ];
     let names: Vec<FontFamily> = families.iter().map(|(family, _)| family.clone()).collect();
     fonts.families.extend(families);
+    // the icons before the CJK font: their code points are the private
+    // use area's, where a system's CJK font may have glyphs of its own
+    // (macOS's PingFang drew "ǹ" for an icon)
+    let glyphs = fonts::icon_file().and_then(|f| fonts::map_file(&f).ok()).map(|bytes| (bytes, 0));
     // mapped, not read: egui would keep two private copies of a 20 MB file
     let cjk = fonts::cjk_font().and_then(|(f, index)| Some((fonts::map_file(&f).ok()?, index)));
-    // icons last: their code points (private use area) are in no other font
-    let glyphs = fonts::icon_file().and_then(|f| fonts::map_file(&f).ok()).map(|bytes| (bytes, 0));
     let mut fallbacks = Vec::new();
-    for (name, font) in [("cjk", cjk), ("icons", glyphs)] {
-        let Some((bytes, index)) = font else { continue };
+    // a font that is there, under `name`
+    let add = |fonts: &mut egui::FontDefinitions, name: &'static str, font: Option<(&'static [u8], u32)>| {
+        let (bytes, index) = font?;
         let mut data = egui::FontData::from_static(bytes);
         data.index = index;
         fonts.font_data.insert(name.into(), std::sync::Arc::new(data));
-        fallbacks.push(name);
-    }
+        Some(name)
+    };
+    fallbacks.extend(add(&mut fonts, "icons", glyphs));
     // no icon font on the system: Phosphor, bundled (see `icons`)
     #[cfg(not(windows))]
     {
         egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
         fonts.families.entry(FontFamily::Proportional).or_default().retain(|f| f != "phosphor");
         fallbacks.push("phosphor");
+    }
+    fallbacks.extend(add(&mut fonts, "cjk", cjk));
+    // its ideographs on Inter's baseline: egui centers a fallback face's
+    // line in the first font's (it doesn't line up the baselines), so a
+    // face whose ascent and descent are shared out otherwise sits too high
+    // or too low (PingFang: 0.26 em too high)
+    if let (Some((bytes, index)), Some(data)) = (cjk, fonts.font_data.get_mut("cjk")) {
+        if let Some(shift) = baseline_shift(BUNDLED_FONTS[0].1, bytes, index) {
+            std::sync::Arc::make_mut(data).tweak.y_offset_factor = shift;
+        }
     }
     for family in names {
         fonts.families.entry(family).or_default().extend(fallbacks.iter().map(|f| f.to_string()));
