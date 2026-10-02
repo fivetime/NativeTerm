@@ -731,7 +731,7 @@
         the main window. Seen on Lingmo: both as they were
   - [ ] Moved out to a library of its own (`fivetime/egui-skin`) once
         settled
-- [ ] The files window's new design (2026-10-02), after the person's
+- [x] The files window's new design (2026-10-02), after the person's
       page `nexus-sftp-workstation.html`: a session strip on each side
       (numbered, the side's colour), a path of crumbs to click or type,
       a filter, bookmarks, the tree and a list or a grid, each side's
@@ -835,6 +835,12 @@
         with `gio open` where it is (Lingmo calls itself KDE and its
         `xdg-open` wants `kfmclient`); helpers started are waited for (an
         `xdg-open` was left a zombie)
+  - [x] Found by hand afterwards (2026-10-02): ssh's questions (a new
+        host's key, passwords) never reached the window off Windows and
+        failed as cancelled everywhere (`921ac62`, `ccd0899`); the two
+        sides keep their shares when the window is maximized (`9068cd1`);
+        the dock can be made taller whatever it shows (`3434bfd`). Tried
+        on Windows, macOS and the Linux boxes
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above
