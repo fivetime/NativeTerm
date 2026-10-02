@@ -38,22 +38,9 @@ pub fn is_password_prompt(prompt: &str) -> bool {
     asks && !["passphrase", "new ", "retype", "again", "code", "token", "otp"].iter().any(|w| prompt.contains(w))
 }
 
-/// What the helper is told to do with a prompt.
-#[derive(serde::Serialize, serde::Deserialize)]
-pub enum Reply {
-    /// Give ssh this.
-    Answer(String),
-    /// Ask in the console (or give up, where there is none to ask in).
-    Ask,
-    /// Give up: the person said so.
-    Cancel,
-}
-
-impl From<Option<String>> for Reply {
-    fn from(answer: Option<String>) -> Reply {
-        answer.map_or(Reply::Ask, Reply::Answer)
-    }
-}
+/// What the helper is told to do with a prompt (shared with NativeTerm's
+/// files window, which serves the same helper).
+pub use native_term_session::protocol::AskpassReply as Reply;
 
 /// Serve `password` to this batch's helpers; the pipe's name.
 pub fn serve(password: String) -> io::Result<String> {

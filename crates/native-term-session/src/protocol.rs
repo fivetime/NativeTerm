@@ -167,6 +167,25 @@ pub struct OldHostKey {
     pub line: u64,
 }
 
+/// What ssh's askpass helper (the shim, `SSH_ASKPASS`) is told to do
+/// with the prompt it sent: by a batch of the shim's own, a tab's shim or
+/// the files window.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AskpassReply {
+    /// Give ssh this.
+    Answer(String),
+    /// Ask in the console (or give up, where there is none to ask in).
+    Ask,
+    /// Give up: the person said so.
+    Cancel,
+}
+
+impl From<Option<String>> for AskpassReply {
+    fn from(answer: Option<String>) -> AskpassReply {
+        answer.map_or(AskpassReply::Ask, AskpassReply::Answer)
+    }
+}
+
 /// What the person said about a host key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -2727,6 +2727,7 @@ fn serve_questions(
     ctx: egui::Context,
 ) -> std::io::Result<String> {
     use native_term_session::pipe;
+    use native_term_session::protocol::AskpassReply;
     // (a named pipe on Windows, a socket elsewhere: the platform's prefix)
     let name = format!("{}askpass-{}-{:016x}", native_term_session::PIPE_NAME_PREFIX, std::process::id(), unique());
     let mut listener = pipe::PipeListener::bind(&name)?;
@@ -2738,7 +2739,7 @@ fn serve_questions(
             let ours = native_term_os::process::parent_pid(helper)
                 .is_some_and(|p| p != 0 && p == ssh_pid.load(Ordering::SeqCst));
             if !ours {
-                let _ = conn.send(&None::<String>);
+                let _ = conn.send(&AskpassReply::Ask);
                 continue;
             }
             let saved = target
@@ -2767,7 +2768,8 @@ fn serve_questions(
                     typed
                 }
             };
-            let _ = conn.send(&answer);
+            // (nothing typed: cancelled; ssh's console here is hidden)
+            let _ = conn.send(&answer.map_or(AskpassReply::Cancel, AskpassReply::Answer));
         }
     });
     Ok(name)
@@ -2947,19 +2949,40 @@ fn unique() -> u64 {
 mod tests {
     use super::*;
 
-    /// ssh's helper reaches the window's question pipe on every platform
-    /// (its name was Windows' only: on macOS and Linux the files window
-    /// fell back to `BatchMode`, and a new host's key failed unasked).
+    /// ssh's helper (the shim) reaches the window's question pipe on
+    /// every platform and gets the answer typed in the window, in the
+    /// shape it reads. (The name was Windows' only: on macOS and Linux the
+    /// window fell back to `BatchMode`; and the answer went as a bare
+    /// string the helper took for no answer, so every question failed.)
     /// A helper that isn't our ssh's child is answered with nothing.
     #[test]
-    fn the_question_pipe_is_reachable() {
-        let (tx, _rx) = mpsc::channel();
-        let ssh_pid = Arc::new(std::sync::atomic::AtomicU32::new(u32::MAX));
-        let name = serve_questions(1, None, ssh_pid, Arc::new(AtomicBool::new(false)), tx, egui::Context::default())
-            .expect("the pipe");
-        let conn = native_term_session::pipe::connect(&name, Duration::from_secs(2)).expect("connected");
-        conn.send(&"Are you sure you want to continue connecting (yes/no)? ".to_string()).unwrap();
-        assert_eq!(conn.recv::<Option<String>>(Duration::from_secs(5)).unwrap(), Some(None));
+    fn ssh_s_helper_gets_the_answer_typed() {
+        use native_term_session::protocol::AskpassReply;
+        let question = "Are you sure you want to continue connecting (yes/no)? ".to_string();
+        let serve = |ssh: u32| {
+            let (tx, rx) = mpsc::channel();
+            let ssh_pid = Arc::new(std::sync::atomic::AtomicU32::new(ssh));
+            let name =
+                serve_questions(1, None, ssh_pid, Arc::new(AtomicBool::new(false)), tx, egui::Context::default())
+                    .expect("the pipe");
+            (native_term_session::pipe::connect(&name, Duration::from_secs(2)).expect("connected"), rx)
+        };
+        let (stranger, _rx) = serve(u32::MAX);
+        stranger.send(&question).unwrap();
+        assert_eq!(stranger.recv::<AskpassReply>(Duration::from_secs(5)).unwrap(), Some(AskpassReply::Ask));
+
+        // this test is the helper; its parent, the ssh that started it
+        let parent = native_term_os::process::parent_pid(std::process::id()).expect("a parent");
+        for typed in [Some("yes".to_string()), None] {
+            let (helper, rx) = serve(parent);
+            helper.send(&question).unwrap();
+            let event = rx.recv_timeout(Duration::from_secs(5)).expect("asked in the window");
+            let What::Ask(asked) = event.what else { panic!("not a question") };
+            assert!(!asked.secret, "a yes/no question is shown as typed");
+            asked.reply.send(typed.clone()).unwrap();
+            let expected = typed.map_or(AskpassReply::Cancel, AskpassReply::Answer);
+            assert_eq!(helper.recv::<AskpassReply>(Duration::from_secs(5)).unwrap(), Some(expected));
+        }
     }
 
     #[test]
