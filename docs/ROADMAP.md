@@ -696,6 +696,14 @@
         three on Fedora (GNOME 50) and EndeavourOS (KDE Plasma), the
         parent only on Zorin (GNOME 46 has no `xdg_wm_dialog_v1`); GNOME
         46 and KDE put the guide over its owner's middle
+  - [x] macOS dialogs as child windows without crashing (2026-10-02,
+        found when the Mac came back): a window made with a parent is
+        shown by AppKit at once, before AccessKit's adapter is set up
+        (a panic), so the dialog is made its owner's child window once
+        shown; and a child window closed as it is threw in AppKit (its
+        Touch Bar observation, "Cannot remove an observer … nextResponder"),
+        so it is taken from its owner and out of sight first. The files
+        window and its first-run guide then ran on the Mac
   - [x] egui 0.36, the CPU renderer our fork (`fivetime/egui-render`,
         branch `nativeterm`; upstream takes no AI-made changes)
   - [x] Every window with the skin's frame round and shadowed on

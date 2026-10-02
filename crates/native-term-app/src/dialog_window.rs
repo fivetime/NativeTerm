@@ -53,15 +53,13 @@ pub fn owned_by(attributes: WindowAttributes, owner: Option<(&Window, bool)>) ->
             None => attributes,
         }
     }
+    // macOS: made a child window once shown (`shown_over`): AppKit shows
+    // a window made with a parent at once, before AccessKit's adapter is
+    // set up for it (which then panics)
     #[cfg(target_os = "macos")]
     {
-        use winit::raw_window_handle::HasWindowHandle;
-        match owner.window_handle() {
-            // SAFETY: the owner outlives its dialogs (they are closed
-            // before it, and with it)
-            Ok(handle) => unsafe { attributes.with_parent_window(Some(handle.as_raw())) },
-            Err(_) => attributes,
-        }
+        let _ = owner;
+        attributes
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -99,6 +97,25 @@ pub fn dialog_of(window: &Window, owner: &Window, modal: bool) {
     {
         let _ = (window, owner, modal);
     }
+}
+
+/// A dialog just shown over its owner: macOS makes it the owner's child
+/// window now (above it, moved with it). `window`, `owner`: the panes'
+/// handles.
+pub fn shown_over(window: isize, owner: isize) {
+    #[cfg(target_os = "macos")]
+    native_term_os::dock::attach_child(owner, window);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, owner);
+}
+
+/// A dialog about to be closed: macOS takes it from its owner's child
+/// windows first (see `detach_child`).
+pub fn closing_over(window: isize, owner: isize) {
+    #[cfg(target_os = "macos")]
+    native_term_os::dock::detach_child(owner, window);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, owner);
 }
 
 /// A window that never takes the keyboard (the floating button: only

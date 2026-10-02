@@ -400,6 +400,29 @@ mod mac {
         view.window()
     }
 
+    /// `child` made `parent`'s child window (above it, moved with it), once
+    /// it is shown: a window made with a parent is shown by AppKit as it is
+    /// made, before what has to be set up first (AccessKit's adapter).
+    pub fn attach_child(parent: isize, child: isize) {
+        let (Some(parent), Some(child)) = (window(parent), window(child)) else { return };
+        // SAFETY: both are windows of ours, open, on the main thread.
+        unsafe { parent.addChildWindow_ordered(&child, objc2_app_kit::NSWindowOrderingMode::Above) };
+    }
+
+    /// `child` taken from `parent`'s child windows and out of sight before
+    /// it is closed, the keyboard's focus in it let go: closing a child
+    /// window as it is threw in AppKit (its Touch Bar observation of the
+    /// view, removed twice: "Cannot remove an observer … nextResponder"),
+    /// which ended the program.
+    pub fn detach_child(parent: isize, child: isize) {
+        let Some(child) = window(child) else { return };
+        if let Some(parent) = window(parent) {
+            parent.removeChildWindow(&child);
+        }
+        child.makeFirstResponder(None);
+        child.orderOut(None);
+    }
+
     /// The window's frame, title bar included: what `move_window` places.
     pub fn window_bounds(handle: isize) -> Option<Bounds> {
         Some(to_pixels(window(handle)?.frame(), space()?))
@@ -549,6 +572,7 @@ mod mac {
 
 #[cfg(target_os = "macos")]
 pub use mac::{
-    cursor, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window, on_a_monitor, over_fullscreen,
-    regular_application, round_corners, set_topmost, title_double_click, window_bounds, work_area, work_area_at,
+    attach_child, cursor, detach_child, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window,
+    on_a_monitor, over_fullscreen, regular_application, round_corners, set_topmost, title_double_click, window_bounds,
+    work_area, work_area_at,
 };

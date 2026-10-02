@@ -952,6 +952,9 @@ impl Runner {
                             }
                         }
                         pane.window.set_visible(true);
+                        if let Some(owner_pane) = self.pane_of(owner) {
+                            crate::dialog_window::shown_over(pane.hwnd, owner_pane.hwnd);
+                        }
                         self.owned.push((n, owner, request.modal));
                     }
                     // (above the others once it is shown: X11's window
@@ -994,6 +997,10 @@ impl Runner {
         if let Some(at) = self.owned.iter().position(|(m, _, _)| *m == n) {
             let (_, owner, modal) = self.owned.remove(at);
             let still = self.owned.iter().any(|(_, o, m)| *o == owner && *m);
+            let mine = self.extra(n).map(|pane| pane.hwnd);
+            if let (Some(mine), Some(theirs)) = (mine, self.pane_of(owner).map(|pane| pane.hwnd)) {
+                crate::dialog_window::closing_over(mine, theirs);
+            }
             if let Some(pane) = self.pane_of(owner) {
                 if modal && !still {
                     win::enable_window(pane.hwnd, true);
