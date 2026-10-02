@@ -8,8 +8,10 @@ use native_term_config::securecrt::{LogonSecret, Origin, Plan, PlannedCredential
 
 use crate::t;
 
-/// SecureCRT's configuration folder (`HKCU\Software\VanDyke\SecureCRT`,
-/// `Config Path`), if it is installed and the folder exists.
+/// SecureCRT's configuration folder, if it is installed and the folder
+/// exists: Windows keeps it in the registry
+/// (`HKCU\Software\VanDyke\SecureCRT`, `Config Path`); macOS and Linux
+/// in SecureCRT's default place (`DEFAULT_CONFIG`).
 pub fn securecrt_config_path() -> Option<PathBuf> {
     // tests: a made-up config folder instead of the user's
     if let Some(dir) = std::env::var_os("NATIVETERM_SECURECRT_CONFIG").filter(|d| !d.is_empty()) {
@@ -24,7 +26,36 @@ pub fn securecrt_config_path() -> Option<PathBuf> {
     }
     #[cfg(not(windows))]
     {
-        None
+        let path = native_term_os::home::home_dir()?.join(DEFAULT_CONFIG);
+        path.join("Sessions").is_dir().then_some(path)
+    }
+}
+
+/// Where SecureCRT keeps its configuration unless told otherwise, under
+/// the home folder.
+#[cfg(target_os = "macos")]
+const DEFAULT_CONFIG: &str = "Library/Application Support/VanDyke/SecureCRT/Config";
+#[cfg(all(unix, not(target_os = "macos")))]
+const DEFAULT_CONFIG: &str = ".vandyke/SecureCRT/Config";
+
+/// A folder typed in the import dialog: `~/` as the home folder, as the
+/// hint writes it (macOS, Linux).
+pub fn typed_path(text: &str) -> PathBuf {
+    match text.strip_prefix("~/").zip(native_term_os::home::home_dir()) {
+        Some((rest, home)) => home.join(rest),
+        None => PathBuf::from(text),
+    }
+}
+
+/// The configuration folder as the import dialog's empty field hints it.
+pub fn securecrt_config_hint() -> String {
+    #[cfg(windows)]
+    {
+        "…\\VanDyke\\Config".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        format!("~/{DEFAULT_CONFIG}")
     }
 }
 
@@ -312,4 +343,21 @@ pub fn summary(scan: &Scan, plan: &Plan) -> Vec<Line> {
         out.push(line(t!("summary-not-yet"), false, Vec::new()));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A folder typed as the hint writes it (`~/…`) is under the home
+    /// folder; anything else is taken as typed.
+    #[test]
+    fn a_typed_folder_with_tilde_is_in_the_home_folder() {
+        let home = native_term_os::home::home_dir().expect("a home folder");
+        assert_eq!(typed_path("~/a/b"), home.join("a/b"));
+        assert_eq!(typed_path("/a/b"), PathBuf::from("/a/b"));
+        assert_eq!(typed_path("~user/a"), PathBuf::from("~user/a"));
+        #[cfg(not(windows))]
+        assert_eq!(typed_path(&securecrt_config_hint()), home.join(DEFAULT_CONFIG));
+    }
 }

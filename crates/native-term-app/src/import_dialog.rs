@@ -79,7 +79,7 @@ impl ImportDialog {
     /// preview once it's there.
     fn preview(&mut self, ctx: &egui::Context) {
         let (tx, rx) = mpsc::channel();
-        let (origin, path, ctx) = (self.origin, PathBuf::from(self.path.trim()), ctx.clone());
+        let (origin, path, ctx) = (self.origin, import::typed_path(self.path.trim()), ctx.clone());
         std::thread::spawn(move || {
             let scanned = match origin {
                 Origin::SecureCrt => securecrt::scan(&path),
@@ -198,7 +198,9 @@ impl ImportDialog {
                     ui.label(folder_label);
                     ui.add_enabled(
                         editable,
-                        egui::TextEdit::singleline(&mut self.path).hint_text("…\\VanDyke\\Config").desired_width(360.0),
+                        egui::TextEdit::singleline(&mut self.path)
+                            .hint_text(import::securecrt_config_hint())
+                            .desired_width(360.0),
                     );
                 });
                 ui.weak(t!("import-into", path = self.ssh_dir.display().to_string()));
