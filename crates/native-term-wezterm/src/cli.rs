@@ -1702,12 +1702,16 @@ local results = {
             },
             Path::new("/usr/bin/nativeterm-shim"),
         );
-        assert!(qt.contains(
-            "pcall(function()
+        // (macOS draws its own title bar: no edge there)
+        assert_eq!(
+            qt.contains(
+                "pcall(function()
   config.integrated_window_edge = { chrome = true }
 end)
 "
-        ));
+            ),
+            !cfg!(target_os = "macos")
+        );
         assert!(!qt.contains("edge-focused.png"));
         assert!(lua.contains("pcall(function()
   config.integrated_window_edge = { focused = \"/c/edge-focused.png\", unfocused = \"/c/edge-unfocused.png\", top = 2, right = 30, bottom = 40, left = 30, radius = 8, slice = 64 }
