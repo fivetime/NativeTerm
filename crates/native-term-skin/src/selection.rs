@@ -15,6 +15,9 @@ const TYPING: f64 = 1.0;
 #[derive(Clone, Debug)]
 pub struct Selection<K> {
     chosen: HashSet<K>,
+    /// The same, in the order they were chosen (what is opened together
+    /// opens in that order).
+    order: Vec<K>,
     /// Where Shift chooses from.
     anchor: Option<usize>,
     /// Where the keys move from (the row last clicked or moved to).
@@ -25,7 +28,14 @@ pub struct Selection<K> {
 
 impl<K> Default for Selection<K> {
     fn default() -> Selection<K> {
-        Selection { chosen: HashSet::new(), anchor: None, cursor: None, typed: String::new(), typed_at: f64::MIN }
+        Selection {
+            chosen: HashSet::new(),
+            order: Vec::new(),
+            anchor: None,
+            cursor: None,
+            typed: String::new(),
+            typed_at: f64::MIN,
+        }
     }
 }
 
@@ -52,8 +62,42 @@ impl<K: Clone + Eq + Hash> Selection<K> {
         self.chosen.len()
     }
 
+    /// What is chosen, in the order it was.
     pub fn iter(&self) -> impl Iterator<Item = &K> {
-        self.chosen.iter()
+        self.order.iter()
+    }
+
+    fn add(&mut self, key: K) {
+        if self.chosen.insert(key.clone()) {
+            self.order.push(key);
+        }
+    }
+
+    fn take_out(&mut self, key: &K) -> bool {
+        let there = self.chosen.remove(key);
+        if there {
+            self.order.retain(|k| k != key);
+        }
+        there
+    }
+
+    fn forget_all(&mut self) {
+        self.chosen.clear();
+        self.order.clear();
+    }
+
+    /// These chosen too (a folder's checkbox), what was stays.
+    pub fn extend(&mut self, keys: impl IntoIterator<Item = K>) {
+        for key in keys {
+            self.add(key);
+        }
+    }
+
+    /// Only what `keep` says stays chosen.
+    pub fn retain(&mut self, mut keep: impl FnMut(&K) -> bool) {
+        self.chosen.retain(|k| keep(k));
+        let chosen = &self.chosen;
+        self.order.retain(|k| chosen.contains(k));
     }
 
     /// The row the keys move from.
@@ -62,15 +106,15 @@ impl<K: Clone + Eq + Hash> Selection<K> {
     }
 
     pub fn clear(&mut self) {
-        self.chosen.clear();
+        self.forget_all();
         self.anchor = None;
         self.cursor = None;
     }
 
     /// Only `key` (the row at `index`), as a plain click.
     pub fn only(&mut self, key: K, index: usize) {
-        self.chosen.clear();
-        self.chosen.insert(key);
+        self.forget_all();
+        self.add(key);
         self.anchor = Some(index);
         self.cursor = Some(index);
     }
@@ -78,7 +122,8 @@ impl<K: Clone + Eq + Hash> Selection<K> {
     /// These, whatever was chosen before (a folder's new listing, a
     /// program's own choice); the keys start again from the top.
     pub fn set(&mut self, keys: impl IntoIterator<Item = K>) {
-        self.chosen = keys.into_iter().collect();
+        self.forget_all();
+        self.extend(keys);
         self.anchor = None;
         self.cursor = None;
     }
@@ -87,7 +132,7 @@ impl<K: Clone + Eq + Hash> Selection<K> {
     /// folder was read again.
     pub fn keep(&mut self, keys: &[K]) {
         let shown: HashSet<&K> = keys.iter().collect();
-        self.chosen.retain(|k| shown.contains(k));
+        self.retain(|k| shown.contains(k));
         let last = keys.len().checked_sub(1);
         self.anchor = self.anchor.zip(last).map(|(a, l)| a.min(l));
         self.cursor = self.cursor.zip(last).map(|(c, l)| c.min(l));
@@ -100,14 +145,15 @@ impl<K: Clone + Eq + Hash> Selection<K> {
         if modifiers.shift {
             let from = self.anchor.unwrap_or(index).min(keys.len() - 1);
             if !modifiers.command {
-                self.chosen.clear();
+                self.forget_all();
             }
+            // (in the order shown, from the anchor's end)
             let (a, b) = (from.min(index), from.max(index));
-            self.chosen.extend(keys[a..=b].iter().cloned());
+            self.extend(keys[a..=b].iter().cloned());
             self.cursor = Some(index);
         } else if modifiers.command {
-            if !self.chosen.remove(key) {
-                self.chosen.insert(key.clone());
+            if !self.take_out(key) {
+                self.add(key.clone());
             }
             self.anchor = Some(index);
             self.cursor = Some(index);
@@ -152,7 +198,8 @@ impl<K: Clone + Eq + Hash> Selection<K> {
             .collect();
         let with = |wanted: egui::Key| pressed.iter().find(|(k, _)| *k == wanted).map(|(_, m)| *m);
         if with(egui::Key::A).is_some_and(|m| m.command) {
-            self.chosen = keys.iter().cloned().collect();
+            self.forget_all();
+            self.extend(keys.iter().cloned());
             return Keyed::Nothing;
         }
         if with(egui::Key::Enter).is_some() && !self.chosen.is_empty() {
@@ -184,9 +231,9 @@ impl<K: Clone + Eq + Hash> Selection<K> {
         };
         if shift {
             let from = self.anchor.unwrap_or(at.unwrap_or(to));
-            self.chosen.clear();
+            self.forget_all();
             let (a, b) = (from.min(to), from.max(to));
-            self.chosen.extend(keys[a..=b].iter().cloned());
+            self.extend(keys[a..=b].iter().cloned());
             self.anchor = Some(from);
             self.cursor = Some(to);
         } else {
@@ -306,6 +353,26 @@ mod tests {
         tapped.modifiers = PLAIN;
         assert_eq!(s.keys(&tapped, &k, 1, 3, none), Keyed::Nothing);
         assert_eq!(chosen(&s), [0, 1, 2, 3, 4, 5]);
+    }
+
+    /// What is chosen comes back in the order it was chosen (a key shown
+    /// twice, as a host under "recent" and in its folder, is once).
+    #[test]
+    fn the_order_chosen_is_kept() {
+        let mut s = Selection::default();
+        let k = [3, 1, 4, 1, 5];
+        s.click(&k, 2, PLAIN);
+        s.click(&k, 0, COMMAND);
+        s.click(&k, 4, COMMAND);
+        assert_eq!(s.iter().copied().collect::<Vec<_>>(), [4, 3, 5]);
+        s.click(&k, 0, COMMAND);
+        assert_eq!(s.iter().copied().collect::<Vec<_>>(), [4, 5], "taken out");
+        s.click(&k, 4, SHIFT | COMMAND);
+        assert_eq!(s.iter().copied().collect::<Vec<_>>(), [4, 5, 3, 1], "from the last Ctrl click (3) on, once each");
+        assert_eq!(s.len(), 4);
+        s.extend([9, 4]);
+        s.retain(|k| *k != 1);
+        assert_eq!(s.iter().copied().collect::<Vec<_>>(), [4, 5, 3, 9]);
     }
 
     #[test]
