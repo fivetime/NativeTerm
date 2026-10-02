@@ -23,6 +23,7 @@ use native_term_platform::Target;
 use crate::icons;
 use crate::layout;
 use crate::looks::{Tint, Tones};
+use native_term_skin::{Check, ItemRow, Picture, LIST_PAD, PICTURE, ROW_GAP};
 
 /// What the user asked for; carried out by the app.
 pub enum TreeAction {
@@ -336,235 +337,10 @@ enum Row<'a> {
     Empty(String),
 }
 
-/// A row's checkbox: nothing of what it stands for is selected, some of
-/// it, all of it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Check {
-    Off,
-    Partly,
-    On,
-}
-
-impl Check {
-    fn of(selected: usize, all: usize) -> Check {
-        match selected {
-            0 => Check::Off,
-            n if n >= all => Check::On,
-            _ => Check::Partly,
-        }
-    }
-}
-
-/// A row, as the design has it: around the list `p-3`, in the row
-/// `level * 20 + 10` before a checkbox (`w-3.5`), the sign that opens a
-/// folder (`w-3.5` with `p-0.5` around it), a picture (`w-4`), the name;
-/// `gap-2` between them.
-const LIST_PAD: f32 = 12.0;
-const ROW_PAD: f32 = 10.0;
-const LEVEL: f32 = 20.0;
-const CHECK: f32 = 14.0;
-const CARET: f32 = 18.0;
-const PICTURE: f32 = 16.0;
-const GAP: f32 = 8.0;
-/// Between two rows (`space-y-0.5`).
-const ROW_GAP: f32 = 2.0;
-/// The name keeps this much of a row before a mark, and before the
-/// host's address, is left out.
-const NAME_BEFORE_MARK: f32 = 120.0;
-const NAME_BEFORE_ADDRESS: f32 = 200.0;
-
 /// Hosts being dragged in the tree, by alias. A drag of one host that
 /// is part of the selection takes the whole selection.
 #[derive(Clone, Debug)]
 struct Dragged(Vec<String>);
-
-#[derive(Default)]
-struct RowLook {
-    /// How deep in the tree the row is.
-    level: usize,
-    /// Its checkbox (a row that is no host and no folder has none).
-    check: Option<Check>,
-    /// The sign that opens and closes a folder; a host has a dot there.
-    chevron: Option<char>,
-    picture: Option<(char, Kind)>,
-    /// In the picture's place: the system the host's server is of, and
-    /// what it is drawn with (`logos.rs`).
-    logo: Option<(egui::TextureId, egui::Color32)>,
-    /// Said after the name, weakly.
-    after: Option<String>,
-    /// A favorite.
-    star: bool,
-    /// The host's tab color, as a bar at the row's start.
-    stripe: Option<egui::Color32>,
-    /// At the row's end: its marks, and last, in the fixed font, where
-    /// the host is.
-    marks: Vec<(String, Option<Tint>)>,
-    address: Option<String>,
-    selected: bool,
-    weak: bool,
-    /// A host row: it can be dragged into another folder.
-    draggable: bool,
-    /// A folder row: hosts dropped on it move there.
-    accepts_drop: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Folder,
-    Host,
-    /// What leads somewhere (a typed target).
-    Link,
-}
-
-/// A row as it was drawn: what happened to it, and whether a click on it
-/// was on its checkbox.
-struct Drawn {
-    response: egui::Response,
-    on_check: bool,
-}
-
-fn paint_check(painter: &egui::Painter, tones: &Tones, rect: egui::Rect, check: Check, near: bool) {
-    if check == Check::Off {
-        painter.rect_filled(rect, 4.0, tones.card);
-        let line = if near { tones.near } else { tones.line };
-        painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0_f32, line), egui::StrokeKind::Inside);
-        return;
-    }
-    painter.rect_filled(rect, 4.0, if near { tones.primary_near } else { tones.primary });
-    let sign = egui::Stroke::new(1.6_f32, tones.on_primary);
-    let at = |x: f32, y: f32| rect.min + egui::vec2(rect.width() * x, rect.height() * y);
-    if check == Check::On {
-        painter.line_segment([at(0.22, 0.52), at(0.42, 0.72)], sign);
-        painter.line_segment([at(0.42, 0.72), at(0.78, 0.30)], sign);
-    } else {
-        painter.line_segment([at(0.25, 0.5), at(0.75, 0.5)], sign);
-    }
-}
-
-fn draw_row(ui: &mut egui::Ui, tones: &Tones, height: f32, text: &str, look: RowLook) -> Drawn {
-    let width = ui.available_width();
-    // a host can be dragged into another folder; a click is still a click
-    // (egui only calls it a drag once the pointer has moved)
-    let sense = if look.draggable { egui::Sense::click_and_drag() } else { egui::Sense::click() };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
-    let drop_here =
-        look.accepts_drop && response.contains_pointer() && egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx());
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, look.selected, text));
-    let within = rect.shrink2(egui::vec2(LIST_PAD, 0.0));
-    let mut x = within.left() + ROW_PAD + look.level as f32 * LEVEL;
-    let check_at = egui::Rect::from_min_size(egui::pos2(x, rect.center().y - CHECK / 2.0), egui::vec2(CHECK, CHECK));
-    // (a little around it counts: it is small)
-    let on = |at: Option<egui::Pos2>| at.is_some_and(|at| check_at.expand(5.0).contains(at));
-    let on_check = look.check.is_some() && response.clicked() && on(response.interact_pointer_pos());
-    if ui.is_rect_visible(rect) {
-        let painter = ui.painter().with_clip_rect(rect);
-        let middle = rect.center().y;
-        let near = response.hovered() || response.highlighted();
-        if look.selected {
-            painter.rect_filled(within, 8.0, tones.chosen.fill);
-            let line = egui::Stroke::new(1.0_f32, tones.chosen.line);
-            painter.rect_stroke(within, 8.0, line, egui::StrokeKind::Inside);
-        } else if near {
-            painter.rect_filled(within, 8.0, tones.raised);
-        }
-        if drop_here {
-            // where the dragged hosts would land
-            painter.rect_filled(within, 8.0, layout::thin(tones.accent, 0x40));
-            let line = egui::Stroke::new(1.0_f32, tones.accent);
-            painter.rect_stroke(within, 8.0, line, egui::StrokeKind::Inside);
-        }
-        // a line down each level the row is under, from under that
-        // level's checkbox (its chevron, where there are none)
-        let first = if look.check.is_some() { CHECK } else { CARET };
-        for level in 0..look.level {
-            let under = (within.left() + ROW_PAD + level as f32 * LEVEL + first / 2.0).round() + 0.5;
-            let whole = egui::Rangef::new(rect.top() - ROW_GAP, rect.bottom());
-            ui.painter().vline(under, whole, egui::Stroke::new(1.0_f32, tones.guide));
-        }
-        if let Some(stripe) = look.stripe {
-            let bar = egui::Rect::from_min_size(
-                egui::pos2(within.left() + 2.0, rect.top() + 5.0),
-                egui::vec2(3.0, rect.height() - 10.0),
-            );
-            painter.rect_filled(bar, 1.5, stripe);
-        }
-        if let Some(check) = look.check {
-            paint_check(&painter, tones, check_at, check, near && on(ui.ctx().pointer_hover_pos()));
-            x += CHECK + GAP;
-        }
-        // a folder's chevron; a host's dot beside the checkboxes (without
-        // them, nothing: the picture is where the host begins)
-        if look.check.is_some() || look.chevron.is_some() {
-            let sign = egui::pos2(x + CARET / 2.0, middle);
-            let (glyph, size, color) = match look.chevron {
-                Some(chevron) => (chevron, 12.0, if near { tones.text } else { tones.weak }),
-                None => ('•', 13.0, tones.weak),
-            };
-            painter.text(sign, egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(size), color);
-            x += CARET + GAP;
-        }
-        if let Some((glyph, kind)) = look.picture {
-            let tint = match kind {
-                Kind::Folder => tones.folder,
-                Kind::Host => tones.host,
-                Kind::Link => tones.accent,
-            };
-            let at = egui::pos2(x + PICTURE / 2.0, middle);
-            match look.logo {
-                Some((logo, tint)) => {
-                    crate::logos::paint(&painter, logo, crate::logos::place(ui.ctx(), at, PICTURE), tint);
-                }
-                None => {
-                    painter.text(at, egui::Align2::CENTER_CENTER, glyph, egui::FontId::proportional(PICTURE), tint);
-                }
-            }
-            x += PICTURE + GAP;
-        }
-        // the row's end, from the right: what does not fit is left out
-        let mut end = within.right() - ROW_PAD;
-        if let Some(address) = &look.address {
-            let galley = painter.layout_no_wrap(address.clone(), egui::FontId::monospace(layout::TINY), tones.weak);
-            let start = end - galley.size().x;
-            if start - GAP - x >= NAME_BEFORE_ADDRESS {
-                painter.galley(egui::pos2(start, middle - galley.size().y / 2.0), galley, tones.weak);
-                end = start - GAP;
-            }
-        }
-        for (mark, tint) in look.marks.iter().rev() {
-            let size = layout::badge_size(&painter, mark);
-            let start = end - size.x;
-            if start - GAP - x >= NAME_BEFORE_MARK {
-                let at = egui::Rect::from_min_size(egui::pos2(start, middle - size.y / 2.0), size);
-                layout::paint_badge(&painter, tones, at, mark, *tint);
-                end = start - GAP;
-            }
-        }
-        let color = match (look.weak, look.selected) {
-            (true, _) => tones.weak,
-            (false, true) => tones.chosen.text,
-            (false, false) => tones.text,
-        };
-        let font = egui::TextStyle::Body.resolve(ui.style());
-        let name = layout::elided(&painter, text, font.clone(), color, end - x);
-        let name_width = name.size().x;
-        painter.galley(egui::pos2(x, middle - name.size().y / 2.0), name, color);
-        x += name_width;
-        if look.star {
-            let star =
-                painter.layout_no_wrap(icons::STAR_FILLED.to_string(), egui::FontId::proportional(12.0), tones.folder);
-            if x + 6.0 + star.size().x <= end {
-                let width = star.size().x;
-                painter.galley(egui::pos2(x + 6.0, middle - star.size().y / 2.0), star, tones.folder);
-                x += 6.0 + width;
-            }
-        }
-        if let Some(after) = look.after.as_deref().filter(|_| end - x - GAP > 24.0) {
-            let after = layout::elided(&painter, after, font, tones.weak, end - x - GAP);
-            painter.galley(egui::pos2(x + GAP, middle - after.size().y / 2.0), after, tones.weak);
-        }
-    }
-    Drawn { response, on_check }
-}
 
 /// What opening `host` means; the login command falls back to its
 /// folder's default.
@@ -1104,15 +880,20 @@ impl TreeView {
         let mut dragging: Option<usize> = None;
         // the selected hosts that still exist, in selection order
         let chosen: Vec<&HostEntry> = self.selected.iter().filter_map(|a| tree.find(a).map(|(_, h)| h)).collect();
+        let colors = crate::looks::item_colors(&tones);
+        // hosts being carried: a folder with a file takes them
+        let carrying = egui::DragAndDrop::has_payload_of_type::<Dragged>(ui.ctx());
         egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, row_height, rows.len(), |ui, range| {
             let first = range.start;
             for (offset, row) in rows[range].iter().enumerate() {
                 let index = first + offset;
                 match row {
                     Row::Quick(target) => {
-                        let look = RowLook { picture: Some((icons::CONNECT, Kind::Link)), ..RowLook::default() };
                         let text = t!("quick-connect", target = target.label());
-                        let response = draw_row(ui, &tones, row_height, &text, look).response;
+                        let response = ItemRow::new(&text)
+                            .picture(Picture::Glyph(icons::CONNECT, tones.accent))
+                            .show(ui, &colors, row_height)
+                            .response;
                         if response.clicked() {
                             actions.push(TreeAction::Open(vec![quick_request(target)], Target::Recent));
                         }
@@ -1124,7 +905,7 @@ impl TreeView {
                         });
                     }
                     Row::Empty(text) => {
-                        draw_row(ui, &tones, row_height, text, RowLook { weak: true, ..RowLook::default() });
+                        ItemRow::new(text).weak().show(ui, &colors, row_height);
                     }
                     Row::Folder { depth, name, path, folder, count, open, check } => {
                         let chevron = if *open { icons::CHEVRON_DOWN } else { icons::CHEVRON_RIGHT };
@@ -1132,17 +913,16 @@ impl TreeView {
                         // a folder with a file of its own can take hosts;
                         // a grouping node (no file) can't
                         let file = folder.and_then(|i| folders.get(i)).map(|f| f.file.clone());
-                        let look = RowLook {
-                            level: *depth,
-                            check: self.checks.then_some(*check),
-                            chevron: Some(chevron),
-                            picture: Some((icon, Kind::Folder)),
-                            after: Some(count.to_string()),
-                            selected: self.focus.as_deref() == Some(path.as_str()),
-                            accepts_drop: file.is_some(),
-                            ..RowLook::default()
-                        };
-                        let Drawn { response, on_check } = draw_row(ui, &tones, row_height, name, look);
+                        let shown = ItemRow::new(name)
+                            .level(*depth)
+                            .check(self.checks.then_some(*check))
+                            .chevron(chevron)
+                            .picture(Picture::Glyph(icon, tones.folder))
+                            .after(Some(count.to_string()))
+                            .chosen(self.focus.as_deref() == Some(path.as_str()))
+                            .drop_target(file.is_some() && carrying)
+                            .show(ui, &colors, row_height);
+                        let (response, on_check) = (shown.response, shown.on_check);
                         if let (Some(file), Some(dropped)) = (&file, response.dnd_release_payload::<Dragged>()) {
                             // the ones that are somewhere else; a host
                             // dropped on its own folder changes nothing
@@ -1335,6 +1115,15 @@ impl TreeView {
                             let picture = logos.picture(ui.ctx(), os, PICTURE)?;
                             Some((picture, crate::logos::tint(os, &tones, ui.visuals().dark_mode)))
                         });
+                        let picture = match logo {
+                            Some((logo, tint)) => {
+                                let ctx = ui.ctx().clone();
+                                Picture::Paint(Box::new(move |painter, at| {
+                                    crate::logos::paint(painter, logo, crate::logos::place(&ctx, at, PICTURE), tint)
+                                }))
+                            }
+                            None => Picture::Glyph(icon, tones.host),
+                        };
                         let stripe = native_term_config::appearance::for_host(folders[*folder], host)
                             .tab_color
                             .and_then(|hex| egui::Color32::from_hex(&hex).ok());
@@ -1351,23 +1140,23 @@ impl TreeView {
                             Some(session) => session.target(),
                             None => address(host),
                         };
-                        let look = RowLook {
-                            level: *depth,
-                            check: self.checks.then_some(if selected { Check::On } else { Check::Off }),
-                            picture: Some((icon, Kind::Host)),
-                            logo,
+                        let mut row = ItemRow::new(host.label())
+                            .level(*depth)
+                            .check(self.checks.then_some(if selected { Check::On } else { Check::Off }))
+                            .picture(picture)
                             // (in a list the host's folder is said too)
-                            after: listed.then(|| folder_title(folders[*folder])),
-                            star: host.favorite(),
-                            stripe,
-                            marks,
-                            address: Some(address),
-                            selected,
-                            draggable: true,
-                            ..RowLook::default()
-                        };
+                            .after(listed.then(|| folder_title(folders[*folder])))
+                            .stripe(stripe)
+                            .marks(marks)
+                            .address(address)
+                            .chosen(selected)
+                            .draggable();
+                        if host.favorite() {
+                            row = row.sign(icons::STAR_FILLED, tones.folder);
+                        }
                         // the tooltip's text only while it shows, not for every row on every frame
-                        let Drawn { response, on_check } = draw_row(ui, &tones, row_height, host.label(), look);
+                        let shown = row.show(ui, &colors, row_height);
+                        let (response, on_check) = (shown.response, shown.on_check);
                         let response = response.on_hover_ui(|ui| {
                             ui.label(hover(folders[*folder], host, written));
                         });
@@ -1996,5 +1785,74 @@ mod tests {
         assert_eq!(Activity::of(&State::LoginFailed(255)), Some(Activity::Failed));
         assert_eq!(Activity::of(&State::Closed), None);
         assert!(Activity::Connected > Activity::Failed, "the best state wins for the dot");
+    }
+}
+
+/// The session tree as the snapshots draw it (`snapshots.rs`): a tree of
+/// two folders with SSH hosts, one a favorite, one with a tab colour, tags
+/// and states, and a view of it with what is chosen and searched.
+#[cfg(test)]
+pub(crate) mod snapshot {
+    use super::*;
+
+    pub struct Fixture {
+        pub tree: SessionTree,
+        pub notes: Notes,
+        pub activity: HashMap<String, Activity>,
+        pub recent: Vec<String>,
+        pub tags: Vec<String>,
+        pub servers: native_term_app::server::Servers,
+    }
+
+    pub fn fixture(dir: &std::path::Path) -> Fixture {
+        let main = "Include config.d/*.conf\n\nHost web\n  HostName 10.0.0.2\n  NativeTermFavorite yes\n";
+        std::fs::write(dir.join("config"), main).unwrap();
+        std::fs::create_dir_all(dir.join("config.d")).unwrap();
+        let lab = "Host __nativeterm_folder__\n  NativeTermLabel Lab\n\n\
+                   Host db1\n  HostName 10.0.1.1\n  User postgres\n  NativeTermId id-db1\n  NativeTermTabColor #E74856\n\n\
+                   Host db2\n  HostName 10.0.1.2\n  NativeTermId id-db2\n\n\
+                   Host db3-with-a-rather-long-name-that-does-not-fit\n  HostName 10.0.1.3\n";
+        std::fs::write(dir.join("config.d/lab.conf"), lab).unwrap();
+        let deep = "Host __nativeterm_folder__\n  NativeTermLabel Lab / Rack 2\n\nHost r2\n  HostName 10.0.2.1\n";
+        std::fs::write(dir.join("config.d/rack.conf"), deep).unwrap();
+        let note = |tags: &[&str]| native_term_app::registry::Note {
+            text: String::new(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            updated_at: 1,
+        };
+        Fixture {
+            tree: SessionTree::load_with(dir, dir),
+            notes: [("id-db1".to_string(), note(&["prod"])), ("id-db2".to_string(), note(&["ceph"]))]
+                .into_iter()
+                .collect(),
+            activity: HashMap::from([("db1".to_string(), Activity::Connected), ("db2".to_string(), Activity::Failed)]),
+            recent: vec!["db2".into(), "web".into()],
+            tags: vec!["ceph".into(), "prod".into()],
+            servers: Default::default(),
+        }
+    }
+
+    impl Fixture {
+        pub fn shown(&self, scope: Scope) -> Shown<'_> {
+            Shown {
+                tree: &self.tree,
+                generation: 1,
+                recent: &self.recent,
+                activity: &self.activity,
+                written: Written { notes: &self.notes, generation: 0 },
+                tags: &self.tags,
+                servers: &self.servers,
+                scope,
+            }
+        }
+    }
+
+    /// A view with checkboxes or not, these hosts chosen (in this order),
+    /// this typed into the search.
+    pub fn view(checks: bool, chosen: &[&str], query: &str) -> TreeView {
+        let mut view = TreeView::with_checks(checks);
+        view.selected = chosen.iter().map(|a| a.to_string()).collect();
+        view.query = query.into();
+        view
     }
 }

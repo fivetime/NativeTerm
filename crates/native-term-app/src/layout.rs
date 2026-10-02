@@ -349,18 +349,13 @@ pub fn switch(ui: &mut egui::Ui, tones: &Tones, rect: egui::Rect, what: Switch, 
 /// A badge's size with `text` in it (`px-2 py-0.5`).
 #[must_use]
 pub fn badge_size(painter: &egui::Painter, text: &str) -> egui::Vec2 {
-    let galley = painter.layout_no_wrap(text.to_string(), font(TINY), egui::Color32::WHITE);
-    egui::vec2(galley.size().x + 16.0, 18.0)
+    native_term_skin::badge_size(painter, text)
 }
 
 /// A badge at `rect`: a tint's colours, or those of a mark that says
 /// nothing about how it goes.
 pub fn paint_badge(painter: &egui::Painter, tones: &Tones, rect: egui::Rect, text: &str, tint: Option<Tint>) {
-    let tint = tint.unwrap_or(tones.plain);
-    painter.rect_filled(rect, 4.0, tint.fill);
-    painter.rect_stroke(rect, 4.0, egui::Stroke::new(1.0_f32, tint.line), egui::StrokeKind::Inside);
-    let galley = painter.layout_no_wrap(text.to_string(), font(TINY), tint.text);
-    painter.galley(rect.center() - galley.size() / 2.0, galley, tint.text);
+    native_term_skin::paint_badge(painter, rect, text, tint.unwrap_or(tones.plain));
 }
 
 /// A badge among other widgets.

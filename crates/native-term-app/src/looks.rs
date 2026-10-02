@@ -247,19 +247,12 @@ impl Palette {
 }
 
 /// How something is marked: a colour thinly under it, less thinly around
-/// it, and its text in a shade that can be read on that.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Tint {
-    pub fill: egui::Color32,
-    pub line: egui::Color32,
-    pub text: egui::Color32,
-}
+/// it, and its text in a shade that can be read on that (the skin's).
+pub use native_term_skin::Tint;
 
-impl Tint {
-    /// `base` at `fill` percent under, at `line` percent around.
-    fn of(base: egui::Color32, fill: u32, line: u32, text: egui::Color32) -> Tint {
-        Tint { fill: thin(base, alpha(fill)), line: thin(base, alpha(line)), text }
-    }
+/// `base` at `fill` percent under, at `line` percent around.
+fn tint_of(base: egui::Color32, fill: u32, line: u32, text: egui::Color32) -> Tint {
+    Tint { fill: thin(base, alpha(fill)), line: thin(base, alpha(line)), text }
 }
 
 /// The colours the main window is laid out in (`layout.rs`), whatever
@@ -336,7 +329,7 @@ impl Tones {
         // (a mark's text: the design has one shade for both themes, 600,
         // which on its own thin colour over white is a sign's contrast
         // and not a text's: 400 in the dark, 700 in the light, amber 800)
-        let mark = |base: u32, dark_one: u32, light_one: u32| Tint::of(rgb(base), 15, 30, shade(dark_one, light_one));
+        let mark = |base: u32, dark_one: u32, light_one: u32| tint_of(rgb(base), 15, 30, shade(dark_one, light_one));
         Tones {
             page: p.page,
             bar: p.bar,
@@ -350,16 +343,16 @@ impl Tones {
             text: p.text,
             weak: p.weak,
             accent: BLUE_500,
-            tile: Tint::of(BLUE_500, 10, 30, BLUE_500),
+            tile: tint_of(BLUE_500, 10, 30, BLUE_500),
             chip_on: if dark {
-                Tint::of(BLUE_500, 20, 40, rgb(0x60a5fa))
+                tint_of(BLUE_500, 20, 40, rgb(0x60a5fa))
             } else {
-                Tint::of(BLUE_600, 12, 35, rgb(0x1d4ed8))
+                tint_of(BLUE_600, 12, 35, rgb(0x1d4ed8))
             },
             chosen: if dark {
-                Tint::of(BLUE_500, 18, 40, rgb(0xffffff))
+                tint_of(BLUE_500, 18, 40, rgb(0xffffff))
             } else {
-                Tint::of(BLUE_600, 12, 35, rgb(0x1e3a8a))
+                tint_of(BLUE_600, 12, 35, rgb(0x1e3a8a))
             },
             primary: BLUE_600,
             primary_near: BLUE_500,
@@ -369,7 +362,7 @@ impl Tones {
             sun: rgb(0xf59e0b),
             folder: rgb(0xf59e0b),
             host: BLUE_500,
-            plain: Tint::of(slate, 10, 20, p.weak),
+            plain: tint_of(slate, 10, 20, p.weak),
             good: mark(0x10b981, 0x34d399, 0x047857),
             busy: mark(0xf59e0b, 0xfbbf24, 0x92400e),
             bad: mark(0xef4444, 0xf87171, 0xb91c1c),
@@ -400,9 +393,9 @@ impl Tones {
             text,
             weak: visuals.weak_text_color(),
             accent: link,
-            tile: Tint::of(chosen, 10, 30, link),
-            chip_on: Tint::of(chosen, 20, 40, link),
-            chosen: Tint::of(chosen, 18, 40, visuals.strong_text_color()),
+            tile: tint_of(chosen, 10, 30, link),
+            chip_on: tint_of(chosen, 20, 40, link),
+            chosen: tint_of(chosen, 18, 40, visuals.strong_text_color()),
             primary: chosen,
             primary_near: mix(chosen, text, 0.15),
             on_primary: readable_on(chosen),
@@ -412,12 +405,31 @@ impl Tones {
     }
 }
 
+/// The colours of the lists' rows (the skin's `ItemRow`).
+#[must_use]
+pub fn item_colors(t: &Tones) -> native_term_skin::ItemColors {
+    native_term_skin::ItemColors {
+        card: t.card,
+        line: t.line,
+        near: t.near,
+        primary: t.primary,
+        primary_near: t.primary_near,
+        on_primary: t.on_primary,
+        chosen: t.chosen,
+        raised: t.raised,
+        accent: t.accent,
+        guide: t.guide,
+        text: t.text,
+        weak: t.weak,
+        plain: t.plain,
+    }
+}
+
 /// The skin every window is drawn with (`native-term-skin`): the
 /// look's colours, the window buttons' names in the person's language.
 #[must_use]
 pub fn skin(visuals: &egui::Visuals) -> native_term_skin::Skin {
     let t = tones(visuals);
-    let tint = |x: Tint| native_term_skin::Tint { fill: x.fill, line: x.line, text: x.text };
     native_term_skin::Skin {
         palette: native_term_skin::Palette {
             page: t.page,
@@ -430,7 +442,7 @@ pub fn skin(visuals: &egui::Visuals) -> native_term_skin::Skin {
             danger: t.danger,
             primary: t.primary,
             on_primary: t.on_primary,
-            tile: tint(t.tile),
+            tile: t.tile,
             rail: t.rail,
             rail_line: t.rail_line,
             accent: t.accent,

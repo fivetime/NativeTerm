@@ -7,7 +7,17 @@ use egui_software_backend::{BufferMutRef, ColorFieldOrder, EguiSoftwareRender};
 
 /// `draw` as a window `size` large shows it, a few frames on (what is
 /// laid out after being measured settles), as RGBA rows.
-fn picture(size: egui::Vec2, dark: bool, mut draw: impl FnMut(&mut egui::Ui)) -> (usize, usize, Vec<u8>) {
+fn picture(size: egui::Vec2, dark: bool, draw: impl FnMut(&mut egui::Ui)) -> (usize, usize, Vec<u8>) {
+    picture_at(size, dark, None, draw)
+}
+
+/// The same with the pointer resting at `pointer`.
+fn picture_at(
+    size: egui::Vec2,
+    dark: bool,
+    pointer: Option<egui::Pos2>,
+    mut draw: impl FnMut(&mut egui::Ui),
+) -> (usize, usize, Vec<u8>) {
     let ctx = egui::Context::default();
     crate::install_fonts(&ctx);
     crate::looks::Preset::from_setting(None).apply(&ctx);
@@ -16,6 +26,7 @@ fn picture(size: egui::Vec2, dark: bool, mut draw: impl FnMut(&mut egui::Ui)) ->
     let input = |frame: u32| egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
         time: Some(f64::from(frame)),
+        events: pointer.map(egui::Event::PointerMoved).into_iter().collect(),
         ..egui::RawInput::default()
     };
     let mut renderer = EguiSoftwareRender::new(ColorFieldOrder::Rgba);
@@ -134,6 +145,34 @@ fn snapshots() {
         over("close-mixed", &mut |ctx| {
             let _ = mixed.show(ctx);
         });
+
+        // the session tree: chosen hosts, checkboxes, a row under the
+        // pointer, the recent list, a search; and narrow
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = crate::tree_view::snapshot::fixture(dir.path());
+        use crate::tree_view::{snapshot::view, Scope};
+        // (name, checkboxes, chosen, searched, scope, width, pointer)
+        type Case<'a> = (&'a str, bool, &'a [&'a str], &'a str, Scope, f32, Option<egui::Pos2>);
+        let cases: [Case; 6] = [
+            ("tree", false, &["db1", "db2"], "", Scope::Tree, 620.0, Some(egui::pos2(200.0, 150.0))),
+            ("tree-checks", true, &["db1"], "", Scope::Tree, 620.0, Some(egui::pos2(30.0, 215.0))),
+            ("tree-recent", false, &["web"], "", Scope::Recent, 620.0, None),
+            ("tree-search", false, &[], "db", Scope::Tree, 620.0, None),
+            ("tree-narrow", false, &["db1"], "", Scope::Tree, 300.0, None),
+            ("tree-narrow-checks", true, &["db1", "db2"], "", Scope::Tree, 300.0, None),
+        ];
+        for (name, checks, chosen, query, scope, width, pointer) in cases {
+            let mut tree = view(checks, chosen, query);
+            save(
+                &format!("{name}-{theme}"),
+                picture_at(egui::vec2(width, 420.0), dark, pointer, |ui| {
+                    let skin = crate::looks::skin(ui.visuals());
+                    egui::CentralPanel::default().frame(egui::Frame::NONE.fill(skin.palette.page)).show(ui, |ui| {
+                        let _ = tree.show(ui, &fixture.shown(scope));
+                    });
+                }),
+            );
+        }
 
         let mut delete = crate::dialogs::ConfirmDelete::new("web01", "Web server 01");
         save(

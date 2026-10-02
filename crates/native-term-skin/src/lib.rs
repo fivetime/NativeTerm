@@ -23,6 +23,7 @@ mod dialog;
 pub mod font;
 mod frame;
 mod grid;
+mod item;
 mod list;
 mod modal;
 mod path;
@@ -38,6 +39,7 @@ pub use dialog::{body, button, footer, Choice, Message, MessageShown, Notice, Or
 pub use font::{font, Weight};
 pub use frame::{edges, frame_cursor, frame_hit, FRAME_BAND, FRAME_CORNER};
 pub use grid::{GridView, Item};
+pub use item::{badge_size, paint_badge, Check, ItemColors, ItemRow, ItemShown, Picture, LIST_PAD, PICTURE, ROW_GAP};
 pub use list::{Cell, Column, ListShown, ListView, Sort, Width};
 pub use modal::{as_window, close_asked, room, set_room, Modal, ModalShown};
 pub use path::{PathBar, PathShown};
