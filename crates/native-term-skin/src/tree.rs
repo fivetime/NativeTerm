@@ -14,6 +14,8 @@ pub const NODE: f32 = 28.0;
 pub const INDENT: f32 = 14.0;
 const PAD: f32 = 6.0;
 const CHEVRON: f32 = 14.0;
+/// What the current row keeps for its name in a deep tree.
+const NAME_ROOM: f32 = 96.0;
 
 /// Whether a row has rows under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +139,13 @@ impl<'a> TreeView<'a> {
                 area = area.vertical_scroll_offset(bottom - view);
             }
         }
+        // deep trees go sideways: every row shifted left so the current
+        // one keeps room for its name (the levels above it go off the left
+        // edge, as a file manager's pane scrolled sideways)
+        let deepest = current.and_then(|c| rows.get(c)).map_or(0, |r| r.depth);
+        let width = ui.available_width();
+        let shift = (PAD + deepest as f32 * INDENT + CHEVRON + 26.0 + NAME_ROOM - width).max(0.0);
+        let shift = (shift / INDENT).ceil() * INDENT;
         let font = egui::FontId::proportional(12.0);
         let current_font = crate::font(ui.ctx(), 12.0, crate::Weight::Medium);
         // (seen in view, once nothing above it is being read: settled;
@@ -166,10 +175,10 @@ impl<'a> TreeView<'a> {
                 }
                 // a line down beside each level above this one
                 for level in 0..row.depth {
-                    let x = rect.left() + PAD + level as f32 * INDENT + CHEVRON / 2.0;
+                    let x = rect.left() + PAD + level as f32 * INDENT + CHEVRON / 2.0 - shift;
                     painter.vline(x, rect.y_range(), egui::Stroke::new(1.0, palette.line));
                 }
-                let x = rect.left() + PAD + row.depth as f32 * INDENT;
+                let x = rect.left() + PAD + row.depth as f32 * INDENT - shift;
                 let y = rect.center().y;
                 let chevron = egui::Rect::from_center_size(egui::pos2(x + CHEVRON / 2.0, y), egui::vec2(CHEVRON, NODE));
                 if row.kids != Kids::No {
