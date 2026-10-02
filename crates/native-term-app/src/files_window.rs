@@ -2727,7 +2727,8 @@ fn serve_questions(
     ctx: egui::Context,
 ) -> std::io::Result<String> {
     use native_term_session::pipe;
-    let name = format!(r"\\.\pipe\NativeTerm-askpass-{}-{:016x}", std::process::id(), unique());
+    // (a named pipe on Windows, a socket elsewhere: the platform's prefix)
+    let name = format!("{}askpass-{}-{:016x}", native_term_session::PIPE_NAME_PREFIX, std::process::id(), unique());
     let mut listener = pipe::PipeListener::bind(&name)?;
     std::thread::spawn(move || {
         let mut cancelled = false;
@@ -2945,6 +2946,21 @@ fn unique() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ssh's helper reaches the window's question pipe on every platform
+    /// (its name was Windows' only: on macOS and Linux the files window
+    /// fell back to `BatchMode`, and a new host's key failed unasked).
+    /// A helper that isn't our ssh's child is answered with nothing.
+    #[test]
+    fn the_question_pipe_is_reachable() {
+        let (tx, _rx) = mpsc::channel();
+        let ssh_pid = Arc::new(std::sync::atomic::AtomicU32::new(u32::MAX));
+        let name = serve_questions(1, None, ssh_pid, Arc::new(AtomicBool::new(false)), tx, egui::Context::default())
+            .expect("the pipe");
+        let conn = native_term_session::pipe::connect(&name, Duration::from_secs(2)).expect("connected");
+        conn.send(&"Are you sure you want to continue connecting (yes/no)? ".to_string()).unwrap();
+        assert_eq!(conn.recv::<Option<String>>(Duration::from_secs(5)).unwrap(), Some(None));
+    }
 
     #[test]
     fn a_folder_is_one_word_to_the_shell() {
