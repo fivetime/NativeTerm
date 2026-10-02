@@ -54,7 +54,11 @@ impl<'a> PathBar<'a> {
                 .font(mono)
                 .vertical_align(egui::Align::Center)
                 .desired_width(inner.width());
-            let field = ui.put(inner, field);
+            // (in a child of its own: `put` would move the bar's cursor
+            // back to the field's end, and what comes next would be drawn
+            // over the box's right edge)
+            let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
+            let field = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(layout)).add(field);
             let started = ui.data(|d| d.get_temp::<bool>(self.id.with("focused"))).is_none();
             if started {
                 field.request_focus();
@@ -156,5 +160,78 @@ impl<'a> PathBar<'a> {
         }
         ui.data_mut(|d| d.insert_temp(editing_id, editing));
         shown
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn palette() -> Palette {
+        let c = egui::Color32::GRAY;
+        let tint = crate::Tint { fill: c, line: c, text: c };
+        Palette {
+            page: c,
+            bar: c,
+            line: c,
+            card: c,
+            raised: c,
+            text: c,
+            weak: c,
+            danger: c,
+            primary: c,
+            on_primary: c,
+            tile: tint,
+            rail: c,
+            rail_line: c,
+            accent: c,
+            rail_near: c,
+            backdrop: c,
+        }
+    }
+
+    /// What follows the bar starts after it, while a path is typed too
+    /// (the field's own placing moved the row back over the box's end).
+    #[test]
+    fn what_follows_starts_after_the_bar() {
+        let palette = palette();
+        let ctx = egui::Context::default();
+        let crumbs = ["/".to_string(), "root".to_string(), "build".to_string()];
+        for edit in [false, true] {
+            let mut gap = None;
+            for _ in 0..2 {
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        let start = ui.cursor().left();
+                        PathBar::new("path", &palette).show(ui, &crumbs, "/root/build", 300.0, edit);
+                        let next = ui.label("filter");
+                        gap = Some(next.rect.left() - (start + 300.0));
+                    });
+                });
+                output.textures_delta.clear();
+            }
+            assert_eq!(gap, Some(2.0), "typing: {edit}");
+        }
+    }
+
+    /// The same after the filter field.
+    #[test]
+    fn what_follows_starts_after_the_filter() {
+        let palette = palette();
+        let ctx = egui::Context::default();
+        let mut gap = None;
+        for _ in 0..2 {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    let start = ui.cursor().left();
+                    crate::filter_field(ui, &palette, &mut String::new(), "?", "filter", 140.0);
+                    gap = Some(ui.label("star").rect.left() - (start + 140.0));
+                });
+            });
+            output.textures_delta.clear();
+        }
+        assert_eq!(gap, Some(2.0));
     }
 }

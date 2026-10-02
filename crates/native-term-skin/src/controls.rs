@@ -140,7 +140,10 @@ pub fn filter_field(
         .font(egui::FontId::proportional(12.0))
         .vertical_align(egui::Align::Center)
         .desired_width(inner.width());
-    let response = ui.put(inner, edit);
+    // (in a child of its own: `put` would move the row back to the
+    // field's end, under the box's right edge)
+    let layout = egui::Layout::centered_and_justified(egui::Direction::TopDown);
+    let response = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(layout)).add(edit);
     let stroke = if response.has_focus() { egui::Stroke::new(1.0, palette.accent) } else { egui::Stroke::NONE };
     ui.painter().rect_stroke(rect, 6.0, stroke, egui::StrokeKind::Inside);
     response
