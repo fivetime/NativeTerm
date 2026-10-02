@@ -2886,7 +2886,10 @@ UTF-8 or the ANSI code page: "不知道这样的主机。" instead of
 
 **Authentication.** ssh's prompts go to the shim as askpass helper
 (`SSH_ASKPASS` forced, `NATIVETERM_ASKPASS` = a private pipe of the files
-window, `NATIVETERM_ASKPASS_NO_CONSOLE=1`). Only the helper whose parent is
+window, named with the platform's `PIPE_NAME_PREFIX` — a socket off Windows —
+`NATIVETERM_ASKPASS_NO_CONSOLE=1`). The window answers in the helper's own
+reply type, `protocol::AskpassReply` (`Answer`, `Cancel`; `Ask` for a helper
+that isn't its ssh's). Only the helper whose parent is
 this window's ssh is answered: the account's own password prompt
 (`Target::answers`) from Credential Manager when saved and not marked
 refused (then `NumberOfPasswordPrompts=1`; a refusal marks it, as in a

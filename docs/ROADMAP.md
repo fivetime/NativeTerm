@@ -704,6 +704,19 @@
         Touch Bar observation, "Cannot remove an observer … nextResponder"),
         so it is taken from its owner and out of sight first. The files
         window and its first-run guide then ran on the Mac
+  - [x] macOS regression pass with synthetic input (2026-10-02, the
+        Mac's Accessibility granted): shortcuts were Ctrl+Command chords
+        (now Command, labelled ⌥⇧⌘, the search hints name the shortcut
+        set); the files window's questions (new host key, passwords)
+        never reached it off Windows (a Windows pipe name) and, since
+        the helper's reply became an enum, failed as cancelled on every
+        platform (`protocol::AskpassReply`, one type for both ends);
+        SecureCRT's configuration looked for in its macOS/Linux default
+        place; texts shown off Windows say "the terminal"; no ssh-agent
+        "service" line where there is none. Checked working: new host,
+        folder, host key once (removed at the session's end), files
+        window (connect, new folder, chmod, upload), title-bar zoom,
+        rail pages, settings, WezTerm tab menu, import
   - [x] egui 0.36, the CPU renderer our fork (`fivetime/egui-render`,
         branch `nativeterm`; upstream takes no AI-made changes)
   - [x] Every window with the skin's frame round and shadowed on
