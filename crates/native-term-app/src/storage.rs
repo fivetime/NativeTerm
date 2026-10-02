@@ -103,25 +103,37 @@ pub fn check(ssh_dir: &Path, data_dir: &Path) -> Health {
     }
     // what ssh refuses to read: its config files and private keys
     for file in ssh_checked(ssh_dir) {
-        if open_to_others(&file) {
+        if open_to_others(&file, is_private_key(&file)) {
             health.too_open.push(file);
         }
     }
     health
 }
 
-/// Whether ssh would refuse the file for its permissions: someone besides
-/// the owner (and the system) may open it.
-fn open_to_others(file: &Path) -> bool {
+/// Whether ssh would refuse the file for its permissions. Windows: someone
+/// besides the owner (and the system) may change it. Unix, as OpenSSH
+/// checks: a config someone else may write (group or others, `0o022`;
+/// reading it is fine: 644 is what ssh's own files are), a private key
+/// anyone else may read (`0o077`).
+fn open_to_others(file: &Path, key: bool) -> bool {
     #[cfg(windows)]
     {
+        let _ = key;
         native_term_config::acl::open_to_others(file).is_some_and(|others| !others.is_empty())
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::metadata(file).is_ok_and(|m| m.permissions().mode() & 0o077 != 0)
+        let others = if key { 0o077 } else { 0o022 };
+        std::fs::metadata(file).is_ok_and(|m| m.permissions().mode() & others != 0)
     }
+}
+
+/// A private key ssh would read from the folder: `id_*` with its `.pub`.
+fn is_private_key(path: &Path) -> bool {
+    path.extension().is_none()
+        && path.with_extension("pub").is_file()
+        && path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("id_"))
 }
 
 /// Owner only, as ssh wants it.
@@ -140,11 +152,6 @@ fn restrict_one(file: &Path) -> std::io::Result<()> {
 /// The files ssh checks the permissions of: the config, the folder files
 /// it includes, and the private keys beside them.
 fn ssh_checked(ssh_dir: &Path) -> Vec<PathBuf> {
-    let is_private_key = |path: &Path| {
-        path.extension().is_none()
-            && path.with_extension("pub").is_file()
-            && path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("id_"))
-    };
     let mut files: Vec<PathBuf> = files_in(ssh_dir)
         .into_iter()
         .filter(|f| {
@@ -313,10 +320,12 @@ mod tests {
         assert!(check(&ssh, dir.path()).too_open.is_empty());
     }
 
-    /// The same on Unix, by mode bits.
+    /// The same on Unix, by mode bits as OpenSSH reads them: a config
+    /// others may read is fine (644), one the group may write is not; a
+    /// private key others may read is not.
     #[cfg(unix)]
     #[test]
-    fn a_config_others_can_read_is_found_and_put_right() {
+    fn a_config_others_can_write_is_found_and_put_right() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let ssh = dir.path().join(".ssh");
@@ -324,8 +333,17 @@ mod tests {
         let config = ssh.join("config");
         std::fs::write(&config, "Host a\n").unwrap();
         std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let key = ssh.join("id_ed25519");
+        std::fs::write(&key, "k").unwrap();
+        std::fs::write(ssh.join("id_ed25519.pub"), "p").unwrap();
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(check(&ssh, dir.path()).too_open.is_empty(), "644 config, 600 key: as ssh makes them");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(check(&ssh, dir.path()).too_open, vec![key.clone()], "a key others may read");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o664)).unwrap();
         let health = check(&ssh, dir.path());
-        assert_eq!(health.too_open, vec![config.clone()]);
+        assert_eq!(health.too_open, vec![config.clone()], "a config the group may write");
         assert!(restrict(&health.too_open).is_empty());
         assert!(check(&ssh, dir.path()).too_open.is_empty());
         assert_eq!(std::fs::metadata(&config).unwrap().permissions().mode() & 0o777, 0o600);
