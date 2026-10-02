@@ -402,3 +402,47 @@ fn what_a_server_said_comes_with_the_login() {
     let (core, _fake) = start(Some(Registry::open(&db).unwrap()));
     assert_eq!(core.servers()[HOST].said, "SSH-2.0-OpenSSH_10.2");
 }
+
+/// A host's after-login command is typed once the login is done, also
+/// when ssh's `LocalCommand` told it first (Unix: its helper says the
+/// login is done before the tab's own shim does, which then found the
+/// session connected already and typed nothing).
+#[test]
+fn the_after_login_command_comes_when_the_local_command_told_first() {
+    let name = pipe_name();
+    let fake = FakeBackend::new(std::env::current_exe().unwrap());
+    let core = Core::start_with_pipe(fake.clone(), None, &name).expect("a pipe of our own");
+    let request = HostRequest { on_login: Some("cd '/srv/www'".into()), ..HostRequest::new(HOST, "web01") };
+    let ids = core.open(&[request], Target::NewWindow);
+    wait_until(&core, &ids, "located", located);
+    let pane = fake.calls().opened[0].1[0].terminal_session.clone();
+    let hello = |role: Role, session: Option<String>, alias: Option<String>| ShimMessage::Hello {
+        protocol: native_term_session::PROTOCOL_VERSION,
+        role,
+        pid: std::process::id(),
+        wt_session: Some(pane.clone()),
+        session,
+        alias,
+        terminal_window: None,
+    };
+    // the tab's own shim, connecting
+    let shim = pipe::connect(&name, Duration::from_secs(2)).expect("the pipe answers");
+    shim.send(&hello(Role::Shim, Some(ids[0].clone()), Some(HOST.into()))).unwrap();
+    shim.send(&ShimMessage::Connecting { attempt: 1 }).unwrap();
+    wait_until(&core, &ids, "connecting", |s| s[0].state == State::Connecting);
+    // ssh's LocalCommand: the login is done
+    let helper = pipe::connect(&name, Duration::from_secs(2)).expect("the pipe answers");
+    helper.send(&hello(Role::AuthSignal, None, None)).unwrap();
+    helper.send(&ShimMessage::Authenticated).unwrap();
+    wait_until(&core, &ids, "logged in", |s| s[0].state == State::Connected);
+    // then the shim says so too: the command comes to it to type
+    shim.send(&ShimMessage::Authenticated).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut typed = None;
+    while Instant::now() < deadline && typed.is_none() {
+        if let Ok(Some(AppMessage::SendText { text, enter })) = shim.recv::<AppMessage>(Duration::from_millis(500)) {
+            typed = Some((text, enter));
+        }
+    }
+    assert_eq!(typed, Some(("cd '/srv/www'".to_string(), true)));
+}

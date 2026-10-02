@@ -54,6 +54,9 @@ const FALLBACK_REFRESH: Duration = Duration::from_secs(60);
 const DEBOUNCE: Duration = Duration::from_millis(150);
 /// Opening more hosts than this at once connects them through the queue.
 const PACED_OVER: usize = 3;
+/// How often a post-login command is tried (300 ms apart) while its
+/// tab isn't found yet.
+const LOGIN_TRIES: usize = 10;
 /// Automatic reconnects before giving up (the setting is off by default).
 const AUTO_RECONNECT_TRIES: u32 = 10;
 const AUTO_RECONNECT_SETTING: &str = "auto_reconnect";
@@ -212,6 +215,9 @@ pub(crate) struct Session {
     told_to_connect: bool,
     /// Typed after every login.
     on_login: Option<String>,
+    /// `on_login` was typed for this login (cleared once it isn't
+    /// connected: the next login types it again).
+    login_typed: bool,
     /// When the current connection logged in.
     connected_at: Option<Instant>,
     locked: bool,
@@ -250,6 +256,7 @@ impl Session {
             told_to_connect: false,
             connected_at: None,
             on_login: None,
+            login_typed: false,
             locked: false,
             last_position: None,
             quiet_since: None,
@@ -2103,14 +2110,17 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
             Ok(Some(message)) => {
                 let (window, retry, login, lost_connect) = shared
                     .update(&id, |s| {
-                        let was_connected = s.state == State::Connected;
                         // we had told it to connect (see below)
                         let was_told = s.told_to_connect;
                         if matches!(message, ShimMessage::Connecting { .. }) {
                             s.told_to_connect = false;
                         }
                         apply(s, &message);
-                        let logged_in = s.state == State::Connected && !was_connected;
+                        // logged in and its command not typed yet (the
+                        // login may have been told another way first:
+                        // ssh's LocalCommand says it is authenticated)
+                        let logged_in = s.state == State::Connected && !s.login_typed;
+                        s.login_typed = s.state == State::Connected;
                         let login = if logged_in { s.on_login.clone() } else { None };
                         let exited = matches!(message, ShimMessage::Exited { .. });
                         let retry = match &s.state {
@@ -2138,7 +2148,24 @@ fn handle_connection(shared: &Arc<Shared>, conn: Arc<PipeConnection>) {
                     }
                 }
                 if let Some(command) = login {
-                    Core { shared: Arc::clone(shared) }.send_text(std::slice::from_ref(&id), &command, true);
+                    // typed off this loop: a backend that types for the
+                    // shim finds the tab by the snapshot, which may not
+                    // have the new tab yet (WezTerm on Linux): looked for
+                    // again a few times
+                    let (shared, id) = (Arc::clone(shared), id.clone());
+                    std::thread::spawn(move || {
+                        let core = Core { shared: Arc::clone(&shared) };
+                        for attempt in 0..LOGIN_TRIES {
+                            if attempt > 0 {
+                                std::thread::sleep(Duration::from_millis(300));
+                                refresh(&shared);
+                            }
+                            let report = core.send_text(std::slice::from_ref(&id), &command, true);
+                            if !report.sent.is_empty() {
+                                break;
+                            }
+                        }
+                    });
                 }
                 if let Some((attempt, why)) = retry.flatten() {
                     schedule_reconnect(shared, &id, attempt, why);

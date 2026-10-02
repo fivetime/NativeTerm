@@ -519,7 +519,12 @@
       the recent list lives in the per-machine `state.db`
 - [x] Command library (`commands.toml`), edited from the send dialog
 - [x] Post-login commands (`NativeTermOnLogin`, host or folder default),
-      typed after every login
+      typed after every login. Fixed 2026-10-02: on Unix nothing was
+      typed (ssh's `LocalCommand` helper said the login was done first,
+      and the tab's own shim then found the session connected and took
+      it for no new login); now typed once per login whoever tells it,
+      and looked for again while a backend that types (WezTerm) hasn't
+      the tab in its snapshot yet. Tested (`core_fake`) and seen on Lingmo
 - [x] Import SecureCRT's button bars (send-string buttons) into the command
       library, grouped by bar; other buttons listed with the reason
 - [ ] Import SecureCRT's Command Manager commands (storage format needed:
