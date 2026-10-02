@@ -23,6 +23,8 @@ pub(super) enum Asked {
     Sync,
     /// What may be done with the files chosen (the server's side).
     Chmod,
+    /// A terminal of the session's host, in the folder shown.
+    Terminal,
     CopyPath,
     Names(Names),
     Bookmark(files_bookmarks::Picked),
@@ -262,6 +264,15 @@ impl FilesWindow {
                 .clicked()
         {
             asked.push(Asked::Edit);
+        }
+        if remote
+            && IconButton::new(icons::TERMINAL.to_string(), t!("files-terminal-here"))
+                .small()
+                .enabled(connected)
+                .show(ui, &palette)
+                .clicked()
+        {
+            asked.push(Asked::Terminal);
         }
         if IconButton::new(icons::DELETE.to_string(), t!("files-delete"))
             .small()

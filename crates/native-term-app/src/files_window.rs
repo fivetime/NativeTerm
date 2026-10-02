@@ -1692,6 +1692,21 @@ impl FilesWindow {
         }
     }
 
+    /// A new terminal tab of the session's host, gone into the folder the
+    /// server's side shows (typed after login, as a host's after-login
+    /// command is; that one isn't typed in this tab).
+    fn terminal_here(&mut self, id: u64) {
+        let Some(tab) = self.tabs.iter().find(|t| t.id == id) else { return };
+        let Some(core) = tab.spec.memory.clone() else { return };
+        let folder = tab.remote.names.decode(&tab.remote.path);
+        let request = native_term_app::HostRequest {
+            on_login: Some(format!("cd {}", shell_quoted(&folder))),
+            ..native_term_app::HostRequest::new(tab.spec.alias.clone(), tab.spec.label.clone())
+        };
+        core.open(&[request], native_term_platform::Target::Recent);
+        self.log(id, t!("files-terminal-opened", folder = folder.as_str()), false);
+    }
+
     /// What the local side's bar asked for.
     fn local_asked(&mut self, id: u64, asked: files_pane::Asked, ctx: &egui::Context) {
         use files_pane::Asked;
@@ -1765,6 +1780,7 @@ impl FilesWindow {
             }
             Asked::Sync => self.open_sync(id),
             Asked::Chmod => self.ask_chmod(id),
+            Asked::Terminal => self.terminal_here(id),
             Asked::CopyPath => {
                 let tab = &self.tabs[self.active];
                 let text: Vec<String> =
@@ -2486,6 +2502,12 @@ fn sorted(lines: Vec<Line>, sort: Sort, remote: bool) -> Vec<Line> {
     order.into_iter().filter_map(|i| lines[i].take()).collect()
 }
 
+/// `text` as one word to a POSIX shell: in single quotes, a quote in it
+/// closed, escaped and opened again.
+fn shell_quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
+}
+
 /// Only the lines whose names have `filter` in them (any case).
 fn filtered(lines: Vec<Line>, filter: &str) -> Vec<Line> {
     let filter = filter.trim().to_lowercase();
@@ -2803,6 +2825,12 @@ fn unique() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_is_one_word_to_the_shell() {
+        assert_eq!(shell_quoted("/srv/my files"), "'/srv/my files'");
+        assert_eq!(shell_quoted("/tmp/it's"), r"'/tmp/it'\''s'");
+    }
 
     #[test]
     fn texts() {

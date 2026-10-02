@@ -799,6 +799,10 @@
         Cancel stops the transfer). Text goes whole (not continued once
         broken off). Tested against Windows' own sftp-server: CR LF up
         as LF, back as CR LF, the progress at its total
+  - [x] An SSH terminal in the folder the server's side shows (its bar's
+        terminal button): a new tab of the session's host, `cd` into the
+        folder (quoted for the shell) typed after login. Seen on Lingmo:
+        the new tab's shell in /tmp/nt-list-test
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above
