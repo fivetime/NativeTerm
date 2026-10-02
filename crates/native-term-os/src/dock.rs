@@ -423,6 +423,17 @@ mod mac {
         child.orderOut(None);
     }
 
+    /// Any window of ours about to be closed (one without an owner too:
+    /// the files window, a question it asks): the keyboard's focus in it
+    /// let go and out of sight first, for the same Touch Bar observation
+    /// (a crash found closing the files window's question on a MacBook
+    /// with a Touch Bar).
+    pub fn retire(handle: isize) {
+        let Some(window) = window(handle) else { return };
+        window.makeFirstResponder(None);
+        window.orderOut(None);
+    }
+
     /// The window's frame, title bar included: what `move_window` places.
     pub fn window_bounds(handle: isize) -> Option<Bounds> {
         Some(to_pixels(window(handle)?.frame(), space()?))
@@ -573,6 +584,6 @@ mod mac {
 #[cfg(target_os = "macos")]
 pub use mac::{
     attach_child, cursor, detach_child, fill, frame_bounds, monitor_bounds, mouse_button_down, move_window,
-    on_a_monitor, over_fullscreen, regular_application, round_corners, set_topmost, title_double_click, window_bounds,
-    work_area, work_area_at,
+    on_a_monitor, over_fullscreen, regular_application, retire, round_corners, set_topmost, title_double_click,
+    window_bounds, work_area, work_area_at,
 };

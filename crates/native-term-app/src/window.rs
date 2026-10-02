@@ -1008,6 +1008,9 @@ impl Runner {
                 pane.window.focus_window();
             }
         }
+        if let Some(pane) = self.extra(n) {
+            crate::dialog_window::closing(pane.hwnd);
+        }
         if let Some((_, key, _)) = self.extras.iter().find(|(m, _, _)| *m == n) {
             let key = key.clone();
             OPEN_KEYS.with(|k| k.borrow_mut().retain(|open| *open != key));

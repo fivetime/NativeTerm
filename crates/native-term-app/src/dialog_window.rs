@@ -109,6 +109,15 @@ pub fn shown_over(window: isize, owner: isize) {
     let _ = (window, owner);
 }
 
+/// Any window about to be closed: on macOS its keyboard focus let go and
+/// out of sight first (see `retire`).
+pub fn closing(window: isize) {
+    #[cfg(target_os = "macos")]
+    native_term_os::dock::retire(window);
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
 /// A dialog about to be closed: macOS takes it from its owner's child
 /// windows first (see `detach_child`).
 pub fn closing_over(window: isize, owner: isize) {
