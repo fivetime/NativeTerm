@@ -106,14 +106,18 @@ impl AgentCheck {
             ui.weak(t!("agent-checking"));
             return;
         };
+        // (a service is Windows' agent; elsewhere the agent is whatever
+        // SSH_AUTH_SOCK names, said below: no line about a service)
         let service = match status.service {
-            ServiceState::Running => t!("agent-running"),
-            ServiceState::Stopped => t!("agent-stopped"),
-            ServiceState::Disabled => t!("agent-disabled"),
-            ServiceState::NotInstalled => t!("agent-missing"),
-            ServiceState::Unavailable => t!("agent-unavailable"),
+            ServiceState::Running => Some(t!("agent-running")),
+            ServiceState::Stopped => Some(t!("agent-stopped")),
+            ServiceState::Disabled => Some(t!("agent-disabled")),
+            ServiceState::NotInstalled => Some(t!("agent-missing")),
+            ServiceState::Unavailable => None,
         };
-        ui.label(t!("agent-service", state = service));
+        if let Some(service) = service {
+            ui.label(t!("agent-service", state = service));
+        }
         if status.keys.is_empty() {
             ui.weak(t!("agent-no-keys", dir = ssh_dir.display().to_string()));
         }

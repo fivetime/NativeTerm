@@ -28,7 +28,6 @@ agent-running = running
 agent-stopped = stopped
 agent-disabled = disabled (Windows' default)
 agent-missing = not installed
-agent-unavailable = not a service on this system
 agent-no-keys = No key pairs in { $dir }.
 agent-key-protected = has a passphrase
 agent-key-open = no passphrase
