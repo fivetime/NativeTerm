@@ -138,6 +138,18 @@ fn job(window: &mut FilesWindow, tab: u64, kind: Kind, title: &str, done: u64, t
 /// side, the trees open down to them, and a queue.
 /// `names`: both sides in their names-only view.
 pub(crate) fn for_snapshot(ctx: &egui::Context, names: bool) -> Box<dyn crate::window::Ui> {
+    Box::new(window(ctx, names))
+}
+
+/// The same with the dock showing the queue (0), the log (1) or the
+/// errors (2: none).
+pub(crate) fn with_dock(ctx: &egui::Context, dock: usize) -> Box<dyn crate::window::Ui> {
+    let mut window = window(ctx, false);
+    window.dock = [files_dock::Dock::Queue, files_dock::Dock::Log, files_dock::Dock::Errors][dock];
+    Box::new(window)
+}
+
+fn window(ctx: &egui::Context, names: bool) -> FilesWindow {
     let mut window = FilesWindow::new(ctx);
     let home = PathBuf::from(if cfg!(windows) { r"C:\Users\Projects" } else { "/home/projects" });
     window.computer = "MACBOOKPRO16".into();
@@ -223,7 +235,7 @@ pub(crate) fn for_snapshot(ctx: &egui::Context, names: bool) -> Box<dyn crate::w
         into: b"/opt/nexus/bin".to_vec(),
     });
     window.jobs = jobs;
-    Box::new(window)
+    window
 }
 
 /// "Choose Transfer Type" over a page standing for the window, as a

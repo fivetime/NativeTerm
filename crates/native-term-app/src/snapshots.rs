@@ -259,3 +259,33 @@ fn files_sides_keep_their_shares() {
         assert!((40.0..=60.0).contains(&room), "at {width}: the local side {local}, the rail's room {room}");
     }
 }
+
+/// The dock (queue, log, errors) as tall as its panel was made, whatever
+/// it shows: a view with little in it (no errors) left the rest of the
+/// panel unpainted, and the panel shrank back to it when let go, so it
+/// could not be made taller.
+#[test]
+fn the_dock_keeps_its_height() {
+    for dock in 0..3 {
+        let ctx = egui::Context::default();
+        crate::install_fonts(&ctx);
+        let tall = egui::Rect::from_min_max(egui::pos2(0.0, 700.0), egui::pos2(1400.0, 1070.0));
+        ctx.data_mut(|d| {
+            d.insert_persisted(egui::Id::new("files-dock"), egui::containers::panel::PanelState { outer_rect: tall })
+        });
+        let mut files: Option<Box<dyn crate::window::Ui>> = None;
+        for frame in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1100.0))),
+                time: Some(f64::from(frame)),
+                ..egui::RawInput::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                files.get_or_insert_with(|| crate::files_window::snapshot::with_dock(ui.ctx(), dock)).ui(ui)
+            });
+            output.textures_delta.clear();
+        }
+        let state = egui::containers::panel::PanelState::load(&ctx, egui::Id::new("files-dock")).unwrap();
+        assert_eq!(state.size().y, tall.height(), "dock view {dock}");
+    }
+}

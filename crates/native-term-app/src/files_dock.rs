@@ -139,6 +139,10 @@ impl FilesWindow {
     /// The panel below the sides: the transfers, the session's log or its
     /// errors.
     pub(super) fn dock(&mut self, ui: &mut egui::Ui) {
+        // all of its panel, whatever it shows: a panel keeps what its
+        // content takes, so a view with little in it (no errors) would
+        // leave the rest unpainted and shrink back when made taller
+        ui.set_min_size(ui.available_size());
         let palette = crate::looks::skin(ui.visuals()).palette;
         let rect = ui.max_rect();
         ui.painter().hline(rect.x_range(), rect.top() + 0.5, egui::Stroke::new(1.0, palette.line));

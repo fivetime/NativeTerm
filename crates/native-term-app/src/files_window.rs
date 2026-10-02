@@ -2494,7 +2494,8 @@ impl crate::window::Ui for FilesWindow {
             .resizable(true)
             .default_size(224.0)
             .min_size(96.0)
-            .max_size(420.0)
+            // (as tall as leaves the sides some room)
+            .max_size((ui.available_height() - 240.0).max(96.0))
             .frame(frame)
             .show(ui, |ui| self.dock(ui));
         let room = ui.available_width() - RAIL;
