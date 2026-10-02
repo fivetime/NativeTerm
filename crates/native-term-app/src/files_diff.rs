@@ -114,7 +114,10 @@ impl FilesWindow {
                 return What::Notice(e.to_string(), true);
             }
             match std::process::Command::new(&tool.program).args(&tool.args).arg(&local).arg(&copy).spawn() {
-                Ok(_) => What::Notice(said, false),
+                Ok(child) => {
+                    native_term_os::shell::reaped(child);
+                    What::Notice(said, false)
+                }
                 Err(e) => What::Notice(format!("{}: {e}", tool.program.display()), true),
             }
         });

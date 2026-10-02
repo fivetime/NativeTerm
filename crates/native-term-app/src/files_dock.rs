@@ -335,6 +335,7 @@ impl FilesWindow {
             (false, None) => (palette.weak, t!("files-status-connecting")),
         };
         let names = tab.remote.names;
+        let host_key = tab.remote.sftp.as_ref().and_then(|s| s.host_key());
         let alias = tab.spec.alias.clone();
         let mut line = ui.new_child(
             egui::UiBuilder::new()
@@ -361,6 +362,16 @@ impl FilesWindow {
         let mut chosen = None;
         line.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 14.0;
+            // the server's host key, as ssh said it (at the end)
+            if let Some(key) = &host_key {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(egui::RichText::new(key).font(mono.clone()).color(palette.weak));
+                    ui.label(egui::RichText::new(icons::LOCK.to_string()).size(12.0).color(palette.weak));
+                })
+                .response
+                .on_hover_text(t!("files-host-key-hint"));
+            }
             let shown =
                 if matches!(names, Names::Auto { .. }) { "UTF-8".to_string() } else { names.label().to_string() };
             let encoding = ui
@@ -552,6 +563,14 @@ fn job_row(
         JobState::Done | JobState::Failed(_) | JobState::Cancelled => {
             if IconButton::new(&clear, t!("files-job-remove")).small().show(&mut buttons, palette).clicked() {
                 action = Some(JobAction::Remove);
+            }
+            let shows = matches!(job.work, Some(Work::Upload { .. } | Work::Download { .. }));
+            if matches!(job.state, JobState::Done) && shows {
+                let hint =
+                    if job.kind == Kind::Upload { t!("files-job-show-remote") } else { t!("files-job-show-local") };
+                if IconButton::new(icons::FOLDER_OPEN.to_string(), hint).small().show(&mut buttons, palette).clicked() {
+                    action = Some(JobAction::Show);
+                }
             }
             if matches!(job.state, JobState::Failed(_))
                 && job.work.is_some()

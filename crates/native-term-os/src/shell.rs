@@ -6,25 +6,49 @@ use std::path::Path;
 #[cfg(windows)]
 pub use native_term_win::shell::{disk_space, downloads_folder, drives, open_file, recycle, user_folders};
 
+/// A program started and left to run: waited for off this thread, so it
+/// isn't left a zombie once it ends (`xdg-open` ends at once).
+pub fn reaped(mut child: std::process::Child) {
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
+/// What opens a file or folder with the desktop's program: GIO's `gio
+/// open` where it is (it asks the desktop's own MIME settings), else
+/// `xdg-open`. (`xdg-open` takes the desktop's name for it: Lingmo calls
+/// itself KDE and has no `kfmclient`, so `xdg-open` opens nothing there.)
+#[cfg(all(unix, not(target_os = "macos")))]
+fn opener() -> std::process::Command {
+    let gio =
+        std::env::var_os("PATH").is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("gio").is_file()));
+    if gio {
+        let mut command = std::process::Command::new("gio");
+        command.arg("open");
+        command
+    } else {
+        std::process::Command::new("xdg-open")
+    }
+}
+
 /// Show a folder in the desktop's file manager.
 pub fn open_folder(dir: &Path) -> std::io::Result<()> {
-    let manager = if cfg!(windows) {
-        "explorer.exe"
-    } else if cfg!(target_os = "macos") {
-        "open"
-    } else {
-        "xdg-open"
-    };
-    std::process::Command::new(manager).arg(dir).spawn().map(|_| ())
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = opener();
+    #[cfg(windows)]
+    let mut command = std::process::Command::new("explorer.exe");
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    command.arg(dir).spawn().map(reaped)
 }
 
 /// Show a file in the desktop's file manager, selected where that is
 /// possible (Windows, macOS), else its folder.
 pub fn reveal(file: &Path) -> std::io::Result<()> {
     if cfg!(windows) {
-        std::process::Command::new("explorer.exe").arg(format!("/select,{}", file.display())).spawn().map(|_| ())
+        std::process::Command::new("explorer.exe").arg(format!("/select,{}", file.display())).spawn().map(reaped)
     } else if cfg!(target_os = "macos") {
-        std::process::Command::new("open").arg("-R").arg(file).spawn().map(|_| ())
+        std::process::Command::new("open").arg("-R").arg(file).spawn().map(reaped)
     } else {
         open_folder(file.parent().unwrap_or(file))
     }
@@ -37,12 +61,15 @@ mod unix {
     /// Opens a file with its program (`open` on macOS, `xdg-open` on
     /// desktops that have it).
     pub fn open_file(path: &Path) -> std::io::Result<()> {
-        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-        let status = std::process::Command::new(opener).arg(path).status()?;
+        #[cfg(target_os = "macos")]
+        let mut command = std::process::Command::new("open");
+        #[cfg(not(target_os = "macos"))]
+        let mut command = super::opener();
+        let status = command.arg(path).status()?;
         if status.success() {
             Ok(())
         } else {
-            Err(std::io::Error::other(format!("{opener} failed ({status})")))
+            Err(std::io::Error::other(format!("{:?} failed ({status})", command.get_program())))
         }
     }
 

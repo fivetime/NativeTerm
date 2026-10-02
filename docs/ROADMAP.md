@@ -803,6 +803,17 @@
         terminal button): a new tab of the session's host, `cd` into the
         folder (quoted for the shell) typed after login. Seen on Lingmo:
         the new tab's shell in /tmp/nt-list-test
+  - [x] The design's last pieces: each strip's "+" (a host to search
+        and choose; its session shown if it is open) and its list of all
+        sessions; "Manage bookmarks…" (rename, let go, a server's for
+        this host or every host); "Show in the file manager" (the local
+        menu and the bar's); a finished transfer's "show where it went"
+        (that side's folder, the files chosen); the host key's type in
+        the status line (ssh's `-v` read for `Server host key:`, its
+        other lines kept out of the errors). Tried on Lingmo. Linux opens
+        with `gio open` where it is (Lingmo calls itself KDE and its
+        `xdg-open` wants `kfmclient`); helpers started are waited for (an
+        `xdg-open` was left a zombie)
 - [x] The main window's new design (2026-09-28), after a design the
       person brought (`interactive_modern_tree_view_ui-v2.html`: a tree
       with a rail of icons at its left, a search field and filters above

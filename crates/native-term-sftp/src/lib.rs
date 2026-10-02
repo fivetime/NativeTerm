@@ -238,6 +238,27 @@ pub struct Session {
     /// How long the last few requests took there and back (microseconds),
     /// the transfers' reads and writes not among them.
     trips: Mutex<std::collections::VecDeque<u32>>,
+    /// The server's host key type as ssh told it (`ed25519`), where ssh
+    /// was asked to tell (`connect`).
+    host_key: Arc<Mutex<Option<String>>>,
+}
+
+/// What ssh's `-v` output says, for a line of it: the host key's type
+/// (`Server host key: ssh-ed25519 SHA256:…` gives `ed25519`), and whether
+/// the line is only ssh talking (not why it failed).
+fn ssh_line(line: &str) -> (Option<String>, bool) {
+    let key = line.split_once("Server host key: ").and_then(|(_, rest)| rest.split_whitespace().next()).map(|t| {
+        let t = t.strip_prefix("ssh-").unwrap_or(t);
+        if t.starts_with("ecdsa") {
+            "ecdsa".to_string()
+        } else {
+            t.to_string()
+        }
+    });
+    let chatter = ["debug", "OpenSSH_", "Authenticated to ", "Transferred: ", "Bytes per second"]
+        .iter()
+        .any(|p| line.starts_with(p));
+    (key, chatter)
 }
 
 /// A file system's size and what is free to the user, in bytes.
@@ -301,7 +322,9 @@ impl Session {
                 command.arg("-o").arg("BatchMode=yes");
             }
         }
-        command.arg("-s").arg("--").arg(alias).arg("sftp");
+        // (`-v`: the host key's type comes with it; its other lines are
+        // left out of what ssh says when it fails)
+        command.arg("-v").arg("-s").arg("--").arg(alias).arg("sftp");
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -323,20 +346,25 @@ impl Session {
         on_spawn(child.id());
         let stdin: ChildStdin = child.stdin.take().ok_or_else(|| Error::Io("no stdin".into()))?;
         let stdout = child.stdout.take().ok_or_else(|| Error::Io("no stdout".into()))?;
-        // ssh's messages: why it couldn't connect, if it can't
+        // ssh's messages: why it couldn't connect, if it can't (by line:
+        // what `-v` adds is read for the host key and not kept)
         let stderr_text = Arc::new(Mutex::new(Vec::<u8>::new()));
-        if let Some(mut stderr) = child.stderr.take() {
-            let text = Arc::clone(&stderr_text);
+        let host_key = Arc::new(Mutex::new(None::<String>));
+        if let Some(stderr) = child.stderr.take() {
+            let (text, key) = (Arc::clone(&stderr_text), Arc::clone(&host_key));
             std::thread::spawn(move || {
-                let mut buf = [0u8; 1024];
-                while let Ok(n) = stderr.read(&mut buf) {
-                    if n == 0 {
-                        break;
+                let mut lines = io::BufReader::new(stderr);
+                let mut line = Vec::new();
+                while matches!(io::BufRead::read_until(&mut lines, b'\n', &mut line), Ok(n) if n > 0) {
+                    let (found, chatter) = ssh_line(&String::from_utf8_lossy(&line));
+                    if let Some(found) = found {
+                        *lock(&key) = Some(found);
                     }
                     let mut t = lock(&text);
-                    if t.len() < 8192 {
-                        t.extend_from_slice(&buf[..n]);
+                    if !chatter && t.len() < 8192 {
+                        t.extend_from_slice(&line);
                     }
+                    line.clear();
                 }
             });
         }
@@ -352,6 +380,7 @@ impl Session {
         };
         let mut session = Session::start(Box::new(stdin), Box::new(stdout), last_words)?;
         session.child = Mutex::new(Some(child));
+        session.host_key = host_key;
         Ok(session)
     }
 
@@ -406,6 +435,7 @@ impl Session {
             child: Mutex::new(None),
             extensions,
             trips: Mutex::new(std::collections::VecDeque::with_capacity(TRIPS)),
+            host_key: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -465,6 +495,11 @@ impl Session {
             trips.push_back(u32::try_from(started.elapsed().as_micros()).unwrap_or(u32::MAX));
         }
         reply
+    }
+
+    /// The server's host key type (`ed25519`, `rsa`, `ecdsa`), as ssh said.
+    pub fn host_key(&self) -> Option<String> {
+        lock(&self.host_key).clone()
     }
 
     /// The latency: the shortest of the last few requests' round trips
@@ -921,6 +956,17 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use crate::test_support::{local_server, remote};
+
+    #[test]
+    fn what_ssh_says_with_v() {
+        assert_eq!(ssh_line("debug1: Server host key: ssh-ed25519 SHA256:abc\r\n"), (Some("ed25519".into()), true));
+        assert_eq!(ssh_line("debug1: Server host key: ecdsa-sha2-nistp256 SHA256:x").0.as_deref(), Some("ecdsa"));
+        assert_eq!(ssh_line("debug1: Server host key: ssh-rsa SHA256:x").0.as_deref(), Some("rsa"));
+        assert_eq!(ssh_line("OpenSSH_10.2p1, LibreSSL 4.2.0"), (None, true));
+        assert_eq!(ssh_line("Authenticated to web01 ([10.0.0.9]:22) using \"publickey\"."), (None, true));
+        assert_eq!(ssh_line("ssh: connect to host web01 port 22: Connection refused"), (None, false));
+        assert_eq!(ssh_line("root@web01: Permission denied (publickey)."), (None, false));
+    }
 
     #[test]
     fn names_in_any_encoding() {

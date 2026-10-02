@@ -51,6 +51,30 @@ const ENCODINGS: [&str; 14] = [
     "windows-1256",
 ];
 
+/// A host a session can be opened to: alias, name, folder.
+pub type HostChoice = (String, String, String);
+
+/// The hosts sessions can be opened to, for the strips' "+": given again
+/// only when the tree changed (`generation`).
+pub fn set_hosts(main: &egui::Context, generation: u64, hosts: impl FnOnce() -> Vec<HostChoice>) {
+    MAIN.with(|m| {
+        if m.borrow().is_none() {
+            *m.borrow_mut() = Some(main.clone());
+        }
+    });
+    HOSTS.with(|h| {
+        let mut h = h.borrow_mut();
+        if h.0 != generation {
+            *h = (generation, hosts());
+        }
+    });
+}
+
+/// Hosts the files window asked a session for since the last look.
+pub fn take_asked() -> Vec<String> {
+    ASKED.with(|a| std::mem::take(&mut *a.borrow_mut()))
+}
+
 /// What opening a session's files needs.
 pub struct Spec {
     pub alias: String,
@@ -84,6 +108,13 @@ thread_local! {
     /// Files to upload to a host (its alias) as soon as its side is
     /// connected: dropped into a terminal tab, uploaded here.
     static PENDING_UPLOADS: RefCell<Vec<(String, Vec<PathBuf>)>> = const { RefCell::new(Vec::new()) };
+    /// The hosts sessions can be opened to (alias, name, folder), as the
+    /// main window last gave them, and the tree's generation they are of.
+    static HOSTS: RefCell<(u64, Vec<HostChoice>)> = const { RefCell::new((u64::MAX, Vec::new())) };
+    /// Hosts the window asked a session for (the main window opens it).
+    static ASKED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// The main window's context: woken to open what was asked for.
+    static MAIN: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
     /// The open window's context (to wake it).
     static WINDOW: RefCell<Option<egui::Context>> = const { RefCell::new(None) };
 }
@@ -171,6 +202,8 @@ enum Action {
     Delete,
     /// What may be done with it (the server's side).
     Permissions,
+    /// Shown in the desktop's file manager (the local side).
+    Reveal,
 }
 
 /// A question from ssh (password, passphrase, new host key, code), for
@@ -317,6 +350,9 @@ enum JobAction {
     Resume,
     Cancel,
     Remove,
+    /// Where a finished transfer put its files: that folder shown, them
+    /// chosen.
+    Show,
 }
 
 /// A file being edited: uploaded again whenever its local copy changes.
@@ -350,6 +386,8 @@ struct Remote {
     filter: String,
     /// The folder's file system: its size, what is free (bytes).
     space: Option<(u64, u64)>,
+    /// To be chosen once the folder asked for is listed (keys).
+    choose: Option<Vec<Vec<u8>>>,
     renaming: Option<(Vec<u8>, String)>,
     names: Names,
     /// Drawn as connected without a connection: the pictures drawn off
@@ -375,6 +413,7 @@ struct Local {
     view: files_list::View,
     filter: String,
     space: Option<(u64, u64)>,
+    choose: Option<Vec<Vec<u8>>>,
     renaming: Option<(Vec<u8>, String)>,
 }
 
@@ -455,10 +494,13 @@ enum FilesPart {
     Chmod,
     /// Text or binary, for a file Auto doesn't know.
     TransferType,
+    /// The bookmarks' manager.
+    Bookmarks,
 }
 
 impl FilesPart {
-    const ALL: [FilesPart; 6] = [
+    const ALL: [FilesPart; 7] = [
+        FilesPart::Bookmarks,
         FilesPart::Sync,
         FilesPart::Question,
         FilesPart::NewFolder,
@@ -475,6 +517,7 @@ impl FilesPart {
             FilesPart::Confirm => "files-confirm",
             FilesPart::Chmod => "files-chmod",
             FilesPart::TransferType => "files-type",
+            FilesPart::Bookmarks => "files-bookmarks",
         };
         let sync = self == FilesPart::Sync;
         let owner = crate::window::Owner::Window(KEY.into());
@@ -494,6 +537,7 @@ impl crate::part_window::Parts for FilesWindow {
             FilesPart::Confirm => self.confirm_dialog(ctx),
             FilesPart::Chmod => self.chmod_dialog(ctx),
             FilesPart::TransferType => self.type_dialog(ctx),
+            FilesPart::Bookmarks => self.bookmarks_dialog(ctx),
         }
         // what it did shows in the files window
         self.ctx.request_repaint();
@@ -507,6 +551,7 @@ impl crate::part_window::Parts for FilesWindow {
             FilesPart::Confirm => self.confirm.is_some(),
             FilesPart::Chmod => self.chmod.is_some(),
             FilesPart::TransferType => self.ask_type.is_some(),
+            FilesPart::Bookmarks => self.managing.is_some(),
         }
     }
 }
@@ -554,6 +599,8 @@ struct FilesWindow {
     chmod: Option<files_chmod::Chmod>,
     /// Text or binary: being asked (a transfer waits for it).
     ask_type: Option<files_mode::TypeQuestion>,
+    /// The bookmarks being managed.
+    managing: Option<files_bookmarks::Managing>,
 }
 
 impl FilesWindow {
@@ -592,6 +639,7 @@ impl FilesWindow {
             bookmarks: files_bookmarks::Bookmarks::default(),
             chmod: None,
             ask_type: None,
+            managing: None,
         }
     }
 
@@ -706,6 +754,7 @@ impl FilesWindow {
                     view: files_list::View::Details,
                     filter: String::new(),
                     space: None,
+                    choose: None,
                     renaming: None,
                     names,
                     pictured: false,
@@ -720,6 +769,7 @@ impl FilesWindow {
                     view: files_list::View::Details,
                     filter: String::new(),
                     space: None,
+                    choose: None,
                     renaming: None,
                 },
                 remote_tree: Tree::default(),
@@ -934,6 +984,9 @@ impl FilesWindow {
                             r.error = None;
                             let keys: Vec<Vec<u8>> = r.rows.iter().map(|x| x.entry.name.clone()).collect();
                             r.selected.keep(&keys);
+                            if let Some(chosen) = r.choose.take() {
+                                r.selected.set(chosen.into_iter().filter(|k| keys.contains(k)));
+                            }
                             expand = Some(r.path.clone());
                         }
                         // the connection went: say so, offer to reconnect
@@ -973,6 +1026,10 @@ impl FilesWindow {
                             l.path = path.clone();
                             l.rows = rows;
                             l.error = None;
+                            if let Some(chosen) = l.choose.take() {
+                                let keys: Vec<Vec<u8>> = l.rows.iter().map(local_key).collect();
+                                l.selected.set(chosen.into_iter().filter(|k| keys.contains(k)));
+                            }
                             if let Some(path) = &path {
                                 expand = Some(path.clone());
                             }
@@ -1382,6 +1439,10 @@ impl FilesWindow {
             (JobAction::Remove, JobState::Done | JobState::Cancelled | JobState::Failed(_)) => {
                 self.jobs.remove(i);
             }
+            (JobAction::Show, JobState::Done) => {
+                let (tab, work) = (job.tab, job.work.clone());
+                self.show_where(tab, work);
+            }
             _ => {}
         }
     }
@@ -1688,6 +1749,7 @@ impl FilesWindow {
                 ui.ctx().copy_text(text.join("\n"));
             }
             Some((_, Action::Delete)) => self.ask_recycle(id),
+            Some((_, Action::Reveal)) => self.reveal_local(id),
             Some((_, Action::Edit | Action::Permissions)) | None => {}
         }
     }
@@ -1705,6 +1767,55 @@ impl FilesWindow {
         };
         core.open(&[request], native_term_platform::Target::Recent);
         self.log(id, t!("files-terminal-opened", folder = folder.as_str()), false);
+    }
+
+    /// The local files chosen (or the folder shown) in the desktop's
+    /// file manager.
+    fn reveal_local(&mut self, id: u64) {
+        let chosen = self.local_selection(id);
+        let folder = self.tabs.iter().find(|t| t.id == id).and_then(|t| t.local.path.clone());
+        let shown = match (chosen.first(), folder) {
+            (Some(file), _) => native_term_os::shell::reveal(file),
+            (None, Some(folder)) => native_term_os::shell::open_folder(&folder),
+            (None, None) => return,
+        };
+        if let Err(e) = shown {
+            self.log(id, e.to_string(), true);
+        }
+    }
+
+    /// Where a finished transfer put its files: the folder shown on that
+    /// side (the session's own), the files chosen once it is listed.
+    fn show_where(&mut self, id: u64, work: Option<Work>) {
+        let Some(i) = self.tabs.iter().position(|t| t.id == id) else { return };
+        match work {
+            Some(Work::Upload { files, into, .. }) => {
+                let names = self.tabs[i].remote.names;
+                let keys = files
+                    .iter()
+                    .filter_map(|f| f.file_name())
+                    .filter_map(|n| names.encode(&n.to_string_lossy()))
+                    .collect();
+                self.active = i;
+                self.local_active = self.local_active.map(|_| i);
+                self.remote_focus = true;
+                self.go(id, into);
+                self.tabs[i].remote.choose = Some(keys);
+            }
+            Some(Work::Download { items, folder, .. }) => {
+                let names = self.tabs[i].remote.names;
+                let keys = items
+                    .iter()
+                    .map(|(p, _)| local_key_of(&folder.join(transfer::local_name(&names, last(p)))))
+                    .collect();
+                self.active = i;
+                self.local_active = self.local_active.map(|_| i);
+                self.remote_focus = false;
+                self.list_local(id, Some(folder));
+                self.tabs[i].local.choose = Some(keys);
+            }
+            _ => {}
+        }
     }
 
     /// What the local side's bar asked for.
@@ -1731,6 +1842,7 @@ impl FilesWindow {
                 self.upload(remote_id, files);
             }
             Asked::Bookmark(picked) => self.bookmark_picked(false, picked),
+            Asked::Reveal => self.reveal_local(id),
             Asked::NewFolder if path.is_some() => self.new_folder = Some((id, false, String::new())),
             Asked::Delete if path.is_some() => self.ask_recycle(id),
             Asked::CopyPath => {
@@ -1781,6 +1893,7 @@ impl FilesWindow {
             Asked::Sync => self.open_sync(id),
             Asked::Chmod => self.ask_chmod(id),
             Asked::Terminal => self.terminal_here(id),
+            Asked::Reveal => {}
             Asked::CopyPath => {
                 let tab = &self.tabs[self.active];
                 let text: Vec<String> =
@@ -1977,6 +2090,7 @@ impl FilesWindow {
             }
             Some((_, Action::Delete)) => self.ask_delete_remote(id),
             Some((_, Action::Permissions)) => self.ask_chmod(id),
+            Some((_, Action::Reveal)) => {}
             None => {}
         }
     }
@@ -2491,6 +2605,7 @@ fn empty_local() -> Local {
         view: files_list::View::Details,
         filter: String::new(),
         space: None,
+        choose: None,
         renaming: None,
     }
 }
@@ -2522,15 +2637,20 @@ const NAME_SORT: Sort = Sort { column: 0, descending: false };
 
 /// A local row's key (its path, as bytes).
 fn local_key(row: &LocalRow) -> Vec<u8> {
+    local_key_of(&row.path)
+}
+
+/// A local path's key, as its row's.
+fn local_key_of(path: &Path) -> Vec<u8> {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
-        row.path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect()
+        path.as_os_str().encode_wide().flat_map(u16::to_le_bytes).collect()
     }
     #[cfg(not(windows))]
     {
         use std::os::unix::ffi::OsStrExt;
-        row.path.as_os_str().as_bytes().to_vec()
+        path.as_os_str().as_bytes().to_vec()
     }
 }
 

@@ -25,6 +25,8 @@ pub(super) enum Asked {
     Chmod,
     /// A terminal of the session's host, in the folder shown.
     Terminal,
+    /// The local files chosen in the desktop's file manager.
+    Reveal,
     CopyPath,
     Names(Names),
     Bookmark(files_bookmarks::Picked),
@@ -67,6 +69,67 @@ pub(super) fn remote_crumbs(path: &[u8], names: Names) -> Vec<(String, Vec<u8>)>
         crumbs.push((names.decode(part), at.clone()));
     }
     crumbs
+}
+
+/// The "+"'s menu: a field to search, the hosts that match (by name,
+/// alias or folder); one clicked is asked for (its session shown if it is
+/// open already).
+fn host_picker(
+    ui: &mut egui::Ui,
+    palette: &native_term_skin::Palette,
+    hosts: &[(String, String, String)],
+    open: &[(usize, String, String)],
+) {
+    ui.set_min_width(300.0);
+    let id = ui.id().with("host-search");
+    let mut search = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_default();
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut search).hint_text(t!("files-new-session-search")).desired_width(f32::INFINITY),
+    );
+    field.request_focus();
+    let wanted = search.trim().to_lowercase();
+    let matching: Vec<&(String, String, String)> = hosts
+        .iter()
+        .filter(|(alias, label, folder)| {
+            wanted.is_empty() || [alias, label, folder].iter().any(|t| t.to_lowercase().contains(&wanted))
+        })
+        .collect();
+    ui.add_space(4.0);
+    if matching.is_empty() {
+        ui.label(egui::RichText::new(t!("files-new-session-none")).size(12.0).color(palette.weak));
+    }
+    let mut chosen = None;
+    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+        for (alias, label, folder) in matching.iter().take(200) {
+            let here = open.iter().any(|(_, _, a)| a == alias);
+            let text = egui::RichText::new(format!("{} {label}", icons::SERVER));
+            let response = ui
+                .horizontal(|ui| {
+                    let b = ui.add(egui::Button::new(text).selected(here).frame_when_inactive(false));
+                    ui.label(
+                        egui::RichText::new(format!("{alias} · {folder}"))
+                            .font(egui::FontId::monospace(10.5))
+                            .color(palette.weak),
+                    );
+                    b
+                })
+                .inner;
+            if response.clicked() {
+                chosen = Some(alias.clone());
+            }
+        }
+    });
+    // Enter: the first that matches
+    if chosen.is_none() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        chosen = matching.first().map(|(a, _, _)| a.clone());
+    }
+    if let Some(alias) = chosen {
+        ASKED.with(|a| a.borrow_mut().push(alias));
+        MAIN.with(|m| m.borrow().as_ref().map(egui::Context::request_repaint));
+        search.clear();
+        ui.close();
+    }
+    ui.data_mut(|d| d.insert_temp(id, search));
 }
 
 impl FilesWindow {
@@ -119,13 +182,41 @@ impl FilesWindow {
             .collect();
         let accent = look.side(remote);
         let salt = if remote { "remote-strip" } else { "local-strip" };
+        // the strip's tools: a new session (a host to choose), all of them
+        let open: Vec<(usize, String, String)> =
+            self.tabs.iter().enumerate().map(|(i, t)| (i, t.spec.label.clone(), t.spec.alias.clone())).collect();
+        let hosts = HOSTS.with(|h| h.borrow().1.clone());
+        let mut switch = None;
+        let tools = |ui: &mut egui::Ui| {
+            let list = IconButton::new(icons::CHEVRON_DOWN.to_string(), t!("files-all-sessions")).small();
+            let list = list.show(ui, &palette);
+            egui::Popup::menu(&list).show(|ui| {
+                for (i, label, alias) in &open {
+                    let text = format!("{}  {label}  ·  {alias}", i + 1);
+                    if ui.button(text).clicked() {
+                        switch = Some(*i);
+                        ui.close();
+                    }
+                }
+            });
+            let add = IconButton::new(icons::ADD.to_string(), t!("files-new-session")).small().show(ui, &palette);
+            egui::Popup::menu(&add).id(egui::Id::new(("files-new-session", remote))).show(|ui| {
+                host_picker(ui, &palette, &hosts, &open);
+            });
+        };
         let shown = TabStrip::new(salt, &palette).accent(accent).show(
             ui,
             &tabs,
             Some(self.side_index(remote)),
             &t!("files-close-tab"),
-            |_| {},
+            tools,
         );
+        if let Some(i) = switch {
+            match (remote, self.local_active.is_some()) {
+                (false, true) => self.local_active = Some(i),
+                _ => self.active = i,
+            }
+        }
         if let Some(i) = shown.clicked {
             match (remote, self.local_active.is_some()) {
                 (false, true) => self.local_active = Some(i),
@@ -287,6 +378,13 @@ impl FilesWindow {
         egui::Popup::menu(&more).show(|ui| {
             if ui.add_enabled(chosen, egui::Button::new(t!("files-copy-path"))).clicked() {
                 asked.push(Asked::CopyPath);
+            }
+            if !remote
+                && ui
+                    .add_enabled(!at_top, egui::Button::new(format!("{} {}", icons::FOLDER_OPEN, t!("files-reveal"))))
+                    .clicked()
+            {
+                asked.push(Asked::Reveal);
             }
             if remote {
                 let local_folder = self.tabs.get(self.active).is_some_and(|t| t.local.path.is_some());

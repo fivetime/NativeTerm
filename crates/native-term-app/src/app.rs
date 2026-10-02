@@ -3116,6 +3116,17 @@ impl crate::window::Ui for App {
         for action in actions {
             self.handle(action);
         }
+        // the files window's "+": the hosts to offer, and the ones chosen
+        crate::files_window::set_hosts(&self.main_ctx, self.generation, || {
+            self.tree
+                .hosts()
+                .filter(|(_, h)| h.plink.is_none())
+                .map(|(f, h)| (h.alias().to_string(), h.label().to_string(), f.label().to_string()))
+                .collect()
+        });
+        for alias in crate::files_window::take_asked() {
+            self.open_files(&alias, None);
+        }
         if let Some(aliases) = self.open_files.take_if(|a| a.split(',').all(|a| self.tree.find(a).is_some())) {
             // and `NATIVETERM_OPEN_FILES_SESSION=<id>`: the first as from that terminal tab's menu
             let session = std::env::var("NATIVETERM_OPEN_FILES_SESSION").ok().filter(|s| !s.is_empty());

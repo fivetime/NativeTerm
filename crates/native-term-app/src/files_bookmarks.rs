@@ -105,6 +105,22 @@ impl Bookmarks {
         self.write_remote(core, list);
     }
 
+    /// This computer's, all of them anew (the manager's OK).
+    pub fn set_local(&mut self, core: Option<&native_term_app::Core>, list: Vec<Bookmark<PathBuf>>) {
+        let text: Vec<String> = list.iter().map(|b| format!("{}\t{}", clean(&b.name), b.path.display())).collect();
+        if let Some(core) = core {
+            core.set_setting(LOCAL_KEY, &text.join("\n"));
+        }
+        self.local = Some(list);
+    }
+
+    /// A host's (or every host's) all anew.
+    pub fn set_remote(&mut self, core: Option<&native_term_app::Core>, list: &str, kept: Vec<Bookmark<Vec<u8>>>) {
+        self.remote
+            .insert(list.to_string(), kept.into_iter().map(|b| Bookmark { name: clean(&b.name), ..b }).collect());
+        self.write_remote(core, list);
+    }
+
     fn write_remote(&self, core: Option<&native_term_app::Core>, list: &str) {
         let Some(kept) = self.remote.get(list) else { return };
         let text: Vec<String> = kept.iter().map(|b| format!("{}\t{}", b.name, hex(&b.path))).collect();
@@ -123,6 +139,19 @@ pub(super) enum Picked {
     ForgetLocal(PathBuf),
     /// A server's bookmark let go: from which list, which.
     ForgetRemote(String, Vec<u8>),
+    /// The manager asked for.
+    Manage,
+}
+
+/// The manager's rows as they are edited: a name, where, and (a
+/// server's) whether every host has it; gone when let go.
+pub(super) struct Managing {
+    pub tab: u64,
+    pub alias: String,
+    pub names: Names,
+    pub local: Vec<(String, PathBuf, bool)>,
+    /// (name, path, every host, gone)
+    pub remote: Vec<(String, Vec<u8>, bool, bool)>,
 }
 
 /// The popup's id for a side (Ctrl+B opens it).
@@ -245,8 +274,104 @@ impl FilesWindow {
                     }
                 }
             }
+            ui.separator();
+            if ui.button(format!("{} {}", icons::SETTINGS, t!("files-bookmarks-manage"))).clicked() {
+                picked = Some(Picked::Manage);
+                ui.close();
+            }
         });
         picked
+    }
+
+    /// Opens the bookmarks' manager for the session shown.
+    fn manage_bookmarks(&mut self, remote: bool) {
+        let core = self.core().cloned();
+        let Some(tab) = self.tabs.get(self.side_index(remote)) else { return };
+        let (id, alias, names) = (tab.id, tab.spec.alias.clone(), tab.remote.names);
+        let local =
+            self.bookmarks.local(core.as_ref()).iter().map(|b| (b.name.clone(), b.path.clone(), false)).collect();
+        let mut kept: Vec<(String, Vec<u8>, bool, bool)> = self
+            .bookmarks
+            .remote(core.as_ref(), &alias)
+            .iter()
+            .map(|b| (b.name.clone(), b.path.clone(), false, false))
+            .collect();
+        kept.extend(
+            self.bookmarks
+                .remote(core.as_ref(), EVERY_HOST)
+                .iter()
+                .map(|b| (b.name.clone(), b.path.clone(), true, false)),
+        );
+        self.managing = Some(Managing { tab: id, alias, names, local, remote: kept });
+    }
+
+    /// The bookmarks' manager (a window of its own, modal): rename, let go,
+    /// a server's for this host or every host.
+    pub(super) fn bookmarks_dialog(&mut self, ctx: &egui::Context) {
+        let Some(m) = &mut self.managing else { return };
+        let mut done = None;
+        let mono = egui::FontId::monospace(11.0);
+        let closed = modal(ctx, "files-bookmarks", t!("files-bookmarks-manage-title"), crate::icons::BOOKMARK, |ui| {
+            ui.set_min_width(560.0);
+            egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                ui.label(egui::RichText::new(t!("files-bookmarks-local")).strong());
+                if m.local.iter().all(|(_, _, gone)| *gone) {
+                    ui.weak(t!("files-bookmarks-none"));
+                }
+                for (name, path, gone) in m.local.iter_mut().filter(|(_, _, g)| !*g) {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(name).desired_width(160.0));
+                        ui.label(egui::RichText::new(path.display().to_string()).font(mono.clone()).weak());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            *gone = ui
+                                .small_button(icons::DELETE.to_string())
+                                .on_hover_text(t!("files-bookmark-forget"))
+                                .clicked();
+                        });
+                    });
+                }
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new(t!("files-bookmarks-server", host = m.alias.as_str())).strong());
+                if m.remote.iter().all(|r| r.3) {
+                    ui.weak(t!("files-bookmarks-none"));
+                }
+                for (name, path, every, gone) in m.remote.iter_mut().filter(|r| !r.3) {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(name).desired_width(160.0));
+                        ui.label(egui::RichText::new(m.names.decode(path)).font(mono.clone()).weak());
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            *gone = ui
+                                .small_button(icons::DELETE.to_string())
+                                .on_hover_text(t!("files-bookmark-forget"))
+                                .clicked();
+                            ui.checkbox(every, t!("files-bookmarks-every-host"));
+                        });
+                    });
+                }
+            });
+            done = ok_cancel(ui, t!("button-save"), native_term_skin::Role::Primary);
+        });
+        if closed && done.is_none() {
+            done = Some(false);
+        }
+        let Some(ok) = done else { return };
+        ctx.memory_mut(|mem| mem.stop_text_input());
+        let Some(m) = self.managing.take() else { return };
+        if !ok {
+            return;
+        }
+        let core = self.core().cloned();
+        let local = m.local.into_iter().filter(|l| !l.2).map(|(name, path, _)| Bookmark { name, path }).collect();
+        self.bookmarks.set_local(core.as_ref(), local);
+        let (mut own, mut every) = (Vec::new(), Vec::new());
+        for (name, path, all, gone) in m.remote {
+            if !gone {
+                if all { &mut every } else { &mut own }.push(Bookmark { name, path });
+            }
+        }
+        self.bookmarks.set_remote(core.as_ref(), &m.alias, own);
+        self.bookmarks.set_remote(core.as_ref(), EVERY_HOST, every);
+        let _ = m.tab;
     }
 
     /// Carries out what a side's bookmarks were asked for.
@@ -279,6 +404,7 @@ impl FilesWindow {
                 }
             }
             Picked::ForgetRemote(list, path) => self.bookmarks.forget_remote(core.as_ref(), &list, &path),
+            Picked::Manage => self.manage_bookmarks(remote),
         }
     }
 }
