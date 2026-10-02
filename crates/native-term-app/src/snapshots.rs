@@ -228,3 +228,34 @@ fn cjk_baseline() {
         g_bottom as i64 - h_bottom as i64
     );
 }
+
+/// The files window made wider and narrower (maximized, restored): its
+/// two sides keep half each, not the local side's width (before, the
+/// remote side took everything a maximized window gained).
+#[test]
+fn files_sides_keep_their_shares() {
+    let ctx = egui::Context::default();
+    crate::install_fonts(&ctx);
+    let mut files: Option<Box<dyn crate::window::Ui>> = None;
+    let mut local_width = |width: f32| {
+        for frame in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 900.0))),
+                time: Some(f64::from(frame)),
+                ..egui::RawInput::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                files.get_or_insert_with(|| crate::files_window::snapshot::for_snapshot(ui.ctx(), false)).ui(ui)
+            });
+            output.textures_delta.clear();
+        }
+        let state = egui::containers::panel::PanelState::load(&ctx, egui::Id::new("files-local")).unwrap();
+        state.size().x
+    };
+    // (the rail between the sides is the rest)
+    for width in [1440.0, 2400.0, 1000.0, 1440.0] {
+        let local = local_width(width);
+        let room = width - 2.0 * local;
+        assert!((40.0..=60.0).contains(&room), "at {width}: the local side {local}, the rail's room {room}");
+    }
+}

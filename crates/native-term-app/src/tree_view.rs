@@ -1585,7 +1585,8 @@ mod tests {
         let fixture = snapshot::fixture(dir.path());
         let mut view = TreeView::default();
         let ctx = egui::Context::default();
-        let key = |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+        let key =
+            |key, modifiers| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
         let frame = |view: &mut TreeView, events: Vec<egui::Event>| {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(620.0, 600.0))),

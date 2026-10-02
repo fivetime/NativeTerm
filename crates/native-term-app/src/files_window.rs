@@ -561,6 +561,11 @@ struct FilesWindow {
     me: std::rc::Weak<std::cell::RefCell<FilesWindow>>,
     /// Dialogs' windows asked for and not open yet.
     parts_asked: Vec<FilesPart>,
+    /// The local side's share of the two sides' room, and that room as
+    /// it was: a wider or narrower window keeps the shares (half each at
+    /// first; dragging the line between them sets them).
+    local_share: f32,
+    sides_room: f32,
     ctx: egui::Context,
     tx: Sender<Event>,
     rx: Receiver<Event>,
@@ -610,6 +615,8 @@ impl FilesWindow {
         FilesWindow {
             me: std::rc::Weak::new(),
             parts_asked: Vec::new(),
+            local_share: 0.5,
+            sides_room: 0.0,
             ctx: ctx.clone(),
             tx,
             rx,
@@ -2490,12 +2497,26 @@ impl crate::window::Ui for FilesWindow {
             .max_size(420.0)
             .frame(frame)
             .show(ui, |ui| self.dock(ui));
-        let half = (ui.available_width() - RAIL) / 2.0;
-        egui::Panel::left("files-local")
+        let room = ui.available_width() - RAIL;
+        let local = egui::Id::new("files-local");
+        if (room - self.sides_room).abs() > 0.5 {
+            // the window got wider or narrower (maximized, restored): each
+            // side keeps its share, not its width
+            if let Some(mut state) = egui::containers::panel::PanelState::load(ui.ctx(), local) {
+                state.outer_rect.set_width(room * self.local_share);
+                ui.ctx().data_mut(|d| d.insert_persisted(local, state));
+            }
+            self.sides_room = room;
+        }
+        let shown = egui::Panel::left(local)
             .resizable(true)
-            .default_size(half)
+            .default_size(room * self.local_share)
             .frame(frame)
             .show(ui, |ui| self.local_side(ui));
+        // (the line between dragged: the new shares)
+        if room > 0.0 {
+            self.local_share = (shown.response.rect.width() / room).clamp(0.05, 0.95);
+        }
         egui::Panel::left("files-rail").exact_size(RAIL).resizable(false).frame(frame).show(ui, |ui| self.rail(ui));
         egui::CentralPanel::default().frame(frame).show(ui, |ui| self.remote_side(ui));
         // its dialogs: each a window of its own
