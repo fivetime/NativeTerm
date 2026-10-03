@@ -358,6 +358,40 @@ question is what a client **cannot do without NativeTerm**:
   through remote control their phone, to tell them something or have them
   decide.
 
+### Who it is for
+
+Little for the leading clients: Claude Code already does phones and
+approvals well, and Codex and Gemini will likely follow. A great deal for
+the many people and companies running **open models themselves** (Qwen,
+DeepSeek, Llama and others, served by Ollama or vLLM, driven by open
+agents such as OpenCode, Goose, Cline, Continue): those have no app of
+their own, no push, no approvals away from the desk. NativeTerm can be
+their phone and their approval channel.
+
+It fits the rest of the design: people who run their own models tend to
+want nothing to leave their network, and a self-hosted model, the
+self-hosted server, the LAN or their own network, and NativeTerm make a
+whole that stays inside a company.
+
+What follows from it:
+
+- **Tools made for weaker models**: few tools, each doing one thing, with
+  simple parameters; hosts and sessions named by name, with a list of
+  candidates back when a name is ambiguous (no ids to remember); short
+  JSON of a fixed shape for small contexts; errors that say what was
+  wrong and what to send instead; every call safe to repeat (an id per
+  request: sent twice, done once).
+- **The CLI matters as much as MCP**: many self-hosted setups call
+  functions the OpenAI-compatible way, without MCP; anything that can run
+  a command can use `nativeterm` with JSON.
+- **Conservative defaults**: weaker models err and are steered by injected
+  text more often; level 2's confirmation of every action is not to be
+  relaxed for convenience.
+- **Measured with them**: tool-call success rates with open models of
+  several sizes (about 7B, 32B, 70B), through Ollama and vLLM, with two or
+  three open agents; the smallest one using the first set reliably is the
+  bar.
+
 ### Levels
 
 | Level | What | Offered |
@@ -580,8 +614,9 @@ a session (through NativeTerm's SFTP).
   notifications with buttons); the skill.
 - Level 2 after R2 (input) and only per tab, each action confirmed.
 - Level 3 never.
-- Tried with Claude Code and Codex; whether a client's own permission
-  prompts can go through `ask`, checked.
+- Tried first with open models of several sizes and open agents (the
+  people it is for), then with Claude Code and Codex; whether a client's
+  own permission prompts can go through `ask`, checked.
 
 ### R8 — Cloudflare (last, optional)
 
