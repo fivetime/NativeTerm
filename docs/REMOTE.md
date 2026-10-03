@@ -37,6 +37,26 @@ waits or ends, and answers.
   terminal does.
 - Not a way to run commands on servers by itself: NativeTerm never probes
   servers, and nothing here changes that.
+- Not a remote for NativeTerm itself: a device types into the tabs opened
+  to it, nothing else. Opening a host, a new tab, switching tabs stay on
+  the desktop (reopening a closed session from a device asks the desktop,
+  see Lifecycle).
+
+### Why it is worth doing
+
+- Among command-line AI tools, only Claude Code has a good experience on
+  several devices; the others have none or a poor one. Done in the
+  terminal, it serves every program in it at once (Codex, Gemini CLI,
+  Aider, OpenCode, a build, a deploy), with nothing to adapt in them.
+- What exists: Termius with tmux on the server, tmate, upterm (sharing a
+  terminal through a server-side program), Teleport (sharing and auditing
+  for companies). What sets this apart: nothing installed or run on any
+  server; local shells, serial lines and Telnet as well as SSH; the
+  desktop's exact screen; a terminal client people already use.
+- What can be sold (the hosted service): reaching the desktop from
+  anywhere, notifications, read-only links for helping someone, and for
+  teams recording and auditing remote sessions. Plain viewing on the LAN
+  stays free.
 
 ## Platforms
 
@@ -53,8 +73,10 @@ Windows with WezTerm), where every pane lives in WezTerm's multiplexer:
 Windows Terminal (the default on Windows) has no interface to read a tab's
 screen or to type into it: remote control needs WezTerm there. Mirroring
 NativeTerm's own tabs in Windows Terminal through a second ConPTY in the
-shim is possible (it would not cover the person's own tabs) and stays in
-"possible, undecided".
+shim is possible (it would not cover the person's own tabs; the shim would
+then also keep a screen of its own) and stays in "possible, undecided".
+Forking Windows Terminal (C++, MIT) would cover everything but is large
+and a lasting merge burden; not planned.
 
 ## Architecture
 
@@ -138,6 +160,11 @@ Resume always says which of these it is. With a device connected:
 - after detaching, remote control stays on; a closed tab reopened starts
   with it off.
 
+When the desktop comes back (awake again, NativeTerm started again), the
+devices stay paired, nothing to scan again; but no session is reopened by
+itself: remote control is opened on the desktop again, so a desktop never
+becomes reachable just by starting.
+
 ## Session protocol
 
 Versioned from the first frame: the phone app, the web client and the
@@ -162,9 +189,11 @@ desktop are updated separately, and each side says what it supports.
   paste, and abstract keys (a name and modifiers). The desktop encodes a
   key with WezTerm's own encoding for the pane's current modes, so a key
   from the phone is the same bytes as from the desktop's keyboard.
-- **Size**: ask for the tab to take the phone's columns and rows while the
-  person is away (full-screen programs lay themselves out again), and to
-  go back.
+- **Size**: the desktop's by default: a device zooms and pans, and never
+  shrinks the tab by connecting (tmux's "the smallest client wins" would
+  squeeze the desktop's 200 columns to a phone's 50). On request, the tab
+  takes the phone's columns and rows while the person is away
+  (full-screen programs lay themselves out again), and goes back.
 - **Control**: who types. By default whoever typed last holds it, the
   desktop's keyboard can always take it back, a session can be read-only.
 - **Pointer**: taps and scrolling sent as mouse events (click, wheel) when
@@ -293,6 +322,15 @@ opt-in and paid, and the free use needs no account (NativeTerm's promise:
 no telemetry, no account, nothing sent anywhere, stays true unless the
 person turns the hosted service on).
 
+Without any server of ours: the LAN, or the person's own network across
+places (Tailscale, ZeroTier, WireGuard): NativeTerm treats it as a LAN, no
+account needed. Forwarding a port on a router to the desktop is not
+offered and is advised against: it puts the entry on the public internet.
+
+For companies (with the self-hosted server): sign-in through their own
+identity provider (OIDC / LDAP), the remote input log exported for their
+audits, recording of remote sessions where they ask for it.
+
 | Part | Does | Notes |
 |---|---|---|
 | Accounts and devices | sign-in, devices and their public keys, pairing, revocation | the least data; passkeys; phone numbers where needed |
@@ -411,6 +449,47 @@ reach edges in Hong Kong, Japan or the US, sometimes slower than direct.
 Cloudflare Tunnel (cloudflared on the desktop, a public hostname behind
 Cloudflare Access) works too but puts the entry on the public internet;
 it is documented as the person's own choice, not offered by default.
+
+## Alternatives considered
+
+- **Pixels (VNC, as a VM's tty1 through noVNC)**: exact, but heavy on
+  mobile networks and batteries, a 200-column terminal unreadable at a
+  phone's width, no text to select, awkward IME input (keysyms), screen
+  recording permissions (macOS) and restrictions (Wayland). Not used.
+- **The byte stream (as OpenStack Zun's wsproxy does to a container's
+  attach stream, xterm.js in the browser)**: light, but a device that
+  joins has no current screen until something is drawn again, and two
+  different parsers (WezTerm, xterm.js) can disagree. Its topology is kept
+  (a WebSocket service, one-time tokens, a browser client); the payload is
+  WezTerm's screen state instead. "Snapshot plus byte stream" may serve
+  for a first prototype, measured against the rows.
+- **A system VPN of NativeTerm's own**: needs drivers and administrator
+  rights (and Apple's approval on iOS), takes the phone's only VPN slot,
+  reaches far more than the terminal, and cannot run in a browser. The
+  private channel is per application instead (WebRTC, in browsers too).
+- **Exposing the desktop**: a forwarded port, or Cloudflare Tunnel behind
+  Cloudflare Access: works, but on the public internet; documented as the
+  person's own choice at most.
+- **Caching the last screen on a server for an offline desktop**: no. The
+  desktop gone, the session has ended; servers hold no terminal content.
+
+## Effort and costs (rough, not measured)
+
+| Phase | Estimate |
+|---|---|
+| R0-R1 | 1-2 weeks after the protocol is written |
+| R2 | 4-6 weeks |
+| R3 | to be measured first (the mux server) |
+| R4 | 4-6 weeks, plus about 2 for the self-hosted package |
+| R5 | the apps several weeks each; the hosted service 6-8 weeks, plus 1-2 months for billing, regions, monitoring |
+| R6 | 1-2 months, plus the ICP filing's own time |
+
+The hardest part of R4 is not writing it but making it hold on every kind
+of network (company firewalls, carrier NAT, HTTPS-only), which only tests
+on those networks settle. Lasting costs of a hosted service: servers and
+bandwidth (TURN above all; the more connections go direct, the less),
+developer accounts and push certificates for each platform, store fees on
+in-app payments, and someone on call for it, security first.
 
 ## Open questions
 
