@@ -2738,9 +2738,12 @@ Phases, each usable without the ones after it:
       (opt-in, paid; free use needs no account)
 - [ ] R6 — mainland China, if it is a market (vendors' push, ICP, region)
 - [ ] R7 — sharing and working together
-- [ ] RA — AI clients through MCP (after R2): the `nativeterm` CLI with
-      JSON output, an MCP server over it, a skill; opened per tab,
-      read-only first; NativeTerm itself contains no AI
+- [ ] RA — AI clients through MCP: the `nativeterm` CLI (JSON), an MCP
+      server on stdio, a skill; first what only NativeTerm has (the hosts,
+      opening tabs) and the person's attention (messages, progress,
+      decisions pushed to the phone with buttons); acting in other
+      sessions later, each action confirmed; secrets never. NativeTerm
+      itself contains no AI
 - [ ] R8 — Cloudflare, last and optional: the web client, signaling and
       the WebSocket relay behind its proxy; nothing depends on it
 
