@@ -191,20 +191,23 @@ desktop are updated separately, and each side says what it supports.
   this: a CDN ends TLS at its edge.
 - **Hello**: versions, capabilities, the device's identity.
 - **Sessions**: the list of open sessions; subscribe to one.
-- **Screen**: a snapshot (rows, cursor, size, title) then changed rows with
-  a sequence number; a row is text with styled runs (colours, bold,
-  italic, underline, inverse, hyperlinks). The device asks for scrollback
+- **Screen**: a snapshot (rows, cursor, size, title, which screen: normal
+  or alternate) then changed rows with a sequence number; a row is text
+  with styled runs (colours, bold, italic, underline, inverse,
+  hyperlinks), and whether it was wrapped (the line goes on in the next
+  row because it was too long, as WezTerm keeps it), so a device can wrap
+  lines again at its own width. The device asks for scrollback
   when it scrolls; the desktop keeps where each device last looked ("new
   since you left").
 - **Input**: text (what the phone's IME committed, never its composition),
   paste, and abstract keys (a name and modifiers). The desktop encodes a
   key with WezTerm's own encoding for the pane's current modes, so a key
   from the phone is the same bytes as from the desktop's keyboard.
-- **Size**: the desktop's by default: a device zooms and pans, and never
-  shrinks the tab by connecting (tmux's "the smallest client wins" would
-  squeeze the desktop's 200 columns to a phone's 50). On request, the tab
-  takes the phone's columns and rows while the person is away
-  (full-screen programs lay themselves out again), and goes back.
+- **Size**: the desktop's by default, never shrunk by a device connecting
+  (tmux's "the smallest client wins" would squeeze the desktop's 200
+  columns to a phone's 50). On request, the tab takes a device's columns
+  and rows while the person is away, and goes back (see "Viewing on a
+  small screen").
 - **Control**: who types. By default whoever typed last holds it, the
   desktop's keyboard can always take it back, a session can be read-only.
 - **Pointer**: taps and scrolling sent as mouse events (click, wheel) when
@@ -245,6 +248,45 @@ underline styles, hyperlinks, colours, images). Nothing is negotiated with
 the device about the terminal; the protocol's own capabilities (Hello) are
 about the protocol only.
 
+### Viewing on a small screen
+
+A desktop terminal is often 200 columns wide; a phone in portrait about
+390 points: shown as it is, two points a character, unreadable, and
+readable only zoomed in and dragged sideways. So the desktop's exact
+layout is one way of viewing among three:
+
+1. **Rewrapped** (the default on the normal screen: shells, plain
+   output): the device wraps wrapped lines again at its own width (the
+   protocol says which rows were wrapped), as WezTerm itself does when a
+   window changes width. A readable size, no sideways dragging, and the
+   desktop untouched. It cannot rewrap what a program laid out itself
+   with line breaks and box characters (an AI tool's tables, code in
+   frames), which looks broken this way; nor a full-screen interface.
+2. **Phone-sized** (for full-screen programs and AI tools): the tab's
+   terminal takes the device's columns and rows for a while (about 45-55
+   in portrait, about 100 in landscape); programs lay themselves out
+   again for it (tables, code, paragraphs at the phone's width), at a
+   readable size. The desktop's tab is narrow meanwhile, while the person
+   is away; one action brings it back, and so does keyboard or mouse use
+   on the desktop if the person chose so. Only what is drawn again is laid
+   out again: a table printed at 200 columns earlier stays so in the
+   scrollback. Full-screen programs often draw everything again on a size
+   change: a burst of rows, carried as any other.
+3. **As it is**: the desktop's layout, pinch to zoom, pan; for checking the
+   exact layout.
+
+The view follows the screen: rewrapped on the normal screen, phone-sized
+offered (or taken, as the person set) on the alternate screen; any view
+chosen by hand at any time. Landscape about doubles the columns (tables,
+diffs); a tablet reaches 120 and more. With several devices watching,
+phone-sized suits one of them; the others see that size and can rewrap
+or zoom on their side.
+
+**For the WezTerm fork**: a pane's size follows its window today, and a
+pane smaller than its window is not supported. Phone-sized needs a pane
+held at a given size, drawn at the window's top left with the rest left
+empty, and released back to the window's size.
+
 ### Programs with their own interface (full-screen and inline TUIs)
 
 Command-line tools that draw their own interface (AI coding assistants
@@ -268,9 +310,8 @@ mirror shows the fold as the desktop does; what it means on the device:
 - **Pasting several lines** is sent as a bracketed paste (mode 2004) when
   the program asked for it, so the lines are one input, not one command
   each.
-- **Phone-sized**: such programs often draw their whole conversation again
-  when the size changes: a burst of changed rows, carried as any other.
-  Tables and diffs are wrapped by the program at the phone's width.
+- **Phone-sized** suits them (see "Viewing on a small screen"): they lay
+  out tables and diffs again at the phone's width; rewrapping does not.
 - **Redrawing all the time** (spinners, timers): changes are gathered and
   sent at most 20-30 times a second, none while the app is in the
   background (events only). With synchronized output (mode 2026) a frame
@@ -353,8 +394,8 @@ an editor of their own, with ways of their own.
 
 ## The experience on the phone
 
-- **Phone-sized while away**: the tab takes the phone's size (see Size),
-  back to the desktop's with one action.
+- **Three ways of viewing** (see "Viewing on a small screen"): rewrapped,
+  phone-sized, as it is; chosen by the screen, changed at any time.
 - **Commands, not pages**: with OSC 133 marks, a list of the commands with
   their exit status and time; a tap goes to the output; long output folds.
   Local shells get the marks from NativeTerm's shell integration; remote
@@ -659,7 +700,9 @@ The frame format chosen by measuring.
   read-only); the remote input log on the desktop.
 - The native text field with insert and send (bracketed paste, the
   program's new-line key, Enter on its own after the paste), images as
-  paths; phone-sized while away; the key bar with key sets per program; mouse
+  paths; the three ways of viewing (rewrapped from the protocol's wrapped
+  rows, phone-sized with a pane held at a size in the WezTerm fork, as it
+  is), chosen by the screen; the key bar with key sets per program; mouse
   events for programs that asked for them (taps, wheel); bracketed paste;
   updates gathered (20-30 a second, synchronized output); scrollback and
   "new since you left"; the command list (OSC 133); reconnection within
