@@ -636,13 +636,13 @@ on the server, its configuration untouched:
   configuration is written once; the forward made when the session is
   opened to AI clients and gone with the session; shown in the session's
   options, never added silently;
-- through ProxyJump too (the forward is on the last host's sshd).
+- through jump hosts: see "Bastions" below.
 
 It needs only what sshd has by default; it is stopped by
 `AllowTcpForwarding no` or `local`, `DisableForwarding yes`, a
 `PermitListen` that leaves the port out, `no-port-forwarding` or
-`restrict` on the key used, the port taken on the server, or a bastion
-or web shell that forbids forwarding. `GatewayPorts` stays at its
+`restrict` on the key used, the port taken on the server, an auditing
+bastion or a web shell (below). `GatewayPorts` stays at its
 default (`no`: the server's loopback only). NativeTerm never changes a
 server's configuration: when ssh reports that the forward failed, the
 desktop says so ("this server does not allow forwarding: messages only")
@@ -653,6 +653,26 @@ client's configuration by the person. (Checked on a stock Ubuntu server,
 `AcceptEnv LANG LC_* COLORTERM NO_COLOR`, nothing in
 `/etc/ssh/sshd_config.d/` about forwarding: it works there as shipped.
 `sshd -T` shows what is in effect.)
+
+**Bastions** are of three kinds, and only one can stop it:
+
+- **A jump host (ProxyJump, `ssh -J`)** only carries a TCP connection to
+  the target's port 22; the SSH session inside is encrypted end to end
+  between the desktop and the target, so the jump host neither sees nor
+  can tell apart a remote forward in it. Only the target's sshd decides.
+  (The jump host must allow the TCP jump itself, or ProxyJump does not
+  connect at all.)
+- **Logging into the bastion's shell and running ssh from there**: the
+  forward NativeTerm's ssh makes ends on the bastion; the second ssh is
+  the person's own, typed on the bastion, which NativeTerm does not
+  control. Not automatic: it would need forwards chained by hand.
+- **An auditing bastion** (JumpServer, Teleport, commercial ones common in
+  companies, often what "堡垒机" means): it ends the person's SSH session
+  itself and opens another to the target, to record it; it sees
+  everything and refuses forwarding (and often agent forwarding, X11,
+  sometimes SFTP), usually by default. Behind one, only the fallback
+  remains, and whether it lets NativeTerm's escape sequence through is to
+  be measured (some filter sequences they do not know).
 
 **The fallback: an escape sequence through the terminal**, one way only.
 A client (or a few lines of script on the server, the person's own)
