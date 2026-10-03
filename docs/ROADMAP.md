@@ -2717,6 +2717,30 @@
       three rounds on top). See ARCHITECTURE "Host keys in NativeTerm's
       window"
 
+## Remote control (after the product is finished)
+
+A tab opened to remote control, one at a time (as Claude Code's `/rc`):
+a paired phone or browser shows exactly what the desktop shows in it, and
+what is typed there runs on the desktop. Local shells too; nothing of it
+is about SSH. Design, protocol, security model and servers: `REMOTE.md`.
+Phases, each usable without the ones after it:
+
+- [ ] R0 — the session protocol and the session model, written and tested
+- [ ] R1 — LAN, read-only, one tab: the mirror in the WezTerm fork,
+      pairing by QR code, the web client
+- [ ] R2 — input, control, the phone basics (phone-sized while away, the
+      key bar, the command list, reconnection, the desktop kept awake)
+- [ ] R3 — detach and resume (local panes in WezTerm's mux server; SSH
+      through the server-side tmux option)
+- [ ] R4 — the private channel, self-hosted: WebRTC, TURN, a WebSocket
+      relay on 443; the server as one program
+- [ ] R5 — the iOS and Android apps, notifications, the hosted service
+      (opt-in, paid; free use needs no account)
+- [ ] R6 — mainland China, if it is a market (vendors' push, ICP, region)
+- [ ] R7 — sharing and working together
+- [ ] R8 — Cloudflare, last and optional: the web client, signaling and
+      the WebSocket relay behind its proxy; nothing depends on it
+
 ## Possible now, undecided
 
 Once "not planned" because they looked impossible; whether to build them
