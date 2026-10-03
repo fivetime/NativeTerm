@@ -37,7 +37,10 @@ waits or ends, and answers.
   session, carried by NativeTerm on the desktop and confirmed there).
 - Not an AI feature. NativeTerm has none and gets none here. Command-line
   AI tools are among the programs that gain from it, as any program in a
-  terminal does.
+  terminal does. Outside AI clients may operate NativeTerm through a
+  standard interface (MCP, a CLI; see "AI clients through MCP"), as
+  chrome-devtools MCP lets them operate Chrome: the AI is theirs, not
+  NativeTerm's.
 - Not a way to run commands on servers by itself: NativeTerm never probes
   servers, and nothing here changes that.
 - Not a remote for NativeTerm itself: a device types into the tabs opened
@@ -334,6 +337,72 @@ Targets, measured in each phase: a key echoed within 100 ms on a LAN and
 200 ms through a relay; the current screen within 1 s of opening the app;
 back within 3 s after a change of network.
 
+## AI clients through MCP
+
+Outside AI clients (Claude Code, Codex, any MCP client) may operate
+NativeTerm's terminals, as chrome-devtools MCP lets them operate Chrome.
+MCP is a standard protocol; NativeTerm contains no AI for it.
+
+What exists already: `wezterm cli` (`list`, `get-text`, `send-text`,
+`spawn`) lets a tool read and type into WezTerm's panes today. What
+NativeTerm adds:
+
+- its own notions: the session tree's hosts, opening one by name, the
+  sessions and their states, SFTP transfers;
+- operations that fit how such clients work: **run a command and wait for
+  it to end** (OSC 133: its output, exit code and duration, instead of
+  reading the screen again and again to guess), **wait for a text** to
+  appear, read the screen or a command's output as text;
+- the control that makes it safe (below).
+
+### Shape
+
+1. **The CLI first**: `nativeterm` subcommands with JSON output, as `gh`
+   has them: `sessions`, `read`, `run`, `wait`, `send`, `open <host>`,
+   `files`. People use them, and so can any AI tool through a shell.
+2. **The MCP server** is a thin layer over the same operations (stdio,
+   started by the client), with a skill (a `SKILL.md`) saying how to use
+   them well: run-and-wait over send-then-read, read before typing, never
+   type into a session not opened to it.
+3. **The same protocol and security model as remote control**: the MCP
+   server is a local paired device speaking the session protocol (session
+   list, snapshot, input, events). Nothing of a second kind to secure.
+
+### Safety
+
+Terminal output comes from servers and is not to be trusted: an AI that
+reads a screen can be steered by what is written on it (prompt
+injection) into typing a dangerous command on a production server. So:
+
+- **Opened per tab, as remote control**: "open to AI clients", off by
+  default; a tab not opened is invisible to them.
+- **Read-only by default**; typing needs the tab's own permission.
+- Optionally every command confirmed on the desktop first, or only
+  commands matching the person's allowlist.
+- Locked sessions, and folders marked "no group send", are never open to
+  them.
+- **Never a secret**: NativeTerm gives no password, key or credential to a
+  client; its password windows are not reachable; the password state of a
+  terminal hides input from the log as for devices.
+- Every input written to the remote input log, marked as from an AI
+  client; the desktop shows that one is typing and takes the keyboard
+  back with one action.
+- Nothing run on servers by NativeTerm for it: the client types into the
+  terminal as a person would; never probing stays true.
+
+### Tools (first set)
+
+| Tool | Does | Needs |
+|---|---|---|
+| `list_sessions` | sessions open to clients: name, host, state, size | read |
+| `read_screen` | the screen (and scrollback on request) as text | read |
+| `read_command` | a command's output, exit code, duration (OSC 133) | read |
+| `wait_for` | until a text appears, a command ends, or a timeout | read |
+| `run_command` | type a command, wait for it to end, return its result | input |
+| `send_keys` | text and keys (as the protocol's abstract keys) | input |
+| `open_host` | open a host of the session tree in a new tab (asks the desktop) | desktop |
+| `transfer` | upload or download through NativeTerm's SFTP (asks the desktop) | desktop |
+
 ## Servers
 
 Needed only to reach the desktop from outside its network and to notify a
@@ -448,6 +517,15 @@ Read-only links with an expiry for helping someone; several people
 watching with who holds control shown; sending a file from the phone into
 a session (through NativeTerm's SFTP).
 
+### RA — AI clients through MCP (after R2)
+
+The `nativeterm` CLI subcommands with JSON output; the MCP server over
+them as a local paired device; the skill; "open to AI clients" per tab,
+read-only first, input with its own permission, optional confirmation or
+allowlist, the AI marked in the input log. Read-only tools could come as
+early as R1 (screen, scrollback); typing needs R2's input. Tried with
+Claude Code and Codex.
+
 ### R8 — Cloudflare (last, optional)
 
 Only what Cloudflare can carry, and only as an addition:
@@ -522,6 +600,8 @@ in-app payments, and someone on call for it, security first.
 - Where the hosted service is paid for: in the apps (store rules and fees)
   or on the website / the desktop.
 - Whether mainland China is served (R6).
+- MCP's place: after R2 as proposed, or its read-only tools right after
+  R1.
 - Whether the self-hosted server is free for everyone, or free for people
   and paid for companies (their features: OIDC / LDAP, audit export,
   recording).
