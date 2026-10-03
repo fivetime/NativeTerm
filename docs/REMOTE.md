@@ -281,6 +281,48 @@ mirror shows the fold as the desktop does; what it means on the device:
   keywords.
 - **Copying** what is folded needs it expanded first.
 
+### Typing into such programs
+
+What a model's client does with input (chat templates, system prompts,
+tool formats) happens inside it and is none of the mirror's business: a
+device delivers keys as a keyboard does. What matters is the program's
+own **input box**: these tools do not use the shell's line editing but
+an editor of their own, with ways of their own.
+
+- **Enter sends, a new line is another key** (Shift+Enter, Ctrl+J,
+  Alt+Enter, a backslash before Enter: each program its own). Text with
+  line breaks sent as keys would send each line. So several lines go as a
+  bracketed paste (mode 2004) when the program asked for it; otherwise a
+  line break is sent as the program's new-line key from its key set.
+  Whether Shift+Enter differs from Enter depends on the program enabling
+  kitty's keyboard protocol; WezTerm encodes for the mode the program set.
+- **Long pastes folded** by the program ("[Pasted text +40 lines]"): the
+  text is there; the mirror shows the fold.
+- **Enter right after a paste**: a program without bracketed paste tells a
+  paste by its burst of characters, and an Enter inside the burst becomes
+  part of it. Enter is sent on its own, once the program has drawn the
+  paste.
+- **A completion menu takes Enter**: `/commands` and `@files` open menus,
+  where Enter picks an entry instead of sending, and changes the text.
+  Hence "insert" (the text into the box, no Enter; the person sees the box
+  in the mirror) and "send" (insert, then Enter) as two actions.
+- **IME**: typing Chinese into a full-screen program in a desktop terminal
+  often goes wrong (the candidate window misplaced, the uncommitted text
+  lost). From a phone it does not: its own IME and voice input in its own
+  text field, and only the committed text sent.
+- **Images**: such tools paste images from the desktop's clipboard
+  (Ctrl+V). Putting a phone's image there would replace what the person
+  has on their clipboard; instead it is saved to a temporary folder on the
+  desktop and its path inserted (most tools take a path or `@path`); the
+  clipboard only when asked for.
+- **Interrupting is costly by mistake**: Esc often interrupts the model,
+  Ctrl+C twice often quits the program. The key bar keeps them apart from
+  the other keys, and a key set can mark a key "ask first".
+- **Predicted echo guesses wrong** where a program draws its own input box:
+  off in the alternate screen and wherever the program handles input
+  itself.
+- **Two people typing in one box** interleave: control decides who types.
+
 ## Security model
 
 - Pairing by QR code on the desktop, confirmed there; one key pair per
@@ -323,10 +365,14 @@ mirror shows the fold as the desktop does; what it means on the device:
   sets ("Allow?", "ERROR"); per-session mute. Replies from the
   notification itself; long tasks on the lock screen (Live Activities,
   widgets; an ongoing notification on Android).
-- **Typing**: a key bar (Esc, Tab, Ctrl, arrows, y / n, the person's own
-  keys, key sets per program); NativeTerm's saved commands; voice and IME
-  text; predicted echo on slow networks (as mosh); a full terminal on an
-  iPad with a keyboard.
+- **Typing**: a native text field, not a key-by-key keyboard: written with
+  the phone's IME or voice, several lines, then **insert** or **send**
+  (by the rules in "Typing into such programs"), images and files added
+  as paths. Beside it a key bar for keys at once (Esc, Tab, Ctrl, arrows,
+  y / n, the person's own keys, key sets per program, interrupting keys
+  apart); NativeTerm's saved commands; predicted echo on slow networks
+  (as mosh, not in programs drawing their own input box); a full terminal
+  on an iPad with a keyboard.
 - **Overview**: every open session as a live thumbnail with its state
   (running, idle, waiting, failed).
 - **Search, select, copy, open links** on the phone; pinch to zoom.
@@ -611,7 +657,9 @@ The frame format chosen by measuring.
 - Input: text, paste, abstract keys encoded by WezTerm for the pane's
   modes; control (whoever typed last, the desktop takes it back,
   read-only); the remote input log on the desktop.
-- Phone-sized while away; the key bar with key sets per program; mouse
+- The native text field with insert and send (bracketed paste, the
+  program's new-line key, Enter on its own after the paste), images as
+  paths; phone-sized while away; the key bar with key sets per program; mouse
   events for programs that asked for them (taps, wheel); bracketed paste;
   updates gathered (20-30 a second, synchronized output); scrollback and
   "new since you left"; the command list (OSC 133); reconnection within
