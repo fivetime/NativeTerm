@@ -167,8 +167,15 @@ desktop are updated separately, and each side says what it supports.
   go back.
 - **Control**: who types. By default whoever typed last holds it, the
   desktop's keyboard can always take it back, a session can be read-only.
-- **Events**: bell, terminal notifications (OSC 9 / OSC 777), command
-  marks (OSC 133: start, end, exit code), the session ending and why.
+- **Pointer**: taps and scrolling sent as mouse events (click, wheel) when
+  the program in the pane asked for mouse reporting; otherwise scrolling is
+  the device's own, through the scrollback.
+- **Events**: bell, terminal notifications (OSC 9 / OSC 777 / OSC 99),
+  command marks (OSC 133: start, end, exit code), the session ending and
+  why.
+- **Pictures**: images in the terminal (sixel, kitty's and iTerm2's image
+  protocols) as cells that stand for an image, the image sent once and
+  referred to; until then (R1, R2) a placeholder where one is.
 - **Reliability**: heartbeats well inside any proxy's idle timeout (30 s;
   Cloudflare closes idle WebSockets after about 100 s); every message
   sequenced, a reconnect resumes from the last one seen; snapshots split
@@ -180,6 +187,59 @@ The screen is synchronized as state (as mosh does), not as the terminal's
 byte stream: the device shows what WezTerm computed, so the two never
 disagree on a sequence one of them handles differently, and a device that
 joins late or comes back has the current screen at once.
+
+### What the program in the tab sees
+
+Programs find out what their terminal can do by its environment (`TERM`,
+`TERM_PROGRAM`, `COLORTERM`, `WEZTERM_PANE`, `WT_SESSION`), by terminfo,
+and by asking it and waiting for the answer (DA1 / DA2, XTVERSION
+`CSI > q`, DECRQM for a mode: 2004 bracketed paste, 1049 the alternate
+screen, 2026 synchronized output; `CSI ? u` for kitty's keyboard protocol;
+XTGETTCAP; OSC 10 / 11 for the colours); many sequences (OSC 8, 9, 133)
+they send anyway, since a terminal that does not know one ignores it.
+
+All of it is asked of the desktop's WezTerm and answered by it: a device
+watching changes nothing a program sees, and a device never has to
+understand an escape sequence, only to draw what WezTerm made of them (its
+underline styles, hyperlinks, colours, images). Nothing is negotiated with
+the device about the terminal; the protocol's own capabilities (Hello) are
+about the protocol only.
+
+### Programs with their own interface (full-screen and inline TUIs)
+
+Command-line tools that draw their own interface (AI coding assistants
+among them) fold what they show themselves ("+40 lines", a key to
+expand). There is no adopted standard for a terminal to fold a part of a
+program's output (OSC 133 folds a whole command's output, nothing inside a
+program): the folded text is in the program, not in the terminal. The
+mirror shows the fold as the desktop does; what it means on the device:
+
+- **Expanding is the program's**: the device sends the program's key, the
+  program draws the rest, the mirror follows. Hence **key sets per
+  program** in the key bar (expand, history, interrupt, approve, a new
+  line without sending): the person's own, plain keys, nothing
+  program-specific in NativeTerm's code.
+- **No terminal scrollback in the alternate screen**: a full-screen program
+  keeps its history itself. In that screen with mouse reporting on, a
+  swipe is sent as wheel events and the program scrolls; "new since you
+  left" and the command list apply to shells, not inside such programs.
+- **Taps** reach the program as clicks when it asked for the mouse (some
+  expand a fold on a click).
+- **Pasting several lines** is sent as a bracketed paste (mode 2004) when
+  the program asked for it, so the lines are one input, not one command
+  each.
+- **Phone-sized**: such programs often draw their whole conversation again
+  when the size changes: a burst of changed rows, carried as any other.
+  Tables and diffs are wrapped by the program at the phone's width.
+- **Redrawing all the time** (spinners, timers): changes are gathered and
+  sent at most 20-30 times a second, none while the app is in the
+  background (events only). With synchronized output (mode 2026) a frame
+  is sent when the program says it is complete: no half-drawn interface,
+  fewer updates.
+- **No command marks inside them**: notifications come from the bell and
+  OSC 9 / 777 / 99 when the program sends them, else from the person's
+  keywords.
+- **Copying** what is folded needs it expanded first.
 
 ## Security model
 
@@ -212,7 +272,7 @@ joins late or comes back has the current screen at once.
   notification itself; long tasks on the lock screen (Live Activities,
   widgets; an ongoing notification on Android).
 - **Typing**: a key bar (Esc, Tab, Ctrl, arrows, y / n, the person's own
-  keys); NativeTerm's saved commands; voice and IME text; predicted echo
+  keys, key sets per program); NativeTerm's saved commands; voice and IME text; predicted echo
   on slow networks (as mosh); a full terminal on an iPad with a keyboard.
 - **Overview**: every open session as a live thumbnail with its state
   (running, idle, waiting, failed).
@@ -270,7 +330,7 @@ The frame format chosen by measuring.
 - Opening from the tab's menu and `nativeterm rc`; the "remote" mark; the
   pairing window with the QR code; the device list; end all.
 - The web client (PWA, renders rows; xterm.js or a thin cell renderer:
-  measured) in a phone's browser.
+  measured) in a phone's browser; images as placeholders.
 - Measured: latency, data used, the snapshot's time.
 
 ### R2 — input, control, the phone basics
@@ -278,9 +338,11 @@ The frame format chosen by measuring.
 - Input: text, paste, abstract keys encoded by WezTerm for the pane's
   modes; control (whoever typed last, the desktop takes it back,
   read-only); the remote input log on the desktop.
-- Phone-sized while away; the key bar; scrollback and "new since you
-  left"; the command list (OSC 133); reconnection within the grace period;
-  the desktop kept awake.
+- Phone-sized while away; the key bar with key sets per program; mouse
+  events for programs that asked for them (taps, wheel); bracketed paste;
+  updates gathered (20-30 a second, synchronized output); scrollback and
+  "new since you left"; the command list (OSC 133); reconnection within
+  the grace period; the desktop kept awake.
 - Several devices, revocation, the lifecycle table above, end to end.
 
 ### R3 — detach and resume
@@ -305,6 +367,7 @@ The frame format chosen by measuring.
 
 ### R5 — the apps, notifications, the hosted service
 
+- Images in the terminal shown on the device.
 - iOS and Android apps (the web client stays): Face ID / fingerprint,
   notifications (waiting, finished, keywords), replies from notifications,
   Live Activities and widgets, the overview, voice and IME input, predicted
