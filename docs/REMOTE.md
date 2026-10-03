@@ -6,15 +6,16 @@ of its own, with a commit, tests and measurements, as everything else.
 
 ## What it is
 
-A terminal tab on the desktop can be **opened to remote control**, one tab
-at a time, as Claude Code's `/rc` opens a session. While it is open, a
+A terminal tab on the desktop can be **opened to remote control**, each
+tab on its own (several can be open), as Claude Code's `/rc` opens a
+session. While it is open, a
 phone or a browser the person paired shows **exactly what the desktop
 shows** in that tab (the text, its colours, the cursor, the scrollback),
 and what is typed there is **sent to the desktop and runs there**, as if
 typed on the desktop's keyboard.
 
-- Any tab: a local shell, an SSH session, a serial line; whatever runs in
-  it (a build, a deploy, a command-line tool waiting for a yes). Nothing
+- Any tab (but a locked one, see Security): a local shell, an SSH
+  session, a serial line; whatever runs in it (a build, a deploy, a command-line tool waiting for a yes). Nothing
   of it is about SSH: the mirror is of the terminal, not of a connection.
 - The desktop is the only place anything runs. The phone holds no shell,
   no SSH key, no password, no host list, and connects to no server of the
@@ -31,7 +32,9 @@ waits or ends, and answers.
 ### What it is not
 
 - Not a VPN and not remote desktop: no other port, program or window of
-  the desktop is reachable; only the tabs opened, only their terminals.
+  the desktop is reachable; only the sessions opened, only their
+  terminals (the one addition, R7: a file sent from a device into a
+  session, carried by NativeTerm on the desktop and confirmed there).
 - Not an AI feature. NativeTerm has none and gets none here. Command-line
   AI tools are among the programs that gain from it, as any program in a
   terminal does.
@@ -53,10 +56,12 @@ waits or ends, and answers.
   for companies). What sets this apart: nothing installed or run on any
   server; local shells, serial lines and Telnet as well as SSH; the
   desktop's exact screen; a terminal client people already use.
-- What can be sold (the hosted service): reaching the desktop from
-  anywhere, notifications, read-only links for helping someone, and for
-  teams recording and auditing remote sessions. Plain viewing on the LAN
-  stays free.
+- What can be sold: the hosted service (reaching the desktop from
+  anywhere, notifications, read-only links for helping someone), and for
+  teams the remote input log's export and the recording of remote
+  sessions (made on the desktop, see Security, whichever server carries
+  them). Use on the LAN or through the person's own network stays free;
+  whether the self-hosted server is free too is an open question.
 
 ## Platforms
 
@@ -105,8 +110,9 @@ Three layers, each replaceable without touching the others:
    later WebRTC peer-to-peer, TURN, and a WebSocket relay on port 443;
    last (optional) the same WebSocket relay behind Cloudflare.
 3. **Sources** on the desktop: produce screen state and take input. The
-   first is the WezTerm fork; others (Windows Terminal through the shim's
-   ConPTY) could come later.
+   first is the WezTerm fork (in the GUI process for R1-R2; from R3 in the
+   mux server, where detached panes live); others (Windows Terminal
+   through the shim's ConPTY) could come later.
 
 ## Session model
 
@@ -129,7 +135,7 @@ is opened; its name is the tab's title.
 | What happens | The session | The device shows |
 |---|---|---|
 | Network gone briefly (either side, under the grace period, 60 s by default) | kept; reconnects by itself | "Reconnecting…", then what came meanwhile |
-| Desktop asleep, off, offline beyond the grace period, NativeTerm quit | ended | "Ended: the desktop is offline"; what it had received stays readable |
+| Desktop asleep, off, offline beyond the grace period, NativeTerm quit | ended (a detached session too: its shell may live on in the mux server, its remote control does not) | "Ended: the desktop is offline"; what it had received stays readable |
 | Tab closed, or remote control turned off | ended at once | "Ended: the tab was closed" / "…turned off" |
 
 The **terminal** is not the session: a command keeps running on the
@@ -142,7 +148,7 @@ battery the person is warned), since its sleeping ends every session.
 
 | The tab's kind | Closed: what resume gives | Detached: resumed whole? |
 |---|---|---|
-| Local shell in the WezTerm mux server (phase R3) | — | yes: processes, directory, scrollback |
+| Local shell in the WezTerm mux server (phase R3) | a new shell; the old output to read | yes: processes, directory, scrollback |
 | Local shell in the GUI process (today) | a new shell; the old output to read | no |
 | SSH with the host kept on the server (tmux, an existing option) | reconnects and attaches the same tmux session | yes (server side) |
 | Plain SSH, Telnet | a new login; the old programs have ended | no |
@@ -153,8 +159,10 @@ Resume always says which of these it is. With a device connected:
 - closing a tab that can be detached asks "detach (the device stays) or
   close (it is disconnected)?", detach chosen; one that cannot be detached
   warns that the device is disconnected and its programs end;
-- a detached session stays usable from the device; the desktop lists
-  detached sessions, to bring one back as a tab or end it;
+- a detached session stays usable from the device while NativeTerm runs;
+  the desktop lists detached sessions, to bring one back as a tab or end
+  it. A detached pane has no tab in the GUI, so from R3 the mirror runs
+  where the panes live (the mux server), not in the GUI process;
 - from a device, resuming a **detached** session is allowed; reopening a
   **closed** one asks the desktop (it starts a connection);
 - after detaching, remote control stays on; a closed tab reopened starts
@@ -279,12 +287,24 @@ mirror shows the fold as the desktop does; what it means on the device:
   ends everything.
 - Read-only per session; input can be refused per device.
 - The phone app asks Face ID / fingerprint when opened and before input.
-- Passwords are not mirrored: NativeTerm asks them in its own windows, not
-  in the terminal, and output is not sent while the terminal's echo is off.
+- Passwords: the ones NativeTerm asks are asked in its own windows, which
+  are not terminals and never mirrored. A password typed into a terminal
+  (sudo, a plain `ssh` in a local shell) is not echoed, so it is not on
+  any screen to mirror; what must not keep it is the remote input log,
+  which writes "(hidden)" instead of the text while the terminal is in a
+  password state (canonical input with echo off, as `getpass` sets it).
+  Echo off alone is not that state: full-screen programs run with it off
+  all the time, and their screens are mirrored as any other.
 - Locked sessions (an existing NativeTerm flag) cannot be opened.
 - A log on the desktop of remote input: which device, when, what.
+- Recording of remote sessions (teams) is made on the desktop, which has
+  the screens anyway, and stored where the company says; never by a
+  relay, which only ever sees ciphertext.
 - Servers hold no terminal content, ever; the hosted service keeps
   accounts, devices' public keys and subscriptions only.
+- Read-only links (R7) are a temporary device: a key in the link's
+  fragment (never sent to a server), read-only, an expiry, and the desktop
+  asked when it is first used.
 
 ## The experience on the phone
 
@@ -295,14 +315,15 @@ mirror shows the fold as the desktop does; what it means on the device:
   Local shells get the marks from NativeTerm's shell integration; remote
   shells only if the person sets that up on the server (nothing is run
   there for them).
-- **Told when it matters**: "waiting for you" (bell, OSC 9 / 777) and
+- **Told when it matters**: "waiting for you" (bell, OSC 9 / 777 / 99) and
   "finished" (OSC 133, with exit code and duration); keywords the person
   sets ("Allow?", "ERROR"); per-session mute. Replies from the
   notification itself; long tasks on the lock screen (Live Activities,
   widgets; an ongoing notification on Android).
 - **Typing**: a key bar (Esc, Tab, Ctrl, arrows, y / n, the person's own
-  keys, key sets per program); NativeTerm's saved commands; voice and IME text; predicted echo
-  on slow networks (as mosh); a full terminal on an iPad with a keyboard.
+  keys, key sets per program); NativeTerm's saved commands; voice and IME
+  text; predicted echo on slow networks (as mosh); a full terminal on an
+  iPad with a keyboard.
 - **Overview**: every open session as a live thumbnail with its state
   (running, idle, waiting, failed).
 - **Search, select, copy, open links** on the phone; pinch to zoom.
@@ -327,9 +348,10 @@ places (Tailscale, ZeroTier, WireGuard): NativeTerm treats it as a LAN, no
 account needed. Forwarding a port on a router to the desktop is not
 offered and is advised against: it puts the entry on the public internet.
 
-For companies (with the self-hosted server): sign-in through their own
-identity provider (OIDC / LDAP), the remote input log exported for their
-audits, recording of remote sessions where they ask for it.
+For companies (with the self-hosted server, or the hosted one): sign-in
+through their own identity provider (OIDC / LDAP), the remote input log
+exported for their audits, recording of remote sessions where they ask
+for it (made on the desktop, see Security).
 
 | Part | Does | Notes |
 |---|---|---|
@@ -387,7 +409,7 @@ The frame format chosen by measuring.
 
 - Local panes in WezTerm's mux server (`wezterm-mux-server`, a unix
   domain), so closing a tab can detach it; measured first: start time,
-  input latency, Windows.
+  input latency, Windows. The mirror moves there with them.
 - SSH resume through the existing server-side tmux option.
 - The questions when closing a tab with devices connected; the list of
   detached sessions; resume from a device (detached only) and from the
@@ -500,3 +522,6 @@ in-app payments, and someone on call for it, security first.
 - Where the hosted service is paid for: in the apps (store rules and fees)
   or on the website / the desktop.
 - Whether mainland China is served (R6).
+- Whether the self-hosted server is free for everyone, or free for people
+  and paid for companies (their features: OIDC / LDAP, audit export,
+  recording).
