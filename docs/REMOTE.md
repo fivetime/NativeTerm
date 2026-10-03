@@ -609,6 +609,84 @@ person paired one (the desktop otherwise); rates limited per client.
   its own to try NativeTerm, for people and companies running their own
   models.
 
+### An AI client on a server
+
+A client running on a server the person reached through SSH cannot use
+the desktop's MCP server (stdio, started on the desktop). Two things on
+the way are NativeTerm's: its ssh and the terminal.
+
+**The way: remote forwarding (S2C) to MCP over HTTP.** Nothing installed
+on the server, its configuration untouched:
+
+- for a session opened to AI clients, NativeTerm's ssh adds a remote
+  forward: a port on the server's loopback (127.0.0.1) to the desktop's
+  MCP endpoint for that session, a Unix socket only NativeTerm can open
+  (no TCP port on the desktop any local program could reach; Win32
+  OpenSSH's support for such sockets is limited: measured, and added to
+  NativeTerm's ssh fork if needed). In OpenSSH's terms
+  `-R 127.0.0.1:47011:<the session's socket>`;
+- a token per session, passed as `LC_NATIVETERM_TOKEN` (`SetEnv`; most
+  distributions' sshd accept `LC_*`): other users of the server can reach
+  the port, not use it without the token;
+- the client on the server is configured once with
+  `http://127.0.0.1:<port>/mcp` and the token from the environment (MCP's
+  HTTP transport, which most clients take as a URL);
+- a high port (not under 1024: only root may listen there, and a web
+  server may hold 80), fixed per host in NativeTerm so the server's
+  configuration is written once; the forward made when the session is
+  opened to AI clients and gone with the session; shown in the session's
+  options, never added silently;
+- through ProxyJump too (the forward is on the last host's sshd).
+
+It needs only what sshd has by default; it is stopped by
+`AllowTcpForwarding no` or `local`, `DisableForwarding yes`, a
+`PermitListen` that leaves the port out, `no-port-forwarding` or
+`restrict` on the key used, the port taken on the server, or a bastion
+or web shell that forbids forwarding. `GatewayPorts` stays at its
+default (`no`: the server's loopback only). NativeTerm never changes a
+server's configuration: when ssh reports that the forward failed, the
+desktop says so ("this server does not allow forwarding: messages only")
+and the fallback below is used; the session itself is not broken. When
+the server does not accept `LC_*`, the token is written once into the
+client's configuration by the person. (Checked on a stock Ubuntu server,
+2026-10-04: `AllowTcpForwarding` and `GatewayPorts` at their defaults,
+`AcceptEnv LANG LC_* COLORTERM NO_COLOR`, nothing in
+`/etc/ssh/sshd_config.d/` about forwarding: it works there as shipped.
+`sshd -T` shows what is in effect.)
+
+**The fallback: an escape sequence through the terminal**, one way only.
+A client (or a few lines of script on the server, the person's own)
+writes a sequence of NativeTerm's to the terminal; the WezTerm fork takes
+it out and hands it to NativeTerm. It needs nothing of the server and
+goes through any SSH and jump host; but answers would come back as the
+terminal's input, which the program in front is reading too, so only
+messages, progress and notifications go this way, never `ask`. Through
+tmux on the server only if the person allowed passthrough there; not
+through mosh, which drops unknown sequences. A request is short and
+written at once, not to land inside a program's drawing.
+
+**Not X11 forwarding**: often off, it needs `xauth` on the server, and
+carrying our protocol in it would mean posing as an X server; the same
+direction as S2C with less.
+
+**What a server may do: less than the desktop.** A server can be broken
+into, and its logs and files can hold hostile text. From a server:
+
+- only the tools that speak to the person, about that session: messages,
+  progress, `ask`, notifications;
+- no inventory (it would hand the person's host list to that server), no
+  opening tabs, no level 2;
+- every card says which server and session it came from;
+- a request without the session's token is dropped: over S2C the token
+  came through ssh; over the terminal a client asks the terminal for it
+  first, which a file's text being shown (`cat`) cannot do, so printed
+  text cannot pose as a request;
+- rates limited.
+
+Or the client runs on the desktop and works on the server through ssh;
+then it is a local client with everything above. A matter of how people
+work, said in the skill.
+
 ### Risks
 
 - **Getting round the client's own permissions**: a client told not to
@@ -626,6 +704,9 @@ person paired one (the desktop otherwise); rates limited per client.
 - **Another local program posing as a client**: stdio only, each client
   paired on the desktop.
 - **Several clients in one tab**: the control of remote control.
+- **A server speaking to the desktop**: only the tools that speak to the
+  person about its own session, a token per session, printed text unable
+  to pose as a request (see "An AI client on a server").
 - **Phishing through messages**: a card says which client and session it
   came from; links show their full address and ask before opening; no
   remote images.
@@ -761,6 +842,10 @@ a session (through NativeTerm's SFTP).
   the desktop; on the phone through the web client, then R5's
   notifications with buttons); the skill.
 - Level 2 after R2 (input) and only per tab, each action confirmed.
+- AI clients on servers: the remote forward (S2C) to MCP over HTTP with a
+  token per session, the forward's failure told on the desktop; the
+  terminal escape sequence as a one-way fallback; the server's narrower
+  set of tools.
 - Level 3 never.
 - Tried first with open models of several sizes and open agents (the
   people it is for), then with Claude Code and Codex; whether a client's
