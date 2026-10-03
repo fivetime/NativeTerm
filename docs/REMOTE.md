@@ -466,6 +466,62 @@ remote control's "waiting for you" and the key bar.
 4. **The remote-control protocol and security model**: the MCP server is
    a local paired device; nothing of a second kind to secure.
 
+### There by default, connected in one click
+
+A client uses these tools when the person has configured them in it: it
+asks the MCP server for its tools, and their descriptions tell the model
+when to call which. The model need not have heard of NativeTerm; what
+counts is whether people set it up, so setting it up must cost nothing.
+(Fame matters only to a model using a command it was never told about,
+as it knows `gh` from its training; `nativeterm skill` tells it instead.)
+
+**On by default, within NativeTerm itself** (it touches nothing else):
+
+- the `nativeterm` CLI installed with NativeTerm and on the PATH;
+  `nativeterm mcp` starts the MCP server, `nativeterm skill` prints the
+  whole skill;
+- every NativeTerm tab carries `NATIVETERM=1` (and the session's id), so a
+  client running in it can tell where it is.
+
+That alone is not enough: clients rarely look at the environment, weaker
+models least of all. Hence:
+
+**One click, asked once** (it writes into other programs' settings):
+
+- a step of the first-run guide lists the AI tools found on the computer
+  (OpenCode, Goose, Cline, Continue, Claude Code, …) and asks: "Let these
+  use NativeTerm (messages, decisions on your phone, …)?"; one click
+  writes the MCP entry and the skill into each one's own settings, each
+  file backed up first;
+- a tool installed later is noticed and offered once, the same way;
+- settings list what was written, and remove it (restoring the backups)
+  in one action;
+- a text the person can paste into a project's instructions (AGENTS.md
+  and the like): "In this terminal, ask for decisions with `nativeterm
+  ask`."
+
+Never written silently: a program gaining abilities its owner did not
+agree to is what NativeTerm never does (nothing silent, nothing opened by
+itself), and a change people can see and undo is one they trust.
+
+Default or not, the limits stay: levels 0 and 1 only; level 2 opened per
+tab and confirmed per action; level 3 never; the phone only once the
+person paired one (the desktop otherwise); rates limited per client.
+
+### Getting known
+
+- Listed where people look for MCP servers: the official MCP registry and
+  the common directories.
+- Integration notes contributed to open agents' documentation (OpenCode,
+  Goose and others), guides for Ollama's and vLLM's users.
+- The decision protocol (`ask`: the request, the answer, its signing)
+  published as an open specification, so any agent can speak it, and
+  NativeTerm is the phone it already has.
+- MCP needs people using NativeTerm first, but works the other way too:
+  "decisions from any open agent on your phone, one tap" is a reason of
+  its own to try NativeTerm, for people and companies running their own
+  models.
+
 ### Risks
 
 - **Getting round the client's own permissions**: a client told not to
@@ -608,7 +664,8 @@ a session (through NativeTerm's SFTP).
 ### RA — AI clients through MCP
 
 - First set, after R1: the `nativeterm` CLI (JSON) and the MCP server on
-  stdio with pairing; levels 0 and 1: hosts, sessions, opening tabs,
+  stdio with pairing; `NATIVETERM=1` in tabs, `nativeterm skill`; the
+  first-run guide's "connect your AI tools" (backups, undo); levels 0 and 1: hosts, sessions, opening tabs,
   naming and colouring them, `post_message`, `post_progress`, `ask` (on
   the desktop; on the phone through the web client, then R5's
   notifications with buttons); the skill.
@@ -694,6 +751,9 @@ in-app payments, and someone on call for it, security first.
 - Whether mainland China is served (R6).
 - Which level 2 actions come at all (typing in a logged-in tab, changing
   hosts, transfers).
+- Each AI tool's settings format and where it keeps MCP entries and skills
+  (found per tool when connecting it is built; some may need their own
+  extension instead).
 - Whether the self-hosted server is free for everyone, or free for people
   and paid for companies (their features: OIDC / LDAP, audit export,
   recording).
